@@ -3336,7 +3336,10 @@ for shape in [(1,), ()]:
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
-        # and not silent.
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+
+        # This test checks the behavior that sample codegen functions (view_as and unbind)
+        # with respect to view tracking and inplace operation on the output.
 
         def run_test(grad_mode, requires_grad, is_view, should_raise_tuple):
             def get_view_as():
@@ -3374,41 +3377,55 @@ for shape in [(1,), ()]:
             maybe_check_raise(lambda: out[1].add_(1), should_raise_tuple[2])
 
 
-        # Args: grad_mode, requires_grad, is_view, should_raise
         # should_raise contains None if it should not raise
         # should_raise contains a string of the error if it should raise
         # The 3 elements are for view_as, first output of unbind and second output of unbind
-        run_test(True, False, True, (None, None, None))
+        run_test(grad_mode=True, requires_grad=False, is_view=True,
+                 should_raise_tuple=(None, None, None))
         # TODO: Second should_raise should not be None below
-        run_test(True, True, True, (None, None, "INTERNAL ASSERT FAILED"))
+        run_test(grad_mode=True, requires_grad=True, is_view=True,
+                 should_raise_tuple=(None, None, "INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        run_test(False, True, True, ("leaf Variable that requires grad",
+        run_test(grad_mode=False, requires_grad=True, is_view=True,
+                 should_raise_tuple=("leaf Variable that requires grad",
                                      "leaf Variable that requires grad",
                                      "leaf Variable that requires grad"))
-        run_test(False, False, True, (None, None, None))
+        run_test(grad_mode=False, requires_grad=False, is_view=True,
+                 should_raise_tuple=(None, None, None))
 
 
     def test_autograd_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
-        # and not silent.
+        # and not silent. The TODOs below mark the places with unexpected behavior.
 
+        # I) This checks the autograd.Function behavior when we return one or multiple outputs
+        # while one of these is an input, a view of an input or of a temporary tensor.
+        # II) This checks that multiples views in the forward are properly traced and how they
+        # behave with respect to inplace operations.
+
+
+        # I) Simple views
         bw_called = [0]
         ga_nz = [False]
 
         class IdOneOutput(Function):
             @staticmethod
-            def forward(ctx, a, b):
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
                 return a
 
             @staticmethod
             def backward(ctx, ga):
                 bw_called[0] += 1
-                return ga, None
+                return ga, None, None
 
         class IdTwoOutput(Function):
             @staticmethod
-            def forward(ctx, a, b):
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
                 return a, a + b
 
             @staticmethod
@@ -3418,13 +3435,15 @@ for shape in [(1,), ()]:
                     ga_nz[0] = False
                 else:
                     ga_nz[0] = True
-                return ga + gab, gab
+                return ga + gab, gab, None
 
         class ViewOfTemp(Function):
             @staticmethod
-            def forward(ctx, a):
-                b = a.clone()
+            def forward(ctx, a, make_view):
                 ctx.save_for_backward(a)
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                b = a.clone()
                 return b.select(0, 0)
 
             @staticmethod
@@ -3433,64 +3452,65 @@ for shape in [(1,), ()]:
                 a, = ctx.saved_tensors
                 res = torch.zeros_like(a)
                 res.select(0, 0).copy_(grad)
-                return res
+                return res, None
 
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
             for inplace in [True, False]:
-                def fn(a, b):
-                    # never modify a, b inplace for gracheck
-                    a = a.clone()
-                    b = b.clone()
-                    if fn_id == "two_output":
-                        tmp1, tmp2 = IdTwoOutput.apply(a, b)
-                        if inplace:
-                            tmp1 += 3
-                            tmp2 += 3
+                for make_view in [True, False]:
+                    def fn(a, b):
+                        # never modify a, b inplace for gracheck
+                        a = a.clone()
+                        b = b.clone()
+                        if fn_id == "two_output":
+                            tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
+                            if inplace:
+                                tmp1 += 3
+                                tmp2 += 3
+                            else:
+                                tmp1 = tmp1 + 3
+                                tmp2 = tmp2 + 3
+                            tmp = tmp1 * tmp2
                         else:
-                            tmp1 = tmp1 + 3
-                            tmp2 = tmp2 + 3
-                        tmp = tmp1 * tmp2
+                            if fn_id == "one_output":
+                                tmp = IdOneOutput.apply(a, b, make_view)
+                            else:
+                                tmp = ViewOfTemp.apply(a + b, make_view)
+                            if inplace:
+                                tmp += 3
+                            else:
+                                tmp = tmp + 3
+
+                        return tmp.sum()
+
+                    a = torch.ones(2, requires_grad=True)
+                    b = torch.ones(2, requires_grad=True)
+
+                    # Are the computed gradients correct ?
+                    if fn_id == "view_of_temp" and inplace:
+                        # TODO: This should compute the right gradients
+                        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                            gradcheck(fn, (a, b))
                     else:
-                        if fn_id == "one_output":
-                            tmp = IdOneOutput.apply(a, b)
-                        else:
-                            tmp = ViewOfTemp.apply(a + b)
-                        if inplace:
-                            tmp += 3
-                        else:
-                            tmp = tmp + 3
-
-                    return tmp.sum()
-
-                a = torch.ones(2, requires_grad=True)
-                b = torch.ones(2, requires_grad=True)
-
-                # Are the computed gradients correct ?
-                if fn_id == "view_of_temp" and inplace:
-                    # TODO: This should compute the right gradients
-                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
                         gradcheck(fn, (a, b))
-                else:
-                    gradcheck(fn, (a, b))
 
-                # Was the custom backward called properly
-                bw_called[0] = 0
-                ga_nz[0] = True  # For the case where the backward is not called
-                fn(a, b).backward()
+                    # Was the custom backward called properly
+                    bw_called[0] = 0
+                    ga_nz[0] = True  # For the case where the backward is not called
+                    fn(a, b).backward()
 
-                expected_called = 1
-                expected_ga_nz = True
-                if fn_id in ["one_output", "view_of_temp"] and inplace:
-                    # TODO: The custom backward is not called in this case
-                    expected_called = 0
-                if fn_id == "two_output" and inplace:
-                    # TODO: The backward only sees part of the gradient as the other part
-                    # is computed with a AsStridedBackward
-                    expected_ga_nz = False
-                self.assertTrue(bw_called[0] == expected_called)
-                self.assertTrue(ga_nz[0] == expected_ga_nz)
+                    expected_called = 1
+                    expected_ga_nz = True
+                    if fn_id in ["one_output", "view_of_temp"] and inplace:
+                        # TODO: The custom backward is not called in this case
+                        expected_called = 0
+                    if fn_id == "two_output" and inplace:
+                        # TODO: The backward only sees part of the gradient as the other part
+                        # is computed with a AsStridedBackward
+                        expected_ga_nz = False
+                    self.assertTrue(bw_called[0] == expected_called)
+                    self.assertTrue(ga_nz[0] == expected_ga_nz)
 
-
+        # II) Complex views
         class ComplexView(Function):
             @staticmethod
             def forward(ctx, a, idx):
@@ -3533,7 +3553,9 @@ for shape in [(1,), ()]:
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
-        # and not silent.
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+
+        # This test checks custom autograd.Function that perform inplace operations
 
         bw_called = [0]
 
@@ -3601,10 +3623,10 @@ for shape in [(1,), ()]:
         # The input is a view
         c, d = MyBadAdder.apply(a.clone().view_as(a), b)
         with self.assertRaisesRegex(TypeError, "missing 1 required positional argument: \'gab\'"):
-            # TODO: Inplace function should never return more than one thing
+            # TODO: CopySlices does not handle Function with multiple outputs
             (c * d).sum().backward()
 
-        # III) Multiple outputs without view
+        # III) Inplace + other op
         class MyOutPlaceAdder(Function):
             @staticmethod
             def forward(ctx, a, b):
