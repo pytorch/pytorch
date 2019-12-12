@@ -3337,6 +3337,7 @@ for shape in [(1,), ()]:
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
 
         # This test checks the behavior that sample codegen functions (view_as and unbind)
         # with respect to view tracking and inplace operation on the output.
@@ -3398,6 +3399,7 @@ for shape in [(1,), ()]:
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
 
         # I) This checks the autograd.Function behavior when we return one or multiple outputs
         # while one of these is an input, a view of an input or of a temporary tensor.
@@ -3554,6 +3556,7 @@ for shape in [(1,), ()]:
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
 
         # This test checks custom autograd.Function that perform inplace operations
 
