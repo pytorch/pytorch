@@ -375,7 +375,20 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             work.type_,
             work.id_);
         if (message.isRequest()) {
-          send(work.from_, cb_->operator()(message));
+          auto futureResponse = cb_->operator()(message);
+          if (futureResponse->completed()) {
+            send(work.from_, std::move(*futureResponse).moveValue());
+          } else {
+            auto fromId = work.from_.id_;
+            futureResponse->addCallback(
+                [this, fromId, futureResponse](
+                    const Message& /* unused */,
+                    const c10::optional<utils::FutureError>& /* unused */) {
+                  send(
+                      getWorkerInfo(fromId),
+                      std::move(*futureResponse).moveValue());
+                });
+          }
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
