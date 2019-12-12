@@ -4,6 +4,7 @@ import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
+import torch.distributed as dist
 
 from torch.jit._recursive import ScriptMethodStub
 from torch._jit_internal import _qualified_name
@@ -2034,6 +2035,9 @@ def _get_builtin_table():
         _builtin_table[id(math.isfinite)] = "aten::isfinite"
     if PY37:
         _builtin_table[id(math.remainder)] = "aten::mathremainder"
+
+    if dist.is_available():
+        _builtin_table[id(dist.autograd.get_gradients)] = "aten::get_gradients"
 
     return _builtin_table
 
