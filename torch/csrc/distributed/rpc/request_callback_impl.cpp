@@ -29,9 +29,15 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-Message RequestCallbackImpl::processRpc(
+std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
-    MessageType messageType) const {
+    MessageType messageType,
+    int64_t messageId) const {
+  auto wrap = [messageId](Message m) {
+    m.setId(messageId);
+    return std::make_shared<FutureMessage>(std::move(m));
+  };
+
   // TODO: RpcCommandBase should have an abstract execute() method that we can
   // call here instead of having another switch statement here. Even better we
   // could have abstract classes RpcRequest and RpcResp which inherit from
@@ -53,16 +59,17 @@ Message RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
-      return std::move(ScriptResp(std::move(stack.front()))).toMessage();
+      return wrap(std::move(ScriptResp(std::move(stack.front()))).toMessage());
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
       std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return std::move(
-                 PythonResp(std::move(payload), std::move(responseTensorTable)))
-          .toMessage();
+      return wrap(
+          std::move(
+              PythonResp(std::move(payload), std::move(responseTensorTable)))
+              .toMessage());
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& src = static_cast<ScriptRemoteCall&>(rpc);
@@ -83,7 +90,7 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
+      return wrap(RemoteRet(src.retRRefId(), src.retForkId()).toMessage());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -108,43 +115,70 @@ Message RequestCallbackImpl::processRpc(
         // rrefId (OwnerRRef does not have a forkId anyway).
         ctx.addForkOfOwner(rrefId, forkId);
       }
-      return RemoteRet(rrefId, forkId).toMessage();
+      return wrap(RemoteRet(rrefId, forkId).toMessage());
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return ScriptRRefFetchRet({rref->getValue()}).toMessage();
+      if (rref->hasValue()) { // optional fast-path
+        return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
+      }
+      auto whenValueSet = rref->getFuture();
+      auto responseFuture = std::make_shared<FutureMessage>();
+
+      // Our response is satisfied when the rpcs come back.
+      whenValueSet->addCallback(
+          [responseFuture, messageId, rref](const Message&) {
+            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(m);
+          });
+      return responseFuture;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<py::object>> rref =
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
-      SerializedPyObj result =
-          PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return PythonRRefFetchRet(result.toIValues()).toMessage();
+      if (rref->hasValue()) { // optional fast-path
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(rref->getValue());
+        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+      }
+
+      auto whenValueSet = rref->getFuture();
+      auto responseFuture = std::make_shared<FutureMessage>();
+
+      // Our response is satisfied when the rpcs come back.
+      whenValueSet->addCallback(
+          [responseFuture, messageId, rref](const Message&) {
+            SerializedPyObj result =
+                PythonRpcHandler::getInstance().serialize(rref->getValue());
+            Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(m);
+          });
+      return responseFuture;
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
-      return std::move(RRefAck()).toMessage();
+      return wrap(std::move(RRefAck()).toMessage());
     }
     case MessageType::RREF_CHILD_ACCEPT: {
       auto& rca = static_cast<RRefChildAccept&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delPendingChild(rca.forkId());
-      return std::move(RRefAck()).toMessage();
+      return wrap(std::move(RRefAck()).toMessage());
     }
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return RRefAck().toMessage();
+      return wrap(RRefAck().toMessage());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
@@ -167,13 +201,14 @@ Message RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      auto wrappedRpcResponse =
-          processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
+      auto wrappedRpcResponse = processRpc(
+          rpcWithAutograd.wrappedRpc(), wrappedMessageType, messageId);
+      wrappedRpcResponse->waitNoThrow(); // TODO: make async
 
-      return getMessageWithAutograd(
+      return wrap(getMessageWithAutograd(
           rpcWithAutograd.fromWorkerId(),
-          std::move(wrappedRpcResponse),
-          MessageType::FORWARD_AUTOGRAD_RESP);
+          std::move(*wrappedRpcResponse).moveMessage(),
+          MessageType::FORWARD_AUTOGRAD_RESP));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
@@ -192,22 +227,30 @@ Message RequestCallbackImpl::processRpc(
       // Attach the gradients to the send function.
       sendFunction->setGrads(gradientsCall.getGrads());
 
+      auto responseFuture = std::make_shared<rpc::FutureMessage>();
+
       // Now execute the autograd graph using the "distributed engine."
-      DistEngine::getInstance().executeSendFunction(
+      auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
           autogradContext, sendFunction);
 
-      return std::move(PropagateGradientsResp()).toMessage();
-    }
+      // Our response is satisfied when the rpcs come back.
+      execFuture->addCallback([responseFuture, messageId](const Message&) {
+        Message m = std::move(PropagateGradientsResp()).toMessage();
+        m.setId(messageId);
+        responseFuture->markCompleted(m);
+      });
+      return responseFuture;
+    };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
       auto cleanupContextId = cleanupContextReq.getContextId();
-      // release the context if it still exists on this thread. We need to check
-      // if it exists since it may have been deleted by an in-flight RPC.
-      // This can create nested RPCs if there are other nodes that get notified
-      // to clean up their context.
+      // release the context if it still exists on this thread. We need to
+      // check if it exists since it may have been deleted by an in-flight
+      // RPC. This can create nested RPCs if there are other nodes that get
+      // notified to clean up their context.
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
-      return std::move(CleanupAutogradContextResp()).toMessage();
+      return wrap(std::move(CleanupAutogradContextResp()).toMessage());
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -216,11 +259,10 @@ Message RequestCallbackImpl::processRpc(
   }
 }
 
-Message RequestCallbackImpl::processMessage(Message& request) const {
+std::shared_ptr<FutureMessage> RequestCallbackImpl::processMessage(
+    Message& request) const {
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
-  auto responseMessage = processRpc(*rpc, request.type());
-  responseMessage.setId(request.id());
-  return responseMessage;
+  return processRpc(*rpc, request.type(), request.id());
 }
 
 } // namespace rpc
