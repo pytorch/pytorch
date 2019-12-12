@@ -49,7 +49,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None):
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -63,7 +63,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
-            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs)
+            dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
+            custom_opsets=custom_opsets)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -114,6 +115,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
 
     if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
+
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_peephole(graph, True)
@@ -127,7 +130,21 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            torch.onnx.symbolic_helper._quantized_ops.clear()
+            # Unpack quantized weights for conv and linear ops and insert into graph.
             torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
+
+            # Insert permutes before and after each conv op to ensure correct order.
+            torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
+
+            # Find consecutive permutes that are no-ops and remove them.
+            torch._C._jit_pass_custom_pattern_based_rewrite_graph("""
+            graph(%Pi):
+                %Pq = quantized::nhwc2nchw(%Pi)
+                %Pr = quantized::nchw2nhwc(%Pq)
+                return (%Pr)""", """
+            graph(%Ri):
+                return (%Ri)""", graph)
 
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
@@ -233,7 +250,8 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(func, args, _force_outplace=False, _return_inputs_states=True)
+    trace_graph, torch_out, inputs_states = \
+        torch.jit._get_trace_graph(func, args, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
     trace_graph = _optimize_graph(trace_graph, operator_export_type)
@@ -254,7 +272,8 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
+        trace_graph, torch_out, inputs_states = \
+            torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
         warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
@@ -358,7 +377,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
                             opset_version=None, _retain_param_name=True,
-                            keep_initializers_as_inputs=None):
+                            keep_initializers_as_inputs=None, custom_opsets=None):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -369,7 +388,8 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
                                     opset_version, _retain_param_name,
-                                    keep_initializers_as_inputs=keep_initializers_as_inputs)
+                                    keep_initializers_as_inputs=keep_initializers_as_inputs,
+                                    custom_opsets=custom_opsets)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
@@ -377,11 +397,13 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, add_node_names=True):
+                             fixed_batch_size=False, custom_opsets=None, add_node_names=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
         opset_version = _default_onnx_opset_version
+    if custom_opsets is None:
+        custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
@@ -397,7 +419,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 
     return graph._pretty_print_onnx(params_dict, opset_version, False,
                                     operator_export_type, google_printer,
-                                    val_keep_init_as_ip, val_add_node_names)
+                                    val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -409,7 +431,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
-            fixed_batch_size=False, add_node_names=True):
+            fixed_batch_size=False, custom_opsets=None, add_node_names=True):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -447,18 +469,20 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
         if dynamic_axes is None:
             dynamic_axes = {}
+        if custom_opsets is None:
+            custom_opsets = {}
 
         _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
         if export_params:
             proto, export_map = graph._export_onnx(
                 params_dict, opset_version, dynamic_axes, defer_weight_export,
-                operator_export_type, strip_doc_string, val_keep_init_as_ip,
+                operator_export_type, strip_doc_string, val_keep_init_as_ip, custom_opsets,
                 val_add_node_names)
         else:
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
-                strip_doc_string, val_keep_init_as_ip, val_add_node_names)
+                strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
