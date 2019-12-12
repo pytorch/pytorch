@@ -129,8 +129,8 @@ torch::nn::DataParallel|No|No
 torch::nn::parallel::DistributedDataParallel|No|No
 torch::nn::utils::clip_grad_norm_|Yes|No
 torch::nn::utils::clip_grad_value_|Yes|No
-torch::nn::utils::parameters_to_vector|No|No
-torch::nn::utils::vector_to_parameters|No|No
+torch::nn::utils::parameters_to_vector|Yes|No
+torch::nn::utils::vector_to_parameters|Yes|No
 torch::nn::utils::weight_norm|No|No
 torch::nn::utils::remove_weight_norm|No|No
 torch::nn::utils::spectral_norm|No|No
@@ -162,7 +162,7 @@ F::max_pool2d|Yes|No
 F::max_pool3d|Yes|No
 F::max_unpool1d|Yes|No
 F::max_unpool2d|Yes|No
-F::max_unpool3d|No|No
+F::max_unpool3d|Yes|No
 F::lp_pool1d|Yes|No
 F::lp_pool2d|Yes|No
 F::adaptive_max_pool1d|Yes|No

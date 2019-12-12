@@ -107,11 +107,7 @@ TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
-
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
-
-TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
 
 TH_API void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value);

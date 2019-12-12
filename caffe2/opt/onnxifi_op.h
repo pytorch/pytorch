@@ -237,7 +237,8 @@ class OnnxifiOp final : public Operator<Context> {
           shape.add_dims(d);
         }
         weight_shape_info[weight_names[i]] = ShapeInfo(
-            std::vector(shape0.size(), TensorBoundShape_DimType_CONSTANT),
+            std::vector<TensorBoundShape::DimType>(
+                shape0.size(), TensorBoundShape_DimType_CONSTANT),
             std::move(shape));
       }
 

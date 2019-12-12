@@ -1,8 +1,9 @@
+#include <torch/csrc/jit/passes/peephole.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/peephole.h>
 
 namespace torch {
 namespace jit {
@@ -302,6 +303,15 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       if (input->mustNotBeNone()) {
         GRAPH_UPDATE(
             "Unwrapping ", *node, " as ", node->input(), " can't be optional");
+        node->output()->replaceAllUsesWith(node->input());
+      }
+    } else if (node->kind() == prim::unchecked_cast) {
+      // unchecked_cast is not generated for tensor properties, so we are not
+      // losing anything by calling unshapedType here
+      auto input_type = unshapedType(node->input()->type());
+      auto output_type = unshapedType(node->output()->type());
+      if (input_type->isSubtypeOf(output_type)) {
+        GRAPH_UPDATE("Removing ", *node, " as input type subtypes output type");
         node->output()->replaceAllUsesWith(node->input());
       }
     } else if (node->matches("prim::dtype(Tensor a) -> int")) {
