@@ -113,33 +113,27 @@ size_t ClassType::addConstant(
 }
 
 IValue ClassType::getConstant(const std::string& name) const {
-  TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
-  size_t pos = 0;
-  for (const auto& c : constantNames_) {
-    if (name == c) {
-      break;
-    }
-    ++pos;
-  }
-
-  if (pos >= constantNames_.size()) {
-    TORCH_CHECK(
-        false,
-        python_str(),
-        " does not have a constant field with the name '",
-        name,
-        "'");
-  }
-  return constantValues_[pos];
+  const auto& v = findConstant(name);
+  TORCH_CHECK(
+      v.has_value(),
+      python_str(),
+      " does not have a constant field with name '",
+      name,
+      "'");
+  return *v;
 }
 
 IValue ClassType::getConstant(size_t slot) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
-  TORCH_CHECK(slot < constantValues_.size());
+  TORCH_CHECK(
+      slot < constantValues_.size(),
+      python_str(),
+      " does not have a constant slot of index ",
+      slot);
   return constantValues_[slot];
 }
 
-c10::optional<IValue> findConstant(const std::string& name) const {
+c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
