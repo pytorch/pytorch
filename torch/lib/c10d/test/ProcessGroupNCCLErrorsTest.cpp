@@ -79,7 +79,7 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       : WorkNCCL(devices), set_timedout_error_(set_timedout_error) {}
 
  private:
-  bool isCompleted() {
+  bool isCompleted() override {
     if (set_timedout_error_) {
       return false;
     }
@@ -191,8 +191,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 }
-
-
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   bool skip;
   std::string skipReason;
