@@ -4,7 +4,7 @@ using namespace nnc;
 
 LLVMCodegen::LLVMCodegen() 
   : irb_(context_),
-    jit_(std::make_unique<PytorchLlvmJit>()),
+    jit_(std::make_unique<PytorchLLVMJIT>()),
     module_(std::make_unique<llvm::Module>("pytorch", context_))
 {
   module_->setDataLayout(jit_->getTargetMachine().createDataLayout());
