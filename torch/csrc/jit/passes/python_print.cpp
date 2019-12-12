@@ -1233,8 +1233,7 @@ struct PythonPrintImpl {
 
     for (size_t i = 0; i < numAttrs; i++) {
       const auto& name = moduleType->getAttributeName(i);
-      // TODO: get attribute
-      const auto& type = moduleType->findAttribute(name);
+      const auto& type = moduleType->getAttribute(i);
       registerClassDependencies(type);
 
       indent();
