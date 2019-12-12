@@ -2,7 +2,6 @@
 
 #include <ATen/Backtrace.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
@@ -302,8 +301,7 @@ static void gatherParametersAndBuffers(
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value, s.value.type(), trace_get_attr);
-      // TODO: get attribute
-    } else if (self_ty->findAttribute(s.name)->is_module()) {
+    } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
           state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
