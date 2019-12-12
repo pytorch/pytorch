@@ -1,3 +1,5 @@
+#include <ATen/native/Normalization.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
@@ -14,6 +16,9 @@
 static const int MIOPEN_DIM_MAX = 4;
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(batch_norm_cpu_inference_contiguous_stub);
+DEFINE_DISPATCH(batch_norm_cpu_inference_channels_last_stub);
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
@@ -57,7 +62,7 @@ struct Var {
 };
 
 template<typename scalar_t>
-void batch_norm_cpu_inference_collect_liner_and_constant_terms(
+void batch_norm_cpu_inference_collect_linear_and_constant_terms(
     scalar_t* alpha, scalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& mean, const Tensor& variance, double eps) {
@@ -108,36 +113,10 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
-  // Apply the linear terms to the input,
-  // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
-  // No need to use parallel_for as this function is supposed to be
-  // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
-  if (image_size != 1) {
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t c = 0; c < n_channel; ++c) {
-        for (int64_t i = 0; i < image_size; ++i) {
-          // Keep all the offset calculation within the inner loop for
-          // simplicity. Compilers are very good at hoisting the common part
-          // outside.
-          int64_t offset = n * n_channel * image_size + c * image_size + i;
-          output_data[offset] = input_data[offset] * alpha_data[c] +
-              beta_data[c];
-        }
-      }
-    }
-  } else {
-    // image_size == 1
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t c = 0; c < n_channel; ++c) {
-        int64_t offset = n * n_channel + c;
-        output_data[offset] = input_data[offset] * alpha_data[c] + beta_data[c];
-      }
-    }
-  }
+  batch_norm_cpu_inference_contiguous_stub(kCPU, output, input, alpha, beta);
 }
 
 /// A fast path for CPU inference when all tensors are channels last contiguous.
@@ -161,35 +140,10 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
-  // Apply the linear terms to the input,
-  // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
-  // No need to use parallel_for as this function is supposed to be
-  // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
-  if (n_channel != 1) {
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t i = 0; i < image_size; ++i) {
-        for (int64_t c = 0; c < n_channel; ++c) {
-          // Keep all the offset calculation within the inner loop for
-          // simplicity. Compilers are very good at hoisting the common part
-          // outside.
-          int64_t offset = n * image_size * n_channel + i * n_channel + c;
-          output_data[offset] = input_data[offset] * alpha_data[c] + beta_data[c];
-        }
-      }
-    }
-  } else {
-    // n_channel == 1
-    for (int64_t n = 0; n < n_batch; ++n) {
-      for (int64_t i = 0; i < image_size; ++i) {
-        int64_t offset = n * image_size + i;
-        output_data[offset] = input_data[offset] * alpha_data[0] + beta_data[0];
-      }
-    }
-  }
+  batch_norm_cpu_inference_channels_last_stub(kCPU, output, input, alpha, beta);
 }
 
 template<typename scalar_t>
