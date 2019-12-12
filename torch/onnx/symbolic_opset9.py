@@ -108,6 +108,33 @@ def div(g, self, other):
     return g.op("Div", self, other)
 
 
+def floor_divide(g, self, other):
+    out = div(g, self, other)
+    # the correct operation is truncate, which is not supported in ONNX,
+    # we cannot call floor since it will behave differently for negative numbers
+    # (eg. -0.1 should become -0 )
+    # - if scalar_type information are not available, assume that
+    # we need to call floor (treat as float)
+    out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+    # Matching PyTorch's behavior:
+    # - if self is fp the output's type is self's type
+    # - if self is not fp and other is fp, the output is of type 'Float'
+    # - self is not fp and other is not fp, the output's type is self's output type
+    # - the output type defaults to Float
+    scalar_type = self.type().scalarType()
+    if scalar_type is not None:
+        if not sym_help._is_fp(self) and \
+           other.type().scalarType() is not None and \
+           sym_help._is_fp(other):
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        else:
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx[scalar_type])
+    else:
+        out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    return out
+
+
 def reciprocal(g, self):
     return g.op("Div", torch.ones(1), self)
 
@@ -742,12 +769,14 @@ replication_pad3d = replication_pad
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
+        if scales is None:
+            scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
@@ -760,7 +789,7 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, use_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
@@ -878,7 +907,9 @@ def log_softmax(g, input, dim, dtype=None):
     # TODO: remove this as onnx opset 11 spec allows negative axes
     input_dim = input.type().dim()
     if input_dim is None:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input. Input rank must be known at export time.")
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
     if dim < 0:
         dim = input_dim + dim
     is_transpose_required = (input_dim != dim + 1)
@@ -2151,7 +2182,7 @@ def _weight_norm(g, weight_v, weight_g, dim):
         # This conflicts the logic for negative axes to access dims backwards
         # TODO: Might need a fix in torch group_norm module
         axes = list(range(rank))
-        if dim:
+        if dim is not None:
             if dim < -1:
                 dim += rank
             if dim != -1:
