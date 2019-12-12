@@ -15244,7 +15244,7 @@ a")
             pass
 
         def test_simple(x1):  # noqa: F811
-            return x1 + 5
+            return x1
 
         def invoke_function():
             return test_simple(1.0), test_simple(.5)
@@ -15255,7 +15255,34 @@ a")
         compiled_fns_1 = torch.jit._get_overloads(test_simple)
         compiled_fns_2 = torch.jit._get_overloads(test_simple)
         for a, b in zip(compiled_fns_1, compiled_fns_2):
-            self.assertIs(a, b)
+            self.assertIs(a.graph, b.graph)
+
+        old_func = test_simple
+
+        # testing that new functions added work with caching
+        @torch.jit._overload  # noqa: F811
+        def test_simple(x1):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        @torch.jit.script
+        def my_func():
+            return old_func("hi")
+
+        # testing new function same qualified name
+        @torch.jit._overload  # noqa: F811
+        def test_simple(a, b):  # noqa: F811
+            # type: (int, int) -> int
+            pass
+
+        def test_simple(a, b):
+            return a + b
+
+        @torch.jit.script
+        def fn():
+            return test_simple(3, 4)
+
+        self.assertEqual(fn(), 7)
 
         # currently we take the default values have to be specified in the
         # overload as well - TODO take them from implementation and apply
@@ -15264,9 +15291,9 @@ a")
         def identity(x1):  # noqa: F811
             # type: (str) -> str
             pass
-
+        #
         @torch.jit._overload  # noqa: F811
-        def identity(x1=1.0):  # noqa: F811
+        def identity(x1):  # noqa: F811
             # type: (float) -> float
             pass
 
@@ -15312,6 +15339,87 @@ a")
         with self.assertRaisesRegex(Exception, "Arguments for call are not valid"):
             torch.jit.script(test)
 
+        @torch.jit._overload  # noqa: F811
+        def good_overload(x=1):  # noqa: F811
+            # type: (int) -> (int)
+            pass
+
+        def good_overload(x=1):  # noqa: F811
+            return x
+
+        @torch.jit.script
+        def foo():
+            return good_overload()
+
+        self.assertEqual(foo(), 1)
+
+
+        with self.assertRaisesRegex(Exception, "must equal to the default parameter"):
+            @torch.jit._overload  # noqa: F811
+            def bad_default_on_overload(x, y=2):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            def bad_default_on_overload(x, y=1):  # noqa: F811
+                # type: (int, int) -> (int)
+                pass
+
+            @torch.jit.script
+            def test():
+                return bad_default_on_overload(1, 2)
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (int) -> int
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_default(x):  # noqa: F811
+            # type: (str) -> str
+            pass
+
+        def diff_default(x="hi"):  # noqa: F811
+            return x
+
+        def test():
+            return diff_default(), diff_default(2), diff_default("abc")
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x):  # noqa: F811
+            # type: (float) -> float
+            pass
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params(x, y):  # noqa: F811
+            # type: (int, int) -> int
+            pass
+
+        def diff_num_params(x, y=2, z=3):  # noqa: F811
+            # type: (Union[float, int], int, int)
+            return x + y + z
+
+        def test():
+            return diff_num_params(1.0), diff_num_params(1, 2), diff_num_params(1), diff_num_params(1, 2, 3)
+
+        self.assertEqual(test(), torch.jit.script(test)())
+
+        @torch.jit._overload  # noqa: F811
+        def diff_num_params_no_annot():
+            # type: () -> int
+            pass
+
+        def diff_num_params_no_annot(x=1):    # noqa: F811
+            return x
+
+        def test():
+            return diff_num_params_no_annot(1.0)
+
+        with self.assertRaisesRegex(Exception, "Parameters not specified"):
+            torch.jit.script(test)
+
+
     def test_function_overloading_isinstance(self):
         @torch.jit._overload  # noqa: F811
         def my_conv(x, y):  # noqa: F811
@@ -15319,7 +15427,7 @@ a")
             pass
 
         @torch.jit._overload  # noqa: F811
-        def my_conv(x, y=2.0):  # noqa: F811
+        def my_conv(x, y):  # noqa: F811
             # type: (float, float) -> (float)
             pass
 
