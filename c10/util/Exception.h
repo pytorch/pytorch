@@ -196,6 +196,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
+#ifdef DEBUG
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
@@ -216,6 +217,9 @@ inline std::string if_empty_then(std::string x, std::string y) {
         ::c10::str(__VA_ARGS__)               \
     ));                                       \
   }
+#endif
+#else
+#define TORCH_INTERNAL_ASSERT(cond, ...)
 #endif
 
 // A utility macro to make it easier to test for error conditions from user
@@ -362,7 +366,7 @@ inline void deprecated_AT_ASSERTM() {}
 #define AT_ASSERT(...)                                              \
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
+    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(__VA_ARGS__)); \
   } while (false)
 
 // Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
@@ -376,7 +380,7 @@ inline void deprecated_AT_ASSERTM() {}
 #define AT_ASSERTM(cond, ...)                                                 \
   do {                                                                        \
     ::c10::detail::deprecated_AT_ASSERTM();                                   \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__));     \
+    C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(cond, __VA_ARGS__));     \
   } while (false)
 
 // Deprecated alias; this alias was deprecated because it represents extra API
