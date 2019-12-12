@@ -35,22 +35,47 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto module = py::handle(rpc_module).cast<py::module>();
 
   auto rpcBackendOptions =
-      shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
-          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
+      shared_ptr_class_<RpcBackendOptions>(
+          module,
+          "RpcBackendOptions",
+          R"(A structure encapsulating the options passed into the RPC backend.
+            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
+            in order to initialize RPC with specific configurations, such as the
+             RPC timeout and init_method to be used. )")
+          .def_readwrite(
+              "rpc_timeout",
+              &RpcBackendOptions::rpcTimeout,
+              R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
+                If an RPC does not complete in this timeframe, it will complete
+                with an exception indicating that it has timed out.)")
+          .def_readwrite(
+              "init_method",
+              &RpcBackendOptions::initMethod,
+              R"(URL specifying how to initialize the process group.
+                Default is env://)");
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
           module,
           "WorkerInfo",
-          R"(Encapsulates information of a worker in the system.)")
+          R"(A structure that encapsulates information of a worker in the system.
+            Contains the name and ID of the worker. This class is not meant to
+            be constructed directly, rather, an instance can be retrieved
+            through :meth:`~torch.distributed.rpc.get_worker_info` and the
+            result can be passed in to functions such as
+            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
+            every invocation.)")
           .def(
               py::init<std::string, worker_id_t>(),
               py::arg("name"),
               py::arg("id"))
-          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
           .def_readonly(
-              "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
+              "name", &WorkerInfo::name_, R"(The name of the worker.)")
+          .def_readonly(
+              "id",
+              &WorkerInfo::id_,
+              R"(Globally unique id to identify the worker.)")
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
@@ -69,6 +94,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_debug_info",
+              &RpcAgent::getDebugInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_metrics",
+              &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
@@ -78,12 +111,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           worker.
 
           Example::
-
               Following examples skip RPC initialization and shutdown code
               for simplicity. Refer to RPC docs for those details.
 
               1. Create an RRef using rpc.remote
 
+              >>> import torch
               >>> import torch.distributed.rpc as rpc
               >>> rref = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
               >>> # get a copy of value from the RRef
@@ -91,17 +124,21 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
               2. Create an RRef from a local object
 
+              >>> import torch
               >>> from torch.distributed.rpc import RRef
               >>> x = torch.zeros(2, 2)
               >>> rref = RRef(x)
 
               3. Share an RRef with other workers
 
-              On both worker0 and worker1:
+              >>> # On both worker0 and worker1:
               >>> def f(rref):
               >>>   return rref.to_here() + 1
 
-              On worker0:
+              >>> # On worker0:
+              >>> import torch
+              >>> import torch.distributed.rpc as rpc
+              >>> from torch.distributed.rpc import RRef
               >>> rref = RRef(torch.zeros(2, 2))
               >>> # the following RPC shares the rref with worker1, reference
               >>> # count is automatically updated.
@@ -218,7 +255,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
     RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
   });
 
-  module.def("_get_debug_info", []() {
+  module.def("_rref_context_get_debug_info", []() {
     return RRefContext::getInstance().getDebugInfo();
   });
 
