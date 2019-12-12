@@ -92,12 +92,12 @@ class ProcessGroupAgent : public RpcAgent {
   struct AverageMetricsTracker {
     const std::string key_;
     float currentAverage_;
-    float currentCount_;
+    int currentCount_;
 
     AverageMetricsTracker(
         const std::string key,
         float currentAverage = 0,
-        float currentCount = 0)
+        int currentCount = 0)
         : key_(key),
           currentAverage_(currentAverage),
           currentCount_(currentCount) {}

@@ -33,7 +33,7 @@ const std::chrono::milliseconds INFINITE_TIMEOUT =
 const std::string kNumPendingRequests = "num_pending_requests";
 const std::string kThreadPoolSize = "thread_pool_size";
 const std::string kNumIdleThreads = "num_idle_threads";
-const std::string kGilAverageWaitTime = "gil_average_wait_time";
+const std::string kGilAverageWaitTime = "gil_average_wait_time_us";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -577,12 +577,12 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
   for (const auto& metricInfo : metricsMap_) {
-    metrics[metricInfo.first] = metricInfo.second->currentAverage_;
+    metrics[metricInfo.first] =
+        c10::to_string(metricInfo.second->currentAverage_);
   }
   return metrics;
 }
 
-// MetricsTracker has key, value, count
 void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   auto gilMetrics = metricsMap_.find(kGilAverageWaitTime);
@@ -591,7 +591,8 @@ void ProcessGroupAgent::addGilWaitTime(
                         std::move(c10::guts::make_unique<AverageMetricsTracker>(
                             kGilAverageWaitTime))});
   } else {
-    gilMetrics->second->computeAverage(gilWaitTime.count());
+    auto& metricsPtr = gilMetrics->second;
+    metricsPtr->computeAverage(gilWaitTime.count());
   }
 }
 
