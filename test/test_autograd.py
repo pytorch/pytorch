@@ -3535,6 +3535,7 @@ for shape in [(1,), ()]:
 
         bw_called = [0]
 
+        ## Single output
         class MyAdder(Function):
             @staticmethod
             def forward(ctx, a, b):
@@ -3563,6 +3564,83 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
+        # The input is a view
+        bw_called[0] = 0
+        c = MyAdder.apply(a.clone().view_as(a), b)
+        c.sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        ## Multiple outputs
+        class MyBadAdder(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a, a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                return ga + gab, ga + gab
+
+        # No extra inplace
+        bw_called[0] = 0
+        c, d = MyBadAdder.apply(a.clone(), b)
+        (c * d).sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # With extra inplace on the output
+        bw_called[0] = 0
+        c, d = MyBadAdder.apply(a.clone(), b)
+        c += 2
+        (c * d).sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # The input is a view
+        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
+        with self.assertRaisesRegex(TypeError, "missing 1 required positional argument: \'gab\'"):
+            # TODO: Inplace function should never return more than one thing
+            (c * d).sum().backward()
+
+        ## Multiple outputs without view
+        class MyOutPlaceAdder(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a.clone(), a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                return ga + gab, ga + 2 * gab
+
+        # We don't reuse the input
+        def fn(a, b):
+            orig_a = a.clone().view_as(a)
+            c, d = MyOutPlaceAdder.apply(orig_a, b)
+            return (c * d).sum()
+
+        bw_called[0] = 0
+        fn(a, b).backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        gradcheck(fn, (a, b))
+
+
+        # We reuse the input
+        def fn(a, b):
+            orig_a = a.clone()
+            c, d = MyOutPlaceAdder.apply(orig_a, b)
+            return (c * d * orig_a).sum()
+
+        bw_called[0] = 0
+        fn(a, b).backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+            # TODO: We are not rebasing the history and so the inplace computation is wrong
+            gradcheck(fn, (a, b))
 
 
 
