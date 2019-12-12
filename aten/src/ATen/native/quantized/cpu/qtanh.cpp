@@ -24,7 +24,7 @@ Tensor qnnpack_tanh(Tensor input) {
   initQNNPACK();
 
   Tensor input_contig = input.contiguous();
-  num_elems = input_contig.numel() / input_contig.size(0);
+  size_t num_elems = input_contig.numel() / input_contig.size(0);
 
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
