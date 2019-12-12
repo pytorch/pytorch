@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from sys import maxsize
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
@@ -42,6 +44,46 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min, max)
 
 
+def index_put(g, self, indices_list_value, values, accumulate=False):
+    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        args = [self] + indices_list + [values, accumulate]
+        return g.op("ATen", *args, operator_s='index_put')
+
+    from torch.onnx.symbolic_opset9 import add, expand
+    accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    index = indices_list[0]
+
+    if len(indices_list) > 1:
+        for ind in indices_list[1:]:
+            index = add(g, index, ind)
+        broadcast_index_shape = g.op("Shape", index)
+        indices_list = [
+            g.op("Unsqueeze", expand(g, ind, broadcast_index_shape, None), axes_i=[-1]) for ind in indices_list
+        ]
+        index = g.op("Concat", *indices_list, axis_i=-1)
+    else:
+        broadcast_index_shape = g.op("Shape", index)
+        index = g.op("Unsqueeze", index, axes_i=[-1])
+    sub_data_shape = sym_help._slice_helper(
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
+    values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    values = g.op("Reshape", values, values_shape)
+
+    if accumulate:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+        zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
+        result = g.op("ScatterND", zeros, index, values)
+        result = add(g, self, result)
+    else:
+        result = g.op("ScatterND", self, index, values)
+
+    return result
+
+
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
     dims = self.type().sizes()
@@ -51,25 +93,37 @@ def pixel_shuffle(g, self, upscale_factor):
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
             else "align_corners" if align_corners else "pytorch_half_pixel"
         empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-        output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-        output_size = g.op("Concat", input_size, output_size, axis_i=0)
 
-        return g.op("Resize",
-                    input,
-                    empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
-                    empty_tensor,  # scales is not needed since we are sending out_size
-                    output_size,
-                    coordinate_transformation_mode_s=coordinate_transformation_mode,
-                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                    mode_s=interpolate_mode,  # nearest, linear, or cubic
-                    nearest_mode_s="floor")  # only valid when mode="nearest"
+        if scales is None:
+            input_size = g.op("Shape", input)
+            input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+            output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
+            scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+            return g.op("Resize",
+                        input,
+                        empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                        scales,  # scales is not needed since we are sending out_size
+                        output_size,
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+        else:
+            return g.op("Resize",
+                        input,
+                        empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
+                        scales,  # scales is not needed since we are sending out_size
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
     return symbolic_fn
 
 
@@ -82,7 +136,7 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -107,14 +161,17 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
         except AttributeError:
             is_scalar = not sym_help._is_packed_list(size)
             if not is_scalar:
-                warnings.warn("Cannot verify if the output_size is a scalar while exporting interpolate. Assuming that it is not a scalar.")
+                warnings.warn("Cannot verify if the output_size is a scalar "
+                              "while exporting interpolate. Assuming that it is not a scalar.")
 
         if is_scalar:
             if not input.type().dim():
-                return sym_help._unimplemented("interpolate (with a scalar output_size)", "missing input shape (try giving an array of output_size values)")
+                return sym_help._unimplemented("interpolate (with a scalar output_size)",
+                                               "missing input shape (try giving an array of output_size values)")
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
         size = g.op("Concat", input_size, size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         return g.op("Resize",
@@ -186,8 +243,42 @@ def masked_scatter(g, self, mask, source):
     return g.op('ScatterND', self, index, source)
 
 
+def _len(g, self):
+    return g.op("SequenceLength", self)
+
+
 def __getitem_(g, self, i):
     return g.op("SequenceAt", self, i)
+
+
+def append(g, self, tensor):
+    return g.op("SequenceInsert", self, tensor)
+
+
+def insert(g, self, pos, tensor):
+    return g.op("SequenceInsert", self, tensor, pos)
+
+
+def pop(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
+
+
+def cat(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import cat as cat_opset9
+        return cat_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim)
+
+
+def stack(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import stack as stack_opset9
+        return stack_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim, new_axis_i=1)
 
 
 @parse_args('v', 'i', 'i', 'i')

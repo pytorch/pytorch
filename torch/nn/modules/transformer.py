@@ -9,6 +9,7 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
+
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
@@ -65,6 +66,7 @@ class Transformer(Module):
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor  # noqa
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -151,6 +153,7 @@ class TransformerEncoder(Module):
         >>> src = torch.rand(10, 32, 512)
         >>> out = transformer_encoder(src)
     """
+    __constants__ = ['norm']
 
     def __init__(self, encoder_layer, num_layers, norm=None):
         super(TransformerEncoder, self).__init__()
@@ -159,6 +162,7 @@ class TransformerEncoder(Module):
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -171,11 +175,10 @@ class TransformerEncoder(Module):
         """
         output = src
 
-        for i in range(self.num_layers):
-            output = self.layers[i](output, src_mask=mask,
-                                    src_key_padding_mask=src_key_padding_mask)
+        for mod in self.layers:
+            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
 
-        if self.norm:
+        if self.norm is not None:
             output = self.norm(output)
 
         return output
@@ -196,6 +199,7 @@ class TransformerDecoder(Module):
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = transformer_decoder(tgt, memory)
     """
+    __constants__ = ['norm']
 
     def __init__(self, decoder_layer, num_layers, norm=None):
         super(TransformerDecoder, self).__init__()
@@ -206,6 +210,7 @@ class TransformerDecoder(Module):
     def forward(self, tgt, memory, tgt_mask=None,
                 memory_mask=None, tgt_key_padding_mask=None,
                 memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -221,13 +226,13 @@ class TransformerDecoder(Module):
         """
         output = tgt
 
-        for i in range(self.num_layers):
-            output = self.layers[i](output, memory, tgt_mask=tgt_mask,
-                                    memory_mask=memory_mask,
-                                    tgt_key_padding_mask=tgt_key_padding_mask,
-                                    memory_key_padding_mask=memory_key_padding_mask)
+        for mod in self.layers:
+            output = mod(output, memory, tgt_mask=tgt_mask,
+                         memory_mask=memory_mask,
+                         tgt_key_padding_mask=tgt_key_padding_mask,
+                         memory_key_padding_mask=memory_key_padding_mask)
 
-        if self.norm:
+        if self.norm is not None:
             output = self.norm(output)
 
         return output
@@ -268,7 +273,13 @@ class TransformerEncoderLayer(Module):
 
         self.activation = _get_activation_fn(activation)
 
+    def __setstate__(self, state):
+        if 'activation' not in state:
+            state['activation'] = F.relu
+        super(TransformerEncoderLayer, self).__setstate__(state)
+
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -283,10 +294,7 @@ class TransformerEncoderLayer(Module):
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
-        if hasattr(self, "activation"):
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        else:  # for backward compatibility
-            src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = src + self.dropout2(src2)
         src = self.norm2(src)
         return src
@@ -332,8 +340,14 @@ class TransformerDecoderLayer(Module):
 
         self.activation = _get_activation_fn(activation)
 
+    def __setstate__(self, state):
+        if 'activation' not in state:
+            state['activation'] = F.relu
+        super(TransformerDecoderLayer, self).__setstate__(state)
+
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tensor
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -355,10 +369,7 @@ class TransformerDecoderLayer(Module):
                                    key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
-        if hasattr(self, "activation"):
-            tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        else:  # for backward compatibility
-            tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
         return tgt
@@ -373,5 +384,5 @@ def _get_activation_fn(activation):
         return F.relu
     elif activation == "gelu":
         return F.gelu
-    else:
-        raise RuntimeError("activation should be relu/gelu, not %s." % activation)
+
+    raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
