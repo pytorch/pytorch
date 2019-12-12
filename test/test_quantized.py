@@ -1783,7 +1783,7 @@ class TestQuantizedConv(unittest.TestCase):
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
-@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
+# @unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1802,6 +1802,26 @@ class TestQNNPackOps(TestCase):
 
             Y[Y < 0] = 0
             qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
+            self.assertEqual(qY, qY_hat)
+
+    """Tests the correctness of the quantized::qnnpack_tanh op."""
+    from hypothesis import reproduce_failure
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_tanh(self, X):
+        # Note: In QNNPACK the output scale and zero_point can be only
+        #       1.0/256, 0 respectively, because it uses an LUT with 256 bins.
+        with override_quantized_engine('qnnpack'):
+            X, (scale, zero_point, torch_type) = X
+            tanh = torch.tanh
+
+            X = torch.from_numpy(X)
+            Y = tanh(X)
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch_type)
+            qY = torch.quantize_per_tensor(Y, scale=1.0/256, zero_point=0, dtype=torch_type)
+            qY_hat = tanh(qX)
+
             self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::add (qnnpack) op."""

@@ -34,8 +34,8 @@ Tensor qnnpack_tanh(Tensor input) {
     num_elems /* channels */,
     zero_point /* input zero point */,
     scale /* input scale */,
-    zero_point /* output zero point */,
-    scale /* output scale */,
+    0 /* output zero point */,
+    1.0f / 256 /* output scale */,
     zero_point /* output min */,
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
@@ -68,14 +68,18 @@ Tensor qnnpack_tanh(Tensor input) {
     "failed to run QNNPACK TanH operator");
   return qy;
 }
-#endif
+#endif  // USE_PYTORCH_QNNPACK
 
 Tensor quantized_tanh(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
-    return qnnpack_tanh(qx);
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      qx.scalar_type() == kQUInt8) {
+    auto qy = qnnpack_tanh(qx);
+    qy.set_quantizer_(make_per_tensor_affine_quantizer(
+          1.0f / 256.0f, 0, qx.scalar_type()));
+    return qy;
   }
-  #endif
+  #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
   qtanh_stub(qx.device().type(), qx, qy);
   return qy;
