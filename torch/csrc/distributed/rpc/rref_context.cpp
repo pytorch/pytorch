@@ -172,10 +172,7 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     auto rref =
         std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
     owners_[rref->rrefId()] = rref;
-    const auto cvIter = ownerCVs_.find(rrefId);
-    if (cvIter != ownerCVs_.end()) {
-      cvIter->second.notify_all();
-    }
+    ownerCV_.notify_all();
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
@@ -211,8 +208,7 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(const RRefId& rrefId) {
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
-    auto& ownerCV = ownerCVs_[rrefId];
-    ownerCV.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
+    ownerCV_.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
     return std::static_pointer_cast<OwnerRRef<T>>(owners_[rrefId]);
   } else {
     // Scenario (2) retrieving an existing RRef
@@ -405,7 +401,6 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
       if (ownerIter != owners_.end()) {
         deletedRRef = ownerIter->second;
         owners_.erase(ownerIter);
-        ownerCVs_.erase(rrefId);
       }
       forks_.erase(rrefIter);
     }
