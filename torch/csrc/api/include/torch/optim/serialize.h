@@ -111,7 +111,7 @@ void serialize(
     int64_t& value);
 
 /// Utility function to save a vector of step buffers.
-TORCH_API void serialize(
+void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
     const std::vector<int64_t>& steps);
@@ -171,7 +171,7 @@ void serialize(
 
 /// Utility function to save a vector of buffers.
 template <typename BufferContainer>
-TORCH_API void serialize(
+void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
     const BufferContainer& buffers) {

@@ -178,8 +178,19 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
   // write sum_buffers and step buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  torch::optim::serialize(output_archive, "sum_buffers", sum_buffers);
-  torch::optim::serialize(output_archive, "step_buffers", step_buffers);
+  output_archive.write(
+      "sum_buffers/size", torch::tensor(static_cast<int64_t>(sum_buffers.size())));
+  for (size_t index = 0; index < sum_buffers.size(); ++index) {
+    output_archive.write(
+        "sum_buffers/" + c10::to_string(index), sum_buffers[index], /*is_buffer=*/true);
+  }
+  output_archive.write(
+      "step_buffers/size", torch::tensor(static_cast<int64_t>(step_buffers.size())));
+  for (size_t index = 0; index < step_buffers.size(); ++index) {
+    output_archive.write(
+        "step_buffers/" + c10::to_string(index), torch::tensor(step_buffers[index]), /*is_buffer=*/true);
+  }
+
   output_archive.save_to(optim_tempfile_old_format.name);
 
   torch::serialize::InputArchive input_archive;
