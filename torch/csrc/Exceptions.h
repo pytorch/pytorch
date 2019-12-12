@@ -42,6 +42,7 @@
   try {                                                              \
     torch::PyWarningHandler __enforce_warning_buffer;
 
+// Only catch torch-specific exceptions
 #define CATCH_TH_ERRORS(retstmnt)                                    \
     catch (python_error & e) {                                       \
       retstmnt;                                                      \
@@ -60,7 +61,10 @@
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg.c_str());                 \
       retstmnt;                                                      \
-    }                                                                \
+    }
+
+#define CATCH_ALL_ERRORS(retstmnt)                                   \
+    CATCH_TH_ERRORS(retstmnt)                                        \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
@@ -78,11 +82,11 @@
   catch (torch::jit::JITException & e) {                                 \
     throw;                                                               \
   }                                                                      \
-  CATCH_TH_ERRORS(throw py::error_already_set())
+  CATCH_ALL_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
   }                                                                  \
-  CATCH_TH_ERRORS(return retval)
+  CATCH_ALL_ERRORS(return retval)
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 

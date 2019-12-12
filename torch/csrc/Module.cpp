@@ -744,11 +744,12 @@ PyObject* initModule() {
 
   // Automatically translate errors thrown from pybind11 functions
   py::register_exception_translator([](std::exception_ptr e) { // NOLINT
-    HANDLE_TH_ERRORS
-    if (e) {
-      std::rethrow_exception(e);
+    try {
+      if (e) {
+        std::rethrow_exception(e);
+      }
     }
-    END_HANDLE_TH_ERRORS_PYBIND
+    CATCH_TH_ERRORS()
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
