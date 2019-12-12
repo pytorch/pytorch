@@ -24,23 +24,6 @@ TH_API void THNN_(BCECriterion_updateGradInput)(
           int64_t reduction,
           THTensor *weights);          // [OPTIONAL]
 
-TH_API void THNN_(ELU_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *output,            // [OUT] ELU output
-          accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale,               // scaling factor for output
-          accreal input_scale,         // scaling factor for input
-          bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
-TH_API void THNN_(ELU_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *gradOutput,        // gradient w.r.t. output
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          THTensor *output,            // output from a forward pass
-          accreal alpha,               // an ELU parameter (as in paper)
-          accreal scale,
-          accreal input_scale);
-
 TH_API void THNN_(GatedLinear_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
