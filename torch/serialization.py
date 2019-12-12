@@ -85,7 +85,7 @@ def register_package(priority, tagger, deserializer):
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
     _package_registry.sort()
-    
+
 
 def check_module_version_greater_or_equal(module, req_version_tuple, error_if_malformed=True):
     '''
@@ -116,7 +116,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
         message = ("'%s' module version string is malformed '%s' and cannot be compared"
             " with tuple %s" % (module.__name__, module.__version__, str(req_version_tuple)))
         if error_if_malformed:
-            raise Exception(message)
+            raise RuntimeError(message)
         else:
             warnings.warn(message + ', but continuing assuming that requirement is met')
             requirement_is_met = True
