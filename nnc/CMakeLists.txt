@@ -25,7 +25,7 @@ add_definitions(${LLVM_DEFINITIONS})
 add_library(nnc
   src/expr.cc
   src/ir_visitor.cc
-  src/llvm_emitter.cc)
+  src/llvm_codegen.cc)
 
 target_include_directories(nnc PUBLIC "include")
 
