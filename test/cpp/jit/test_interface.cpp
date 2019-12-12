@@ -72,9 +72,8 @@ void testModuleInterfaceSerialization() {
   parentMod.save(ss);
   Module reloaded_mod = jit::load(ss);
   ASSERT_TRUE(reloaded_mod.hasattr("subMod"));
-  // TODO: get attribute
   InterfaceTypePtr submodType =
-      reloaded_mod.type()->findAttribute("subMod")->cast<InterfaceType>();
+      reloaded_mod.type()->getAttribute("subMod")->cast<InterfaceType>();
   ASSERT_TRUE(submodType->is_module());
 }
 
