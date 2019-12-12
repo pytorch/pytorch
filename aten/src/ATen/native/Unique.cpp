@@ -92,7 +92,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     inverse_data = inverse_indices.data_ptr<int64_t>();
   }
   if (return_counts) {
-    counts.resize_(input.sizes());
+    counts.resize_({numel});
     counts_data = counts.data_ptr<int64_t>();
   }
   scalar_t *p = output_data;
@@ -110,7 +110,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
       inverse_data[i] = p - output_data;
     }
   }
-  int64_t output_size = p - output_data + 1;
+  int64_t output_size = (numel > 0 ? p - output_data + 1 : 0);
   if (return_counts && numel > 0) {
     *q = numel - last;
     counts.resize_({output_size});
@@ -158,7 +158,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     auto sizes = self.sizes().vec();
     // check how many zero dimensions exist
     auto num_zero_dims = std::count(sizes.begin(), sizes.end(), 0);
-    
+
     // tensor is not well formed as it has 0 sized dimensions
     if (self.size(dim) == 0){
       TORCH_CHECK(
@@ -171,10 +171,10 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
       return std::make_tuple(output, inverse_indices, counts);
     }
-    
+
     TORCH_CHECK(num_zero_dims == 0,
     "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
-  
+
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
   auto orig_sizes = input_flat.sizes().vec();

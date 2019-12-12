@@ -12557,6 +12557,9 @@ class TestTorchDeviceType(TestCase):
             expected_unique = torch.tensor([0], dtype=dtype, device=device)
             expected_inverse = torch.tensor(0, device=device)
             expected_counts = torch.tensor([1], device=device)
+            self.assertEqual(unique, expected_unique)
+            self.assertEqual(inverse, expected_inverse)
+            self.assertEqual(counts, expected_counts)
 
         # test zero sized tensor
         x = torch.zeros((0, 0, 3), dtype=dtype, device=device)
@@ -12565,6 +12568,9 @@ class TestTorchDeviceType(TestCase):
             expected_unique = torch.tensor([], dtype=dtype, device=device)
             expected_inverse = torch.empty((0, 0, 3), dtype=torch.long, device=device)
             expected_counts = torch.tensor([], dtype=torch.long, device=device)
+            self.assertEqual(unique, expected_unique)
+            self.assertEqual(inverse, expected_inverse)
+            self.assertEqual(counts, expected_counts)
 
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16})
     def test_unique_consecutive(self, device, dtype):
@@ -12597,7 +12603,6 @@ class TestTorchDeviceType(TestCase):
                     # sorted unique test
                     ret = ensure_tuple(torch.unique_consecutive(x, return_inverse=return_inverse, return_counts=return_counts))
                     self.assertEqual(len(ret), 1 + int(return_inverse) + int(return_counts))
-                    print(len(ret), 1 + int(return_inverse) + int(return_counts))
                     self.assertEqual(expected_unique, ret[0])
                     if return_inverse:
                         self.assertEqual(expected_inverse, ret[1])
@@ -12611,6 +12616,9 @@ class TestTorchDeviceType(TestCase):
         expected_unique = torch.tensor([0], dtype=dtype, device=device)
         expected_inverse = torch.tensor(0, device=device)
         expected_counts = torch.tensor([1], device=device)
+        self.assertEqual(unique, expected_unique)
+        self.assertEqual(inverse, expected_inverse)
+        self.assertEqual(counts, expected_counts)
 
         # test zero sized tensor
         x = torch.zeros((0, 0, 3), dtype=dtype, device=device)
@@ -12618,6 +12626,10 @@ class TestTorchDeviceType(TestCase):
         expected_unique = torch.tensor([], dtype=dtype, device=device)
         expected_inverse = torch.empty((0, 0, 3), dtype=torch.long, device=device)
         expected_counts = torch.tensor([], dtype=torch.long, device=device)
+        print(unique, expected_unique)
+        self.assertEqual(unique, expected_unique)
+        self.assertEqual(inverse, expected_inverse)
+        self.assertEqual(counts, expected_counts)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
