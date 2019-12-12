@@ -85,6 +85,22 @@ Adding a new operation as follows:
 
 Will change the computation to: :math:`v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}`.
 
+Using a Tensor in multiple places will simply accumulate the gradients from the different branches:
+
+.. code::
+
+    def f(w):
+        x = op_1(w)
+        y = op_2(w)
+        z = op_3(x, y)
+        return z
+
+    w.requires_grad_()
+    f(w).backward(v)
+
+We write the Jacobian of :code:`op_3` by concatenating the Jacobians for each input.
+The computation is then: :math:`v^T J_f = v^T J_{op_3} \begin{pmatrix} J_{op_1} \\ J_{op_2} \end{pmatrix} = v^T \begin{pmatrix} \dfrac{\partial{z}}{\partial{x}} & \dfrac{\partial{z}}{\partial{y}} \end{pmatrix} \begin{pmatrix} \dfrac{\partial{x}}{\partial{w}} \\ \dfrac{\partial{y}}{\partial{w}} \end{pmatrix} = v^T \dfrac{\partial{z}}{\partial{w}}`.
+
 Handling in-place operations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
