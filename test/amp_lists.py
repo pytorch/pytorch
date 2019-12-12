@@ -88,6 +88,9 @@ class AmpLists(object):
             ("rsqrt", (pointwise0_fp16[0].clamp(0.0, 100.0),)),
             ("sinh", pointwise0_fp16),
             ("tan", (pointwise0_fp16[0].clamp(-3.1/2, 3.1/2),)),
+            ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_fp16),
+            ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
+            # ("pow", (1.7,) + pointwise0_fp16), # This variant has a backend, but is not documented in the API.
         ]
         self.torch_fp32_inplace = [
             ("acos_", (pointwise0_fp32[0].clamp(-.9, 0.9),)),
@@ -119,6 +122,9 @@ class AmpLists(object):
             ("rsqrt", pointwise0_fp32 + (pointwise0_fp16[0].clamp(0.0, 100.0),)),
             ("sinh", pointwise0_fp32 + pointwise0_fp16),
             ("tan", pointwise0_fp32 + (pointwise0_fp16[0].clamp(-3.1/2, 3.1/2),)),
+            ("pow", pointwise0_fp32 + ((pointwise1_fp16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_fp16),
+            ("pow", pointwise0_fp32 + ((pointwise1_fp16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
+            # ("pow", pointwise0_fp32 + (1.7,) + pointwise1_fp32), # This variant has a backend, but is not documented.
         ]
         # self.torch_fp32 = []
         # self.torch_fp32_inplace = []
@@ -159,6 +165,8 @@ class AmpLists(object):
         # self.tensor_only_fp32 = []
         self.tensor_only_fp32_inplace = [
             ("erfinv_", (pointwise0_fp32[0].clamp(-.9, .9),)),
+            ("pow_", ((pointwise0_fp32[0] + 1.).clamp(0.0, 100.0),) + pointwise1_fp16),
+            ("pow_", ((pointwise0_fp32[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
         ]
         # self.tensor_only_fp32_user_supplied_out = []
         # self.tensor_only_fp32 = []

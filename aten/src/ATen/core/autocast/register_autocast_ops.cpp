@@ -265,18 +265,18 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, FuncType, F, Ret, guts
 // 1.b. For ops that don't have an at:: exposure, VariableType's functions forward to a Tensor method,
 // eg self_.addmm_.  For these, I need to create a macro that defines a specialization, so I can request self.FUNC.
 // Pure macros or codegen are looking better and better...
-#define SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(FUNC) \
+#define SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
-struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(FUNC), FUNC, Ret, guts::typelist::typelist<Args...>> { \
+struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
   template<typename... RemainingArgs> static \
   Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
     auto run_as_type = at::kHalf; \
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
     if (self.scalar_type() == run_as_type) { \
-      self.FUNC(cached_cast(run_as_type, args)...); \
+      self.METHOD(cached_cast(run_as_type, args)...); \
     } else { \
       auto fp16_self_lvalue = cached_cast(run_as_type, self); \
-      fp16_self_lvalue.FUNC(cached_cast(run_as_type, args)...); \
+      fp16_self_lvalue.METHOD(cached_cast(run_as_type, args)...); \
       self.copy_(fp16_self_lvalue); \
     } \
     return self; \
@@ -286,15 +286,15 @@ struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(FUNC), FUNC, 
   } \
 };
 
-#define SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(FUNC) \
+#define SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
-struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(FUNC), FUNC, Ret, guts::typelist::typelist<Args...>> { \
+struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
   template<typename... RemainingArgs> static \
   Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
     auto run_as_type = at::kFloat; \
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
     if (self.scalar_type() == run_as_type) { \
-      self.FUNC(cached_cast(run_as_type, args)...); \
+      self.METHOD(cached_cast(run_as_type, args)...); \
     } else { \
       AT_ASSERT(false, "In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)"); \
     } \
@@ -305,17 +305,23 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(FUNC), FUNC, 
   } \
 };
 
-// Define the specializations that will serve each 1.b. FUNC.
-// For each specialization, I must also supply a dummy function with the right signature
+// Define the specializations that will serve each 1.b. METHOD.
+// For each specialization, I must also supply a dummy OVERLOAD with the right signature
 // (copied from VariableType) to provide the type information for instantiation.
+// Most of the time there is only one OVERLOAD so no disambiguation is required.
+// pow_ is the exception.  The pow(_) family of overloads is a pain in the neck.
 // fp16 ops
 Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) { return self; }
-SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addmm_)
+SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addmm_, addmm_)
 Tensor & addr_(Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha) { return self; }
-SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addr_)
+SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addr_, addr_)
 // fp32 ops
 Tensor & erfinv_(Tensor & self) { return self; }
-SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(erfinv_)
+SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(erfinv_, erfinv_)
+Tensor & pow_scalar_(Tensor & self, Scalar exponent) { return self; }
+SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_scalar_)
+Tensor & pow_tensor_(Tensor & self, const Tensor & exponent) { return self; }
+SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_tensor_)
 
 // 2.a. Functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
@@ -594,6 +600,23 @@ auto register_well_behaved = torch::RegisterOperators()
     .schema("aten::tan(Tensor self) -> Tensor")
     .kernel<Tensor (const Tensor &)>(TensorTypeId::AutocastTensorId, PATCH(at::tan, fp32, wellbehaved))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor")
+    .kernel<Tensor (const Tensor &, Scalar)>(TensorTypeId::AutocastTensorId,
+    // The pow overloads don't play well with the decltype in my PATCH helper macro,
+    // so I have to write out the full instantiation for WrapFunction.
+    &WrapFunction<CastPolicy::fp32, Behavior::wellbehaved, Tensor (const Tensor &, Scalar), at::pow>::type::call)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor")
+    .kernel<Tensor (const Tensor &, const Tensor &)>(TensorTypeId::AutocastTensorId,
+    &WrapFunction<CastPolicy::fp32, Behavior::wellbehaved, Tensor (const Tensor &, const Tensor &), at::pow>::type::call)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor")
+    .kernel<Tensor (Scalar, const Tensor &)>(TensorTypeId::AutocastTensorId,
+    &WrapFunction<CastPolicy::fp32, Behavior::wellbehaved, Tensor (Scalar, const Tensor &), at::pow>::type::call)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // CastPolicy::promote
   // CastPolicy::passthrough
   .op(torch::RegisterOperators::options()
@@ -694,6 +717,14 @@ auto register_inplace_method_only = torch::RegisterOperators()
     .schema("aten::erfinv_(Tensor(a!) self) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<Tensor & (Tensor &), PATCH(at::autocast::erfinv_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, Scalar), PATCH(at::autocast::pow_scalar_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::autocast::pow_tensor_, fp32, inplace)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
 
@@ -782,6 +813,26 @@ auto register_user_supplied_out = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)")
     .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &), PATCH(at::tan_out, fp32, user_supplied_out)>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, Scalar),
+    // The pow overloads don't play well with the decltype in my PATCH helper macro,
+    // so I have to write out the full WrapFunction instantiation.
+    &WrapFunction<CastPolicy::fp32, Behavior::user_supplied_out, Tensor & (Tensor &, const Tensor &, Scalar), at::pow_out>::type::call
+    >(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &),
+    &WrapFunction<CastPolicy::fp32, Behavior::user_supplied_out, Tensor & (Tensor &, const Tensor &, const Tensor &), at::pow_out>::type::call
+    >(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<Tensor & (Tensor &, Scalar, const Tensor &),
+    &WrapFunction<CastPolicy::fp32, Behavior::user_supplied_out, Tensor & (Tensor &, Scalar, const Tensor &), at::pow_out>::type::call
+    >(TensorTypeId::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   // promote ops
   ;
