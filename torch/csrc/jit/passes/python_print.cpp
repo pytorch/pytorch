@@ -1260,7 +1260,7 @@ struct PythonPrintImpl {
     size_t numConstants = moduleType->numConstants();
     for (size_t i = 0; i < numConstants; i++) {
       const auto& name = moduleType->getConstantName(i);
-      const auto& v = moduleType->getConstant(name).value();
+      const auto& v = moduleType->getConstant(name);
 
       indent();
       body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
