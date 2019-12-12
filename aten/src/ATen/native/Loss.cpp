@@ -103,6 +103,29 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
+Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss;
+
+    loss = (target - 1).mul_(
+      (1 - input).log_()
+    ).add_(
+      (-target).mul_(
+        input.log()
+      )
+    );
+
+    if (weight.defined()) {
+      loss.mul_(weight);
+    }
+
+    return apply_loss_reduction(loss, reduction);
+}
+
+Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input;
+    return grad_input;
+}
+
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);
