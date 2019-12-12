@@ -28,8 +28,9 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
-const std::chrono::milliseconds INFINITE_TIMEOUT =
-    std::chrono::milliseconds::max();
+const ProcessGroupAgent::steady_clock_time_point
+    ProcessGroupAgent::kInfiniteTimeoutTimePoint =
+        std::chrono::time_point<std::chrono::steady_clock>::max();
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -241,19 +242,15 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   auto future = std::make_shared<FutureMessage>();
   if (message.isRequest()) {
     // millisecond level precision of when request started.
-    auto futureStartTime =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch());
+    auto futureStartTime = std::chrono::steady_clock::now();
+
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       // Prepare endTime from timeout.
       auto timeout = rpcTimeout_.load();
       // Set infinite timeout if specified.
-      if (timeout.count() == 0) {
-        timeout = INFINITE_TIMEOUT;
-      }
-      std::chrono::milliseconds endTime = timeout == INFINITE_TIMEOUT
-          ? INFINITE_TIMEOUT
+      steady_clock_time_point endTime = timeout.count() == 0
+          ? kInfiniteTimeoutTimePoint
           : futureStartTime + timeout;
       // Insert future into future map.
       futures_.emplace(
@@ -475,24 +472,21 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     if (!rpcRunning_.load()) {
       return;
     }
-    std::chrono::milliseconds sleepTime;
+    steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
     // if there are no futures or the first future's RPC timeout is set to 0
     // (meaning no timeout), then sleep for a set "infinity" time.
-    if (futureTimeouts_.empty() ||
-        futureTimeouts_.begin()->first == INFINITE_TIMEOUT) {
-      sleepTime = INFINITE_TIMEOUT;
+    if (futureTimeouts_.empty()) {
+      minEndTime = kInfiniteTimeoutTimePoint;
     } else {
-      const auto minFutureExpirationTime = futureTimeouts_.begin()->first;
-      const auto remainingTime = getRPCRemainingTime(minFutureExpirationTime);
-      sleepTime = std::max(remainingTime, std::chrono::milliseconds(0));
+      minEndTime = futureTimeouts_.begin()->first;
     }
 
-    if (sleepTime == INFINITE_TIMEOUT) {
+    if (minEndTime == kInfiniteTimeoutTimePoint) {
       futureTimeoutCV_.wait(lock);
     } else {
-      futureTimeoutCV_.wait_for(lock, sleepTime);
+      futureTimeoutCV_.wait_until(lock, minEndTime);
     }
 
     if (!rpcRunning_.load()) {
@@ -525,9 +519,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
   for (auto it = futureTimeouts_.begin(); it != futureTimeouts_.end();
        /* intentional no increment */) {
     const auto& endTime = it->first;
-    const auto remainingTime = getRPCRemainingTime(endTime);
-
-    if (remainingTime.count() > 0) {
+    if (std::chrono::steady_clock::now() < endTime) {
       // Since the futureTimeouts_ map is ordered by timeout, we don't need
       // to check the remaining futures.
       break;
@@ -546,15 +538,6 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
     }
   }
   return timedOutFutures;
-}
-
-const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
-    const std::chrono::milliseconds& rpcEndTime) const {
-  const auto remainingTime =
-      rpcEndTime -
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch());
-  return remainingTime;
 }
 
 std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
