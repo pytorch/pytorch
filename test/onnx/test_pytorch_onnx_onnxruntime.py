@@ -540,6 +540,30 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x)
 
+    def test_floor_div(self):
+        class FloorDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x // 3, x // 2., \
+                    x.to(dtype=torch.float64) // 3, x.to(dtype=torch.float64) // 2., \
+                    x.to(dtype=torch.int64) // 3, x.to(dtype=torch.int64) // 2., \
+                    x // (y + 1.).to(dtype=torch.int64), x // y, \
+                    x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
+                    x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
+        self.run_test(FloorDivModule(), (x, y))
+
+    def test_floor_div_script(self):
+        class FloorDivModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return x // 3, x // 2., x // y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(FloorDivModule(), (x, y))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -680,6 +704,174 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensor_index_advanced_indexing_consecutive(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, ind, update):
+                x[ind] = update
+                return x
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor([1], dtype=torch.long)
+        update = torch.ones(4)
+        self.run_test(IndexPutModel(), (x, ind, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_accumulate(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, ind, update):
+                return x.index_put((ind, ), update, accumulate=True)
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor([2], dtype=torch.long)
+        update = torch.ones(4)
+        self.run_test(IndexPutModel(), (x, ind, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_slice_index(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:2, 1:3, torch.tensor([1])] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(1, 2, 1)
+        self.run_test(IndexPutModel(), (x, update))
+
+        class IndexPutModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), torch.tensor([1, 2])] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.randn(2, 5)
+        self.run_test(IndexPutModel2(), (x, update))
+
+        class IndexPutModel3(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), 1:2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1, 1)
+        self.run_test(IndexPutModel3(), (x, update))
+
+        class IndexPutModel4(torch.nn.Module):
+            def forward(self, x, update):
+                x[torch.tensor([0, 2]), 2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1)
+        self.run_test(IndexPutModel4(), (x, update))
+
+        class IndexPutModel5(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:3, torch.tensor([0, 2]), 2] += update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.tensor([10, 15]).view(2, 1)
+        self.run_test(IndexPutModel5(), (x, update))
+
+        class IndexPutModel6(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:3, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
+        self.run_test(IndexPutModel6(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_ellipsis(self):
+        class IndexPutModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[..., torch.tensor([2, 1, 3]), 2:4] += update
+                return x
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        update = torch.randn(3, 1, 1, 3, 2)
+        self.run_test(IndexPutModel(), (x, update))
+
+        class IndexPutModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
+                return x
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        update = torch.randn(4, 1, 3, 2)
+        self.run_test(IndexPutModel2(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_copy_(self):
+        class CopyModel(torch.nn.Module):
+            def forward(self, x, data):
+                x[1:3] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.randn(2, 4)
+        self.run_test(CopyModel(), (x, update))
+
+        # mixed slice and select
+        class CopyModel2(torch.nn.Module):
+            def forward(self, x, data):
+                x[1:3, 0] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.tensor([0], dtype=torch.float32)
+        self.run_test(CopyModel2(), (x, update))
+
+        update = torch.tensor([2, 3], dtype=torch.float32)
+        self.run_test(CopyModel2(), (x, update))
+
+        update = torch.randn(2)
+        self.run_test(CopyModel2(), (x, update))
+
+        class CopyModel3(torch.nn.Module):
+            def forward(self, x, data):
+                x[1, 1:3] = data
+                return x
+
+        x = torch.randn(3, 4)
+        update = torch.tensor([0], dtype=torch.float32)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.tensor([2, 3], dtype=torch.float32)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.randn(2)
+        self.run_test(CopyModel3(), (x, update))
+
+        update = torch.randn(1, 2)
+        self.run_test(CopyModel3(), (x, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_copy_ellipsis(self):
+        class CopyModel(torch.nn.Module):
+            def forward(self, x, update):
+                x[..., 1] = update
+                return x
+
+        x = torch.randn(2, 3, 4)
+        update = torch.ones(1)
+        self.run_test(CopyModel(), (x, update))
+
+        x = torch.randn(2, 3, 4, 5, 6)
+        update = torch.ones(1)
+        self.run_test(CopyModel(), (x, update))
+
+        class CopyModel2(torch.nn.Module):
+            def forward(self, x, update):
+                x[2, ..., 1:3] = update
+                return x
+
+        x = torch.randn(3, 4, 5, 6)
+        update = torch.ones(1)
+        self.run_test(CopyModel2(), (x, update))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
         class MyModule(torch.nn.Module):
@@ -734,73 +926,93 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
 
-    def _interpolate(self, x, mode, use_size, is_upsample):
+    def _interpolate(self, x, mode, use_size, is_upsample, align_corners=False):
         class MyModel(torch.nn.Module):
             def forward(self, x):
-                scale = 2.3 if is_upsample else 0.3
+                scale = 2.3 if is_upsample else 0.5
+                if len(x.size()) == 3:
+                    scale_array = 2.3
+                if len(x.size()) == 4:
+                    scale_array = [2.3, 5.1]
+                if len(x.size()) == 5:
+                    scale_array = [3.3, 2.3, 5.1]
                 if use_size:
-                    size = [int(float(v) * scale) for v in x.size()[2:]]
-                    return torch.nn.functional.interpolate(x, mode=mode, size=size)
-                return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale)
+                    size_array = [int(float(v) * scale) for v in x.size()[2:]]
+                    if align_corners:
+                        return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0], align_corners=True), \
+                            torch.nn.functional.interpolate(x, mode=mode, size=size_array, align_corners=True)
+                    return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0]), \
+                        torch.nn.functional.interpolate(x, mode=mode, size=size_array)
+                if align_corners:
+                    return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
+                                                           align_corners=True, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
+                                                        align_corners=True, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=mode,
+                                                       scale_factor=scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=mode,
+                                                    scale_factor=scale_array, use_scale_factor=True)
 
         self.run_test(MyModel(), x)
 
-    def _interpolate_script(self, x, mode, use_size, is_upsample):
+    def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
 
         class MyModel(torch.jit.ScriptModule):
-            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array']
+            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
-            def __init__(self, mode, use_size, is_upsample):
+            def __init__(self, mode, use_size, is_upsample, align_corners):
                 super(MyModel, self).__init__()
                 self.mode = mode
                 self.use_size = use_size
                 self.is_upsample = is_upsample
+                self.align_corners = align_corners
                 self.scale = 2.0 if self.is_upsample else 0.5
-                self.size = 24 if self.is_upsample else 1
+                self.size = 24 if self.is_upsample else 2
                 if x.dim() == 3:
-                    self.scale_array = [2.]
+                    self.scale_array = [2.3]
                     self.size_array = [16]
                 elif x.dim() == 4:
-                    self.scale_array = [2., 3.]
+                    self.scale_array = [2.3, 3.1]
                     self.size_array = [16, 32]
                 else:
-                    self.scale_array = [2., 3., 4.]
+                    self.scale_array = [2.3, 3.1, 4.6]
                     self.size_array = [16, 32, 64]
 
             @torch.jit.script_method
             def forward(self, x):
                 if self.use_size:
-                    out = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size)
-                    out_array = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
-                    return out, out_array
-                out = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale)
-                out_array = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
-                return out, out_array
+                    if self.align_corners:
+                        return torch.nn.functional.interpolate(x, mode=self.mode, size=self.size, align_corners=True), \
+                            torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array, align_corners=True)
+                    return torch.nn.functional.interpolate(x, mode=self.mode, size=self.size), \
+                        torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
+                if self.align_corners:
+                    return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                           scale_factor=self.scale, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=self.mode,
+                                                        scale_factor=self.scale_array, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                       scale_factor=self.scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=self.mode,
+                                                    scale_factor=self.scale_array, use_scale_factor=True)
 
-        model = MyModel(mode, use_size, is_upsample)
-        self.run_test(model, x)
+        model = MyModel(mode, use_size, is_upsample, align_corners)
+        self.run_test(model, x, atol=1e-6)
 
-    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
-        # - nearest mode does not match for opsets below 11,
-        # for some cases where the nearest pixel's index is
-        # not calculated the same way for ONNX and PyTorch
-        # (the operation involves a floor in PyTorch vs
-        # in round_prefer_floor ONNX). (The below tests
-        # do not  show this error for nearest mode for
-        # all opsets)
-        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
+        modes = ["nearest", "linear", "bicubic"]
         if self.opset_version < 11:
             modes = ["nearest"]
-        x = [torch.randn(1, 2, 4, requires_grad=True),
-             torch.randn(1, 2, 4, 4, requires_grad=True),
+        x = [torch.randn(1, 2, 6, requires_grad=True),
+             torch.randn(1, 2, 4, 6, requires_grad=True),
              torch.randn(1, 2, 4, 4, 6, requires_grad=True)]
 
         for mode in modes:
             for xi in x:
                 mode_i = mode
+                # TODO: enable bicubic downsample when ORT precision loss fixed
                 if mode == "bicubic" and xi.dim() != 4:
                     continue
                 elif mode == "linear":
@@ -814,11 +1026,19 @@ class TestONNXRuntime(unittest.TestCase):
                         mode_i = "trilinear"
                         continue
                 self._interpolate(xi, mode_i, True, is_upsample)
+                # test with align_corners if supported
+                if mode != 'nearest':
+                    self._interpolate(xi, mode_i, True, is_upsample, True)
+                    self._interpolate_script(xi, mode_i, True, is_upsample, True)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
                 if self.opset_version >= 9:
                     self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
+                    # test with align_corners if supported
+                    if mode != 'nearest':
+                        self._interpolate(xi, mode_i, False, is_upsample, True)
+                        self._interpolate_script(xi, mode_i, False, is_upsample, True)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
     def test_interpolate_upsample(self):
@@ -1442,6 +1662,10 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 1, 5, requires_grad=True)
         self.run_test(model, x)
 
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(3, 6, 3), name='weight')
+        x = torch.randn(3, 3, 5, requires_grad=True)
+        self.run_test(model, x)
+
     def test_weight_norm_nodim(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
@@ -1507,6 +1731,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(UnbindModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_len(self):
+        class LenModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return len(input.unbind()) + input
+
+        x = torch.randn(4, 5)
+        self.run_test(LenModel(), x, input_names=['input'], dynamic_axes={'input': {0: 'seq'}},
+                      test_with_inputs=(torch.randn(5, 5),))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_unbind_dynamic(self):
         class UnbindModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1556,6 +1791,112 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    def test_concat(self):
+        class ConcatModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.cat((x, y, z))
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        self.run_test(ConcatModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_concat_dynamic(self):
+        class ConcatDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.cat(x.unbind())
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(ConcatDynamicModel(), x)
+
+    def test_stack(self):
+        class StackModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.stack((x, y, z), 1)
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(3, 4, 5)
+        z = torch.randn(3, 4, 5)
+        self.run_test(StackModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_stack_dynamic(self):
+        class StackDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.stack(x.unbind(), 1)
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(StackDynamicModel(), x)
+
+    def test_loop_dynamic(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(2)):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_loop_nested(self):
+        class NestedLoopsModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    a = 0
+                    while a < 4:
+                        a += 1
+                    x = x + a
+                return x
+
+        model = NestedLoopsModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_with_list(self):
+        class ListLoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                res = []
+                res1 = []
+                arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
+                res2 = torch.zeros(3, 4, dtype=torch.long)
+                for i in range(len(arr)):
+                    res = res.append(arr[i].sum(0, False))
+                    res1 = res1.append(arr[-1 - i].sum(0, False))
+                    res2 += 1
+                return torch.stack(res), torch.stack(res1), res2
+
+        model = ListLoopModel()
+        inputs = torch.randn(16)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list(self):
+        class ListModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                tensors = x.unbind()
+                res = []
+                res.append(tensors[0])
+                res.append(tensors[1])
+                res.pop(1)
+
+                res.insert(0, tensors[1])
+                res.append(tensors[2])
+                return torch.ones(len(res))
+
+        model = ListModel()
+        inputs = torch.randn(16, 1)
+        self.run_test(model, inputs)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
