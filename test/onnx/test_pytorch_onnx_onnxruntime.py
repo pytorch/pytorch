@@ -926,73 +926,93 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
 
-    def _interpolate(self, x, mode, use_size, is_upsample):
+    def _interpolate(self, x, mode, use_size, is_upsample, align_corners=False):
         class MyModel(torch.nn.Module):
             def forward(self, x):
-                scale = 2.3 if is_upsample else 0.3
+                scale = 2.3 if is_upsample else 0.5
+                if len(x.size()) == 3:
+                    scale_array = 2.3
+                if len(x.size()) == 4:
+                    scale_array = [2.3, 5.1]
+                if len(x.size()) == 5:
+                    scale_array = [3.3, 2.3, 5.1]
                 if use_size:
-                    size = [int(float(v) * scale) for v in x.size()[2:]]
-                    return torch.nn.functional.interpolate(x, mode=mode, size=size)
-                return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale)
+                    size_array = [int(float(v) * scale) for v in x.size()[2:]]
+                    if align_corners:
+                        return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0], align_corners=True), \
+                            torch.nn.functional.interpolate(x, mode=mode, size=size_array, align_corners=True)
+                    return torch.nn.functional.interpolate(x, mode=mode, size=size_array[0]), \
+                        torch.nn.functional.interpolate(x, mode=mode, size=size_array)
+                if align_corners:
+                    return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
+                                                           align_corners=True, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
+                                                        align_corners=True, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=mode,
+                                                       scale_factor=scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=mode,
+                                                    scale_factor=scale_array, use_scale_factor=True)
 
         self.run_test(MyModel(), x)
 
-    def _interpolate_script(self, x, mode, use_size, is_upsample):
+    def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
 
         class MyModel(torch.jit.ScriptModule):
-            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array']
+            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
-            def __init__(self, mode, use_size, is_upsample):
+            def __init__(self, mode, use_size, is_upsample, align_corners):
                 super(MyModel, self).__init__()
                 self.mode = mode
                 self.use_size = use_size
                 self.is_upsample = is_upsample
+                self.align_corners = align_corners
                 self.scale = 2.0 if self.is_upsample else 0.5
-                self.size = 24 if self.is_upsample else 1
+                self.size = 24 if self.is_upsample else 2
                 if x.dim() == 3:
-                    self.scale_array = [2.]
+                    self.scale_array = [2.3]
                     self.size_array = [16]
                 elif x.dim() == 4:
-                    self.scale_array = [2., 3.]
+                    self.scale_array = [2.3, 3.1]
                     self.size_array = [16, 32]
                 else:
-                    self.scale_array = [2., 3., 4.]
+                    self.scale_array = [2.3, 3.1, 4.6]
                     self.size_array = [16, 32, 64]
 
             @torch.jit.script_method
             def forward(self, x):
                 if self.use_size:
-                    out = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size)
-                    out_array = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
-                    return out, out_array
-                out = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale)
-                out_array = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
-                return out, out_array
+                    if self.align_corners:
+                        return torch.nn.functional.interpolate(x, mode=self.mode, size=self.size, align_corners=True), \
+                            torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array, align_corners=True)
+                    return torch.nn.functional.interpolate(x, mode=self.mode, size=self.size), \
+                        torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
+                if self.align_corners:
+                    return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                           scale_factor=self.scale, use_scale_factor=True), \
+                        torch.nn.functional.interpolate(x, mode=self.mode,
+                                                        scale_factor=self.scale_array, use_scale_factor=True)
+                return torch.nn.functional.interpolate(x, mode=self.mode,
+                                                       scale_factor=self.scale, use_scale_factor=True), \
+                    torch.nn.functional.interpolate(x, mode=self.mode,
+                                                    scale_factor=self.scale_array, use_scale_factor=True)
 
-        model = MyModel(mode, use_size, is_upsample)
-        self.run_test(model, x)
+        model = MyModel(mode, use_size, is_upsample, align_corners)
+        self.run_test(model, x, atol=1e-6)
 
-    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
-        # - nearest mode does not match for opsets below 11,
-        # for some cases where the nearest pixel's index is
-        # not calculated the same way for ONNX and PyTorch
-        # (the operation involves a floor in PyTorch vs
-        # in round_prefer_floor ONNX). (The below tests
-        # do not  show this error for nearest mode for
-        # all opsets)
-        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
+        modes = ["nearest", "linear", "bicubic"]
         if self.opset_version < 11:
             modes = ["nearest"]
-        x = [torch.randn(1, 2, 4, requires_grad=True),
-             torch.randn(1, 2, 4, 4, requires_grad=True),
+        x = [torch.randn(1, 2, 6, requires_grad=True),
+             torch.randn(1, 2, 4, 6, requires_grad=True),
              torch.randn(1, 2, 4, 4, 6, requires_grad=True)]
 
         for mode in modes:
             for xi in x:
                 mode_i = mode
+                # TODO: enable bicubic downsample when ORT precision loss fixed
                 if mode == "bicubic" and xi.dim() != 4:
                     continue
                 elif mode == "linear":
@@ -1006,11 +1026,19 @@ class TestONNXRuntime(unittest.TestCase):
                         mode_i = "trilinear"
                         continue
                 self._interpolate(xi, mode_i, True, is_upsample)
+                # test with align_corners if supported
+                if mode != 'nearest':
+                    self._interpolate(xi, mode_i, True, is_upsample, True)
+                    self._interpolate_script(xi, mode_i, True, is_upsample, True)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
                 if self.opset_version >= 9:
                     self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
+                    # test with align_corners if supported
+                    if mode != 'nearest':
+                        self._interpolate(xi, mode_i, False, is_upsample, True)
+                        self._interpolate_script(xi, mode_i, False, is_upsample, True)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
     def test_interpolate_upsample(self):
