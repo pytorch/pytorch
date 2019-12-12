@@ -540,6 +540,30 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x)
 
+    def test_floor_div(self):
+        class FloorDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x // 3, x // 2., \
+                    x.to(dtype=torch.float64) // 3, x.to(dtype=torch.float64) // 2., \
+                    x.to(dtype=torch.int64) // 3, x.to(dtype=torch.int64) // 2., \
+                    x // (y + 1.).to(dtype=torch.int64), x // y, \
+                    x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
+                    x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
+        self.run_test(FloorDivModule(), (x, y))
+
+    def test_floor_div_script(self):
+        class FloorDivModule(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return x // 3, x // 2., x // y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(FloorDivModule(), (x, y))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
