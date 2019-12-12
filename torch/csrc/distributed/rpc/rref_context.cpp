@@ -199,21 +199,20 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::createUntrackedOwnerRRef() {
       new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
 }
 
-template std::shared_ptr<OwnerRRef<IValue>>
-    RRefContext::createUntrackedOwnerRRef<IValue>();
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::
+    createUntrackedOwnerRRef<IValue>();
 
-template std::shared_ptr<OwnerRRef<py::object>>
-    RRefContext::createUntrackedOwnerRRef<py::object>();
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
+    createUntrackedOwnerRRef<py::object>();
 
 template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(
-    const RRefId& rrefId) {
+std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(const RRefId& rrefId) {
   std::unique_lock<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
     // Scenario (1) RRef is used before it is created
     auto& ownerCV = ownerCVs_[rrefId];
-    ownerCV.wait(lock, [&] {return owners_.find(rrefId) != owners_.end();});
+    ownerCV.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
     return std::static_pointer_cast<OwnerRRef<T>>(owners_[rrefId]);
   } else {
     // Scenario (2) retrieving an existing RRef
@@ -221,8 +220,8 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(
   }
 }
 
-template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOwnerRRef<
-    IValue>(const RRefId& rrefId);
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOwnerRRef<IValue>(
+    const RRefId& rrefId);
 
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::getOwnerRRef<
     py::object>(const RRefId& rrefId);
