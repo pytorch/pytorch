@@ -105,9 +105,7 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Get the default stream for a given device.
    */
-  virtual Stream getDefaultStream(Device) const {
-    TORCH_CHECK(false, "Backend doesn't support acquiring a default stream.")
-  }
+  virtual Stream getDefaultStream(Device) const;
 
   /**
    * Set a stream to be the thread local current stream for its device.
@@ -121,7 +119,7 @@ struct C10_API DeviceGuardImplInterface {
  */
   virtual void destroyEvent (
     void* event,
-    const DeviceIndex device_index) const noexcept { }
+    const DeviceIndex device_index) const noexcept;
 
 /**
  * Increments the event's version and enqueues a job with this version
@@ -133,9 +131,7 @@ struct C10_API DeviceGuardImplInterface {
     void** event,
     const Stream& stream,
     const DeviceIndex device_index,
-    const c10::EventFlag flag) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
-  }
+    const c10::EventFlag flag) const;
 
 /**
  * Does nothing if the event has not been scheduled to be recorded.
@@ -147,9 +143,7 @@ struct C10_API DeviceGuardImplInterface {
  */
   virtual void block(
     void* event,
-    const Stream& stream) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
-  }
+    const Stream& stream) const;
 
 /**
  * Returns true if (and only if)
@@ -157,9 +151,7 @@ struct C10_API DeviceGuardImplInterface {
  *  (2) the current version is marked as recorded.
  * Returns false otherwise.
  */
-  virtual bool queryEvent(void* event) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
-  }
+  virtual bool queryEvent(void* event) const;
 
   /**
    * Get the number of devices.  WARNING: This is REQUIRED to not raise
@@ -172,7 +164,7 @@ struct C10_API DeviceGuardImplInterface {
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
    * So you better not call the destructor, buster!
    */
-  virtual ~DeviceGuardImplInterface() = default;
+  virtual ~DeviceGuardImplInterface();
 };
 
 // The registry is NON-owning.  Each stored pointer is std::atomic so
