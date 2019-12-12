@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
-from yaml import CLoader, load
+from yaml import load
+
+try:
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
 
 
 def load_config(filename=".circleci/config.yml"):
     with open(filename, "r") as fh:
-        return load("".join(fh.readlines()), CLoader)
+        return load("".join(fh.readlines()), Loader)
 
 
 def load_tags_for_projects(workflow_config):
