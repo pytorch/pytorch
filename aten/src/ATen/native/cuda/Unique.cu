@@ -5,7 +5,9 @@
 
 #include <tuple>
 #include <iterator>
-#include <cub/cub.cuh>
+
+#include <cub/device/device_radix_sort.hpp>
+#include <cub/device/device_run_length_encode.cuh>
 
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
