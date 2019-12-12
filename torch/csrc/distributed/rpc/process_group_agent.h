@@ -80,7 +80,7 @@ class ProcessGroupAgent : public RpcAgent {
   using steady_clock_time_point =
       std::chrono::time_point<std::chrono::steady_clock>;
 
-  static const steady_clock_time_point kInfiniteTimeoutTimePoint;
+  const steady_clock_time_point kInfiniteTimeoutTimePoint;
 
   class MessageCounter {
    public:
