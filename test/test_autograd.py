@@ -3357,7 +3357,7 @@ for shape in [(1,), ()]:
                 else:
                     fn()
 
-            ## Views are tracked
+            # Are they differentiable views?
             out = get_view_as()
             self.assertTrue(out._is_view() == is_view)
 
@@ -3365,7 +3365,7 @@ for shape in [(1,), ()]:
             self.assertTrue(out[0]._is_view() == is_view)
             self.assertTrue(out[1]._is_view() == is_view)
 
-            ## Inplace are always allowed
+            # Are inplace allowed?
             out = get_view_as()
             maybe_check_raise(lambda: out.add_(1), should_raise_tuple[0])
 
@@ -3382,7 +3382,9 @@ for shape in [(1,), ()]:
         # TODO: Second should_raise should not be None below
         run_test(True, True, True, (None, None, "INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        run_test(False, True, True, ("leaf Variable that requires grad", "leaf Variable that requires grad", "leaf Variable that requires grad"))
+        run_test(False, True, True, ("leaf Variable that requires grad",
+                                     "leaf Variable that requires grad",
+                                     "leaf Variable that requires grad"))
         run_test(False, False, True, (None, None, None))
 
 
@@ -3452,7 +3454,7 @@ for shape in [(1,), ()]:
                         if fn_id == "one_output":
                             tmp = IdOneOutput.apply(a, b)
                         else:
-                            tmp = ViewOfTemp.apply(a+b)
+                            tmp = ViewOfTemp.apply(a + b)
                         if inplace:
                             tmp += 3
                         else:
@@ -3473,7 +3475,7 @@ for shape in [(1,), ()]:
 
                 # Was the custom backward called properly
                 bw_called[0] = 0
-                ga_nz[0] = True # For the case where the backward is not called
+                ga_nz[0] = True  # For the case where the backward is not called
                 fn(a, b).backward()
 
                 expected_called = 1
@@ -3535,7 +3537,7 @@ for shape in [(1,), ()]:
 
         bw_called = [0]
 
-        ## Single output
+        # I) Single output
         class MyAdder(Function):
             @staticmethod
             def forward(ctx, a, b):
@@ -3570,7 +3572,7 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
-        ## Multiple outputs
+        # II) Multiple outputs
         class MyBadAdder(Function):
             @staticmethod
             def forward(ctx, a, b):
@@ -3602,7 +3604,7 @@ for shape in [(1,), ()]:
             # TODO: Inplace function should never return more than one thing
             (c * d).sum().backward()
 
-        ## Multiple outputs without view
+        # III) Multiple outputs without view
         class MyOutPlaceAdder(Function):
             @staticmethod
             def forward(ctx, a, b):
@@ -3626,7 +3628,6 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         gradcheck(fn, (a, b))
-
 
         # We reuse the input
         def fn(a, b):
