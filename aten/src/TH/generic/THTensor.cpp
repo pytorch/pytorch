@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <new>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)
@@ -626,8 +627,11 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
 
   // Inputs cannot alias the output tensor
   for (int i = 0; i < numInputs; i++) {
-    THArgCheck(result != inputs[i], 0,
-        "Cannot output result into input tensor %d", i);
+    auto lap = at::get_overlap_status(result, inputs[i]);
+    THArgCheck(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor %d.", i);
   }
 
   auto should_skip = [](THTensor *t) { return t->is_empty() && t->dim() == 1; };

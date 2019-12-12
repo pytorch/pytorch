@@ -6870,12 +6870,23 @@ class TestTorchDeviceType(TestCase):
         y = torch.randn((4, 6), device=device)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"Cannot output result into input tensor 0"):
+                RuntimeError, r"unsupported operation:.* input tensor 0"):
             torch.cat([x, y], dim=0, out=x)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"Cannot output result into input tensor 1"):
+                RuntimeError, r"unsupported operation:.* input tensor 1"):
             torch.cat([x, y], dim=0, out=y)
+
+        z = torch.zeros((4, 6), device=device)
+        with self.assertRaisesRegex(
+                RuntimeError, r"unsupported operation:.* input tensor 1"):
+            torch.cat([y, z], out=z[:2, :])
+
+        w = y.view(-1).clone()
+        a = torch.cat([w[:2], w[4:6]])
+        b = torch.cat([w[:2], w[4:6]], out=w[6:10])
+        self.assertEqual(a, b)
+        self.assertEqual(w[:6], y.view(-1)[:6])
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
