@@ -121,7 +121,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
       std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
+          ctx.getOwnerRRef<IValue>(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -141,7 +141,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
       std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
+          ctx.getOwnerRRef<py::object>(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(rref->getValue());
