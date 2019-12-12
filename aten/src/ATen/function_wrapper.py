@@ -3,7 +3,7 @@
 
 import re
 from code_template import CodeTemplate
-from tensor_options_utils import *
+import tensor_options_utils as TOUtils
 
 try:
     import typing  # noqa: F401
@@ -30,8 +30,6 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
-from env import BUILD_NAMEDTENSOR
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # what has to be done to add a Operation ...
@@ -48,9 +46,7 @@ ${return_type} ${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -63,9 +59,7 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -99,9 +93,7 @@ ${return_type} ${api_name}(${type_method_formals}) const;
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -109,9 +101,7 @@ ${return_type} ${api_name}(${type_method_formals}) {
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
-#ifdef BUILD_NAMEDTENSOR
     ${named_guard_declaration}
-#endif
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
@@ -149,26 +139,12 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 
 # add non-virtual declaration to TensorBody.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals_with_defaults}) const;
+${return_type} ${api_name_prefix}${api_name}(${method_formals_with_defaults}) const;
 """)
-TENSOR_METHOD_DECLARATION_UNDERSCORE = CodeTemplate("""\
-${return_type} _${api_name}(${method_formals_with_defaults}) const;
-""")
+
 # add non-virtual declaration to Tensor.cpp
-
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
-#endif
-}
-""")
-
-C10_TENSOR_METHOD_DEFINITION_UNDERSCORE = CodeTemplate("""\
-inline ${return_type} Tensor::_${api_name}(${method_formals}) const {
+inline ${return_type} Tensor::${api_name_prefix}${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
@@ -180,10 +156,7 @@ inline ${return_type} Tensor::_${api_name}(${method_formals}) const {
 
 # add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals_with_defaults});
-""")
-FUNCTION_DECLARATION_UNDERSCORE = CodeTemplate("""\
-static inline ${return_type} _${api_name}(${formals_with_defaults});
+static inline ${return_type} ${api_name_prefix}${api_name}(${formals_with_defaults});
 """)
 COLLAPSED_FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${collapsed_formals_with_defaults});
@@ -240,7 +213,7 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 """)
 
 # special method definition for factory functions in Functions.h that initializes backends
-C10_FACTORY_DEFINITION_UNDERSCORE = CodeTemplate("""\
+C10_FACTORY_DEFINITION_FACTORY = CodeTemplate("""\
 static inline ${return_type} _${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
@@ -254,13 +227,13 @@ static inline ${return_type} _${api_name}(${formals}) {
 """)
 
 COLLAPSED_FACTORY_DEFINITION = CodeTemplate("""\
-inline ${return_type} ${api_name}(${collapsed_formals}) { 
+inline ${return_type} ${api_name}(${collapsed_formals}) {
     return _${api_name}(${expanded_native_actuals});
 }
 """)
 
 COLLAPSED_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const { 
+inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
     c10::optional<ScalarType> dtype = c10::nullopt;
     c10::optional<Layout> layout = c10::nullopt;
     c10::optional<Device> device = c10::nullopt;
@@ -270,17 +243,9 @@ inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
         dtype = typeMetaToScalarType(options.dtype());
     }
 
-    if (options.layout_opt().has_value()) {
-        layout = options.layout();
-    }
-    
-    if (options.device_opt().has_value()) {
-        device = options.device();
-    }
-
-    if (options.pinned_memory_opt().has_value()) {
-        pin_memory = options.pinned_memory();
-    }
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
 
     return _${api_name}(${expanded_native_actuals});
 }
@@ -289,7 +254,7 @@ inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
 # This is a special case for '.to' operator. It should be cleaned up
 # issue #30405
 COLLAPSED_METHOD_TO_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const { 
+inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
     TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
          "to(options) expects unset requires_grad flag, but got "
          "options.requires_grad set as ", options.requires_grad());
@@ -303,17 +268,9 @@ inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
         dtype = typeMetaToScalarType(options.dtype());
     }
 
-    if (options.layout_opt().has_value()) {
-        layout = options.layout();
-    }
-    
-    if (options.device_opt().has_value()) {
-        device = options.device();
-    }
-
-    if (options.pinned_memory_opt().has_value()) {
-        pin_memory = options.pinned_memory();
-    }
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
 
     return _${api_name}(${expanded_native_actuals});
 }
@@ -334,11 +291,6 @@ CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 OPERATOR_NAME = CodeTemplate("""\
     {"aten::${operator_name}", "${overload_name}"},
 """)
-
-NAMEDTENSOR_CHECK = CodeTemplate("""\
-#ifdef BUILD_NAMEDTENSOR
-${code}
-#endif""")
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
@@ -659,6 +611,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_types': List[str],
     'formals_types_with_return': List[str],
     'inferred_type_set': str,
+    'api_name_prefix': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
@@ -732,9 +685,9 @@ def device_guard(option, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
     if option.get('device_guard', True):
         if dispatch_options:
-            if any(arg['type'] == 'c10::optional<ScalarType>' for arg in option['arguments']):
+            if any(arg['type'] == 'c10::optional<Device>' for arg in option['arguments']):
                 return 'auto dev = device.has_value() ? device.value() : Device(kCPU);\nconst DeviceGuard device_guard(dev);'
-            else:    
+            else:
                 return 'const DeviceGuard device_guard(device); '
         if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
@@ -978,7 +931,7 @@ def create_generic(top_env, declarations):
             if formal['dynamic_type'] in ['TensorList'] or is_any_tensor_type(formal):
                 r.append(formal['name'])
 
-        if check_if_factory_method(formals):
+        if TOUtils.check_if_factory_method(formals):
             r.append('dtype, device, layout, pin_memory')
         return r
 
@@ -1185,10 +1138,10 @@ def create_generic(top_env, declarations):
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
 
-        collapsed_formals = collapse_formals_list(formals)
+        collapsed_formals = TOUtils.collapse_formals_list(formals)
         option['collapsed_formals'] = [format_formal(f) for f in collapsed_formals]
         option['collapsed_formals_with_defaults'] = [formal_with_default(f) for f in collapsed_formals]
-        
+
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -1210,16 +1163,13 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
 
-        option['collapsed_method_actuals'] = collapse_actuals(option['method_actuals'])
+        option['collapsed_method_actuals'] = TOUtils.collapse_actuals(option['method_actuals'])
 
         def find_formal(formal_name, formals):
             for formal in formals:
                 if formal_name == formal['dynamic_type']:
                     return formal
             return None
-
-        def has_named_tensor_formals(formals):
-            return any(['Dimname' in formal['dynamic_type'] for formal in formals])
 
         def gen_tensor_method(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
@@ -1261,30 +1211,28 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            if check_if_factory_method(option['arguments']):  
-                return FunctionCode(
-                declaration=TENSOR_METHOD_DECLARATION_UNDERSCORE.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body),
-                definition=C10_TENSOR_METHOD_DEFINITION_UNDERSCORE.substitute( 
-                    option, static_dispatch_method_body=static_dispatch_method_body))
-            else:
-                return FunctionCode(
+            option['api_name_prefix'] = ''
+            if TOUtils.check_if_factory_method(option['arguments']):
+                option['api_name_prefix'] = '_'
 
-                declaration=TENSOR_METHOD_DECLARATION.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body),
-                definition=C10_TENSOR_METHOD_DEFINITION.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body))
+            return FunctionCode(
+            declaration=TENSOR_METHOD_DECLARATION.substitute(
+                option, static_dispatch_method_body=static_dispatch_method_body),
+            definition=C10_TENSOR_METHOD_DEFINITION.substitute(
+                option, static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
-            
+
             option['inferred_type_set'] = (
                 'c10::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
+            option['api_name_prefix'] = ''
+            if is_factory_method:
+                option['api_name_prefix'] = '_'
+
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
-            if is_factory_method:
-                fn_declaration = FUNCTION_DECLARATION_UNDERSCORE.substitute(option)
 
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_switches = []
@@ -1304,7 +1252,7 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                fn_definition = C10_FACTORY_DEFINITION_UNDERSCORE.substitute(
+                fn_definition = C10_FACTORY_DEFINITION_FACTORY.substitute(
                     option, static_dispatch_function_body=static_dispatch_function_body)
             else:
                 fn_definition = C10_FUNCTION_DEFINITION.substitute(
@@ -1321,7 +1269,7 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.remove('options')
             expanded_native_actuals.insert(index, 'options.pinned_memory()')
             expanded_native_actuals.insert(index, 'options.device()')
-            
+
              # special case for 'sparse_coo_tensor' and '_sparse_coo_tensor_unsafe'
              # issue #30405
             if (option['name'] == 'sparse_coo_tensor' or option['name'] == '_sparse_coo_tensor_unsafe'):
@@ -1335,7 +1283,7 @@ def create_generic(top_env, declarations):
 
         def gen_native_dispatch_declaration(option):
             declaration = NATIVE_DISPATCH_DECLARATION_CONST
-            fn_declaration = declaration.substitute(option, type_method_formals= collapse_formals(option['method_formals_with_defaults']))
+            fn_declaration = declaration.substitute(option, type_method_formals = TOUtils.collapse_formals(option['method_formals_with_defaults']))
 
             expanded_native_actuals = option['collapsed_method_actuals'][:]
             expanded_native_actuals.remove('const_cast<Tensor&>(*this)')
@@ -1347,27 +1295,10 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.insert(index, 'dtype')
 
             if option['name'] == 'to':
-                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option, collapsed_formals = collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
-            else:    
-                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option, collapsed_formals = collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option, collapsed_formals = TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+            else:
+                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option, collapsed_formals = TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
-
-        # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
-        # that is sent to top_env.
-        is_named_tensor_only = (has_named_tensor_formals(formals) or
-                                option['api_name'] == 'align_tensors' or
-                                option['api_name'] == 'align_as')
-
-        def check_namedtensor_enabled(code):
-            if is_named_tensor_only:
-                return NAMEDTENSOR_CHECK.substitute(code=code)
-            return code
-
-        def add_namedtensor_enabled_macro(code):
-            # type: (FunctionCode) -> FunctionCode
-            return FunctionCode(
-                definition=NAMEDTENSOR_CHECK.substitute(code=code.definition),
-                declaration=NAMEDTENSOR_CHECK.substitute(code=code.declaration))
 
         assert find_formal('Type', formals) is None, \
             "Found Type argument in {}({}). Use TensorOptions instead.".format(
@@ -1392,7 +1323,7 @@ def create_generic(top_env, declarations):
         # first argument.  Scalar type test will be removed once TH is removed.
         # If you need more complex device guard behavior, you should disable
         # device guard and then manually add the guards you need.
-        dispatch_options = check_tensor_options_in_formals(formals)
+        dispatch_options = TOUtils.check_tensor_options_in_formals(formals)
         guard_tensor = None if dispatch_options else find_dispatch_tensor(formals)
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
@@ -1404,9 +1335,7 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['list_of_aten_ops'].append(
-            check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-        )
+        top_env['list_of_aten_ops'].append(OPERATOR_NAME.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1423,21 +1352,16 @@ def create_generic(top_env, declarations):
             # Having manual_kernel_registration for an abstract method doesn't make sense.
             assert not option['manual_kernel_registration']
         else:
-            top_env['type_method_declarations'].append(
-                check_namedtensor_enabled(NATIVE_DISPATCH_DECLARATION.substitute(option)))
-            top_env['type_method_definitions'].append(
-                check_namedtensor_enabled(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option)))
+            top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
+            top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if option['manual_kernel_registration']:
-                top_env['function_registrations'].append(
-                    check_namedtensor_enabled(DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
+                top_env['function_registrations'].append(DEFAULT_SCHEMA_REGISTRATION.substitute(option))
             else:
                 if option['use_c10_dispatcher'] == 'full':
-                    top_env['function_registrations'].append(
-                        check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
+                    top_env['function_registrations'].append(DEFAULT_FUNCTION_REGISTRATION.substitute(option))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
-                    top_env['function_registrations'].append(
-                        check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+                    top_env['function_registrations'].append(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1449,24 +1373,20 @@ def create_generic(top_env, declarations):
                     continue
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
-                    top_env['native_function_declarations'].append(
-                        check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
+                    top_env['native_function_declarations'].append(NATIVE_DECLARATION.substitute(option))
                     generated_native_functions.append(value)
         else:
-            top_env['native_function_declarations'].append(
-                check_namedtensor_enabled(NATIVE_DECLARATION.substitute(option)))
+            top_env['native_function_declarations'].append(NATIVE_DECLARATION.substitute(option))
 
         method_of = ['Type']
-        is_factory_method = check_if_factory_method(option['arguments'])
+        is_factory_method = TOUtils.check_if_factory_method(option['arguments'])
 
         if is_method:
             code = gen_tensor_method(option, multidispatch_tensors)
-            if is_named_tensor_only:
-                code = add_namedtensor_enabled_macro(code)
             top_env['tensor_method_declarations'].append(code.declaration)
             top_env['tensor_method_definitions'].append(code.definition)
             method_of.append('Tensor')
-            
+
             if is_factory_method:
                 code = gen_native_dispatch_declaration(option)
                 top_env['tensor_method_declarations'].append(code.declaration)
@@ -1474,25 +1394,19 @@ def create_generic(top_env, declarations):
 
         if is_namespace_function:
             code = gen_namespace_function(option, multidispatch_tensors)
-            if is_named_tensor_only:
-                code = add_namedtensor_enabled_macro(code)
             top_env['function_definitions'].append(code.definition)
             top_env['function_declarations'].append(code.declaration)
             method_of.append('namespace')
 
+
             if is_factory_method:
-                # function_definitions and function_declarations are being used for constructing 
-                # Functions.h which is part of our C++ API. We have to preverse TensorOption here
+                # function_definitions and function_declarations are being used for constructing
+                # Functions.h which is part of our C++ API. We have to keep TensorOption here
                 collapsed_code = gen_collapsed_function_declaration(option)
-                
-                if is_named_tensor_only:
-                    collapsed_code = add_namedtensor_enabled_macro(collapsed_code)
 
                 top_env['function_definitions'].append(collapsed_code.definition)
                 top_env['function_declarations'].append(collapsed_code.declaration)
 
-        if not BUILD_NAMEDTENSOR and is_named_tensor_only:
-            return None
         return OutputDeclaration(
             name=option['api_name'],
             operator_name=option['operator_name'],

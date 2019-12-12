@@ -249,16 +249,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
 
-    def check_topt_representation(topt_representation):
-        for idx, supported_topt in enumerate(supported_topt_arguments):
-            matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
-            if matches:
-                return corresponding_topts[idx]
-        return None
-
-    def is_tensor_option(argument):
-        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
-
     idx = 0
 
     # This is a hack around tril_indices/triu_indices as codegen doesn't handle default values well.
@@ -267,21 +257,21 @@ def parse_arguments(args, func_variants, declaration, func_return):
         argument = arguments[idx]
         if declaration['name'] == 'tril_indices' or declaration['name'] == 'triu_indices':
             arguments = [
-                {'type': 'int64_t', 'name': 'row', 'is_nullable': False, 'annotation': None}, 
+                {'type': 'int64_t', 'name': 'row', 'is_nullable': False, 'annotation': None},
                 {'type': 'int64_t', 'name': 'col', 'is_nullable': False, 'annotation': None},
-                {'type': 'int64_t', 'name': 'offset', 'is_nullable': False, 'annotation': None, 'default': 0}, 
+                {'type': 'int64_t', 'name': 'offset', 'is_nullable': False, 'annotation': None, 'default': 0},
                 {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
-                'default': 'at::kLong', 'is_nullable': True},
+                 'default': 'at::kLong', 'is_nullable': True},
                 {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
-                'default': 'c10::nullopt', 'is_nullable': True},
+                 'default': 'c10::nullopt', 'is_nullable': True},
                 {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
                 'default': 'c10::nullopt', 'is_nullable': True},
                 {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
                 'default': 'c10::nullopt', 'is_nullable': True},
             ]
-    
+
         idx += 1
-    
+
     # Sanity checks
 
     # TODO: convention is that the ith-argument correspond to the i-th return, but it would

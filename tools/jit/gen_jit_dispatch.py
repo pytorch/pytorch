@@ -22,7 +22,7 @@ from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
 try:
-    from src.ATen.tensor_options_utils import *
+    import src.ATen.tensor_options_utils as TOUtils
 except ImportError:
     from tools.shared.module_loader import import_module
     TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
@@ -287,13 +287,13 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         def pack_arguments(args):
             return ',\n'.join(args)
         is_namespace_function = 'namespace' in decl['method_of']
-        
+
         if TOUtils.check_if_factory_method(decl['arguments']):
             if 'ScalarType dtype' in decl['formals']:
                 tensor_options_arg_index = decl['formals'].index('ScalarType dtype')
             if 'c10::optional<ScalarType> dtype' in decl['formals']:
                 tensor_options_arg_index = decl['formals'].index('c10::optional<ScalarType> dtype')
-            
+
             dtype = args[tensor_options_arg_index]
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
