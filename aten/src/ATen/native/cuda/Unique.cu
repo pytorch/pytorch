@@ -40,6 +40,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted;
   const scalar_t* sorted_data = self_data;
 
+  Tensor inverse_indices;
+
+  if (return_inverse) {
+    inverse_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+  }
+
   if (!consecutive) {
     sorted = at::empty({num_inp}, self.options());
     scalar_t *sorted_data_ = sorted.data_ptr<scalar_t>();
@@ -63,19 +69,19 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   }
 
   // inverse indices
-  Tensor inverse_indices;
   if (return_inverse) {
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
-    Tensor inv_loc = at::empty({num_inp}, self.options());
-    inverse_indices = at::empty(self.sizes(), self.options());
-    int64_t* inv_loc_ptr = inv_loc.data_ptr<int64_t>();
     int64_t* inverse_indices_ptr = inverse_indices.data_ptr<int64_t>();
+    Tensor inv_loc = consecutive ? inverse_indices.view(-1) : at::empty({num_inp}, self.options().dtype(kLong));
+    int64_t* inv_loc_ptr = inv_loc.data_ptr<int64_t>();
     thrust::adjacent_difference(policy, sorted_data, sorted_data + num_inp, inv_loc_ptr, thrust::not_equal_to<scalar_t>());
     inv_loc[0] = 0;
     thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
-    thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_data, inverse_indices_ptr);
-    c10::cuda::CUDACachingAllocator::raw_delete(sorted_indices_data);
+    if (!consecutive) {
+      thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_data, inverse_indices_ptr);
+      c10::cuda::CUDACachingAllocator::raw_delete(sorted_indices_data);
+    }
   }
 
   // cub always returns counts, so just ignore the return_counts flag and return counts always
