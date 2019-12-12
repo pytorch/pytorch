@@ -58,53 +58,54 @@ class TORCH_API Future final {
   }
 
   void markCompleted(T value) {
-    {
-      std::unique_lock<std::mutex> lock(mutex_);
-      TORCH_CHECK(!completed());
-      // Set value first as completed_ is accessed without lock
-      value_ = std::move(value);
-      completed_ = true;
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(!completed());
+    // Set value first as completed_ is accessed without lock
+    value_ = std::move(value);
+    completed_ = true;
 
-      // Move callbacks to a vector on the stack so we can access it without
-      // holding a lock
-      std::vector<Callback> cbs;
-      cbs.swap(callbacks_);
-      lock.unlock();
-      // There is no need to protect callbacks_ with the lock.
-      // Once completed_ is set to true, no one can add new callback to the
-      // list. pass value_, error_ for callback to easily check state.
-      for (auto& callback : cbs) {
-        callback(value_, error_);
-      }
+    // Move callbacks to a vector on the stack so we can access it without
+    // holding a lock
+    std::vector<Callback> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+    // There is no need to protect callbacks_ with the lock.
+    // Once completed_ is set to true, no one can add new callback to the
+    // list. pass value_, error_ for callback to easily check state.
+    for (auto& callback : cbs) {
+      callback(value_, error_);
     }
     finished_cv_.notify_all();
   }
 
   void setError(std::string errorMsg) {
-    {
-      std::unique_lock<std::mutex> lock(mutex_);
-      TORCH_CHECK(!completed());
-      // Set error first as completed_ is accessed without lock
-      error_ = FutureError(std::move(errorMsg));
-      completed_ = true;
+    std::unique_lock<std::mutex> lock(mutex_);
+    TORCH_CHECK(!completed());
+    // Set error first as completed_ is accessed without lock
+    error_ = FutureError(std::move(errorMsg));
+    completed_ = true;
 
-      // Move callbacks to a vector on the stack so we can access it without
-      // holding a lock
-      std::vector<Callback> cbs;
-      cbs.swap(callbacks_);
-      lock.unlock();
-      // There is no need to protect callbacks_ with the lock.
-      // Once completed_ is set to true, no one can add new callback to the
-      // list. pass value_, error_ for callback to easily check state.
-      for (auto& callback : cbs) {
-        callback(value_, error_);
-      }
+    // Move callbacks to a vector on the stack so we can access it without
+    // holding a lock
+    std::vector<Callback> cbs;
+    cbs.swap(callbacks_);
+    lock.unlock();
+    // There is no need to protect callbacks_ with the lock.
+    // Once completed_ is set to true, no one can add new callback to the
+    // list. pass value_, error_ for callback to easily check state.
+    for (auto& callback : cbs) {
+      callback(value_, error_);
     }
     finished_cv_.notify_all();
   }
 
   bool completed() const {
     return completed_;
+  }
+
+  bool hasError() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_ ? true : false;
   }
 
   // If completed() the callback will be invoked in-place.
