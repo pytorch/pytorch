@@ -18,7 +18,8 @@ import gzip
 import types
 import textwrap
 import zipfile
-from torch._utils_internal import get_file_path_2, check_module_version_greater_or_equal
+from torch._utils_internal import get_file_path_2
+from torch.serialization import check_module_version_greater_or_equal
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple

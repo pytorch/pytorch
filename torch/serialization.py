@@ -12,7 +12,7 @@ import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
-from torch._utils_internal import get_source_lines_and_file, check_module_version_greater_or_equal
+from torch._utils_internal import get_source_lines_and_file
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -85,6 +85,43 @@ def register_package(priority, tagger, deserializer):
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
     _package_registry.sort()
+    
+
+def check_module_version_greater_or_equal(module, req_version_tuple, error_if_malformed=True):
+    '''
+    Check if a module's version satisfies requirements
+
+    Usually, a module's version string will be like 'x.y.z', which would be represented
+    as a tuple (x, y, z), but sometimes it could be an unexpected format. If the version
+    string does not match the given tuple's format up to the length of the tuple, then
+    error and exit or emit a warning.
+
+    Args:
+        module: the module to check the version of
+        req_version_tuple: tuple (usually of ints) representing the required version
+        error_if_malformed: whether we should exit if module version string is malformed
+
+    Returns:
+        requirement_is_met: bool
+    '''
+    try:
+        version_strs = module.__version__.split('.')
+        # Cast module version fields to match the types of the required version
+        module_version = tuple(
+            type(req_field)(version_strs[idx]) for idx, req_field in enumerate(req_version_tuple)
+        )
+        requirement_is_met = module_version >= req_version_tuple
+
+    except:
+        message = ("'%s' module version string is malformed '%s' and cannot be compared"
+            " with tuple %s" % (module.__name__, module.__version__, str(req_version_tuple)))
+        if error_if_malformed:
+            raise Exception(message)
+        else:
+            warnings.warn(message + ', but continuing assuming that requirement is met')
+            requirement_is_met = True
+
+    return requirement_is_met
 
 
 def _cpu_tag(obj):
