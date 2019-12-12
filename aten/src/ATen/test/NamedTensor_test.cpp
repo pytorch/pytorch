@@ -5,7 +5,6 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 using at::Dimname;
 using at::DimnameList;

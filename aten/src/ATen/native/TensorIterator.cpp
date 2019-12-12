@@ -3,7 +3,6 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/native/TypeProperties.h>
 
 namespace at {

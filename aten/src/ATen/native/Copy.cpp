@@ -9,7 +9,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 

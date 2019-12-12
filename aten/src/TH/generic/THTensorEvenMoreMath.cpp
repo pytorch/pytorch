@@ -4,7 +4,6 @@
 
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)

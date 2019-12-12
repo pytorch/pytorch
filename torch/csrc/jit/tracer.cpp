@@ -2,7 +2,6 @@
 
 #include <ATen/Backtrace.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>

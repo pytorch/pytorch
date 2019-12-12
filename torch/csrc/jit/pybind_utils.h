@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>

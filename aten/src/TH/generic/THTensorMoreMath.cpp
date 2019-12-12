@@ -5,7 +5,6 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
 
 ptrdiff_t THTensor_(numel)(THTensor *t)

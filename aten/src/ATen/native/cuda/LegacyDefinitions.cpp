@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at { namespace native {
 

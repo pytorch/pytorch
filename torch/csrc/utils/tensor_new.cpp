@@ -20,7 +20,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <stdexcept>
 #include <vector>
