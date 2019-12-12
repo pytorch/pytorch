@@ -147,7 +147,7 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
   if (ownerId == getWorkerId()) {
-    return getOrCreateOwnerRRef<T>(rrefId);
+    return getOwnerRRef<T>(rrefId);
   } else {
     return createUserRRef<T>(ownerId, rrefId, forkId);
   }
@@ -172,8 +172,11 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     auto rref =
         std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
     owners_[rref->rrefId()] = rref;
+    const auto iter = ownerCVs_.find(rrefId);
+    if (iter != ownerCVs_.end()) {
+      iter->second.notify_all();
+    }
     return rref;
-
   } else {
     // Scenario (2) retrieving an existing RRef
     return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
@@ -187,7 +190,7 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
 template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
+std::shared_ptr<OwnerRRef<T>> RRefContext::createUntrackedOwnerRRef() {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
@@ -196,11 +199,33 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
       new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
 }
 
-template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
-    IValue>();
+template std::shared_ptr<OwnerRRef<IValue>>
+    RRefContext::createUntrackedOwnerRRef<IValue>();
 
-template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
-    py::object>();
+template std::shared_ptr<OwnerRRef<py::object>>
+    RRefContext::createUntrackedOwnerRRef<py::object>();
+
+template <typename T>
+std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(
+    const RRefId& rrefId) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  const auto iter = owners_.find(rrefId);
+  if (iter == owners_.end()) {
+    // Scenario (1) RRef is used before it is created
+    auto& ownerCV = ownerCVs_[rrefId];
+    ownerCV.wait(lock, [&] {return owners_.find(rrefId) != owners_.end();});
+    return std::static_pointer_cast<OwnerRRef<T>>(owners_[rrefId]);
+  } else {
+    // Scenario (2) retrieving an existing RRef
+    return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
+  }
+}
+
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOwnerRRef<
+    IValue>(const RRefId& rrefId);
+
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::getOwnerRRef<
+    py::object>(const RRefId& rrefId);
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
@@ -381,6 +406,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
       if (ownerIter != owners_.end()) {
         deletedRRef = ownerIter->second;
         owners_.erase(ownerIter);
+        ownerCVs_.erase(rrefId);
       }
       forks_.erase(rrefIter);
     }

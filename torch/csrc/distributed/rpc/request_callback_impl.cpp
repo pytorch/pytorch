@@ -122,7 +122,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
+          ctx.getOwnerRRef<IValue>(srf.rrefId());
       return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
@@ -130,7 +130,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
+          ctx.getOwnerRRef<py::object>(prf.rrefId());
+
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
       return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());

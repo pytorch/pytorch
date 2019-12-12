@@ -219,7 +219,7 @@ PyRRef pyRemotePythonUdf(
     fm->addCallback(finishAcceptUserRRef);
     return PyRRef(userRRef);
   } else {
-    auto ownerRRef = ctx.createOwnerRRef<py::object>();
+    auto ownerRRef = ctx.createUntrackedOwnerRRef<py::object>();
     // prevent this owner RRef be deleted due to other forks
     ctx.addSelfAsFork(ownerRRef);
     auto fm = sendPythonRemoteCall(

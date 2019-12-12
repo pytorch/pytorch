@@ -31,7 +31,8 @@ PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
 
 PyRRef::PyRRef(const py::object& value)
     : PyRRef([&value]() {
-        auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+        auto rref =
+            RRefContext::getInstance().createUntrackedOwnerRRef<py::object>();
         py::object copy(value); // increases refcount
         rref->setValue(std::move(copy));
         return rref;

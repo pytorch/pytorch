@@ -61,9 +61,15 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(const RRefId& rrefId);
+
   // Create an empty owner rref of type T.
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+  std::shared_ptr<OwnerRRef<T>> createUntrackedOwnerRRef();
+
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> getOwnerRRef(const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -138,6 +144,7 @@ class RRefContext {
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  std::unordered_map<RRefId, std::condition_variable, RRefId::Hash> ownerCVs_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,
