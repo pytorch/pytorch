@@ -21,12 +21,11 @@ __global__ void upsample_nearest1d_out_frame(
     size_t dim_c,
     size_t src_dim_w,
     size_t dst_dim_w,
-    scalar_t* output) {
+    scalar_t* output,
+    float scale_factor) {
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
-
-  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
   int c = (dst_idx / dst_dim_w) % dim_c;
 
@@ -53,13 +52,12 @@ __global__ void upsample_nearest1d_backward_out_frame(
     size_t dim_c,
     size_t src_dim_w,
     size_t dst_dim_w,
-    scalar_t* grad_i) {
+    scalar_t* grad_i,
+    float scale_factor) {
 
   int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
-
-  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
@@ -81,7 +79,8 @@ __global__ void upsample_nearest1d_backward_out_frame(
 static void upsample_nearest1d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    double scales_1) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest1d_out_cuda", {input_arg, output_arg});
 
@@ -120,8 +119,10 @@ static void upsample_nearest1d_out_cuda_template(
         auto idata = input.data_ptr<scalar_t>();
         auto odata = output.data_ptr<scalar_t>();
 
+        const float scale_factor = compute_scales_value<float>(scales_1, input_width, output_width);
+
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
-            idata, nbatch, channels, input_width, output_width, odata);
+            idata, nbatch, channels, input_width, output_width, odata, scale_factor);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -131,7 +132,8 @@ static void upsample_nearest1d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -176,9 +178,11 @@ static void upsample_nearest1d_backward_out_cuda_template(
         auto idata = grad_input.data_ptr<scalar_t>();
         auto odata = grad_output.data_ptr<scalar_t>();
 
+        const float scale_factor = compute_scales_value_backwards<float>(scales_1, output_width, input_width);
+
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
-                odata, nbatch, channels, output_width, input_width, idata);
+                odata, nbatch, channels, output_width, input_width, idata, scale_factor);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -189,14 +193,15 @@ static void upsample_nearest1d_backward_out_cuda_template(
 Tensor& upsample_nearest1d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size) {
-  upsample_nearest1d_out_cuda_template(output, input, output_size);
+    IntArrayRef output_size,
+    double scales_1) {
+  upsample_nearest1d_out_cuda_template(output, input, output_size, scales_1);
   return output;
 }
 
-Tensor upsample_nearest1d_cuda(const Tensor& input, IntArrayRef output_size) {
+Tensor upsample_nearest1d_cuda(const Tensor& input, IntArrayRef output_size, double scales_1) {
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest1d_out_cuda_template(output, input, output_size);
+  upsample_nearest1d_out_cuda_template(output, input, output_size, scales_1);
   return output;
 }
 
@@ -204,19 +209,21 @@ Tensor& upsample_nearest1d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   upsample_nearest1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1);
   return grad_input;
 }
 
 Tensor upsample_nearest1d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1);
   return grad_input;
 }
 
