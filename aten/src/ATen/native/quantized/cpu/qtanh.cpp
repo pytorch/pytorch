@@ -24,17 +24,14 @@ Tensor qnnpack_tanh(Tensor input) {
   initQNNPACK();
 
   Tensor input_contig = input.contiguous();
-  size_t num_elems_x = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
-    num_elems_x *= input_contig.size(i);
-  }
+  num_elems = input_contig.numel() / input_contig.size(0);
 
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
 
   pytorch_qnnp_operator_t tanh_op{nullptr};
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_tanh_nc_q8(
-    num_elems_x /* channels */,
+    num_elems /* channels */,
     zero_point /* input zero point */,
     scale /* input scale */,
     zero_point /* output zero point */,
@@ -50,15 +47,14 @@ Tensor qnnpack_tanh(Tensor input) {
     input.options(),
     input_contig.q_scale(),
     input_contig.q_zero_point());
-  size_t num_elems_y = input_contig.numel() / qy.size(0);
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
     tanh_op,
     input_contig.size(0) /* batch size */,
     (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
-    num_elems_x /* input stride */,
+    num_elems /* input stride */,
     (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
-    num_elems_y /* output stride */);
+    num_elems /* output stride */);
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK TanH operator");
 
