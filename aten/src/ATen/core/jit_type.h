@@ -1431,8 +1431,24 @@ struct CAFFE2_API ClassType : public NamedType {
 
   const std::vector<Function*>& methods() const;
 
+  TypePtr findAttribute(const std::string& name) const {
+    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    size_t pos = 0;
+    for (const auto& attr : attributeNames_) {
+      if (name == attr) {
+        break;
+      }
+      ++pos;
+    }
+
+    if (pos >= attributeNames_.size()) {
+      return nullptr;
+    }
+    return attributeTypes_[pos];
+  }
+
   TypePtr getAttribute(const std::string& name) const {
-    TORCH_CHECK(attributeNames_.size() == attributeTypes_.size());
+    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
     for (const auto& attr : attributeNames_) {
       if (name == attr) {
@@ -1445,7 +1461,7 @@ struct CAFFE2_API ClassType : public NamedType {
       TORCH_CHECK(
           false,
           python_str(),
-          " does not have a field with the name '",
+          " does not have attribute field with the name '",
           name,
           "'");
     }
@@ -1492,7 +1508,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have a field with the name '",
+        " does not have attribute field with the name '",
         name,
         "'");
   }
@@ -1585,7 +1601,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have a field with the name '",
+        " does not have constant field with the name '",
         name,
         "'");
   }
@@ -1598,6 +1614,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   IValue getConstant(const std::string& name) const;
   IValue getConstant(size_t slot) const;
+  c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
     TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
