@@ -288,6 +288,11 @@ class OwnerRRef final : public RRef {
   // does not create any new py::object.
   void setValue(T&& value);
 
+  // Has a value been set?
+  bool hasValue() const;
+  // Gets a future that is satisfied when the value is set.
+  std::shared_ptr<FutureMessage> getFuture();
+
  private:
   friend class RRefContext;
 
@@ -302,6 +307,7 @@ class OwnerRRef final : public RRef {
   c10::optional<T> value_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
+  std::shared_ptr<FutureMessage> future_;
 };
 
 } // namespace rpc
