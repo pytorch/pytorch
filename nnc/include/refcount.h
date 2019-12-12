@@ -15,8 +15,7 @@ namespace nnc {
 class RefCounted {
  public:
   // Initial reference count is one.
-  RefCounted() : ref_(1) {
-  }
+  RefCounted() : ref_(1) {}
 
   // Increments reference count by one.
   void Ref() const {
@@ -38,9 +37,7 @@ class RefCounted {
   }
 
   // Return whether the reference count is one.
-  bool RefCountIsOne() const {
-    return (ref_.load(std::memory_order_acquire) == 1);
-  }
+  bool RefCountIsOne() const { return (ref_.load(std::memory_order_acquire) == 1); }
 
  protected:
   // Make destructor protected so that RefCounted objects cannot
@@ -57,14 +54,12 @@ class RefCounted {
 };
 
 template <class NodeType>
-class RefHandle
-{
+class RefHandle {
  protected:
   virtual ~RefHandle() { reset(); }
 
   RefHandle() {}
-  RefHandle(NodeType *node) : node_(node) {
-  }
+  RefHandle(NodeType* node) : node_(node) {}
 
   RefHandle(const RefHandle& other) {
     this->reset();
@@ -99,9 +94,9 @@ class RefHandle
   NodeType* node() { return node_; }
 
  private:
-  NodeType *node_ = nullptr;
+  NodeType* node_ = nullptr;
 };
- 
-} /// namespace nnc
- 
-#endif // NNC_INCLUDE_REFCOUNT_H_INCLUDED_
+
+}  /// namespace nnc
+
+#endif  // NNC_INCLUDE_REFCOUNT_H_INCLUDED_

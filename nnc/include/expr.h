@@ -9,7 +9,7 @@ namespace nnc {
 // The common base between all IR expression node.
 class BaseExprNode : public RefCounted {
  public:
-  virtual void accept(IRVisitor *visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -17,9 +17,7 @@ class BaseExprNode : public RefCounted {
 template <class Op>
 class ExprNode : public BaseExprNode {
  public:
-  void accept(IRVisitor *visitor) const override {
-    visitor->visit(static_cast<const Op*>(this));
-  }
+  void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
 };
 
 // A refcounted pointer to the underlying ExprNode.
@@ -27,11 +25,9 @@ class ExprNode : public BaseExprNode {
 class Expr : public RefHandle<BaseExprNode> {
  public:
   using BaseHandle = RefHandle<BaseExprNode>;
-  explicit Expr(BaseExprNode *node) : BaseHandle(node) {}
+  explicit Expr(BaseExprNode* node) : BaseHandle(node) {}
 
-  void accept(IRVisitor *visitor) const {
-    node()->accept(visitor);
-  }
+  void accept(IRVisitor* visitor) const { node()->accept(visitor); }
 
   explicit Expr(int v);
   explicit Expr(float v);
@@ -43,6 +39,6 @@ class Expr : public RefHandle<BaseExprNode> {
   Expr operator/(const Expr& other) const;
 };
 
-} // namespace nnc
+}  // namespace nnc
 
-#endif // NNC_INCLUDE_EXPR_H_INCLUDED_
+#endif  // NNC_INCLUDE_EXPR_H_INCLUDED_
