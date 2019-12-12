@@ -61,12 +61,9 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(const RRefId& rrefId);
-
   // Create an empty owner rref of type T.
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createUntrackedOwnerRRef();
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
 
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOwnerRRef(const RRefId& rrefId);
@@ -144,6 +141,19 @@ class RRefContext {
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  // Conditional variables to block getOwnerRRef() calls until the corresponding
+  // OwnerRRef has been created and inserted into the owners_ map. The method
+  // getOwnerRRef() is triggered by rref.to_here() messages. The reason for
+  // having this CV is because rref.to_here() message and rpc.remote message may
+  // arrive in any order, and to_here() can only be served when the RRef value
+  // is ready. In the previous version, we used to block the to_here() call by
+  // waiting on the CV member variable in OwnerRRef. However, that means the
+  // to_here() call has to first create the OwnerRRef, which would require
+  // knowing the IValue type when if we want to make RRef an IValue. Instead of
+  // sending serialized TypePtr in every to_here() message, we decided to only
+  // create OwnerRRef when processing remote calls.
+  // TODO: As OwnerRRef::getValue() is always called after
+  // OwnerRRef::setValue(), we should be able to remove the CV from OwnerRRef.
   std::unordered_map<RRefId, std::condition_variable, RRefId::Hash> ownerCVs_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<

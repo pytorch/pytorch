@@ -190,7 +190,7 @@ template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
 template <typename T>
-std::shared_ptr<OwnerRRef<T>> RRefContext::createUntrackedOwnerRRef() {
+std::shared_ptr<OwnerRRef<T>> RRefContext::createOwnerRRef() {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
@@ -199,11 +199,11 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::createUntrackedOwnerRRef() {
       new OwnerRRef<T>(getWorkerId(), genGloballyUniqueId()));
 }
 
-template std::shared_ptr<OwnerRRef<IValue>> RRefContext::
-    createUntrackedOwnerRRef<IValue>();
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
+    IValue>();
 
-template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
-    createUntrackedOwnerRRef<py::object>();
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
+    py::object>();
 
 template <typename T>
 std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(const RRefId& rrefId) {
