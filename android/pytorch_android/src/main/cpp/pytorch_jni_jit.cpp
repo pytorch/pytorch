@@ -6,8 +6,6 @@
 #include <fbjni/ByteBuffer.h>
 #include <fbjni/fbjni.h>
 
-#include <caffe2/utils/threadpool/ThreadPool.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/script.h>
 
@@ -75,7 +73,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         makeNativeMethod("initHybrid", PytorchJni::initHybrid),
         makeNativeMethod("forward", PytorchJni::forward),
         makeNativeMethod("runMethod", PytorchJni::runMethod),
-        makeNativeMethod("setNumThreads", PytorchJni::setNumThreads),
     });
   }
 
@@ -124,10 +121,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         facebook::jni::gJavaLangIllegalArgumentException,
         "Undefined method %s",
         methodName.c_str());
-  }
-
-  void setNumThreads(jint numThreads) {
-    caffe2::mobile_threadpool()->setNumThreads(numThreads);
   }
 };
 
