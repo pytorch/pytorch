@@ -62,6 +62,8 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
+
+    ZERO_COLLISION_HASH = 14;  // zero-collision hash state
   }
   optional DataType data_type = 2 [default = FLOAT];
 
