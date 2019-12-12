@@ -243,8 +243,42 @@ def masked_scatter(g, self, mask, source):
     return g.op('ScatterND', self, index, source)
 
 
+def _len(g, self):
+    return g.op("SequenceLength", self)
+
+
 def __getitem_(g, self, i):
     return g.op("SequenceAt", self, i)
+
+
+def append(g, self, tensor):
+    return g.op("SequenceInsert", self, tensor)
+
+
+def insert(g, self, pos, tensor):
+    return g.op("SequenceInsert", self, tensor, pos)
+
+
+def pop(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
+
+
+def cat(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import cat as cat_opset9
+        return cat_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim)
+
+
+def stack(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import stack as stack_opset9
+        return stack_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim, new_axis_i=1)
 
 
 @parse_args('v', 'i', 'i', 'i')
