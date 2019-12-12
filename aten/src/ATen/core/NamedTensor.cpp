@@ -1,7 +1,5 @@
 #include <ATen/core/NamedTensor.h>
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/Tensor.h>
 #include <c10/util/C++17.h>
 
@@ -145,4 +143,3 @@ bool has_names(const TensorImpl* impl) {
 } // namespace impl
 
 } // namespace at
-#endif
