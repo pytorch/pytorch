@@ -1668,7 +1668,7 @@ jobs:
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               set -x
-              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG} --dry-run
+              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG}
 
 
 
@@ -5750,13 +5750,13 @@ workflows:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
   ecr_gc:
-    # triggers:
-    #   - schedule:
-    #       cron: "0 15 * * 0"
-        #   filters:
-        #     branches:
-        #       only:
-        #         - master
+    triggers:
+      - schedule:
+          cron: "45 * * * *"
+          filters:
+            branches:
+              only:
+                - master
     jobs:
       - ecr_gc_job:
             name: ecr_gc_job_for_pytorch
