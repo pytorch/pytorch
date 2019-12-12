@@ -27,6 +27,8 @@ def register_version(domain, version):
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
     for op in version_ops:
+        if op[0] == '_len':
+            op = ('len', op[1])
         if isfunction(op[1]) and not is_registered_op(op[0], domain, version):
             register_op(op[0], op[1], domain, version)
 
