@@ -189,7 +189,7 @@ void SimpleValue::setAttr(
                            << " on a non-class: "
                            << value_->type()->python_str();
   }
-  auto expectedType = classType->getAttribute(field);
+  auto expectedType = classType->findAttribute(field);
   if (!expectedType) {
     // If we are still compiling the __init__ method for this class, then
     // setting an unknown attribute adds it to the class's definition.

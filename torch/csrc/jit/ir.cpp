@@ -1582,7 +1582,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
   auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
   n->s_(attr::name, field);
 
-  const auto outputType = classType->getAttribute(field);
+  const auto outputType = classType->findAttribute(field);
   n->output()->setType(outputType);
   return n;
 }

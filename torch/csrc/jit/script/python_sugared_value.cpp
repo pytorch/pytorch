@@ -260,6 +260,26 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
   }
 }
 
+// helper function for instantiating a SugaredValue from an IValue
+std::shared_ptr<SugaredValue> toSugaredValue(
+    const IValue& v,
+    Function& m,
+    const SourceRange& loc) {
+  if (v.isTuple()) {
+    auto tp = v.toTuple();
+    std::vector<Value*> values;
+    values.reserve(tp->elements().size());
+    for (const auto& e: tp->elements()) {
+      values.push_back(toSugaredValue(e, m, loc)->asValue(loc, m));
+    }
+    return toSimple(
+        m.graph()->insertNode(m.graph()->createTuple(values))->output());
+  } else {
+    return toSimple(
+        m.graph()->insertConstant(v, loc));
+  }
+}
+
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
@@ -445,25 +465,6 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
   }
   return value->call(loc, caller, inputs, attributes, n_binders);
-}
-
-std::shared_ptr<SugaredValue> toSugaredValue(
-    const IValue& v,
-    Function& m,
-    const SourceRange& loc) {
-  if (v.isTuple()) {
-    auto tp = v.toTuple();
-    std::vector<Value*> values;
-    values.reserve(tp->elements().size());
-    for (const auto& e: tp->elements()) {
-      values.push_back(toSugaredValue(e, m, loc)->asValue(loc, m));
-    }
-    return toSimple(
-        m.graph()->insertNode(m.graph()->createTuple(values))->output());
-  } else {
-    return toSimple(
-        m.graph()->insertConstant(v, loc));
-  }
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(

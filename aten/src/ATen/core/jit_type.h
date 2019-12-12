@@ -1450,24 +1450,14 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
   TypePtr getAttribute(const std::string& name) const {
-    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    size_t pos = 0;
-    for (const auto& attr : attributeNames_) {
-      if (name == attr) {
-        break;
-      }
-      ++pos;
-    }
-
-    if (pos >= attributeNames_.size()) {
-      TORCH_CHECK(
-          false,
-          python_str(),
-          " does not have attribute field with the name '",
-          name,
-          "'");
-    }
-    return attributeTypes_[pos];
+    auto& type = findAttribute(name);
+    TORCH_CHECK(
+        type,
+        python_str(),
+        " does not have an attribute with the name '",
+        name,
+        "'");
+    return type;
   }
 
   size_t numAttributes() const {
