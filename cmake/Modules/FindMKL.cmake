@@ -269,7 +269,7 @@ IF (NOT MKL_LIBRARIES)
   UNSET(MKL_LIBRARIES CACHE)
 ENDIF()
 
-# First: search for parallelized ones with intel thread lib
+# Search for parallelized ones with intel thread lib
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
   FOREACH(mklrtl ${mklrtls} "")
     FOREACH(mkliface ${mklifaces})
@@ -285,7 +285,19 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
   ENDFOREACH(mklrtl)
 ENDIF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
 
-# Second: search for sequential ones
+# Search for parallelized ones with native pthread lib
+FOREACH(mklrtl ${mklrtls} "")
+  FOREACH(mkliface ${mklifaces})
+    FOREACH(mkl64 ${mkl64s} "")
+      IF (NOT MKL_LIBRARIES)
+        CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+          "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
+      ENDIF (NOT MKL_LIBRARIES)
+    ENDFOREACH(mkl64)
+  ENDFOREACH(mkliface)
+ENDFOREACH(mklrtl)
+
+# Search for sequential ones
 FOREACH(mkliface ${mklifaces})
   FOREACH(mkl64 ${mkl64s} "")
     IF (NOT MKL_LIBRARIES)
@@ -297,18 +309,6 @@ FOREACH(mkliface ${mklifaces})
     ENDIF (NOT MKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDFOREACH(mkliface)
-
-# First: search for parallelized ones with native pthread lib
-FOREACH(mklrtl ${mklrtls} "")
-  FOREACH(mkliface ${mklifaces})
-    FOREACH(mkl64 ${mkl64s} "")
-      IF (NOT MKL_LIBRARIES)
-        CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
-          "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
-      ENDIF (NOT MKL_LIBRARIES)
-    ENDFOREACH(mkl64)
-  ENDFOREACH(mkliface)
-ENDFOREACH(mklrtl)
 
 # Check for older versions
 IF (NOT MKL_LIBRARIES)
