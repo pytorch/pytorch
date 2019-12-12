@@ -4527,6 +4527,26 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
 
+    def test_list_unification(self):
+        def fn():
+            return [1, None, 2]
+
+        def fn2(x):
+            return [torch.ones(2, 2), None, x]
+
+        self.checkScript(fn, [])
+        self.checkScript(fn2, (torch.ones(2, 2),))
+
+        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
+            @torch.jit.script
+            def fn():
+                return [1, 1.2]
+
+        with self.assertRaisesRegex(RuntimeError, "Could not unify"):
+            @torch.jit.script
+            def fn():
+                return [1, torch.ones(1, 2)]
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
