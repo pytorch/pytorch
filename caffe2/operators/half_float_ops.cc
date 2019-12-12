@@ -1,5 +1,6 @@
 #include "caffe2/operators/half_float_ops.h"
 #include <c10/util/Half.h>
+#include "caffe2/utils/cpuid.h"
 #ifdef USE_FBGEMM
 #include "fbgemm/FbgemmConvert.h"
 #endif
