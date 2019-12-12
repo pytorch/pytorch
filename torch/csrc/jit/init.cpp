@@ -464,15 +464,21 @@ void initJITBindings(PyObject* module) {
 
     size_t read(uint64_t pos, void* buf, size_t n, const char* what)
         const override {
-      // Seek to desired position
-      buffer_.attr("seek")(start_offset_ + pos);
+      // Seek to desired position (NB: this has to be a Py_ssize_t or Python
+      // throws a weird error)
+      Py_ssize_t absolute_pos = start_offset_ + pos;
+      buffer_.attr("seek")(absolute_pos);
 
       if (use_readinto_) {
         auto memview = getMemview(buf, n);
-        THPObjectPtr res(
-            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get()));
+        auto res =
+            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
-          return PyLong_AsSsize_t(res.get());
+          // AT_ASSERT(PyInt_Check(res)); // failure
+          int i = PyInt_AsLong(res);
+          if (i > 0) {
+            return i;
+          }
         }
       }
       // Read bytes into `buf` from the buffer
