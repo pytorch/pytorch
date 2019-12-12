@@ -6,7 +6,6 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/math_compat.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>

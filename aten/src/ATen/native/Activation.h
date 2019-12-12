@@ -16,7 +16,10 @@ using threshold_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using hardtanh_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using shrink_fn = void (*)(TensorIterator&, Scalar);
 using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
+using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
 
+DECLARE_DISPATCH(elu_fn, elu_stub);
+DECLARE_DISPATCH(elu_fn, elu_backward_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(activation_fn, GeluKernel);
 DECLARE_DISPATCH(activation_backward_fn, GeluBackwardKernel);
