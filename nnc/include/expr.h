@@ -27,10 +27,27 @@ class Expr : public RefHandle<BaseExprNode> {
   using BaseHandle = RefHandle<BaseExprNode>;
   explicit Expr(BaseExprNode* node) : BaseHandle(node) {}
 
-  void accept(IRVisitor* visitor) const { node()->accept(visitor); }
+  void accept(IRVisitor* visitor) const {
+    // TODO: Consider implement this without using recursion. Otherwise,
+    // if the expression tree is degenerate and too long, it could cause a
+    // stack overflow.
+    node()->accept(visitor);
+  }
 
   explicit Expr(int v);
   explicit Expr(float v);
+
+  template <class Op>
+  Op* AsNode() {
+    BaseExprNode* node = this->node();
+    return dynamic_cast<Op*>(node);
+  }
+
+  template <class Op>
+  const Op* AsNode() const {
+    Expr* this_non_const = const_cast<Expr*>(this);
+    return this_non_const->AsNode<Op>();
+  }
 
   // Handling the math operators.
   Expr operator+(const Expr& other) const;

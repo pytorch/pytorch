@@ -9,6 +9,8 @@ class Mul;
 class Div;
 class IntImm;
 class FloatImm;
+class Variable;
+class Let;
 
 class IRVisitor {
  public:
@@ -18,6 +20,8 @@ class IRVisitor {
   virtual void visit(const Div* v);
   virtual void visit(const IntImm* v);
   virtual void visit(const FloatImm* v);
+  virtual void visit(const Variable* v);
+  virtual void visit(const Let* v);
 };
 
 }  // namespace nnc

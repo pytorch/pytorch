@@ -1,55 +1,9 @@
 #include <stdexcept>
 
 #include <gtest/gtest.h>
-#include <ir.h>
+#include "test_utils.h"
 
 namespace nnc {
-
-template <typename T>
-class SimpleExprEvaluator : public IRVisitor {
- public:
-  void visit(const Add* v) override { visit_binary_op(v); }
-
-  void visit(const Sub* v) override { visit_binary_op(v); }
-
-  void visit(const Mul* v) override { visit_binary_op(v); }
-
-  void visit(const Div* v) override { visit_binary_op(v); }
-
-  template <typename Op>
-  void visit_binary_op(const BinaryOpNode<Op>* v) {
-    v->lhs().accept(this);
-    T lhs_v = this->value_;
-    v->rhs().accept(this);
-    T rhs_v = this->value_;
-    switch (v->expr_type()) {
-      case ExprNodeType::kAdd:
-        this->value_ = lhs_v + rhs_v;
-        break;
-      case ExprNodeType::kSub:
-        this->value_ = lhs_v - rhs_v;
-        break;
-      case ExprNodeType::kMul:
-        this->value_ = lhs_v * rhs_v;
-        break;
-      case ExprNodeType::kDiv:
-        this->value_ = lhs_v / rhs_v;
-        break;
-      default:
-        // TODO: change to a proper error report
-        throw std::runtime_error("invalid operator type");
-    }
-  }
-
-  void visit(const IntImm* v) override { value_ = (T)(v->value()); }
-
-  void visit(const FloatImm* v) override { value_ = (T)(v->value()); }
-
-  T value() const { return value_; }
-
- private:
-  T value_ = T();
-};
 
 TEST(ExprTest, BasicValueTest) {
   Expr a = IntImm::make(2), b = IntImm::make(3);
@@ -68,6 +22,28 @@ TEST(ExprTest, BasicValueTest02) {
   SimpleExprEvaluator<float> eval;
   f.accept(&eval);
   EXPECT_EQ(eval.value(), -4.0f);
+}
+
+TEST(ExprTest, LetTest01) {
+  Var x("x");
+  Expr value = Expr(3.f);
+  Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f));
+  Expr result = Let::make(x, Expr(3.f), body);
+  SimpleExprEvaluator<float> eval;
+  result.accept(&eval);
+  EXPECT_EQ(eval.value(), 2 + (3 * 3 + 4));
+}
+
+TEST(ExprTest, LetTest02) {
+  Var x("x");
+  Var y("y");
+  Expr value = Expr(3.f);
+  Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f) * y);
+  Expr e1 = Let::make(x, Expr(3.f), body);
+  Expr e2 = Let::make(y, Expr(6.f), e1);
+  SimpleExprEvaluator<float> eval;
+  e2.accept(&eval);
+  EXPECT_EQ(eval.value(), 2 + (3 * 3 + 4 * 6));
 }
 
 }  // namespace nnc
