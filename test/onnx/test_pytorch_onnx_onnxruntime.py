@@ -1731,6 +1731,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(UnbindModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_len(self):
+        class LenModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return len(input.unbind()) + input
+
+        x = torch.randn(4, 5)
+        self.run_test(LenModel(), x, input_names=['input'], dynamic_axes={'input': {0: 'seq'}},
+                      test_with_inputs=(torch.randn(5, 5),))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_unbind_dynamic(self):
         class UnbindModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1780,6 +1791,112 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    def test_concat(self):
+        class ConcatModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.cat((x, y, z))
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        self.run_test(ConcatModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_concat_dynamic(self):
+        class ConcatDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.cat(x.unbind())
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(ConcatDynamicModel(), x)
+
+    def test_stack(self):
+        class StackModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.stack((x, y, z), 1)
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(3, 4, 5)
+        z = torch.randn(3, 4, 5)
+        self.run_test(StackModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_stack_dynamic(self):
+        class StackDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.stack(x.unbind(), 1)
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(StackDynamicModel(), x)
+
+    def test_loop_dynamic(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(2)):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_loop_nested(self):
+        class NestedLoopsModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    a = 0
+                    while a < 4:
+                        a += 1
+                    x = x + a
+                return x
+
+        model = NestedLoopsModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_loop_with_list(self):
+        class ListLoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                res = []
+                res1 = []
+                arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
+                res2 = torch.zeros(3, 4, dtype=torch.long)
+                for i in range(len(arr)):
+                    res = res.append(arr[i].sum(0, False))
+                    res1 = res1.append(arr[-1 - i].sum(0, False))
+                    res2 += 1
+                return torch.stack(res), torch.stack(res1), res2
+
+        model = ListLoopModel()
+        inputs = torch.randn(16)
+        self.run_test(model, inputs)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list(self):
+        class ListModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                tensors = x.unbind()
+                res = []
+                res.append(tensors[0])
+                res.append(tensors[1])
+                res.pop(1)
+
+                res.insert(0, tensors[1])
+                res.append(tensors[2])
+                return torch.ones(len(res))
+
+        model = ListModel()
+        inputs = torch.randn(16, 1)
+        self.run_test(model, inputs)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
