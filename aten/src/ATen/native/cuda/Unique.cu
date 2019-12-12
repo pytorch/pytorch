@@ -36,7 +36,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
 
   // inverse indices
   Tensor inverse_indices;
-  if (!return_inverse) {
+  if (!return_inverse || num_inp == 0) {
     inverse_indices = at::empty({0}, options);
   } else {
     TORCH_CHECK(sorted_indices.defined(),
