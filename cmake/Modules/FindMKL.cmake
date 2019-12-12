@@ -89,6 +89,7 @@ SET(mklseq)
 # Paths
 SET(saved_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
 SET(saved_CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH})
+SET(saved_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
 IF(WIN32)
   # Set default MKLRoot for Windows
   IF($ENV{MKLProductDir})
@@ -197,7 +198,18 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
       ELSE()
+        SET(MKL_SAVED_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+        IF(${_library} MATCHES "mkl*")
+          # Unfortunately combinations of shared MKL libraries other than only libmkl_rt
+          # assume and _require_ loading them into the global symbol namespace, which
+          # generally causes a lot of pollution with common symbols like pthreads, etc.
+          # To avoid this we only allow either linking to libmkl_rt.so, or require all
+          # libraries to get statically linked.
+          # Relevant link: https://software.intel.com/en-us/forums/intel-math-kernel-library/topic/296094
+          SET(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+        ENDIF()
         FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
+        SET(CMAKE_FIND_LIBRARY_SUFFIXES ${MKL_SAVED_LIBRARY_SUFFIXES})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))
@@ -250,10 +262,12 @@ ELSE(UNIX AND NOT APPLE)
   SET(mkl_dl "")
 ENDIF(UNIX AND NOT APPLE)
 
-# Check for version 10/11
+SET(MKL_VERSION 1011)
+
+FIND_LIBRARY(MKL_LIBRARIES mkl_rt)
 IF (NOT MKL_LIBRARIES)
-  SET(MKL_VERSION 1011)
-ENDIF (NOT MKL_LIBRARIES)
+  UNSET(MKL_LIBRARIES CACHE)
+ENDIF()
 
 # First: search for parallelized ones with intel thread lib
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
@@ -336,6 +350,7 @@ ENDIF (MKL_LIBRARIES)
 # Final
 SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
+SET(CMAKE_FIND_LIBRARY_SUFFIXES ${saved_CMAKE_FIND_LIBRARY_SUFFIXES})
 IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
 ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
