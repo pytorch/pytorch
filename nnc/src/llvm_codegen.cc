@@ -1,25 +1,29 @@
-#include "ir_visitor.h"
-#include "llvm_jit.h"
+#include "llvm_codegen.h"
 
 using namespace nnc;
 
-class LLVMEmitter : public IRVisitor {
- public:
-  void visit(const Add *v) override {
-  }
+LLVMCodegen::LLVMCodegen() 
+  : irb_(context_),
+    jit_(std::make_unique<PytorchLlvmJit>()),
+    module_(std::make_unique<llvm::Module>("pytorch", context_))
+{
+  module_->setDataLayout(jit_->getTargetMachine().createDataLayout());
+}
 
-  void visit(const Sub *v) override {
-  }
+void LLVMCodegen::visit(const Add *v) {
+}
 
-  void visit(const Mul *v) override {
-  }
+void LLVMCodegen::visit(const Sub *v) {
+}
 
-  void visit(const Div *v) override {
-  }
+void LLVMCodegen::visit(const Mul *v) {
+}
 
-  void visit(const IntImm *v) override {
-  }
+void LLVMCodegen::visit(const Div *v) {
+}
 
-  void visit(const FloatImm *v) override {
-  }
-};
+void LLVMCodegen::visit(const IntImm *v) {
+}
+
+void LLVMCodegen::visit(const FloatImm *v) {
+}
