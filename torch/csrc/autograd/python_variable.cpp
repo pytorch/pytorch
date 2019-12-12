@@ -145,6 +145,9 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 }
 
 // Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
+//
+// WARNING: Apparently this is now semi-public, as fastai v2 is using it, see
+// https://github.com/pytorch/pytorch/issues/22402#issuecomment-541340831
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
