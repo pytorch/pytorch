@@ -1454,7 +1454,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         type,
         python_str(),
-        " does not have an attribute with the name '",
+        " does not have an attribute with name '",
         name,
         "'");
     return type;
@@ -1500,7 +1500,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have attribute field with the name '",
+        " does not have an attribute with name '",
         name,
         "'");
   }
