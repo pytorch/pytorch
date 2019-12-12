@@ -35,22 +35,47 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto module = py::handle(rpc_module).cast<py::module>();
 
   auto rpcBackendOptions =
-      shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
-          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
+      shared_ptr_class_<RpcBackendOptions>(
+          module,
+          "RpcBackendOptions",
+          R"(A structure encapsulating the options passed into the RPC backend.
+            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
+            in order to initialize RPC with specific configurations, such as the
+             RPC timeout and init_method to be used. )")
+          .def_readwrite(
+              "rpc_timeout",
+              &RpcBackendOptions::rpcTimeout,
+              R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
+                If an RPC does not complete in this timeframe, it will complete
+                with an exception indicating that it has timed out.)")
+          .def_readwrite(
+              "init_method",
+              &RpcBackendOptions::initMethod,
+              R"(URL specifying how to initialize the process group.
+                Default is env://)");
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
           module,
           "WorkerInfo",
-          R"(Encapsulates information of a worker in the system.)")
+          R"(A structure that encapsulates information of a worker in the system.
+            Contains the name and ID of the worker. This class is not meant to
+            be constructed directly, rather, an instance can be retrieved
+            through :meth:`~torch.distributed.rpc.get_worker_info` and the
+            result can be passed in to functions such as
+            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
+            every invocation.)")
           .def(
               py::init<std::string, worker_id_t>(),
               py::arg("name"),
               py::arg("id"))
-          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
           .def_readonly(
-              "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
+              "name", &WorkerInfo::name_, R"(The name of the worker.)")
+          .def_readonly(
+              "id",
+              &WorkerInfo::id_,
+              R"(Globally unique id to identify the worker.)")
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
