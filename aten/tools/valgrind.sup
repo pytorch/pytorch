@@ -9,3 +9,10 @@
    fun:handle_ld_preload
    ...
 }
+{
+   <Dynamically loaded MKL uninitialized jump>
+   Memcheck:Cond
+   fun:__intel_sse2_strrchr
+   fun:*_INTERNAL_45_______src_thirdparty_tbb_omp_dynamic_link_cpp*init_dl_data*
+   fun:__sti__$E
+}
