@@ -39,8 +39,8 @@ qlinear_configs = op_bench.config_list(
 
 class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, linear_under_test):
-        scale = 1.0 / 255
-        zero_point = 0
+        scale = torch.tensor(1.0 / 255)
+        zero_point = torch.tensor(0)
         self.X = torch.randn(N, IN, dtype=torch.float32)
         self.qX = torch.quantize_per_tensor(self.X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         W = torch.randn(OUT, IN, dtype=torch.float32)
