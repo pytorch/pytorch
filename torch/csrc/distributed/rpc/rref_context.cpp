@@ -172,9 +172,9 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     auto rref =
         std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
     owners_[rref->rrefId()] = rref;
-    const auto iter = ownerCVs_.find(rrefId);
-    if (iter != ownerCVs_.end()) {
-      iter->second.notify_all();
+    const auto cvIter = ownerCVs_.find(rrefId);
+    if (cvIter != ownerCVs_.end()) {
+      cvIter->second.notify_all();
     }
     return rref;
   } else {
