@@ -23,7 +23,7 @@
 
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
-class PytorchLlvmJit {
+class PytorchLLVMJIT {
  private:
   llvm::orc::ExecutionSession ES;
   std::shared_ptr<llvm::orc::SymbolResolver> Resolver;
@@ -33,7 +33,7 @@ class PytorchLlvmJit {
   llvm::orc::LegacyIRCompileLayer<decltype(ObjectLayer), llvm::orc::SimpleCompiler> CompileLayer;
 
  public:
-  PytorchLlvmJit()
+  PytorchLLVMJIT()
     : Resolver(createLegacyLookupResolver(
                  ES,
                  [this](const std::string &Name) -> llvm::JITSymbol {

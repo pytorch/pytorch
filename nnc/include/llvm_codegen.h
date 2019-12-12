@@ -12,7 +12,7 @@ class LLVMCodegen : public IRVisitor {
  private:
   llvm::LLVMContext context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<PytorchLlvmJit> jit_;
+  std::unique_ptr<PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
   
  public:
