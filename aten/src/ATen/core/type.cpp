@@ -217,14 +217,25 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements) {
+c10::optional<TypePtr> unifyTypeList(
+    at::ArrayRef<TypePtr> elements,
+    std::ostream& why_not) {
   if (elements.size() == 0) {
+    why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
   }
 
-  c10::optional<TypePtr> ret_type = elements[0];
+  TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    ret_type = unifyTypes(*ret_type, elements[i]);
+    auto maybe_unified = unifyTypes(ret_type, elements.at(i));
+    if (!maybe_unified) {
+      why_not << "Could not unify type list since element " << i << " of type "
+              << elements.at(i)->python_str()
+              << " did not match the types before it ("
+              << ret_type->python_str() << ")";
+      return c10::nullopt;
+    }
+    ret_type = maybe_unified.value();
   }
 
   return ret_type;
@@ -264,7 +275,8 @@ MatchTypeReturn matchTypeVariables(
       }
       return MatchTypeReturn::Success();
     } else if (auto tup_type = actual->cast<TupleType>()) {
-      auto maybe_tuple_unified = unifyTypeList(tup_type->elements());
+      std::stringstream ss;
+      auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
       if (maybe_tuple_unified) {
         return matchTypeVariables(
             lt_formal->getElementType(), *maybe_tuple_unified, type_env);
