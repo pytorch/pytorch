@@ -32,8 +32,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 ) {
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
-  void *tmp_storage = nullptr;
+  void *tmp_storage_ptr = nullptr;
   size_t tmp_storage_size = 0;
 
   int64_t num_inp = self.numel();
@@ -42,7 +41,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted;
   const scalar_t* sorted_data = self_data;
 
-  Tensor inverse_indices;
+  Tensor inverse_indices, sorted_indices;
+  Tensor tmp_storage = at::empty({0}, self.options().dtype(kChar));
 
   if (return_inverse) {
     inverse_indices = at::empty(self.sizes(), self.options().dtype(kLong));
@@ -55,18 +55,21 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     if (return_inverse) {
       auto arange = at::arange(0, num_inp, self.options().dtype(kLong));
       int64_t *arange_data = arange.data_ptr<int64_t>();
-      sorted_indices_data = static_cast<int64_t *>(c10::cuda::CUDACachingAllocator::raw_alloc(num_inp * sizeof(int64_t)));
+      sorted_indices = at::empty({num_inp}, self.options().dtype(kLong));
+      sorted_indices_data = sorted_indices.data_ptr<int64_t>();
       // get tmp_storage_size
-      cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      cub::DeviceRadixSort::SortPairs(nullptr, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
       // allocate tmp_storage and run the computation
-      tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
-      cub::DeviceRadixSort::SortPairs(tmp_storage, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      tmp_storage.resize_(tmp_storage_size);
+      tmp_storage_ptr = tmp_storage.data_ptr<int8_t>();
+      cub::DeviceRadixSort::SortPairs(tmp_storage_ptr, tmp_storage_size, self_data, sorted_data_, arange_data, sorted_indices_data, num_inp, 0, sizeof(scalar_t) * 8, stream);
     } else {
       // get tmp_storage_size
-      cub::DeviceRadixSort::SortKeys(tmp_storage, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      cub::DeviceRadixSort::SortKeys(nullptr, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
       // llocate tmp_storage and run the computation
-      tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
-      cub::DeviceRadixSort::SortKeys(tmp_storage, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
+      tmp_storage.resize_(tmp_storage_size);
+      tmp_storage_ptr = tmp_storage.data_ptr<int8_t>();
+      cub::DeviceRadixSort::SortKeys(tmp_storage_ptr, tmp_storage_size, self_data, sorted_data_, num_inp, 0, sizeof(scalar_t) * 8, stream);
     }
   }
 
@@ -82,7 +85,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
     if (!consecutive) {
       thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_data, inverse_indices_ptr);
-      c10::cuda::CUDACachingAllocator::raw_delete(sorted_indices_data);
     }
   }
 
@@ -96,12 +98,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   size_t new_tmp_storage_size = 0;
   cub::DeviceRunLengthEncode::Encode(nullptr, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
   if (new_tmp_storage_size > tmp_storage_size) {
-    c10::cuda::CUDACachingAllocator::raw_delete(tmp_storage);
     tmp_storage_size = new_tmp_storage_size;
-    tmp_storage = c10::cuda::CUDACachingAllocator::raw_alloc(tmp_storage_size);
+    tmp_storage.resize_(tmp_storage_size);
+    tmp_storage_ptr = tmp_storage.data_ptr<int8_t>();
   }
-  cub::DeviceRunLengthEncode::Encode(tmp_storage, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
-  c10::cuda::CUDACachingAllocator::raw_delete(tmp_storage);
+  cub::DeviceRunLengthEncode::Encode(tmp_storage_ptr, new_tmp_storage_size, sorted_data, output_data, counts_data, num_out_data, num_inp, stream);
 
   int num_out = num_out_tensor.item().to<int>();  // synchronization happens here
   output.resize_(num_out);
