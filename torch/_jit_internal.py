@@ -311,8 +311,9 @@ def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
-    your model that is not yet TorchScript compatible. Models with ignored
-    functions cannot be exported; use torch.jit.unused instead.
+    your model that is not yet TorchScript compatible. If called from TorchScript,
+    ignored functions will dispatch the call to the Python interpreter. Models with ignored
+    functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
