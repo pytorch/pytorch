@@ -2085,7 +2085,7 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     def _run_autocast_outofplace(self, op, args, out_type):
-        output = output_tensor = None
+        output = output_method = None
         # Make sure the torch.* and Tensor.* variants, if present, have the same output dtype and numerics.
         if hasattr(torch, op):
             output = getattr(torch, op)(*args)
@@ -2097,11 +2097,11 @@ t2.start()
             self.assertTrue(output_method.dtype == out_type,
                             "autocast for torch.{} produced {}, should produce torch.{}"
                             .format(op, output_method.dtype, out_type))
-        if (output is not None) and (output_tensor is not None):
+        if (output is not None) and (output_method is not None):
             self.assertTrue(torch.allclose(output, output_method),
                             "torch.{0} result did not match Tensor.{0} result".format(op))
         # Finally, compare numerics to Python-side "autocasting" that (we expect) does the same thing
-        # as the C++-side autocasting:
+        # as the C++-side autocasting, and should be bitwise accurate.
         output_to_compare = output if output is not None else output_method
         with torch.cuda.amp.autocast(enabled=False):
             if hasattr(torch, op):
@@ -2127,13 +2127,20 @@ t2.start()
             for op, args in self.amp_lists.torch_fp32:
                 self._run_autocast_outofplace(op, args, torch.float32)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_torch_need_autocast_promote(self):
+        with torch.cuda.amp.autocast():
+            for op, args in self.amp_lists.torch_need_autocast_promote:
+                self._run_autocast_outofplace(op, args, torch.float32)
+
     def _run_autocast_user_supplied_out(self, op, args, run_as_type):
         # For ops with a user-supplied output, we can't cast the output.  Instead, backend runs
         # the op in the autocasted dtype.  If the user-supplied out tensor is already that type,
         # the backend uses the out tensor directly, otherwise, the result is copy_ed into the output tensor.
         # Therefore, it doesn't make sense to check if the user-supplied output has been casted to a different dtype.
         # However, we can still compare numerics to Python-side "autocasting" that (we expect) uses the same
-        # sequence of types as the C++-side autocasting:
+        # sequence of types as the C++-side autocasting, which should be bitwise accurate.
         output = args[0].clone()
         getattr(torch, op)(*args[1:], out=output)
         with torch.cuda.amp.autocast(enabled=False):
@@ -2157,17 +2164,17 @@ t2.start()
                 self._run_autocast_user_supplied_out(op, args, torch.float32)
 
     def _run_autocast_inplace(self, op, args, run_as_type):
-        output = output_tensor = None
+        output = output_method = None
         # Make sure the torch.* and Tensor.* variants, if present, have the same numerics.
         if hasattr(torch, op):
             output = getattr(torch, op)(args[0].clone(), *args[1:])
         if hasattr(torch.Tensor, op):
             output_method = getattr(args[0].clone(), op)(*args[1:])
-        if (output is not None) and (output_tensor is not None):
+        if (output is not None) and (output_method is not None):
             self.assertTrue(torch.allclose(output, output_method),
                             "torch.{0} result did not match Tensor.{0} result".format(op))
         # Finally, compare numerics to Python-side "autocasting" that (we expect) does the same thing
-        # as the C++-side autocasting:
+        # as the C++-side autocasting, and should be bitwise accurate.
         output_to_compare = output if output is not None else output_method
         with torch.cuda.amp.autocast(enabled=False):
             if hasattr(torch, op):
@@ -2193,6 +2200,13 @@ t2.start()
     def test_amp_torch_fp32_inplace(self):
         with torch.cuda.amp.autocast():
             for op, args in self.amp_lists.torch_fp32_inplace:
+                self._run_autocast_inplace(op, args, torch.float32)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_torch_need_autocast_promote_inplace(self):
+        with torch.cuda.amp.autocast():
+            for op, args in self.amp_lists.torch_need_autocast_promote_inplace:
                 self._run_autocast_inplace(op, args, torch.float32)
 
     @skipIfRocm

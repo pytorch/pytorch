@@ -129,12 +129,16 @@ class AmpLists(object):
         # self.torch_fp32 = []
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
-        # self.torch_need_autocast_promotion = []
-        # self.torch_need_autocast_promotion_inplace = []
-        # self.torch_need_autocast_promotion_user_supplied_out = []
-        # self.torch_expect_builtin_promotion = []
-        # self.torch_expect_builtin_promotion_inplace = []
-        # self.torch_expect_builtin_promotion_user_supplied_out = []
+        self.torch_need_autocast_promote = [
+            ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),))
+        ]
+        self.torch_need_autocast_promote_inplace = [
+            ("addcdiv_", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),))
+        ]
+        # self.torch_need_autocast_promote_user_supplied_out = []
+        # self.torch_expect_builtin_promote = []
+        # self.torch_expect_builtin_promote_inplace = []
+        # self.torch_expect_builtin_promote_user_supplied_out = []
 
         # self.torch_need_autocast_sequence_cast_ops = [
         #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
@@ -149,12 +153,12 @@ class AmpLists(object):
         # self.nn_fp32 = []
         # self.nn_fp32_inplace = []
         # self.nn_fp32_user_supplied_out = []
-        # self.nn_need_autocast_promotion = []
-        # self.nn_need_autocast_promotion_inplace = []
-        # self.nn_need_autocast_promotion_user_supplied_out = []
-        # self.nn_expect_builtin_promotion = []
-        # self.nn_expect_builtin_promotion_inplace = []
-        # self.nn_expect_builtin_promotion_user_supplied_out = []
+        # self.nn_need_autocast_promote = []
+        # self.nn_need_autocast_promote_inplace = []
+        # self.nn_need_autocast_promote_user_supplied_out = []
+        # self.nn_expect_builtin_promote = []
+        # self.nn_expect_builtin_promote_inplace = []
+        # self.nn_expect_builtin_promote_user_supplied_out = []
 
         # self.tensor_only_fp16 = []
         self.tensor_only_fp16_inplace = [
@@ -172,9 +176,9 @@ class AmpLists(object):
         # self.tensor_only_fp32 = []
         # self.tensor_only_fp32_inplace = []
         # self.tensor_only_fp32_user_supplied_out = []
-        # self.tensor_only_need_autocast_promotion = []
-        # self.tensor_only_need_autocast_promotion_inplace = []
-        # self.tensor_only_need_autocast_promotion_user_supplied_out = []
-        # self.tensor_only_expect_builtin_promotion = []
-        # self.tensor_only_expect_builtin_promotion_inplace = []
-        # self.tensor_only_expect_builtin_promotion_user_supplied_out = []
+        # self.tensor_only_need_autocast_promote = []
+        # self.tensor_only_need_autocast_promote_inplace = []
+        # self.tensor_only_need_autocast_promote_user_supplied_out = []
+        # self.tensor_only_expect_builtin_promote = []
+        # self.tensor_only_expect_builtin_promote_inplace = []
+        # self.tensor_only_expect_builtin_promote_user_supplied_out = []
