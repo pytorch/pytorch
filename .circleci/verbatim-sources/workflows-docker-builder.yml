@@ -7,6 +7,7 @@
               only:
                 - master
     jobs:
+      - docker_for_ecr_gc_build_job
       - docker_build_job:
           name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
           image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
