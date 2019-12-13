@@ -185,10 +185,10 @@ class _ObserverBase(ObserverBase):
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
-        min_max_equal = min_val == max_val
-        if min_max_equal is not None:
-            scale[min_max_equal] = 1.0
-            zero_point[min_max_equal] = 0
+        # min_max_equal = min_val == max_val
+        # if min_max_equal is not None:
+        #     scale[min_max_equal] = 1.0
+        #     zero_point[min_max_equal] = 0
 
         return scale, zero_point
 
