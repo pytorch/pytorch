@@ -5,13 +5,8 @@
 #include <tuple>
 #include <iterator>
 
-#if defined(__HIPCC__)
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_run_length_encode.cuh>
-#else
-#include <cub/device/device_radix_sort.cuh>
-#include <cub/device/device_run_length_encode.cuh>
-#endif
 
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
