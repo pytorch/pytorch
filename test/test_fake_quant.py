@@ -55,15 +55,6 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    print('dY = ', dY)
-    print('X = ', X)
-    print('per channel scale = ', per_channel_scale)
-    print('per channel zero point = ', per_channel_zero_point)
-    print('axis = ', axis)
-    print('quant_min = ', quant_min)
-    print('quant_max = ', quant_max)
-    print('Xq = ', Xq)
-    print('res = ', res)
     return res
 
 def to_tensor(X, device):
@@ -277,7 +268,7 @@ class TestFakeQuantizePerChannel(TestCase):
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
     def test_fq_module(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
