@@ -129,6 +129,15 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   return c10::nullopt;
 }
 
+c10::optional<std::string> ConcreteModuleType::findBuiltinFunction(
+    const std::string& name) const {
+  const auto it = data_.builtinFunctions_.find(name);
+  if (it != data_.builtinFunctions_.end()) {
+    return it->second;
+  }
+  return c10::nullopt;
+}
+
 c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
     const std::string& name) const {
   const auto it = data_.failedAttributes_.find(name);
@@ -189,6 +198,12 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
       std::move(name),
       ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
                                                 std::move(pyFunction)});
+}
+
+void ConcreteModuleTypeBuilder::addBuiltinFunction(
+    std::string name,
+    std::string symbol_name) {
+  builtinFunctions_.emplace(std::move(name), std::move(symbol_name));
 }
 
 void ConcreteModuleTypeBuilder::addModule(
