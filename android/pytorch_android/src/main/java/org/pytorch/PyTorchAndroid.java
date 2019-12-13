@@ -21,9 +21,6 @@ public final class PyTorchAndroid {
    * This method is meant to use in tests and demos.
    */
   public static Module loadModuleFromAsset(final AssetManager assetManager, final String assetName) {
-    if (!NativeLoader.isInitialized()) {
-      NativeLoader.init(new SystemDelegate());
-    }
     return new Module(new NativePeer(assetName, assetManager));
   }
 
