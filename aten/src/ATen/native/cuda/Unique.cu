@@ -6,8 +6,8 @@
 #include <iterator>
 
 #if defined(__HIPCC__)
-#include <cub/device/device_radix_sort.hpp>
-#include <cub/device/device_run_length_encode.hpp>
+#include <cub/device/device_radix_sort.cuh>
+#include <cub/device/device_run_length_encode.cuh>
 #else
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_run_length_encode.cuh>
