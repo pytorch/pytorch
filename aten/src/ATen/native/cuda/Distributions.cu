@@ -207,6 +207,36 @@ void poisson_cuda_kernel(
 }
 
 template <typename scalar_t>
+void binomial_cuda_kernel(
+    at::Tensor& ret,
+    const at::Tensor& count,
+    const at::Tensor& prob,
+    std::pair<uint64_t, uint64_t> seeds) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
+      ret,
+      count,
+      prob,
+      [seeds] __device__(
+          scalar_t & ret_val, const scalar_t& count, const scalar_t& prob) {
+        curandStatePhilox4_32_10_t state;
+        curand_init(
+            seeds.first,
+            blockIdx.x * blockDim.x + threadIdx.x,
+            seeds.second,
+            &state);
+
+        auto uniform_lambda = [&state] __device__ () {
+          return curand_uniform(&state);
+        };
+        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+        auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform)
+        ret_val = static_cast<scalar_t>(sample);
+      });
+}
+
+template <typename scalar_t>
 void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
@@ -340,6 +370,21 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "poisson_cuda", [&] {
     poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);
+  });
+  return ret;
+}
+
+Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, Generator* gen_) {
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    rng_engine_inputs = gen->philox_engine_inputs(20);
+  }
+  Tensor ret = at::empty(lambda.sizes(), lambda.options());
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "binomial_cuda", [&] {
+    binomial_cuda_kernel<scalar_t>(ret, count, prob, rng_engine_inputs);
   });
   return ret;
 }
