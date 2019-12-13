@@ -512,3 +512,34 @@ def __lshift_(g, self, other):
 
     lshift = g.op('Mul', self, two_pow)
     return lshift
+
+
+@parse_args('v', 'i', 'i')
+def flatten(g, input, start_dim, end_dim):
+    dim = input.type().dim()
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1:
+        if (end_dim == -1 or (end_dim is not None and end_dim == dim - 1)):
+            return g.op("Flatten", input, axis_i=start_dim)
+    elif start_dim == 0:
+        if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
+            return g.op("Flatten", input, axis_i=end_dim + 1)
+    # use Reshape for cases where the output shape is not 2D
+    if not input.isCompleteTensor():
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
+    # if end_dim is negative add dim
+    if end_dim < 0 :
+        end_dim = dim + end_dim
+    input_dims = input.type().sizes()
+    output_dims = []
+    for i in range(0, dim):
+        if start_dim < i and end_dim >= i:
+            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
+        else:
+            output_dims.append(input_dims[i])
+    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
+    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    p = _reshape_from_tensor(g, input, shape)
+    return p
