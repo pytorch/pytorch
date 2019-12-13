@@ -2,7 +2,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -134,7 +133,7 @@ class ProcessGroupAgent : public RpcAgent {
   // future is marked with the passed in message, and then removed from the
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
-  void markFutureWithMessage(Message& message);
+  void markFutureWithError(Message& message);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

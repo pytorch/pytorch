@@ -281,7 +281,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     }
     message.setId(requestId);
   } else {
-    future->markCompleted();
+    future->markCompleted(Message());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
@@ -379,7 +379,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
                << e.what();
             auto exceptionMsg =
                 rpc::createExceptionResponse(work.message_, ss.str());
-            markFutureWithMessage(exceptionMsg);
+            markFutureWithError(exceptionMsg);
           }
         }
       },
@@ -399,14 +399,16 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           auto futureResponse = cb_->operator()(message);
           if (futureResponse->completed()) {
-            send(work.from_, std::move(*futureResponse).moveMessage());
+            send(work.from_, std::move(*futureResponse).moveValue());
           } else {
             auto fromId = work.from_.id_;
             futureResponse->addCallback(
-                [this, fromId, futureResponse](const Message&) {
+                [this, fromId, futureResponse](
+                    const Message& /* unused */,
+                    const c10::optional<utils::FutureError>& /* unused */) {
                   send(
                       getWorkerInfo(fromId),
-                      std::move(*futureResponse).moveMessage());
+                      std::move(*futureResponse).moveValue());
                 });
           }
         } else if (message.isResponse()) {
@@ -439,7 +441,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             }
           }
           futureCV_.notify_all();
-          fm->markCompleted(std::move(message));
+          if (message.type() == MessageType::EXCEPTION) {
+            fm->setError(std::string(
+                message.payload().begin(), message.payload().end()));
+          } else {
+            fm->markCompleted(std::move(message));
+          }
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -451,7 +458,10 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       std::move(work)));
 }
 
-void ProcessGroupAgent::markFutureWithMessage(Message& message) {
+void ProcessGroupAgent::markFutureWithError(Message& message) {
+  TORCH_INTERNAL_ASSERT(
+      message.type() == MessageType::EXCEPTION,
+      "markFutureWithError should be only called with Message that has type Exception.");
   auto id = message.id();
   std::shared_ptr<FutureMessage> fm = nullptr;
   {
@@ -479,9 +489,8 @@ void ProcessGroupAgent::markFutureWithMessage(Message& message) {
       futureTimeouts_.erase(rpcEndTime);
     }
   }
-  // Not holding lock on markCompleted as this could run callbacks that
-  // call agent_->send
-  fm->markCompleted(std::move(message));
+
+  fm->setError(std::string(message.payload().begin(), message.payload().end()));
   futureCV_.notify_all();
 }
 
@@ -577,7 +586,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->markCompleted(exceptionMsg);
+      timedOutFuture.future_->setError(std::string(
+          exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);
