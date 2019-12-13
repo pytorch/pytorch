@@ -12506,7 +12506,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(inverse, expected_inverse)
         self.assertEqual(counts, expected_counts)
 
-    def _test_unique_with_different_return_inverse_and_return_counts(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
+    def _test_unique_with_expects(self, device, dtype, f, x, expected_unique, expected_inverse, expected_counts, additional_shape):
         def ensure_tuple(x):
             if torch.is_tensor(x):
                 return (x,)
@@ -12514,7 +12514,7 @@ class TestTorchDeviceType(TestCase):
 
         for return_inverse in [True, False]:
             for return_counts in [True, False]:
-                # sorted unique test
+                # test with expected
                 ret = ensure_tuple(f(x, return_inverse=return_inverse, return_counts=return_counts))
                 self.assertEqual(len(ret), 1 + int(return_inverse) + int(return_counts))
                 self.assertEqual(expected_unique, ret[0])
@@ -12524,7 +12524,7 @@ class TestTorchDeviceType(TestCase):
                     count_index = 1 + int(return_inverse)
                     self.assertEqual(expected_counts, ret[count_index])
 
-                # Tests per-element unique on a higher rank tensor.
+                # tests per-element unique on a higher rank tensor.
                 y = x.view(additional_shape)
                 y_unique, y_inverse, y_counts = f(y, return_inverse=True, return_counts=True)
                 self.assertEqual(expected_unique, y_unique)
@@ -12554,7 +12554,7 @@ class TestTorchDeviceType(TestCase):
 
         # test sorted unique
         for f in [lambda x, **kwargs: torch.unique(x, sorted=True,**kwargs), lambda x, **kwargs: x.unique(sorted=True,**kwargs)]:
-            self._test_unique_with_different_return_inverse_and_return_counts(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (2, 2, 2))
+            self._test_unique_with_expects(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (2, 2, 2))
             self._test_unique_scalar_empty(dtype, device, f)
 
         # test unsorted unique
@@ -12598,7 +12598,7 @@ class TestTorchDeviceType(TestCase):
             expected_counts = torch.tensor([1, 3, 2, 2, 1], device=device)
 
         for f in [torch.unique_consecutive, lambda x, **kwargs: x.unique_consecutive(**kwargs)]:
-            self._test_unique_with_different_return_inverse_and_return_counts(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (3, 3))
+            self._test_unique_with_expects(device, dtype, f, x, expected_unique, expected_inverse, expected_counts, (3, 3))
             self._test_unique_scalar_empty(dtype, device, f)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
