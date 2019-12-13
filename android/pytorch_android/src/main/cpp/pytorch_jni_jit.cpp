@@ -32,10 +32,9 @@ struct JITCallGuard {
 } // namespace
 
 #ifdef __ANDROID__
-class AndroidAssetReadAdapter final
-    : public caffe2::serialize::ReadAdapterInterface {
+class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  public:
-  explicit AndroidAssetReadAdapter(const void* data, off_t size)
+  explicit MemoryReadAdapter(const void* data, off_t size)
       : data_(data), size_(size){};
 
   size_t size() const override {
@@ -48,7 +47,7 @@ class AndroidAssetReadAdapter final
     return n;
   }
 
-  ~AndroidAssetReadAdapter() {}
+  ~MemoryReadAdapter() {}
 
  private:
   const void* data_;
@@ -117,16 +116,28 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     preModuleLoadSetup();
     JNIEnv* env = facebook::jni::Environment::current();
     AAssetManager* mgr = AAssetManager_fromJava(env, assetManager.get());
-    AAsset* asset = AAssetManager_open(
-        mgr, assetName->toStdString().c_str(), AASSET_MODE_BUFFER);
-    if (asset == nullptr) {
+    if (!mgr) {
       facebook::jni::throwNewJavaException(
           facebook::jni::gJavaLangIllegalArgumentException,
-          "Asset '%s' not found",
+          "Unable to get asset manager");
+    }
+    AAsset* asset = AAssetManager_open(
+        mgr, assetName->toStdString().c_str(), AASSET_MODE_BUFFER);
+    if (!asset) {
+      facebook::jni::throwNewJavaException(
+          facebook::jni::gJavaLangIllegalArgumentException,
+          "Failed to open asset '%s'",
           assetName->toStdString().c_str());
     }
-    module_ = torch::jit::load(torch::make_unique<AndroidAssetReadAdapter>(
-        AAsset_getBuffer(asset), AAsset_getLength(asset)));
+    auto assetBuffer = AAsset_getBuffer(asset);
+    if (!assetBuffer) {
+      facebook::jni::throwNewJavaException(
+          facebook::jni::gJavaLangIllegalArgumentException,
+          "Could not get buffer for asset '%s'",
+          assetName->toStdString().c_str());
+    }
+    module_ = torch::jit::load(torch::make_unique<MemoryReadAdapter>(
+        assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();
   }

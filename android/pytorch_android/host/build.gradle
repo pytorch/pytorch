@@ -16,7 +16,7 @@ sourceSets {
     main {
         java {
             srcDir '../src/main/java'
-            exclude 'org/pytorch/AndroidUtils.java'
+            exclude 'org/pytorch/PyTorchAndroid.java'
         }
     }
     test {

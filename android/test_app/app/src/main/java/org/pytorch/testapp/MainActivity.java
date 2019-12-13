@@ -11,7 +11,7 @@ import android.widget.TextView;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.Tensor;
-import org.pytorch.AndroidUtils;
+import org.pytorch.PyTorchAndroid;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -91,7 +91,7 @@ public class MainActivity extends AppCompatActivity {
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
-      mModule = AndroidUtils.loadModuleFromAsset(BuildConfig.MODULE_ASSET_NAME, getAssets());
+      mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
       mInputTensorBuffer = Tensor.allocateFloatBuffer(3 * 224 * 224);
       mInputTensor = Tensor.fromBlob(mInputTensorBuffer, new long[]{1, 3, 224, 224});
     }
