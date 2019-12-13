@@ -74,7 +74,8 @@ bool ConcreteModuleTypeBuilder::equals(
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
-      functionAttributes_ == other.functionAttributes_;
+      functionAttributes_ == other.functionAttributes_ &&
+      builtinFunctions_ == other.builtinFunctions_;
   // clang-format on
   if (!equal) {
     return false;
