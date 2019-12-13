@@ -16428,6 +16428,27 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
 
+    def test_type_comments_in_body(self):
+        @torch.jit.script
+        def foo(a,  # type: int
+                b,  # type: int
+                ):
+            # type: (...) -> int
+            # type: int
+            return a + b
+
+        class M(torch.nn.Module):
+            def __init__(self,
+                         a,  # type: int
+                         b   # type: int
+                         ):
+                # type: (...) -> None
+                super(M, self).__init__()
+                self.a = a  # type: int
+                self.b = b  # type: int
+
+        torch.jit.script(M(2, 3))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.

@@ -150,15 +150,15 @@ def get_type_line(source):
     # https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code
     return_line = None
     parameter_type_lines = []
-    for line_num, line in reversed(type_lines):
+    for line_num, line in type_lines:
         if '# type: (...) -> ' in line:
             return_line = (line_num, line)
+            break
         elif type_comment in line:
-            if return_line is None:
-                raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
-                                   "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
-            if line_num < return_line[0]:
-                parameter_type_lines.insert(0, line)
+            parameter_type_lines.append(line)
+    if return_line is None:
+        raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
+                           "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
