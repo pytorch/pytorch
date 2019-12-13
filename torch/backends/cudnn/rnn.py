@@ -1,22 +1,16 @@
 import torch.cuda
-
-try:
-    from torch._C import _cudnn
-except ImportError:
-    # Uses of all the functions below should be guarded by torch.backends.cudnn.is_available(),
-    # so it's safe to not emit any checks here.
-    _cudnn = None
+import torch.backends.cudnn as cudnn
 
 
 def get_cudnn_mode(mode):
     if mode == 'RNN_RELU':
-        return int(_cudnn.RNNMode.rnn_relu)
+        return cudnn.CUDNN_RNN_RELU
     elif mode == 'RNN_TANH':
-        return int(_cudnn.RNNMode.rnn_tanh)
+        return cudnn.CUDNN_RNN_TANH
     elif mode == 'LSTM':
-        return int(_cudnn.RNNMode.lstm)
+        return cudnn.CUDNN_LSTM
     elif mode == 'GRU':
-        return int(_cudnn.RNNMode.gru)
+        return cudnn.CUDNN_GRU
     else:
         raise Exception("Unknown mode: {}".format(mode))
 

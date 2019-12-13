@@ -178,8 +178,6 @@ if (USE_CUDA)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
@@ -206,9 +204,6 @@ if (USE_CUDNN)
     # we're not careful.
     list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
     list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_PATH})
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
-      )
 endif()
 
 if (USE_NUMPY)
@@ -224,8 +219,6 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
 
@@ -233,8 +226,6 @@ if (USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_HCC__
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
 endif()
 
 if (USE_DISTRIBUTED)
