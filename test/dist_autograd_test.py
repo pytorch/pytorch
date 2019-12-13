@@ -11,6 +11,7 @@ import torch.distributed.rpc as rpc
 import dist_utils
 from dist_utils import dist_init
 from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing import FileCheck
 
 import threading
 
@@ -1566,6 +1567,7 @@ class DistAutogradJitTest(RpcAgentTestFixture):
             # type: (int) -> (Dict[Tensor, Tensor])
             return dist_autograd.get_gradients(context_id)
 
+        FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
