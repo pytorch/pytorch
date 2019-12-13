@@ -4,6 +4,7 @@ import torch
 
 import hypothesis
 from hypothesis import assume
+from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.strategies import SearchStrategy
@@ -304,11 +305,18 @@ def tensor_conv(
 
     return X, W, b, groups
 
-from hypothesis import settings
-settings.register_profile("no_deadline", deadline=None)
-settings.load_profile("no_deadline")
 
-# This is really just to get flake8 to not complain when this file
-# is imported purely for the side-effectful stuff above
-def assert_deadline_disabled():
-    assert settings().deadline is None
+if hypothesis.version.__version_info__ >= (3, 27, 0):
+    settings.register_profile("no_deadline", deadline=None)
+
+    # This is really just to get flake8 to not complain when this file
+    # is imported purely for the side-effectful stuff above
+    def assert_deadline_disabled():
+        assert settings().deadline is None
+else:
+    from warnining import warn
+    warn("Your hypothesis version is outdated and doesn't support `deadline`. "
+         "Some tests are likely to fail with `DeadlineExceeded` error. "
+         "Current hypothesis version: {}".format(hypothesis.__version__))
+    settings.register_profile("no_deadline")
+settings.load_profile("no_deadline")
