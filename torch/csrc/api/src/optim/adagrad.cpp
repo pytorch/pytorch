@@ -64,7 +64,7 @@ void Adagrad::step() {
       }
       auto grad = p.grad().data();
       // TODO: assert that `state_[p.unsafeGetTensorImpl()]` exists and is not a null pointer, before dereferencing it
-      TORCH_CHECK(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != NULL, "state found NULL for the Tensor ", p);
+      TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != NULL, "state found NULL for the Tensor ", p);
       auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
