@@ -382,7 +382,7 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, Generator* gen_
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_engine_inputs(20);
   }
-  Tensor ret = at::empty(lambda.sizes(), lambda.options());
+  Tensor ret = at::empty(count.sizes(), count.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "binomial_cuda", [&] {
     binomial_cuda_kernel<scalar_t>(ret, count, prob, rng_engine_inputs);
   });
