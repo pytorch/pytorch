@@ -76,22 +76,39 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-    # We suppress the vptr volation, since we have separate copies of
-    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
-    # the following problem:
-    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
-    #        runtime error: member call on address ... which does not point
-    #        to an object of type 'google::protobuf::MessageLite'
-    #        ...: note: object is of type 'onnx_torch::ModelProto'
-    #
-    # This problem should be solved when libtorch.so and libcaffe2.so are
-    # merged.
-    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    # NB: we preload libtorch.so to ensure that subsequent loads of C++
+    # extension modules consistently reference the type info in
+    # libtorch.so and its dependencies (most notably, libc++.so).
+    # If another copy of type info is generated, then
+    # UBSAN will fail claiming a vptr violation that looks like:
+    #
+    #    member call on address XXXXXX which does not point to an object of
+    #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
+    #    XXXXXX note: object is of type
+    #    'std::_Sp_counted_ptr<torch::nn::LinearImpl*, (__gnu_cxx::_Lock_policy)2>'
+    #
+    # (NB: the textual types of the objects here are misleading, because
+    # they actually line up; it just so happens that there's two copies
+    # of the type info floating around in the address space, so they
+    # don't pointer compare equal.  See also
+    #   https://github.com/google/sanitizers/issues/1175
+    #
+    # This didn't use to be necessary, because historically we loaded
+    # _C.so (and transitively, libtorch.so) using RTLD_GLOBAL. We
+    # stopped doing that to promote better hygiene of C++ symbols,
+    # but that means all weak symbols are going to get duplicated--this
+    # especially applies to type info, which is almost always weak.  This
+    # has implications for RTTI (which UBSAN is rightly flagging won't
+    # work), but in our codebase, we don't use RTTI (because it doesn't
+    # work in mobile).  However, UBSAN relies on UBSAN to detect vptr
+    # confusion, so at least in this environment, we need our ducks in
+    # order!
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:$PWD/torch/lib/libtorch.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
