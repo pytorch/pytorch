@@ -7,6 +7,10 @@
 #include <fbjni/fbjni.h>
 
 #include "pytorch_jni_common.h"
+#if defined(__ANDROID__)
+#include <caffe2/utils/threadpool/ThreadPool.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#endif
 
 namespace pytorch_jni {
 
@@ -567,6 +571,30 @@ at::IValue JIValue::JIValueToAtIValue(
       facebook::jni::gJavaLangIllegalArgumentException,
       "Unknown IValue typeCode %d",
       typeCode);
+}
+
+#if defined(__ANDROID__)
+class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
+ public:
+  constexpr static auto kJavaDescriptor = "Lorg/pytorch/PyTorchAndroid;";
+
+  static void registerNatives() {
+    javaClassStatic()->registerNatives({
+        makeNativeMethod(
+            "nativeSetNumThreads", PyTorchAndroidJni::setNumThreads),
+    });
+  }
+
+  static void setNumThreads(facebook::jni::alias_ref<jclass>, jint numThreads) {
+    caffe2::mobile_threadpool()->setNumThreads(numThreads);
+  }
+};
+#endif
+
+void common_registerNatives() {
+#if defined(__ANDROID__)
+  pytorch_jni::PyTorchAndroidJni::registerNatives();
+#endif
 }
 
 } // namespace pytorch_jni
