@@ -9791,6 +9791,12 @@ class TestTorchDeviceType(TestCase):
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
 
+        # test bool tensor
+        t = torch.zeros(6, dtype=torch.bool, device=device)
+        t[0] = True
+        t[3] = True
+        self.assertEqual(torch.tensor([False, True, False, False, True, False]), t.roll(1, 0))
+
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))
@@ -13206,7 +13212,7 @@ class TestTorchDeviceType(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
-    def test_memory_format_factory_like_functions_preserve_strides(self, device):
+    def test_memory_format_factory_like_functions_preserve(self, device):
         def input_generator_fn(device):
             return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \
                         .contiguous(memory_format=torch.channels_last)

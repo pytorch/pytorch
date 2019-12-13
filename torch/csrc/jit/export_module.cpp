@@ -77,7 +77,7 @@ class ScriptModuleSerializer {
     size_t i = 0;
     std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
-      std::string fname = prefix + std::to_string(i++);
+      std::string fname = prefix + c10::to_string(i++);
       writer_.writeRecord(fname, td.data(), td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";
@@ -252,7 +252,6 @@ class ScriptModuleSerializer {
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
   // created
   OrderedDict<std::string, PythonPrint> file_streams_;
-  bool bytecode_format_;
 };
 
 void ExportModule(
