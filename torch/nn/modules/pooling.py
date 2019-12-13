@@ -472,7 +472,7 @@ class AvgPool1d(_AvgPoolNd):
         tensor([[[ 2.,  4.,  6.]]])
     """
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=False):
         super(AvgPool1d, self).__init__()
         self.kernel_size = _single(kernel_size)
         self.stride = _single(stride if stride is not None else kernel_size)
@@ -540,7 +540,7 @@ class AvgPool2d(_AvgPoolNd):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True, divisor_override=None):
+                 count_include_pad=False, divisor_override=None):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
@@ -615,7 +615,7 @@ class AvgPool3d(_AvgPoolNd):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True, divisor_override=None):
+                 count_include_pad=False, divisor_override=None):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
