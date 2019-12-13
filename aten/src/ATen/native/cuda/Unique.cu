@@ -22,7 +22,6 @@ namespace native{
 
 namespace {
 
-// unique
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_cuda_fast_32bit_sized(
   const Tensor& self,
@@ -41,9 +40,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_fast_32bit_sized(
   Tensor sorted;
   const scalar_t* sorted_data = self_data;
 
-  TORCH_INTERNAL_CHECK(num_inp <= std::numeric_limits<int>::max(),
-    "Fast path of unique does not support more than 2^31 - 1 elements"
-  );
+  TORCH_INTERNAL_ASSERT(num_inp <= std::numeric_limits<int>::max());
 
   Tensor inverse_indices, sorted_indices;
   Tensor tmp_storage = at::empty({0}, self.options().dtype(kChar));
