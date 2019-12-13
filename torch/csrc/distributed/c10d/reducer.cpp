@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -171,10 +172,16 @@ Reducer::Reducer(
     for (size_t i = 0; i < replica_count; i++) {
       at::TensorOptions options, options_host;
       options = options.dtype(at::kInt);
-      options_host =
-          replicas_[i][0].is_cuda() ? options.pinned_memory(true) : options;
-      local_used_maps_[i] =
-          at::zeros({static_cast<long>(variable_count)}, options_host);
+
+      if (replicas_[i][0].is_cuda()) {
+        at::DeviceGuard g(replicas_[i][0].device());
+        local_used_maps_[i] = at::zeros(
+            {static_cast<long>(variable_count)}, options.pinned_memory(true));
+      } else {
+        local_used_maps_[i] =
+            at::zeros({static_cast<long>(variable_count)}, options);
+      }
+
       // This tensor needs to be on the same device as replica because backend
       // such as NCCL may not support CPU tensors, and hence it might not work
       // if we always put it on CPU.
