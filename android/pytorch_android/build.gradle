@@ -41,11 +41,6 @@ android {
     }
 
     packagingOptions {
-        if (rootProject.isPublishing()) {
-            exclude '**/libfbjni.so'
-        } else {
-            pickFirst '**/libfbjni.so'
-        }
         if (nativeLibsDoNotStrip.toBoolean()) {
             doNotStrip "**/*.so"
             logger.warn('WARNING: nativeLibsDoNotStrip==true; debug symbols included')
@@ -58,8 +53,7 @@ android {
 }
 
 dependencies {
-    api project(':fbjni')
-
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
     implementation 'com.android.support:appcompat-v7:28.0.0'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
 
