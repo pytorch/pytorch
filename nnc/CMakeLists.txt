@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(nnc)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -mavx2 -march=native -fno-rtti")
+set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -mavx2 -march=native")
 
 set(default_build_type "Release")
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -26,6 +26,8 @@ add_library(nnc
   src/expr.cc
   src/ir_visitor.cc
   src/llvm_codegen.cc)
+
+set_source_files_properties(src/llvm_codegen.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
 
 target_include_directories(nnc PUBLIC "include")
 
