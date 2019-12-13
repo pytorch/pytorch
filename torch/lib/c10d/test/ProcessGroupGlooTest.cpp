@@ -368,6 +368,10 @@ void testRecv(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
+  if (!at::cuda::is_available()) {
+    LOG(INFO) << "Skipping test since it is not available on CUDA\n";
+    return EXIT_SUCCESS;
+  }
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
