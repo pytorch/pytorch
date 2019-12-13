@@ -380,7 +380,7 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, Generator* gen_
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(20);
+    rng_engine_inputs = gen->philox_engine_inputs(42);
   }
   Tensor ret = at::empty(count.sizes(), count.options());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "binomial_cuda", [&] {
