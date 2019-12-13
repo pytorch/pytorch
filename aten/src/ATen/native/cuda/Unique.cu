@@ -24,7 +24,7 @@ namespace {
 
 // unique
 template <typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
+std::tuple<Tensor, Tensor, Tensor> unique_cuda_fast_32bit_sized(
   const Tensor& self,
   const bool consecutive,
   const bool return_inverse,
@@ -41,9 +41,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor sorted;
   const scalar_t* sorted_data = self_data;
 
-  TORCH_CHECK(num_inp <= std::numeric_limits<int>::max(),
-    "Current implementation of unique does not support more than 2^31 - 1 elements, "
-    "if your use case needs more than 2^31 - 1 elements, open an issue on GitHub to let us know."
+  TORCH_INTERNAL_CHECK(num_inp <= std::numeric_limits<int>::max(),
+    "Fast path of unique does not support more than 2^31 - 1 elements"
   );
 
   Tensor inverse_indices, sorted_indices;
@@ -116,12 +115,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
 }
 
-// unique dim
 template <
   typename policy_t, typename scalar_t,
   typename equal_t, typename not_equal_t
 >
-std::tuple<Tensor, Tensor, int64_t> compute_unique_dim(
+std::tuple<Tensor, Tensor, int64_t> compute_unique(
   const policy_t &policy,
   scalar_t *data,
   int64_t num_inp,
@@ -168,6 +166,56 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique_dim(
 
   THCudaCheck(cudaGetLastError());
   return std::tuple<Tensor, Tensor, int64_t>(inverse_indices, counts, num_out);
+}
+
+template <typename scalar_t>
+std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
+  const Tensor& self,
+  const bool consecutive,
+  const bool return_inverse,
+  const bool return_counts
+) {
+  int64_t num_inp = self.numel();
+  if (num_inp <= std::numeric_limits<int>::max()) {
+    return unique_cuda_fast_32bit_sized<scalar_t>(self, consecutive, return_inverse, return_counts);
+  }
+
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
+  auto options = self.options().dtype(kLong);
+  Tensor output = self.clone(at::MemoryFormat::Contiguous).reshape(-1);
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+
+  Tensor sorted_indices;
+  if (!return_inverse) {
+    if (!consecutive) {
+      thrust::sort(policy, output_data, output_data + num_inp);
+    }
+  } else {
+    sorted_indices = at::arange(0, num_inp, options);
+    if (!consecutive) {
+      int64_t *sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
+      thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
+    }
+  }
+
+  Tensor inverse_indices, counts;
+  int64_t num_out;
+  std::tie(inverse_indices, counts, num_out) = compute_unique(
+    policy, output_data, num_inp, sorted_indices,
+    return_inverse, return_counts, options,
+    thrust::equal_to<scalar_t>(),
+    thrust::not_equal_to<scalar_t>()
+  );
+  output.resize_(num_out);
+
+  if (return_inverse) {
+      inverse_indices.resize_(self.sizes());
+  }
+
+  return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
 }
 
 template <typename scalar_t>
@@ -239,7 +287,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
   Tensor inverse_indices, counts;
   int64_t num_out;
-  std::tie(inverse_indices, counts, num_out) = compute_unique_dim(
+  std::tie(inverse_indices, counts, num_out) = compute_unique(
     policy, indices_data, num_inp, indices,
     return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
