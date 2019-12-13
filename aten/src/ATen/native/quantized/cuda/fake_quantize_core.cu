@@ -51,8 +51,8 @@ void fake_quantize_grad_slice_cuda(
       input,
       input_grad,
       [=] __device__(const float& dy, const float& x, float& dx) {
-        // int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
-        int64_t Xq = std::round(x * inv_scale + zero_point);
+        int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
+        // int64_t Xq = std::round(x * inv_scale + zero_point);
         dx = (Xq >= quant_min && Xq <= quant_max) * dy;
       });
 }
