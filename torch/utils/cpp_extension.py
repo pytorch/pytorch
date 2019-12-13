@@ -446,16 +446,18 @@ def CppExtension(name, sources, *args, **kwargs):
     include_dirs += include_paths()
     kwargs['include_dirs'] = include_dirs
 
-    library_dirs = kwargs.get('library_dirs', [])
-    library_dirs += library_paths()
-    kwargs['library_dirs'] = library_dirs
+    if IS_WINDOWS:
+        library_dirs = kwargs.get('library_dirs', [])
+        library_dirs += library_paths()
+        kwargs['library_dirs'] = library_dirs
 
-    libraries = kwargs.get('libraries', [])
-    libraries.append('c10')
-    libraries.append('torch')
-    libraries.append('torch_cpu')
-    libraries.append('torch_python')
-    kwargs['libraries'] = libraries
+        libraries = kwargs.get('libraries', [])
+        libraries.append('c10')
+        libraries.append('torch')
+        libraries.append('torch_cpu')
+        libraries.append('torch_python')
+        libraries.append('_C')
+        kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'
     return setuptools.Extension(name, sources, *args, **kwargs)
@@ -495,12 +497,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
-    libraries.append('c10')
-    libraries.append('c10_cuda')
-    libraries.append('torch')
-    libraries.append('torch_cpu')
-    libraries.append('torch_cuda')
-    libraries.append('torch_python')
+    if IS_WINDOWS:
+        libraries.append('c10')
+        libraries.append('c10_cuda')
+        libraries.append('torch_cpu')
+        libraries.append('torch_cuda')
+        libraries.append('torch')
+        libraries.append('torch_python')
+        libraries.append('_C')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -557,11 +561,12 @@ def library_paths(cuda=False):
     '''
     paths = []
 
-    # We need to link against libtorch.so
-    here = os.path.abspath(__file__)
-    torch_path = os.path.dirname(os.path.dirname(here))
-    lib_path = os.path.join(torch_path, 'lib')
-    paths.append(lib_path)
+    if IS_WINDOWS:
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        paths.append(lib_path)
 
     if cuda:
         if IS_WINDOWS:
@@ -928,13 +933,13 @@ def verify_ninja_availability():
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
-    here = os.path.abspath(__file__)
-    torch_path = os.path.dirname(os.path.dirname(here))
-    lib_path = os.path.join(torch_path, 'lib')
-
     if IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
         python_lib_path = os.path.join(python_path, 'libs')
+
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -944,13 +949,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('torch_cuda.lib')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
+        extra_ldflags.append('_C.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
         extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
-    else:
-        extra_ldflags.append('-L{}'.format(lib_path))
-        extra_ldflags.append('-lc10')
-        extra_ldflags.append('-ltorch')
-        extra_ldflags.append('-ltorch_python')
 
     if with_cuda:
         if verbose:
