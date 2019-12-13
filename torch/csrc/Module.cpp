@@ -46,7 +46,6 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
@@ -764,12 +763,6 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
-
-#ifdef BUILD_NAMEDTENSOR
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
-#else
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
 #endif
 
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();

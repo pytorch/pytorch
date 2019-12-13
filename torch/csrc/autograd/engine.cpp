@@ -837,6 +837,12 @@ bool Engine::is_checkpoint_valid() {
 }
 
 size_t Engine::ready_queue_size(at::Device device) {
+  if (ready_queues_.empty()) {
+    // The vector ready_queues_ is initialized in start_threads, but this method
+    // can be called before start_threads. Adding this check to avoid index
+    // out of bound error.
+    return 0;
+  }
   return ready_queue(device).size();
 }
 

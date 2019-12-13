@@ -7,11 +7,15 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
+// aten and prim nodes (except FusionGroup) are guaranteed to work
+// with Autograd, other nodes (e.g. user-defined nodes) are not necessarily
+// Autograd-aware
 bool canRunWithAutograd(Node* node) {
-  return node->kind() != prim::FusionGroup;
+  auto kind = node->kind();
+  return kind != prim::FusionGroup && (kind.is_aten() || kind.is_prim());
 }
+
+namespace {
 
 void InlineAutodiffSubgraphs(Block* block, size_t threshold);
 
