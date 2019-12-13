@@ -6395,6 +6395,15 @@ class TestTorchDeviceType(TestCase):
         torch.diag(x, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_diag_bool(self, device):
+        # test bool tensor
+        a = torch.tensor([True, False, True], device=device)
+        res = torch.diag(a)
+        expected = torch.tensor([[True, False, False],
+                                 [False, False, False],
+                                 [False, False, True]])
+        self.assertEqual(res, expected)
+
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
         result = torch.diagonal(x)
