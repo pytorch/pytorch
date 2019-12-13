@@ -13193,7 +13193,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.to(dtype=torch.float64, **kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, default_is_preserve=True)
 
     def test_memory_format_type(self, device):
         def input_generator_fn(device):
@@ -13203,7 +13203,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.type(torch.float64, **kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, default_is_preserve=True)
 
     def test_memory_format_clone(self, device):
         def input_generator_fn(device):
@@ -13265,14 +13265,14 @@ class TestTorchDeviceType(TestCase):
             shortcuts += ['bfloat16']
 
         for fn_name in shortcuts:
-            self._test_memory_format_transformations(device, input_generator_fn, get_fn(fn_name))
+            self._test_memory_format_transformations(device, input_generator_fn, get_fn(fn_name), default_is_preserve=True)
 
         # Test 'float' separately to avoid float->float no-op.
         def input_generator_fn_double(device):
             return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1) \
                         .round().contiguous(memory_format=torch.channels_last)
 
-        self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'))
+        self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'), default_is_preserve=True)
 
     @onlyCUDA
     def test_memory_format_cpu_and_cuda_ops(self, device):
@@ -13285,8 +13285,8 @@ class TestTorchDeviceType(TestCase):
         def transformation_cuda_fn(tensor, **kwargs):
             return tensor.cuda(**kwargs)
 
-        self._test_memory_format_transformations('cuda', input_generator_fn, transformation_cpu_fn)
-        self._test_memory_format_transformations('cpu', input_generator_fn, transformation_cuda_fn)
+        self._test_memory_format_transformations('cuda', input_generator_fn, transformation_cpu_fn, default_is_preserve=True)
+        self._test_memory_format_transformations('cpu', input_generator_fn, transformation_cuda_fn, default_is_preserve=True)
 
     @onlyCPU
     @skipCPUIfNoLapack
