@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace {
 
@@ -150,18 +150,21 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-#endif
     copy_impl(self, src, non_blocking);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
-#endif
   return self;
 }
+
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
 DEFINE_DISPATCH(copy_stub);
 

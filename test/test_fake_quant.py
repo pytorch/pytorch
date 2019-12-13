@@ -5,7 +5,7 @@ import numpy as np
 from hypothesis import given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
-from hypothesis_utils import no_deadline
+hu.assert_deadline_disabled()
 from common_utils import run_tests, TestCase
 from torch.quantization import FakeQuantize
 from torch.quantization import default_observer, default_per_channel_weight_observer
@@ -73,10 +73,7 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestFakeQuantizePerTensor(TestCase):
-    # NOTE: Tests in this class are decorated with no_deadline
-    # to prevent spurious failures due to cuda runtime initialization.
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -94,7 +91,6 @@ class TestFakeQuantizePerTensor(TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -118,7 +114,6 @@ class TestFakeQuantizePerTensor(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -139,7 +134,6 @@ class TestFakeQuantizePerTensor(TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
@@ -218,10 +212,7 @@ class TestFakeQuantizePerTensor(TestCase):
 
 
 class TestFakeQuantizePerChannel(TestCase):
-    # NOTE: Tests in this class are decorated with no_deadline
-    # to prevent spurious failures due to cuda runtime initialization.
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -241,7 +232,6 @@ class TestFakeQuantizePerChannel(TestCase):
             X, scale, zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -265,7 +255,6 @@ class TestFakeQuantizePerChannel(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -287,7 +276,6 @@ class TestFakeQuantizePerChannel(TestCase):
             X, scale, zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
-    @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
