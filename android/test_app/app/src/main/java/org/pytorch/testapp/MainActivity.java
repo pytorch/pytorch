@@ -129,19 +129,6 @@ public class MainActivity extends AppCompatActivity {
     return null;
   }
 
-  static class Result {
-
-    private final float[] scores;
-    private final long totalDuration;
-    private final long moduleForwardDuration;
-
-    public Result(float[] scores, long moduleForwardDuration, long totalDuration) {
-      this.scores = scores;
-      this.moduleForwardDuration = moduleForwardDuration;
-      this.totalDuration = totalDuration;
-    }
-  }
-
   @UiThread
   protected void handleResult(Result result) {
     String message = String.format("forwardDuration:%d", result.moduleForwardDuration);
