@@ -101,10 +101,6 @@ bool Message::isResponse() const {
       MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
 }
 
-bool Message::isShutdown() const {
-  return MessageType::SHUTDOWN == type_;
-}
-
 int64_t Message::id() const {
   return id_;
 }
