@@ -187,6 +187,7 @@ struct C10_API InefficientStdFunctionContext {
   static DataPtr makeDataPtr(
       void* ptr,
       const std::function<void(void*)>& deleter,
+      void *deleterContext,
       Device device);
 };
 

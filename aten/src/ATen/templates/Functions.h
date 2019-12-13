@@ -26,6 +26,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
+    void* deleterContext,
     const TensorOptions& options = {}) {
   AutoNonVariableTypeMode guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
@@ -39,7 +40,7 @@ inline Tensor from_blob(
       options.dtype(),
       detail::computeStorageSize(sizes, strides),
       InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, device),
+          data, deleter, deleterContext, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
   return empty({0}, options).set_(storage, 0, sizes, strides);
@@ -48,9 +49,18 @@ inline Tensor from_blob(
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
+    IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, detail::defaultStrides(sizes), deleter, options);
+  return from_blob(data, sizes, strides, deleter, data, options);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {}) {
+  return from_blob(data, sizes, detail::defaultStrides(sizes), deleter, data, options);
 }
 
 inline Tensor from_blob(
@@ -58,14 +68,14 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, strides, [](void*) {}, options);
+  return from_blob(data, sizes, strides, [](void*) {}, nullptr, options);
 }
 
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, nullptr, options);
 }
 
 inline int64_t numel(const Tensor& tensor) {
