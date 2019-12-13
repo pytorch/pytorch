@@ -31,7 +31,6 @@ struct JITCallGuard {
 
 } // namespace
 
-#ifdef __ANDROID__
 class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
  public:
   explicit MemoryReadAdapter(const void* data, off_t size)
@@ -53,7 +52,6 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
   const void* data_;
   off_t size_;
 };
-#endif
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
