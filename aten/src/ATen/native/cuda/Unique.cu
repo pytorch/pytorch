@@ -4,6 +4,7 @@
 
 #include <tuple>
 #include <iterator>
+#include <limits>
 
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_run_length_encode.cuh>
@@ -39,6 +40,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   int64_t *sorted_indices_data = nullptr;
   Tensor sorted;
   const scalar_t* sorted_data = self_data;
+
+  TORCH_CHECK(num_inp <= std::numeric_limits<int>::max(),
+    "Current implementation of unique does not support more than 2^31 - 1 elements, "
+    "if your use case needs more than 2^31 - 1 elements, open an issue on GitHub to let us know."
+  );
 
   Tensor inverse_indices, sorted_indices;
   Tensor tmp_storage = at::empty({0}, self.options().dtype(kChar));
