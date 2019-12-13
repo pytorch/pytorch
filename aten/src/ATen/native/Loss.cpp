@@ -123,6 +123,19 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
 
 Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor grad_input;
+
+    grad_input = (input - target).div_(
+      (1 - input) * (input)
+    );
+
+    if (weight.defined()) {
+      grad_input.mul_(weight);
+    }
+
+    if (reduction == at::Reduction::Mean) {
+        grad_input.div_(input.numel());
+    }
+
     return grad_input;
 }
 
