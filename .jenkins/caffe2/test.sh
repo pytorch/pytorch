@@ -40,6 +40,9 @@ for test in $(find "$cpp_test_dir" -executable -type f); do
         LD_LIBRARY_PATH="$ld_library_path" "$test"
       fi
       ;;
+    */*_benchmark)
+      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+      ;;
     *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
