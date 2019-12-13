@@ -65,7 +65,10 @@ void OptimizerBase::add_param_group(const OptimizerParamGroup& param_group) {
   } else {
     param_group_.set_options(param_group.options().clone());
   }
-  // TODO: check "some parameters appear in more than one parameter group"
+  for(const auto& p : param_group_.params()) {
+    TORCH_CHECK(state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
+      "some parameters appear in more than one parameter group");
+  }
   param_groups_.push_back(std::move(param_group_));
 }
 

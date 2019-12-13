@@ -163,44 +163,6 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
       return false;
     }
   }
-
-  // bc compatibility check
-  auto optim3_3 = OptimizerClass(model3->parameters(), options);
-  std::vector<torch::Tensor> sum_buffers; // fill up with optim3_2 sum_buffers
-  std::vector<int64_t> step_buffers; // fill up with optim3_2 state_buffers
-  auto params_ = optim3_2_param_groups[0].params();
-  for(size_t i=0; i<params_.size(); i++) {
-    auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-    const DerivedOptimizerParamState& curr_state_ = static_cast<const DerivedOptimizerParamState&>(*(optim3_2_state.at(key_).get()));
-    sum_buffers.push_back(curr_state_.sum());
-    step_buffers.push_back(curr_state_.step());
-  }
-  // write sum_buffers and step buffers to the file
-  auto optim_tempfile_old_format = c10::make_tempfile();
-  torch::serialize::OutputArchive output_archive;
-  output_archive.write(
-      "sum_buffers/size", torch::tensor(static_cast<int64_t>(sum_buffers.size())));
-  for (size_t index = 0; index < sum_buffers.size(); ++index) {
-    output_archive.write(
-        "sum_buffers/" + c10::to_string(index), sum_buffers[index], /*is_buffer=*/true);
-  }
-  output_archive.write(
-      "step_buffers/size", torch::tensor(static_cast<int64_t>(step_buffers.size())));
-  for (size_t index = 0; index < step_buffers.size(); ++index) {
-    output_archive.write(
-        "step_buffers/" + c10::to_string(index), torch::tensor(step_buffers[index]), /*is_buffer=*/true);
-  }
-
-  output_archive.save_to(optim_tempfile_old_format.name);
-
-  torch::serialize::InputArchive input_archive;
-  input_archive.load_from(optim_tempfile_old_format.name);
-  torch::load(optim3_3, optim_tempfile_old_format.name);
-  if(!is_optimizer_state_equal<DerivedOptimizerParamState>(
-    optim3_2.param_groups()[0].params(), optim3_2.state(),
-    optim3_3.param_groups()[0].params(), optim3_3.state())) {
-    return false;
-  }
   return true;
 }
 
@@ -445,6 +407,54 @@ TEST(SerializeTest, Optim) {
 TEST(SerializeTest, Optim_Adagrad) {
   auto ret = test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
   ASSERT_TRUE(ret);
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto optim1 = torch::optim::Adagrad(
+      model1->parameters(), torch::optim::AdagradOptions(1e-1));
+
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+  step(optim1, model1);
+  auto optim1_2 = Adagrad(model1->parameters(), torch::optim::AdagradOptions(1e-1));
+
+  std::vector<torch::Tensor> sum_buffers; // fill up with optim1 sum_buffers
+  std::vector<int64_t> step_buffers; // fill up with optim1 state_buffers
+  const auto& params_ = optim1.param_groups()[0].params();
+  const auto& optim1_state = optim1.state();
+  for(size_t i=0; i<params_.size(); i++) {
+    auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+    const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
+    sum_buffers.push_back(curr_state_.sum());
+    step_buffers.push_back(curr_state_.step());
+  }
+  // write sum_buffers and step buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  output_archive.write(
+      "sum_buffers/size", torch::tensor(static_cast<int64_t>(sum_buffers.size())));
+  for (size_t index = 0; index < sum_buffers.size(); ++index) {
+    output_archive.write(
+        "sum_buffers/" + c10::to_string(index), sum_buffers[index], /*is_buffer=*/true);
+  }
+  output_archive.write(
+      "step_buffers/size", torch::tensor(static_cast<int64_t>(step_buffers.size())));
+  for (size_t index = 0; index < step_buffers.size(); ++index) {
+    output_archive.write(
+        "step_buffers/" + c10::to_string(index), torch::tensor(step_buffers[index]), /*is_buffer=*/true);
+  }
+  output_archive.save_to(optim_tempfile_old_format.name);
+  torch::serialize::InputArchive input_archive;
+  input_archive.load_from(optim_tempfile_old_format.name);
+  torch::load(optim1_2, optim_tempfile_old_format.name);
+
+  ASSERT_TRUE(is_optimizer_state_equal<AdagradParamState>(
+    optim1.param_groups()[0].params(), optim1.state(),
+    optim1_2.param_groups()[0].params(), optim1_2.state()));
 }
 
 TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {

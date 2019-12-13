@@ -16,12 +16,11 @@ AdagradOptions::AdagradOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
 bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
-  auto eq = (lhs.learning_rate() == rhs.learning_rate()) &&
-            (lhs.lr_decay() == rhs.lr_decay()) &&
-            (lhs.weight_decay() == rhs.weight_decay()) &&
-            (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
-            (lhs.eps() == rhs.eps());
-  return eq;
+  return (lhs.learning_rate() == rhs.learning_rate()) &&
+          (lhs.lr_decay() == rhs.lr_decay()) &&
+          (lhs.weight_decay() == rhs.weight_decay()) &&
+          (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
+          (lhs.eps() == rhs.eps());
 }
 
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
@@ -41,9 +40,8 @@ void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
 }
 
 bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs) {
-  auto eq = (lhs.step() == rhs.step()) &&
+  return (lhs.step() == rhs.step()) &&
             torch::equal(lhs.sum(), rhs.sum());
-  return eq;
 }
 
 void AdagradParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -131,22 +129,25 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  if(archive.keys().size() == 3){
-    serialize(*this, archive);
-  }
-  else {
-    std::vector<Tensor> sum_buffers;
-    std::vector<int64_t> step_buffers;
-    torch::optim::serialize(archive, "sum_buffers", sum_buffers);
-    torch::optim::serialize(archive, "step_buffers", step_buffers);
-    // since there were no param_groups before, assuming all tensors are now in one param_group
-    std::vector<Tensor> params = param_groups_[0].params();
-    for(size_t idx = 0; idx<params.size(); idx++) {
-      auto state = c10::guts::make_unique<AdagradParamState>();
-      state->step(step_buffers[idx]);
-      state->sum(sum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+  auto keys_ = archive.keys();
+  for(int i=0; i<keys_.size(); i++) {
+    if(keys_[i] == "pytorch_version") {
+      serialize(*this, archive);
+      return;
     }
+  }
+  // deserializing archives saved in old format (prior to version 1.5.0)
+  std::vector<Tensor> sum_buffers;
+  std::vector<int64_t> step_buffers;
+  torch::optim::serialize(archive, "sum_buffers", sum_buffers);
+  torch::optim::serialize(archive, "step_buffers", step_buffers);
+  // since there were no param_groups before, assuming all tensors are now in one param_group
+  std::vector<Tensor> params = param_groups_[0].params();
+  for(size_t idx = 0; idx<params.size(); idx++) {
+    auto state = c10::guts::make_unique<AdagradParamState>();
+    state->step(step_buffers[idx]);
+    state->sum(sum_buffers[idx]);
+    state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
   }
 }
 } // namespace optim
