@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/utils/future.h>
 
 #include <deque>
 #include <exception>
@@ -26,6 +27,8 @@ struct ReadyQueue;
 
 namespace torch { namespace autograd {
 
+using FutureVariableList = torch::utils::Future<variable_list>;
+
 void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
@@ -36,7 +39,6 @@ static constexpr int NO_DEVICE = -2;
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
-  std::exception_ptr exception_;
   // Indicates if an error occurred while executing any task.  When this is
   // true, it signals all threads to stop executing.
   std::atomic_bool has_error_;
@@ -45,12 +47,8 @@ struct GraphTask {
   bool keep_graph_;
   bool grad_mode_;
 
-  // To protect reads/writes to no_ready_, dependencies_ , captured_vars_ and
-  // exception_
+  // To protect reads/writes to no_ready_, dependencies_ and captured_vars_
   std::mutex mutex_;
-  // Notified when a task finishes executing.  Check outstanding_tasks_ to see
-  // if all tasks are done.
-  std::condition_variable not_done_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
@@ -96,12 +94,16 @@ struct GraphTask {
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
-  void set_exception(std::exception_ptr eptr, const std::shared_ptr<Node>& fn);
+  void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
   // an exception as soon as the autograd engine receives an exception.
   bool exit_on_error_;
+
+  // Future representing the completion of the graph task. Notified when all
+  // tasks are done.
+  std::shared_ptr<FutureVariableList> future_;
 
   GraphTask(
       bool keep_graph,
@@ -114,7 +116,8 @@ struct GraphTask {
         grad_mode_(grad_mode),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
-        exit_on_error_(exit_on_error) {}
+        exit_on_error_(exit_on_error),
+        future_(std::make_shared<FutureVariableList>()) {}
 };
 
 struct NodeTask {
@@ -165,7 +168,7 @@ struct TORCH_API Engine {
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual variable_list execute_with_graph_task(
+  virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
       std::shared_ptr<GraphTask> graph_task,
       std::shared_ptr<Node> graph_root);
 
@@ -213,6 +216,9 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
+  variable_list graph_task_exec_post_processing(
+      const std::shared_ptr<GraphTask>& graph_task);
+  void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;

@@ -69,7 +69,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-variable_list PythonEngine::execute_with_graph_task(
+std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
     std::shared_ptr<GraphTask> graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
