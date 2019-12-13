@@ -692,7 +692,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "setattr",
           [](Object& self, const std::string& name, py::object value) {
-            TypePtr type = self.type()->findAttribute(name);
+            TypePtr type = self.type()->getAttribute(name);
             auto ivalue = toIValue(std::move(value), type);
             self.setattr(name, ivalue);
           })
