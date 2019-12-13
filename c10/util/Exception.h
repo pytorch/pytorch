@@ -259,6 +259,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+
+// Debug only version of TORCH_CHECK
+#ifndef NDEBUG
+#define TORCH_DCHECK(...) TORCH_CHECK(__VA_ARGS__)
+#else
+// Optimized version - generates no code.
+#define TORCH_DCHECK(...) \
+  while (false)           \
+  TORCH_CHECK(__VA_ARGS__)
+#endif
+
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
