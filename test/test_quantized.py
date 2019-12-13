@@ -144,6 +144,33 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::clamp op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           min_val=st.floats(-1e6, 1e6, allow_nan=False),
+           max_val=st.floats(-1e6, 1e6, allow_nan=False))
+    def test_qclamp(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
+
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
