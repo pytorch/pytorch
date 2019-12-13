@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/utils/future.h>
 #include <torch/serialize.h>
 #include <vector>
 
@@ -125,6 +126,8 @@ createExceptionResponse(const Message& request, const std::exception& e);
 TORCH_API Message createExceptionResponse(
     const Message& request,
     const std::string& exceptionStr);
+
+typedef torch::utils::Future<Message> FutureMessage;
 
 } // namespace rpc
 } // namespace distributed
