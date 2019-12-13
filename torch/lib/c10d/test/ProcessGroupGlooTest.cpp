@@ -369,7 +369,7 @@ void testRecv(const std::string& path) {
 
 int main(int argc, char** argv) {
   if (!at::cuda::is_available()) {
-    LOG(INFO) << "Skipping test since it is not available on CUDA\n";
+    LOG(INFO) << "Skipping test since CUDA is not available.";
     return EXIT_SUCCESS;
   }
   {
