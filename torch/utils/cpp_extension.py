@@ -949,6 +949,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
     else:
         extra_ldflags.append('-L{}'.format(lib_path))
         extra_ldflags.append('-lc10')
+        if with_cuda:
+            extra_ldflags.append('-lc10_cuda')
+        extra_ldflags.append('-ltorch_cpu')
+        if with_cuda:
+            extra_ldflags.append('-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         extra_ldflags.append('-ltorch_python')
 
