@@ -16,7 +16,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
 
 namespace caffe2 {
@@ -185,7 +184,6 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef BUILD_NAMEDTENSOR
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
   optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
@@ -194,7 +192,6 @@ class CAFFE2_API Tensor {
   DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
-#endif
   int64_t ndimension() const {
     return dim();
   }
@@ -238,6 +235,7 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
+  C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
@@ -297,14 +295,12 @@ class CAFFE2_API Tensor {
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
 
-#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
   NamedTensorMeta* get_named_tensor_meta();
-#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.

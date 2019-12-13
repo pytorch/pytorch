@@ -9,7 +9,6 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #ifdef USE_STATIC_DISPATCH
@@ -84,7 +83,6 @@ inline bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -96,7 +94,6 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 inline bool Tensor::has_names() const {
   return impl::has_names(unsafeGetTensorImpl());
 }
-#endif
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();

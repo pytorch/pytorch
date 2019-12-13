@@ -211,6 +211,7 @@ Pointwise Ops
 .. autofunction:: exp
 .. autofunction:: expm1
 .. autofunction:: floor
+.. autofunction:: floor_divide
 .. autofunction:: fmod
 .. autofunction:: frac
 .. autofunction:: imag
@@ -220,7 +221,9 @@ Pointwise Ops
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_and
 .. autofunction:: logical_not
+.. autofunction:: logical_or
 .. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
@@ -237,6 +240,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
@@ -373,3 +377,4 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
+.. autofunction:: export_opnames

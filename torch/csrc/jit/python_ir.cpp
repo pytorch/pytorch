@@ -235,6 +235,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
              bool keep_initializers_as_inputs,
+             const std::map<std::string, int>& custom_opsets,
              bool add_node_names) {
             std::string graph;
             RawDataExportMap export_map;
@@ -247,13 +248,14 @@ void initPythonIRBindings(PyObject* module_) {
                 operator_export_type,
                 strip_doc_string,
                 keep_initializers_as_inputs,
+                custom_opsets,
                 add_node_names);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
               auto t = kv.second;
               size_t copy_bytes = t.element_size() * t.numel();
-              // TODO: this is an unecessary copy. In theory we can directly
+              // TODO: this is an unnecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.
               python_serialized_export_map[kv.first] =
@@ -270,6 +272,7 @@ void initPythonIRBindings(PyObject* module_) {
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("strip_doc_string") = true,
           py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"),
           py::arg("add_node_names") = true)
       .def(
           "_pretty_print_onnx",
@@ -280,6 +283,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer,
              bool keep_initializers_as_inputs,
+             const std::map<std::string, int>& custom_opsets,
              bool add_node_names) {
             return pretty_print_onnx(
                 g,
@@ -289,6 +293,7 @@ void initPythonIRBindings(PyObject* module_) {
                 operator_export_type,
                 google_printer,
                 keep_initializers_as_inputs,
+                custom_opsets,
                 add_node_names);
           },
           py::arg("initializers"),
@@ -298,6 +303,7 @@ void initPythonIRBindings(PyObject* module_) {
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("google_printer") = false,
           py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"),
           py::arg("add_node_names") = true)
       .def(
           "inputs",
@@ -698,6 +704,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
       .def_static("get", &StringType::get);
+  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
+      .def_static("get", &DeviceObjType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 

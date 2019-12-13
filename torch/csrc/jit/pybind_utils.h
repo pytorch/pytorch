@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -331,11 +330,9 @@ inline IValue createGenericDict(
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-#ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
-#endif
 }
 
 inline IValue toIValue(
@@ -542,6 +539,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
@@ -689,7 +687,7 @@ inline py::object toPyObject(IValue ivalue) {
 
     auto pyCu = get_python_cu();
     if (obj->name().find("__torch__.torch.classes") == 0) {
-      return py::cast(script::Object(ivalue.toObject()));
+      return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
