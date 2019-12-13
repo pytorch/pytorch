@@ -9,10 +9,9 @@ static void deleteInefficientStdFunctionContext(void* ptr) {
 at::DataPtr InefficientStdFunctionContext::makeDataPtr(
     void* ptr,
     const std::function<void(void*)>& deleter,
-    void* deleterContext,
     Device device) {
   return {ptr,
-          new InefficientStdFunctionContext({deleterContext, deleter}),
+          new InefficientStdFunctionContext({ptr, deleter}),
           &deleteInefficientStdFunctionContext,
           device};
 }
