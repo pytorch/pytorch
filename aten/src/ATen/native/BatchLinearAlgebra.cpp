@@ -1156,6 +1156,8 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
   return result;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t>
 static void symmetrize_single(scalar_t* self, int n, bool upper) {
   if (upper) {
@@ -1199,7 +1201,6 @@ static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t
     }
   }
 
-  
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     for (auto b = start; b < end; b++) {
       scalar_t* self_batch = &self_data[b * self_matrix_stride];

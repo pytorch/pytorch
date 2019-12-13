@@ -134,6 +134,11 @@ void magmaLuSolveBatched(
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
+template<class scalar_t>
+void magmaCholeskyInverse(
+    magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
+    magma_int_t ldda, magma_int_t* info);
+
 template<>
 void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
@@ -495,8 +500,24 @@ void magmaLuSolveBatched<float>(
     magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
     float** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
- info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
- AT_CUDA_CHECK(cudaGetLastError());
+  info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<double>(
+    magma_uplo_t uplo, magma_int_t n, double* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  magma_dpotri_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaCholeskyInverse<float>(
+    magma_uplo_t uplo, magma_int_t n, float* dA,
+    magma_int_t ldda, magma_int_t* info) {
+  magma_spotri_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 #endif
 
@@ -510,7 +531,7 @@ template <typename scalar_t>
 static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
@@ -601,7 +622,7 @@ template <typename scalar_t>
 static void apply_batched_inverse(Tensor& self, Tensor& self_inv, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
   auto self_mat_stride = matrixStride(self);
@@ -669,7 +690,7 @@ template <typename scalar_t>
 static void apply_single_inverse(Tensor& self, int64_t& info) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
@@ -715,7 +736,7 @@ template <typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
 #ifndef USE_MAGMA
 AT_ERROR("cholesky_solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
@@ -796,7 +817,7 @@ template <typename scalar_t>
 static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("cholesky: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
@@ -883,7 +904,7 @@ template <typename scalar_t>
 static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos, bool get_pivots) {
 #ifndef USE_MAGMA
 AT_ERROR("lu: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
   magma_int_t m = magma_int_cast(self.size(-2), "m");
@@ -1088,7 +1109,7 @@ template <typename scalar_t>
 static void apply_qr(Tensor& Q, Tensor& R, int64_t n_columns, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("qr: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto q_data = Q.data_ptr<scalar_t>();
   auto r_data = R.data_ptr<scalar_t>();
@@ -1189,7 +1210,7 @@ template <typename scalar_t>
 static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("symeig: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
   auto eigvals_data = eigvals.data_ptr<scalar_t>();
@@ -1278,7 +1299,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobchar, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("svd: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+         "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
@@ -1470,6 +1491,82 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
     apply_lu_solve<scalar_t>(self_working_copy, LU_data_working_copy, LU_pivots_working_copy, info);
   });
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
+  return self_working_copy;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+__global__
+static void symmetrize_kernel(scalar_t* self, const int64_t n,
+                              const int64_t matrix_stride,
+                              const int64_t numel, const bool upper) {
+  int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_idx >= numel) {
+    return;
+  }
+
+  int64_t col = linear_idx % n;  // Get column index
+  linear_idx /= n;
+  int64_t row = linear_idx % n;  // Get row index
+  linear_idx /= n;
+
+  // If upper, then we need to copy the upper triangle to the lower triangle
+  // i.e., when row < col and upper, then mask is true
+  // If lower, then we need to copy the lower triangle to the upper triangle
+  // i.e., when row > col and not upper, then mask is true
+  bool mask = upper ? row < col : row > col;
+  if (mask) {
+    self[matrix_stride * linear_idx + n * row + col] = self[matrix_stride * linear_idx + row + col * n];
+  }
+}
+
+template <typename scalar_t>
+static void apply_cholesky_inverse(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("cholesky_inverse: MAGMA library not found in "
+         "compilation. Please rebuild with MAGMA.");
+#else
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+
+  auto self_data = self.data_ptr<scalar_t>();
+  auto batch_size = batchCount(self);
+  auto self_matrix_stride = matrixStride(self);
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    magmaCholeskyInverse<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+
+  int64_t numel = self.numel();
+  dim3 dim_block = cuda::getApplyBlock();
+  dim3 dim_grid((numel + dim_block.x - 1) / dim_block.x);
+  symmetrize_kernel<scalar_t>
+    <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+      self_data, n, self_matrix_stride, numel, upper);
+  AT_CUDA_CHECK(cudaGetLastError());
+#endif
+}
+
+Tensor _cholesky_inverse_helper_cuda(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_inverse_cuda", [&]{
+    apply_cholesky_inverse<scalar_t>(self_working_copy, upper, infos);
+  });
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_inverse_cuda");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_inverse_cuda");
+  }
   return self_working_copy;
 }
 
