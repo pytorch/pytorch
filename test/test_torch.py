@@ -12592,7 +12592,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.tensor([0, 1, 1, 1, 2, 2, 3], dtype=torch.long, device=device), bool_inverse)
             self.assertEqual(torch.tensor([1, 3, 2, 1], dtype=torch.long, device=device), bool_counts)
         else:
-            # test consecutive version
             x = torch.tensor([1, 2, 2, 2, 5, 5, 2, 2, 3], dtype=dtype, device=device)
             expected_unique = torch.tensor([1, 2, 5, 2, 3], dtype=dtype, device=device)
             expected_inverse = torch.tensor([0, 1, 1, 1, 2, 2, 3, 3, 4], device=device)
@@ -12600,7 +12599,6 @@ class TestTorchDeviceType(TestCase):
 
             for return_inverse in [True, False]:
                 for return_counts in [True, False]:
-                    # sorted unique test
                     ret = ensure_tuple(torch.unique_consecutive(x, return_inverse=return_inverse, return_counts=return_counts))
                     self.assertEqual(len(ret), 1 + int(return_inverse) + int(return_counts))
                     self.assertEqual(expected_unique, ret[0])
@@ -12609,6 +12607,13 @@ class TestTorchDeviceType(TestCase):
                     if return_counts:
                         count_index = 1 + int(return_inverse)
                         self.assertEqual(expected_counts, ret[count_index])
+
+            # Tests per-element unique on a higher rank tensor.
+            y = x.view(3, 3)
+            y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True)
+            self.assertEqual(expected_unique, y_unique)
+            self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+            self.assertEqual(expected_counts, y_counts)
 
         # test scalar
         x = torch.tensor(0, dtype=dtype, device=device)
