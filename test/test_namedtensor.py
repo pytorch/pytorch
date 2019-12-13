@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -705,6 +702,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -730,6 +730,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
@@ -738,26 +739,27 @@ class TestNamedTensor(TestCase):
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
-    def test_logical_xor(self):
+    def test_logical_ops(self):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
             return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
-        self._test_name_inference(
-            torch.logical_xor,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+        for op in ('logical_xor', 'logical_and', 'logical_or'):
+            self._test_name_inference(
+                getattr(torch, op),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            Tensor.logical_xor_,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                getattr(Tensor, op + '_'),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            lambda out, x, y: torch.logical_xor(x, y, out=out),
-            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                lambda out, x, y: getattr(torch, op)(x, y, out=out),
+                (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
@@ -1943,11 +1945,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

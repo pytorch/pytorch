@@ -22,9 +22,10 @@ from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, record_function, emit_nvtx)
+                                     FunctionEvent, FunctionEventAvg,
+                                     record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
@@ -2571,6 +2572,23 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_function_event_avg(self):
+        avg = FunctionEventAvg()
+        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(avg)
+        self.assertEqual(avg.key, "foo")
+
+        # aggregate stats
+        self.assertEqual(avg.count, 4)
+        self.assertEqual(avg.cpu_time_total, 30)
+        self.assertEqual(avg.self_cpu_time_total, 30)
+        self.assertEqual(avg.cuda_time_total, 0)
+
+        # average stats
+        self.assertEqual(avg.cpu_time, 7.5)
+        self.assertEqual(avg.cuda_time_total, 0)
+
     def test_profiler_shapes(self):
         print("")
         layer1 = torch.nn.Linear(20, 30)
@@ -2692,6 +2710,15 @@ class TestAutograd(TestCase):
             2,
         )
 
+        # We can also use record_function to decorate arbitrary function
+        @record_function('my_func')
+        def f(x, y):
+            return x + y
+
+        with profile() as p:
+            f(1, 2)
+
+        self.assertTrue('my_func' in str(p))
 
     def test_dir(self):
         x = torch.randn(10, 10)
@@ -3411,24 +3438,26 @@ def add_test(
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,))[0][0]
+                self_variable = create_input((self_size,), device=device)[0][0]
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs, device=device)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 if not exclude_tensor_method(name, test_name):
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                     if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
-                        output_tensor = torch.DoubleTensor((output_tensor,))
+                        # TODO: I'm not sure why we insert an outer dimension
+                        # here, seems a bit strange
+                        output_tensor = torch.tensor((output_tensor, ), dtype=torch.float, device=device)
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
@@ -3525,10 +3554,8 @@ def add_test(
         for skip in skipTestIf:
             do_test = skip(do_test)
 
-        setattr(TestAutograd, test_name, do_test)
+        setattr(TestAutogradDeviceType, test_name, do_test)
 
-for test in method_tests():
-    add_test(*test)
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -4014,7 +4041,18 @@ class TestAutogradDeviceType(TestCase):
         out.sum().backward()
 
 
-instantiate_device_type_tests(TestAutogradDeviceType, globals())
+for test in method_tests():
+    add_test(*test)
+
+
+# e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
+instantiate_device_type_tests(
+    TestAutogradDeviceType,
+    globals(),
+    # Exclude ROCM for now, there are a lot of failures.  See
+    # https://github.com/pytorch/pytorch/issues/30845
+    except_for='cuda' if TEST_WITH_ROCM else None
+)
 
 if __name__ == '__main__':
     run_tests()
