@@ -8,21 +8,26 @@
 
 namespace nnc {
 
-class LLVMCodegen : public IRVisitor {
+class LLVMCodeGen : public IRVisitor {
  private:
   llvm::LLVMContext context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<PytorchLLVMJIT> jit_;
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
-  
+  llvm::Function *fn_;
+  llvm::BasicBlock *bb_;
+  llvm::Value *value_;
+  llvm::Type *int32Ty_;
+
  public:
-  LLVMCodegen();
+  LLVMCodeGen();
   void visit(const Add *v) override;
   void visit(const Sub *v) override;
   void visit(const Mul *v) override;
   void visit(const Div *v) override;
   void visit(const IntImm *v) override;
   void visit(const FloatImm *v) override;
+  int value();
 };
 
 } // namespace nnc
