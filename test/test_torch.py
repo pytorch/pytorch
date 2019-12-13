@@ -12501,7 +12501,6 @@ class TestTorchDeviceType(TestCase):
         expected_unique = torch.tensor([], dtype=dtype, device=device)
         expected_inverse = torch.empty((0, 0, 3), dtype=torch.long, device=device)
         expected_counts = torch.tensor([], dtype=torch.long, device=device)
-        print(unique, expected_unique)
         self.assertEqual(unique, expected_unique)
         self.assertEqual(inverse, expected_inverse)
         self.assertEqual(counts, expected_counts)
