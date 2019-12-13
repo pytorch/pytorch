@@ -5,6 +5,7 @@ from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
+import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import expand
@@ -482,14 +483,16 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
                             blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
 
     # Apply dilation on kernel and find its indices along dim d
-    kernel_grid = g.op("Range",
-                       g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
-                       g.op("Constant", value_t=torch.tensor(kernel_size_d * dilation_d)),
-                       g.op("Constant", value_t=torch.tensor(dilation_d)))
+    # kernel_grid = g.op("Range",
+    #                    g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
+    #                    g.op("Constant", value_t=torch.tensor(kernel_size_d * dilation_d)),
+    #                    g.op("Constant", value_t=torch.tensor(dilation_d)))
+    kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
+    kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
-    blocks_d_indices = g.op('Reshape', blocks_d_indices, g.op('Constant', value_t=torch.tensor([1, -1])))
+    blocks_d_indices = g.op('Unsqueeze', blocks_d_indices, axes_i=[0])  # Reshape to [1, -1]
     kernel_mask = g.op('Reshape', kernel_grid, g.op('Constant', value_t=torch.tensor([-1, 1])))
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
 
@@ -535,8 +538,30 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     output_shape = _get_im2col_output_shape(g, input, kernel_h, kernel_w)
     padded_input = _get_im2col_padded_input(g, input, padding_h, padding_w)
 
+    # For a 4D matrix of size (1, 1, 3, 3) as below with kernel_size=2, stride=1, and dilation=1
+    # [[[[1., 2., 3.,],
+    #    [4., 5., 6.,],
+    #    [7., 8., 9.,]]]]
+    # First gather indices along rows (dim=2) with blocks_row_indices = [[0,1], [1,2]] to get:
+    # [[[[[1., 2., 3.],
+    #     [4., 5., 6.]],
+    #    [[4., 5., 6.],
+    #     [7., 8., 9.]]]]]
+    # And then gather along cols (dim=4) with blocks_row_indices = [[0,1], [1,2]] to get:
+    # [[[[[[1., 2.],
+    #      [4., 5.]],
+    #     [[2., 3.],
+    #      [5., 6]]],
+    #    [[[4., 5.],
+    #      [7., 8.]],
+    #     [[5., 6.],
+    #      [8., 9.]]]]]]
+    # Transpose dims 3 (depth) and 4 (rows), and then reshape to output shape (1, 1, 4, 4) to get:
+    #  [[[1., 2., 4., 5.],
+    #    [2., 3., 5., 6.],
+    #    [4., 5., 7., 8.],
+    #    [5., 6., 8., 9.]]]
     output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
     output = g.op("Gather", output, blocks_col_indices, axis_i=4)
     output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
-
     return g.op("Reshape", output, output_shape)

@@ -2138,7 +2138,9 @@ class TestONNXRuntime(unittest.TestCase):
     def test_im2col(self):
         class Unfold(torch.nn.Module):
             def forward(self, input):
-                return torch.nn.functional.unfold(input, kernel_size=(10, 15), dilation=(2, 3), padding=5, stride=3)
+                return torch.nn.functional.unfold(input, kernel_size=(10, 15), dilation=2, padding=5, stride=3), \
+                       torch.nn.functional.unfold(input, kernel_size=(2, 2), dilation=1, padding=0, stride=3), \
+                       torch.nn.functional.unfold(input, kernel_size=(1, 1), dilation=5, padding=2, stride=3),
 
         x = torch.rand(1, 1, 200, 100)
         self.run_test(Unfold(), x)
