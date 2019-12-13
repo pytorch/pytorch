@@ -99,16 +99,7 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 # nodes. This helper allows timeout_seconds for those RPCs to be completed, and
 # ensures that all the contexts have been cleaned up in that timeframe.any
 def _all_contexts_cleaned_up(timeout_seconds=10):
-    # This is for tests using `dist.barrier`.
-    # For `RpcAgent` other than `ProcessGroupAgent`,
-    # no `_default_pg` is initialized.
-    if not dist.is_initialized():
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+    assert dist.is_initialized(), "ProcessGroup must be initialized."
     # Ensure all peers have finished mutating the
     # `known_context_ids` set.
     dist.barrier()
@@ -712,6 +703,8 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_context_cleanup_tensor_with_grad(self):
+        self._initialize_pg()
+
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -728,6 +721,8 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_context_cleanup_tensor_no_grad(self):
+        self._initialize_pg()
+
         # test that in dist autograd, in the case that tensors communicated over RPC do
         # NOT require grad, we still cleanup the dist autograd contexts created
         # on other nodes. This is because the autograd context is still
@@ -748,6 +743,8 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_context_cleanup_no_tensors(self):
+        self._initialize_pg()
+
         # test that in dist autograd, in the case that RPCs do not have tensors
         # at all, we still cleanup the dist autograd contexts created
         # on other nodes. This is because the autograd context is still
