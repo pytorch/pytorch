@@ -243,7 +243,9 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       // at::reshape does not support shape dim value to be zero
       assert(shape_a[i] >= -1);
       if (shape_a[i] == 0){
-        assert(i < inputTensorValues[0].sizes().size());  // dim with value zero < the dimension size input tensor
+        if (i >= inputTensorValues[0].sizes().size()){
+          throw std::runtime_error("Dimension with value 0 exceeds the input size dimensions.");
+        }
         shape[i] = inputTensorValues[0].sizes()[i];
       }
       else {

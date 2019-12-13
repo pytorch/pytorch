@@ -2344,7 +2344,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
-
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_pad_types(self):
