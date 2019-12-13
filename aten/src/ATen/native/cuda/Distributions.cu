@@ -231,7 +231,7 @@ void binomial_cuda_kernel(
         };
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform)
+        auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);
         ret_val = static_cast<scalar_t>(sample);
       });
 }

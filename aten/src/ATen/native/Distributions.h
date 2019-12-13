@@ -159,7 +159,7 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSample
     if (geom_sum > count) {
       break;
     }
-    ++num_geom;
+    num_geom = num_geom + 1;
   }
   return num_geom;
 }
