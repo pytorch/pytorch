@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <cmath>
+#include <cfenv>
 
 /* Fake quantize a tensor, common block for per-channel & per-tensor fake quant
 Args:
@@ -50,6 +51,7 @@ void fake_quantize_grad_slice_cuda(
   std::cout << "cuda zero_point = " << zero_point << std::endl;
   std::cout << "cuda quant_min = " << quant_min << std::endl;
   std::cout << "cuda quant_max = " << quant_max << std::endl;
+  std::cout << "cuda round mode = " << std::fegetround() << std::endl;
   at::cuda::CUDA_tensor_apply3<float, float, float>(
       output_grad,
       input,
