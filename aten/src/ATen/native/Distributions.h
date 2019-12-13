@@ -4,7 +4,7 @@
 #include <c10/macros/Macros.h>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
-#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_exp c10::cuda::compat::exp
 #define compat_floor c10::cuda::compat::floor
@@ -12,6 +12,14 @@
 #define compat_pow c10::cuda::compat::pow
 #define compat_sqrt c10::cuda::compat::sqrt
 #define compat_tan c10::cuda::compat::tan
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#define compat_exp c10::hip::compat::exp
+#define compat_floor c10::hip::compat::floor
+#define compat_log c10::hip::compat::log
+#define compat_pow c10::hip::compat::pow
+#define compat_sqrt c10::hip::compat::sqrt
+#define compat_tan c10::hip::compat::tan
 #else
 #define compat_exp std::exp
 #define compat_floor std::floor
