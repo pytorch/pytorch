@@ -96,24 +96,16 @@ class ProcessGroupAgent : public RpcAgent {
   // to track num_sends, recvs, average size of messages, etc.
   struct AverageMetricsTracker {
     const std::string key_;
-    float currentAverage_;
-    int currentCount_;
+    uint64_t currentSum_;
+    uint64_t currentCount_;
 
     AverageMetricsTracker(
         const std::string key,
-        float currentAverage = 0,
-        int currentCount = 0)
-        : key_(key),
-          currentAverage_(currentAverage),
-          currentCount_(currentCount) {}
+        double currentSum = 0,
+        uint64_t currentCount = 0);
 
-    float computeAverage(float dataPoint) {
-      ++currentCount_;
-      auto newAvg = currentAverage_ +
-          (dataPoint - currentAverage_) / (float)currentCount_;
-      currentAverage_ = newAvg;
-      return currentAverage_;
-    }
+    void addData(uint64_t dataPoint);
+    double computeAverage();
   };
 
   // The FutureInfo struct stores a shared_ptr to the future, as well as

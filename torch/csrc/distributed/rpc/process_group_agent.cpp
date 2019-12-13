@@ -26,6 +26,23 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
   return counters_;
 }
 
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+ProcessGroupAgent::AverageMetricsTracker::AverageMetricsTracker(
+    const std::string key,
+    double currentSum,
+    uint64_t currentCount)
+    : key_(key), currentSum_(currentSum), currentCount_(currentCount) {}
+
+void ProcessGroupAgent::AverageMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
+  return currentSum_ / (double)currentCount_;
+}
+
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
 const ProcessGroupAgent::steady_clock_time_point
@@ -575,7 +592,7 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
   for (const auto& metricInfo : metricsMap_) {
     metrics[metricInfo.first] =
-        c10::to_string(metricInfo.second->currentAverage_);
+        c10::to_string(metricInfo.second->computeAverage());
   }
   return metrics;
 }
@@ -584,13 +601,17 @@ void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   auto gilMetrics = metricsMap_.find(kGilAverageWaitTime);
   if (gilMetrics == metricsMap_.end()) {
-    metricsMap_.insert({kGilAverageWaitTime,
-                        std::move(c10::guts::make_unique<AverageMetricsTracker>(
-                            kGilAverageWaitTime))});
-  } else {
-    auto& metricsPtr = gilMetrics->second;
-    metricsPtr->computeAverage(gilWaitTime.count());
+    gilMetrics = metricsMap_
+                     .emplace(
+                         std::piecewise_construct,
+                         std::forward_as_tuple(kGilAverageWaitTime),
+                         std::forward_as_tuple(std::move(
+                             c10::guts::make_unique<AverageMetricsTracker>(
+                                 kGilAverageWaitTime))))
+                     .first;
   }
+  auto& metricsPtr = gilMetrics->second;
+  metricsPtr->addData(gilWaitTime.count());
 }
 
 } // namespace rpc
