@@ -9791,6 +9791,12 @@ class TestTorchDeviceType(TestCase):
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
 
+        # test bool tensor
+        t = torch.zeros(6, dtype=torch.bool, device=device)
+        t[0] = True
+        t[3] = True
+        self.assertEqual(torch.tensor([False, True, False, False, True, False]), t.roll(1, 0))
+
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))
