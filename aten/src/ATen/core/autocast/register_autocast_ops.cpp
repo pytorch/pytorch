@@ -39,8 +39,9 @@ void clear_cache() {
 enum class CastPolicy : uint8_t {
   fp16 = 0,
   fp32,
-  promote,
-  passthrough
+  promote, // Run in the widest dtype among several args.
+  neutral, // Run in the dtype of the first argument.
+  passthrough // Run without casting any args (workaround for some ops the boxed fallback can't handle)
 };
 
 enum class Behavior : uint8_t {
@@ -227,6 +228,12 @@ The tools we have to reduce manual special casing are templates,
 macros, and codegen.  Based on the observed commonalities among
 in-place ops and the observed commonalities among ops with
 user-supplied out, I'll try templates for now.
+
+NB:  For in-place ops and ops with a user-supplied out, functions with multiple
+arguments that need type standardization are called "neutral" instead of "promote."
+They cast other arguments to the type of the in-place or out buffer before running,
+because they must eventually write to that buffer anyway.  This mimics Apex's
+current strategy.
 **********************************************************************************/
 
 // In-place ops. Basically, I try to imitate what VariableType*.cpp is doing:
@@ -276,6 +283,7 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, FuncType, F, Ret, guts
 // 1.b. For ops that don't have an at:: exposure, VariableType's functions forward to a Tensor method,
 // eg self_.addmm_.  For these, I need to create a macro that defines a specialization, so I can request self.FUNC.
 // Pure macros or codegen are looking better and better...
+// fp16
 #define SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
 struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
@@ -297,6 +305,7 @@ struct WrapFunction_<CastPolicy::fp16, Behavior::inplace, decltype(OVERLOAD), OV
   } \
 };
 
+// fp32
 #define SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
 struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
@@ -316,21 +325,14 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(OVERLOAD), OV
   } \
 };
 
-#define SPECIALIZE_PROMOTE_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
+// neutral
+#define SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
-struct WrapFunction_<CastPolicy::promote, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
+struct WrapFunction_<CastPolicy::neutral, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
   template<typename... RemainingArgs> static \
   Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
-    auto run_as_type = promote_type(self.scalar_type(), args...); \
-    if (self.scalar_type() == run_as_type) { \
-      self.METHOD(cached_cast(run_as_type, args)...); \
-    } else { \
-      auto fp16_self_lvalue = cached_cast(run_as_type, self); \
-      fp16_self_lvalue.METHOD(cached_cast(run_as_type, args)...); \
-      self.copy_(fp16_self_lvalue); \
-    } \
-    return self; \
+    return self.METHOD(cached_cast(self.scalar_type(), args)...); \
   } \
   static Tensor & call(Args... args) { \
     return peel_first_arg_and_run(args...); \
@@ -354,12 +356,13 @@ Tensor & pow_scalar_(Tensor & self, Scalar exponent) { return self; }
 SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_scalar_)
 Tensor & pow_tensor_(Tensor & self, const Tensor & exponent) { return self; }
 SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_tensor_)
-// promote ops
+// neutral ops
 Tensor & addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) { return self; }
-SPECIALIZE_PROMOTE_INPLACE_NO_AT_EXPOSURE(addcdiv_, addcdiv_) \
+SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(addcdiv_, addcdiv_) \
 
-// 2.a. Functions with out=... arguments
+// 2.a. Specializations for functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
+// fp16
 template<class FuncType, FuncType* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   template<typename... RemainingArgs>
@@ -380,6 +383,7 @@ struct WrapFunction_<CastPolicy::fp16, Behavior::user_supplied_out, FuncType, F,
   }
 };
 
+// fp32
 template<class FuncType, FuncType* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   template<typename... RemainingArgs>
@@ -392,6 +396,19 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::user_supplied_out, FuncType, F,
       AT_ASSERT(false, "If you supply an 'out=my_output' argument to an op that autocasts to torch.float32, my_output must be torch.float32.  (Other arguments may be any type.)");
     }
     return out;
+  }
+  static Tensor & call(Args... args) {
+    return peel_first_arg_and_run(args...);
+  }
+};
+
+// neutral
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::neutral, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  template<typename... RemainingArgs>
+  static Tensor & peel_first_arg_and_run(Tensor & out, RemainingArgs... args) {
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    return (*F)(out, cached_cast(out.scalar_type(), args)...);
   }
   static Tensor & call(Args... args) {
     return peel_first_arg_and_run(args...);
@@ -512,7 +529,7 @@ Explicit registration
 Explicit registration for well-behaved ops
 *****************************************/
 auto register_well_behaved = torch::RegisterOperators()
-  // CastPolicy::fp16
+  // fp16
   // TODO (to consider): should the slow_conv*d from python_nn_functions_dispatch.h go here?
   // They use unfolding + admm (which may use cublas) so it's possible they benefit from Tensor Cores,
   // although if that code path is being used, it's probably unsalvageably slow regardless.
@@ -535,7 +552,7 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::matmul, "aten::matmul(Tensor self, Tensor other) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16, wellbehaved)
   KERNEL(at::mm, "aten::mm(Tensor self, Tensor mat2) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16, wellbehaved)
   KERNEL(at::mv, "aten::mv(Tensor self, Tensor vec) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16, wellbehaved)
-  // CastPolicy::fp32
+  // fp32
   KERNEL(at::acos, "aten::acos(Tensor self) -> Tensor", Tensor (const Tensor &), fp32, wellbehaved)
   KERNEL(at::asin, "aten::asin(Tensor self) -> Tensor", Tensor (const Tensor &), fp32, wellbehaved)
   KERNEL(at::cosh, "aten::cosh(Tensor self) -> Tensor", Tensor (const Tensor &), fp32, wellbehaved)
@@ -553,9 +570,9 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::pow, "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor", Tensor (const Tensor &, Scalar), fp32, wellbehaved)
   KERNEL(at::pow, "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor", Tensor (const Tensor &, const Tensor &), fp32, wellbehaved)
   KERNEL(at::pow, "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor", Tensor (Scalar, const Tensor &), fp32, wellbehaved)
-  // CastPolicy::promote
+  // promote
   KERNEL(at::addcdiv, "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote, wellbehaved)
-  // CastPolicy::passthrough
+  // passthrough
   KERNEL_UNBOXED_ONLY(at::detach_, "aten::detach_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::zero_, "aten::zero_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
   ;
@@ -585,7 +602,7 @@ auto register_inplace = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::rsqrt_, "aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::sinh_, "aten::sinh_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::tan_, "aten::tan_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
-  // promote ops
+  // neutral ops
   ;
 
 /**************************************************
@@ -599,8 +616,8 @@ auto register_inplace_method_only = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::autocast::erfinv_, "aten::erfinv_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::pow_scalar_, "aten::pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)", Tensor & (Tensor &, Scalar), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::pow_tensor_, "aten::pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), fp32, inplace)
-  // promote ops
-  KERNEL_UNBOXED_ONLY(at::autocast::addcdiv_, "aten::addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), promote, inplace)
+  // neutral ops
+  KERNEL_UNBOXED_ONLY(at::autocast::addcdiv_, "aten::addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), neutral, inplace)
   ;
 
 /******************************************************************************************************
@@ -632,7 +649,8 @@ auto register_user_supplied_out = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, Scalar), fp32, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), fp32, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, Scalar, const Tensor &), fp32, user_supplied_out)
-  // promote ops
+  // neutral ops
+  KERNEL_UNBOXED_ONLY(at::addcdiv_out, "aten::addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
   ;
 
 }

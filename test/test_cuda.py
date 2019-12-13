@@ -2163,6 +2163,13 @@ t2.start()
             for op, args in self.amp_lists.torch_fp32_user_supplied_out:
                 self._run_autocast_user_supplied_out(op, args, torch.float32)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_torch_neutral_user_supplied_out(self):
+        with torch.cuda.amp.autocast():
+            for op, args in self.amp_lists.torch_neutral_user_supplied_out:
+                self._run_autocast_user_supplied_out(op, args, torch.float32)
+
     def _run_autocast_inplace(self, op, args, run_as_type):
         output = output_method = None
         # Make sure the torch.* and Tensor.* variants, if present, have the same numerics.
@@ -2204,13 +2211,6 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_torch_need_autocast_promote_inplace(self):
-        with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.torch_need_autocast_promote_inplace:
-                self._run_autocast_inplace(op, args, torch.float32)
-
-    @skipIfRocm
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_amp_tensor_only_fp16_inplace(self):
         with torch.cuda.amp.autocast():
             for op, args in self.amp_lists.tensor_only_fp16_inplace:
@@ -2221,6 +2221,13 @@ t2.start()
     def test_amp_tensor_only_fp32_inplace(self):
         with torch.cuda.amp.autocast():
             for op, args in self.amp_lists.tensor_only_fp32_inplace:
+                self._run_autocast_inplace(op, args, torch.float32)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_amp_tensor_only_neutral_inplace(self):
+        with torch.cuda.amp.autocast():
+            for op, args in self.amp_lists.tensor_only_neutral_inplace:
                 self._run_autocast_inplace(op, args, torch.float32)
 
 
