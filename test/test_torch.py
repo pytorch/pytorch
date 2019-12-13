@@ -5282,7 +5282,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             tensor[0] = np_val
             self.assertEqual(tensor[0], np_val)
 
-            # Original reported issue, np integral type parses to the correct 
+            # Original reported issue, np integral type parses to the correct
             # PyTorch integral type when passed for a `Scalar` parameter in
             # arithmetic operations:
             t = torch.from_numpy(np_arr)
@@ -12348,6 +12348,16 @@ class TestTorchDeviceType(TestCase):
         nhwc = x.contiguous(memory_format=torch.channels_last)
         y = nhwc.permute(0, 1, 3, 2).permute(0, 1, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
+
+    def test_memory_format_to_operator(self, device):
+        x = torch.randn(4, 3, 8, 8, device=device).contiguous(memory_format=torch.channels_last)
+        z = x.to(device=device)
+        self.assertTrue(z.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(x.data_ptr(), z.data_ptr())
+        z = x.to(memory_format=torch.contiguous_format)
+        self.assertTrue(z.is_contiguous(memory_format=torch.contiguous_format))
+        z = x.to(memory_format=torch.channels_last)
+        self.assertEqual(x.data_ptr(), z.data_ptr())
 
     def test_resize_as_preserves_strides(self, device):
         x = torch.empty(2, 3).t()
