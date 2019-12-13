@@ -530,10 +530,6 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
                             blocks_d, g.op("Constant", value_t=torch.tensor(stride_d)))
 
     # Apply dilation on kernel and find its indices along dim d
-    # kernel_grid = g.op("Range",
-    #                    g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
-    #                    g.op("Constant", value_t=torch.tensor(kernel_size_d * dilation_d)),
-    #                    g.op("Constant", value_t=torch.tensor(dilation_d)))
     kernel_grid = numpy.arange(0, kernel_size_d * dilation_d, dilation_d)
     kernel_grid = g.op("Constant", value_t=torch.tensor([kernel_grid]))
 
