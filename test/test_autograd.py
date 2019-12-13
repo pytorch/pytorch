@@ -3339,7 +3339,7 @@ for shape in [(1,), ()]:
         # and not silent. The TODOs below mark the places with unexpected behavior.
         # Note that any change in these test will be BC-breaking and should be done carefully.
 
-        # This test checks the behavior that sample codegen functions (view_as and unbind)
+        # This test checks the behavior of two codegen functions (view_as and unbind)
         # with respect to view tracking and inplace operation on the output.
 
         def run_test(grad_mode, requires_grad, is_view, should_raise_tuple):
@@ -3355,6 +3355,7 @@ for shape in [(1,), ()]:
                     return inp.unbind()
 
             def maybe_check_raise(fn, should_raise):
+                self.assertTrue(should_raise is None or isinstance(should_raise, str))
                 if should_raise is not None:
                     with self.assertRaisesRegex(RuntimeError, should_raise):
                         fn()
@@ -3385,12 +3386,11 @@ for shape in [(1,), ()]:
                  should_raise_tuple=(None, None, None))
         # TODO: Second should_raise should not be None below
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "INTERNAL ASSERT FAILED"))
+                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
+        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
-                 should_raise_tuple=("leaf Variable that requires grad",
-                                     "leaf Variable that requires grad",
-                                     "leaf Variable that requires grad"))
+                 should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
