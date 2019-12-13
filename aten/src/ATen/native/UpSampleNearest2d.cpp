@@ -15,11 +15,9 @@ static void upsample_nearest2d_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels,
-    double scales_1,
-    double scales_2) {
-  const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
-  const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+    int64_t channels) {
+  const float height_scale = (float)input_height / (float)output_height;
+  const float width_scale = (float)input_width / (float)output_width;
 
   channels = channels * nbatch;
 
@@ -72,12 +70,9 @@ static void upsample_nearest2d_backward_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels,
-    double scales_1,
-    double scales_2) {
-
-  const float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
-  const float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
+    int64_t channels) {
+  const float height_scale = (float)input_height / (float)output_height;
+  const float width_scale = (float)input_width / (float)output_width;
 
   channels = channels * nbatch;
 
@@ -123,9 +118,7 @@ static void upsample_nearest2d_backward_out_frame(
 static void upsample_nearest2d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size,
-    double scales_1,
-    double scales_2) {
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -168,9 +161,7 @@ static void upsample_nearest2d_out_cpu_template(
         output_height,
         output_width,
         nbatch,
-        channels,
-        scales_1,
-        scales_2);
+        channels);
   });
 }
 
@@ -178,9 +169,7 @@ static void upsample_nearest2d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    IntArrayRef input_size,
-    double scales_1,
-    double scales_2) {
+    IntArrayRef input_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -227,9 +216,7 @@ static void upsample_nearest2d_backward_out_cpu_template(
             output_height,
             output_width,
             nbatch,
-            channels,
-            scales_1,
-            scales_2);
+            channels);
       });
 }
 } // namespace
@@ -237,16 +224,14 @@ static void upsample_nearest2d_backward_out_cpu_template(
 Tensor& upsample_nearest2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size,
-    double scales_1,
-    double scales_2) {
-  upsample_nearest2d_out_cpu_template(output, input, output_size, scales_1, scales_2);
+    IntArrayRef output_size) {
+  upsample_nearest2d_out_cpu_template(output, input, output_size);
   return output;
 }
 
-Tensor upsample_nearest2d_cpu(const Tensor& input, IntArrayRef output_size, double scales_1, double scales_2) {
+Tensor upsample_nearest2d_cpu(const Tensor& input, IntArrayRef output_size) {
   auto output = at::empty({0}, input.options());
-  upsample_nearest2d_out_cpu_template(output, input, output_size, scales_1, scales_2);
+  upsample_nearest2d_out_cpu_template(output, input, output_size);
   return output;
 }
 
@@ -254,23 +239,19 @@ Tensor& upsample_nearest2d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size,
-    double scales_1,
-    double scales_2) {
+    IntArrayRef input_size) {
   upsample_nearest2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, scales_1, scales_2);
+      grad_input, grad_output, output_size, input_size);
   return grad_input;
 }
 
 Tensor upsample_nearest2d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size,
-    double scales_1,
-    double scales_2) {
+    IntArrayRef input_size) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_nearest2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, scales_1, scales_2);
+      grad_input, grad_output, output_size, input_size);
   return grad_input;
 }
 
