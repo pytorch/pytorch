@@ -16,7 +16,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
 
 namespace caffe2 {
