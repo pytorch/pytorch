@@ -114,7 +114,6 @@ C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], 
   return result;
 }
 
-
 /* the functions stirling_approx_tail, binomial_inversion, and btrs are adapted
  * from TensorFlow's random_binomial_op.cc implementation. That code is under 
  * copyright: 2019 The TensorFlow Authors.
@@ -122,7 +121,6 @@ C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], 
  * It was released under the Apache License, Version 2.0 (the "License"), available at:
  *    http://www.apache.org/licenses/LICENSE-2.0
  */
-
 
 template<typename scalar_t>
 C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
@@ -165,7 +163,6 @@ C10_DEVICE scalar_t binomial_inversion(scalar_t count, scalar_t prob, BaseSample
   }
   return num_geom;
 }
-
 
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
 C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
@@ -220,7 +217,6 @@ C10_DEVICE scalar_t btrs(scalar_t count, scalar_t prob, BaseSampler<accscalar_t,
   }
 }
 
-
 template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t>
 C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform) {
   if (count <= 0.0 || prob <= 0.0) {
@@ -249,7 +245,6 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
     return static_cast<scalar_t>(NAN);
   }
 }
-
 
 /*
  * The following function comes with the following copyright notice.

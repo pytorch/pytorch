@@ -229,7 +229,6 @@ Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, Generator *gen) 
     );
     });
   return ret;
-
 }
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
