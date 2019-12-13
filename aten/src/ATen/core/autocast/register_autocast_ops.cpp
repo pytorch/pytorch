@@ -359,6 +359,10 @@ SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_tensor_)
 // neutral ops
 Tensor & addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) { return self; }
 SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(addcdiv_, addcdiv_) \
+Tensor & addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) { return self; }
+SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(addcmul_, addcmul_) \
+Tensor & atan2_(Tensor & self, const Tensor & other) { return self; }
+SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(atan2_, atan2_) \
 
 // 2.a. Specializations for functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
@@ -572,6 +576,10 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::pow, "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor", Tensor (Scalar, const Tensor &), fp32, wellbehaved)
   // promote
   KERNEL(at::addcdiv, "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote, wellbehaved)
+  KERNEL(at::addcmul, "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote, wellbehaved)
+  KERNEL(at::atan2, "aten::atan2(Tensor self, Tensor other) -> Tensor", Tensor (const Tensor &, const Tensor &), promote, wellbehaved)
+  KERNEL(at::cross, "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::bilinear, "aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote, wellbehaved)
   // passthrough
   KERNEL_UNBOXED_ONLY(at::detach_, "aten::detach_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::zero_, "aten::zero_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
@@ -618,6 +626,8 @@ auto register_inplace_method_only = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::autocast::pow_tensor_, "aten::pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), fp32, inplace)
   // neutral ops
   KERNEL_UNBOXED_ONLY(at::autocast::addcdiv_, "aten::addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), neutral, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::addcmul_, "aten::addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), neutral, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::atan2_, "aten::atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), neutral, inplace)
   ;
 
 /******************************************************************************************************
@@ -651,6 +661,9 @@ auto register_user_supplied_out = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, Scalar, const Tensor &), fp32, user_supplied_out)
   // neutral ops
   KERNEL_UNBOXED_ONLY(at::addcdiv_out, "aten::addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::addcmul_out, "aten::addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::atan2_out, "aten::atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), neutral, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::cross_out, "aten::cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, c10::optional<int64_t>), neutral, user_supplied_out)
   ;
 
 }

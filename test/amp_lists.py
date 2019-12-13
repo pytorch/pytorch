@@ -132,11 +132,24 @@ class AmpLists(object):
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
         self.torch_need_autocast_promote = [
-            ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),))
+            ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
+            ("addcmul", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
+            ("atan2", pointwise0_fp32 + (pointwise1_fp16[0].clamp(0.1, 100),)),
+            ("cross", (torch.randn(3, dtype=torch.float32, device="cuda"),
+                       torch.randn(3, dtype=torch.float16, device="cuda"))),
+            ("bilinear", (torch.randn((1,2), dtype=torch.float16, device="cuda"),
+                          torch.randn((1,2), dtype=torch.float32, device="cuda"),
+                          torch.randn((1,2,2), dtype=torch.float16, device="cuda"),
+                          torch.randn((1,), dtype=torch.float32, device="cuda")))
         ]
         # self.torch_neutral_inplace = []
         self.torch_neutral_user_supplied_out = [
-            ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + (pointwise3_fp16[0].clamp(0.1, 100),))
+            ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + (pointwise3_fp16[0].clamp(0.1, 100),)),
+            ("addcmul", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + pointwise3_fp16),
+            ("atan2", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
+            ("cross", (torch.randn(3, dtype=torch.float32, device="cuda"),
+                       torch.randn(3, dtype=torch.float16, device="cuda"),
+                       torch.randn(3, dtype=torch.float16, device="cuda"))),
         ]
         # self.torch_expect_builtin_promote = []
         # self.torch_expect_builtin_promote_inplace = []
@@ -180,7 +193,9 @@ class AmpLists(object):
         # self.tensor_only_fp32_user_supplied_out = []
         # self.tensor_only_need_autocast_promote = []
         self.tensor_only_neutral_inplace = [
-            ("addcdiv_", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),))
+            ("addcdiv_", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
+            ("addcmul_", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
+            ("atan2_", pointwise0_fp32 + (pointwise1_fp16[0].clamp(0.1, 100),)),
         ]
         # self.tensor_only_neutral_user_supplied_out = []
         # self.tensor_only_expect_builtin_promote = []
