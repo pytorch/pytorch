@@ -27,12 +27,6 @@ TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
 namespace detail {
 template <class R, class...>
 struct types {
-  constexpr static bool hasRet = true;
-  using type = types;
-};
-template <class... args>
-struct types<void, args...> {
-  constexpr static bool hasRet = false;
   using type = types;
 };
 template <class Sig>
@@ -102,7 +96,7 @@ class class_ {
       object->setSlot(0, capsule);
     };
 
-    defineMethod<void>("__init__", std::move(func), false);
+    defineMethod<void>("__init__", std::move(func));
     return *this;
   }
   template <typename Func>
@@ -112,59 +106,30 @@ class class_ {
   }
 
  private:
-  template <class T>
-  struct addInput {
-    static Value* call(std::shared_ptr<Graph> graph) {
-      return graph->addInput()->setType(getTypePtr<T>());
-    }
-  };
-  template <class Func, size_t... arg_indices>
-  std::vector<Value*> addInputs_(
-      Func f,
-      std::shared_ptr<Graph> graph,
-      at::guts::index_sequence<arg_indices...>) {
-    using argTypes =
-        typename at::guts::infer_function_traits_t<Func>::parameter_types;
-    std::vector<Value*> res = {
-        addInput<at::guts::typelist::element_t<arg_indices, argTypes>>::call(
-            graph)...};
-    return res;
-  }
-  template <class Func>
-  std::vector<Value*> addInputs(Func f, std::shared_ptr<Graph> graph) {
-    constexpr auto numArgs =
-        at::guts::infer_function_traits_t<Func>::number_of_parameters;
-    return addInputs_(f, graph, at::guts::make_index_sequence<numArgs>());
-  }
 
-  template <typename Last>
-  std::string type_name() {
-    return std::string(typeid(Last).name());
-  }
-  template <typename First, typename Second, typename... Rest>
-  std::string type_name() {
-    return type_name<First>() + "_" + type_name<Second, Rest...>();
-  }
-
-  template <class T>
-  void addType(Value* v) {
-    v->setType(getTypePtr<T>());
-  }
   template<typename R, typename Func>
-  void defineMethod(std::string name, Func func, bool hasRet) {
+  void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
+    auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
+    auto ops = torch::jit::getAllOperatorsFor(func_symbol);
+    TORCH_CHECK(ops.size() == 1);
+    auto &schema = ops[0]->schema();
 
+    for (const auto& arg : schema.arguments()) {
+      graph->addInput()->setType(arg.type());
+    }
 
-    std::vector<Value*> inputs = addInputs(func, graph);
+    bool hasRet = schema.returns().size();
     auto methodCall = graph->insertNode(graph->create(
-        Symbol::fromQualString(qualFuncName), inputs, hasRet));
+        func_symbol, graph->inputs(), hasRet));
     Value* res;
     if (hasRet) {
-      res = methodCall->output();
-      addType<R>(res);
+      const auto& returns = schema.returns();
+      TORCH_CHECK(returns.size() == 1);
+      res = methodCall->output()->setType(returns[0].type());
     } else {
       res = graph->insertConstant(IValue())->setType(NoneType::get());
     }
@@ -178,7 +143,7 @@ class class_ {
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return at::guts::invoke(f, *cur, args...);
     };
-    defineMethod<R>(name, std::move(func), funcInfo.hasRet);
+    defineMethod<R>(name, std::move(func));
     return *this;
   }
 };

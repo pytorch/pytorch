@@ -10,13 +10,21 @@ struct CustomObjectProxy;
 void initPythonCustomClassBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  m.def("_get_custom_class_python_wrapper", [](const std::string& str) {
+  // This function returns a ScriptFunction that wraps the constructor
+  // of the given class, specified by the qualified name passed in.
+  //
+  // This is to emulate the behavior in python where instantiation
+  // of a class is a call to a code object for the class, where that
+  // code object in turn calls __init__. Rather than calling __init__
+  // directly, we need a wrapper that at least returns the instance
+  // rather than the None return value from __init__
+  m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
     auto cu = classCU();
     c10::NamedTypePtr named_type =
-        cu->get_type("__torch__.torch.classes." + str);
+        cu->get_type("__torch__.torch.classes." + qualname);
     if (!named_type || !named_type->cast<ClassType>()) {
       std::stringstream err;
-      err << "Class " << str << " not registered!";
+      err << "Class " << qualname << " not registered!";
       throw std::runtime_error(err.str());
     }
     c10::ClassTypePtr class_type = named_type->cast<ClassType>();
