@@ -13213,7 +13213,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, True)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, True, default_is_preserve=True)
 
     @onlyCPU
     @dtypes(torch.double)
