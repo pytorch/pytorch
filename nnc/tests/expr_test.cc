@@ -1,5 +1,8 @@
 #include <stdexcept>
 
+#include "expr.h"
+#include "ir.h"
+
 #include <gtest/gtest.h>
 #include "test_utils.h"
 

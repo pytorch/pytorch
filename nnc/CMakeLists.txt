@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(nnc)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -mavx2 -march=native")
+set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -mavx2 -march=native -fno-rtti")
 
 set(default_build_type "Release")
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -29,13 +29,19 @@ add_library(nnc
 
 target_include_directories(nnc PUBLIC "include")
 
-target_link_libraries(nnc
-  PRIVATE
-  LLVMExecutionSession)
+llvm_map_components_to_libnames(LLVM_LINK_LIBS
+  support core irreader analysis executionengine instcombine object orcJIT
+  runtimedyld scalaropts transformutils native ipo orcjit)
+
+target_link_libraries(nnc PRIVATE ${LLVM_LINK_LIBS})
 
 add_custom_target(cpptest)
 add_subdirectory(tests/googletest/ EXCLUDE_FROM_ALL)
-file(GLOB TEST_SRCS tests/*.cc)
+
+set(TEST_SRCS
+  tests/expr_test.cc
+  tests/llvm_test.cc)
+
 foreach(test_path ${TEST_SRCS})
   get_filename_component(filename ${test_path} NAME)
   string(REPLACE ".cc" "" test_exec ${filename})
