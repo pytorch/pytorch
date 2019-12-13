@@ -5282,7 +5282,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             tensor[0] = np_val
             self.assertEqual(tensor[0], np_val)
 
-            # Original reported issue, np integral type parses to the correct 
+            # Original reported issue, np integral type parses to the correct
             # PyTorch integral type when passed for a `Scalar` parameter in
             # arithmetic operations:
             t = torch.from_numpy(np_arr)
@@ -11621,6 +11621,7 @@ class TestTorchDeviceType(TestCase):
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/31108")
     def test_int_pow(self, device):
 
         def _test_integral_pow(dt, range, dev):
