@@ -142,7 +142,6 @@ IValue UserRRef<IValue>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
   return rfr.values().front();
@@ -162,7 +161,6 @@ py::object UserRRef<py::object>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
   return PythonRpcHandler::getInstance().deserialize(
@@ -197,7 +195,7 @@ std::shared_ptr<FutureMessage> OwnerRRef<T>::getFuture() {
   std::shared_ptr<FutureMessage> ret = future_;
   if (value_.has_value()) {
     lock.unlock();
-    ret->markCompleted();
+    ret->markCompleted(Message());
   }
   return ret;
 }
@@ -211,7 +209,7 @@ void OwnerRRef<T>::setValue(T&& value) {
   lock.unlock();
   valueCV_.notify_all();
   if (future.get() && !future->completed()) {
-    future->markCompleted();
+    future->markCompleted(Message());
   }
 }
 
