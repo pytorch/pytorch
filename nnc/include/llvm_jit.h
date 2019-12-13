@@ -27,12 +27,25 @@ namespace orc {
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
 class PytorchLLVMJIT {
 private:
+
+#if LLVM_VERSION_MAJOR == 8
+  using JITLinkingLayer = LegacyRTDyldObjectLinkingLayer;
+  template<typename B, typename C>
+  using JITCompileLayer = LegacyIRCompileLayer<B, C>;
+#elif LLVM_VERSION_MAJOR == 7
+  using JITLinkingLayer = RTDyldObjectLinkingLayer;
+  template<typename B, typename C>
+  using JITCompileLayer = IRCompileLayer<B, C>;
+#else
+  #error "Supported LLVM versions: 7, 8"
+#endif
+
   ExecutionSession ES;
   std::shared_ptr<SymbolResolver> Resolver;
   std::unique_ptr<TargetMachine> TM;
   const DataLayout DL;
-  RTDyldObjectLinkingLayer ObjectLayer;
-  IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
+  JITLinkingLayer ObjectLayer;
+  JITCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
 
 public:
   PytorchLLVMJIT()
@@ -52,7 +65,7 @@ public:
         TM(EngineBuilder().selectTarget()), DL(TM->createDataLayout()),
         ObjectLayer(ES,
                     [this](VModuleKey) {
-                      return RTDyldObjectLinkingLayer::Resources{
+                      return JITLinkingLayer::Resources{
                           std::make_shared<SectionMemoryManager>(), Resolver};
                     }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
