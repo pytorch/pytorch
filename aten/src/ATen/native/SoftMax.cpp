@@ -6,7 +6,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {

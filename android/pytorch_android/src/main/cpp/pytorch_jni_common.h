@@ -87,4 +87,6 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   static at::IValue JIValueToAtIValue(
       facebook::jni::alias_ref<JIValue> jivalue);
 };
+
+void common_registerNatives();
 } // namespace pytorch_jni

@@ -24,7 +24,6 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <ATen/ATen.h>
