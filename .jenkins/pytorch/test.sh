@@ -49,7 +49,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip_install --user hypothesis
+  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
