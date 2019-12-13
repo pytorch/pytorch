@@ -382,16 +382,35 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           auto futureResponse = cb_->operator()(message);
           if (futureResponse->completed()) {
-            send(work.from_, std::move(*futureResponse).moveValue());
+            if (!futureResponse->hasError()) {
+              send(work.from_, std::move(*futureResponse).moveValue());
+            } else {
+              send(
+                  work.from_,
+                  createExceptionResponse(
+                      message, futureResponse->error()->what()));
+            }
           } else {
             auto fromId = work.from_.id_;
+            auto requestId = work.id_;
             futureResponse->addCallback(
-                [this, fromId, futureResponse](
+                [this, fromId, requestId, futureResponse](
                     const Message& /* unused */,
-                    const c10::optional<utils::FutureError>& /* unused */) {
-                  send(
-                      getWorkerInfo(fromId),
-                      std::move(*futureResponse).moveValue());
+                    const c10::optional<utils::FutureError>& err) {
+                  if (!err) {
+                    send(
+                        getWorkerInfo(fromId),
+                        std::move(*futureResponse).moveValue());
+                  } else {
+                    std::string errStr = err->what();
+                    std::vector<char> payload(errStr.begin(), errStr.end());
+                    Message m(
+                        std::move(payload),
+                        {},
+                        MessageType::EXCEPTION,
+                        requestId);
+                    send(getWorkerInfo(fromId), std::move(m));
+                  }
                 });
           }
         } else if (message.isResponse()) {
