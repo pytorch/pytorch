@@ -225,10 +225,7 @@ CALL_DEFAULT = CodeTemplate("""\
 TypeDefault::${api_name}(${type_method_args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
-at::${api_name}(${unpacked_args})""")
-
-CALL_DISPATCH_VIA_NAMESPACE_UNDERSCORE = CodeTemplate("""\
-at::_${api_name}(${unpacked_args})""")
+at::${api_name_prefix}${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
 self_.${api_name}(${unpacked_method_args})""")
@@ -855,10 +852,11 @@ def emit_body(declaration):
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
             if 'namespace' in declaration['method_of']:
+                api_name_prefix = ''
                 if TOUtils.check_if_factory_method(declaration['arguments']):
-                    base_type_call = CALL_DISPATCH_VIA_NAMESPACE_UNDERSCORE.substitute(combined)
-                else:
-                    base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+                    api_name_prefix = TOUtils.API_NAME_PREFIX
+
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined, api_name_prefix = api_name_prefix)
             else:
                 unpacked_method_args = combined['unpacked_args'][1:]
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(

@@ -13,7 +13,7 @@ except ImportError:
     from tools.shared.module_loader import import_module
     TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
 
-# This is a hack. 
+# This is a hack.
 # issue #30405
 FUNCTION_TEMPLATE_ARANGE = CodeTemplate("""\
 inline at::Tensor ${name}(${collapsed_formals}) {
@@ -74,7 +74,7 @@ def fully_qualified_type(argument_type):
 def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
     function_definitions = []
     for decl in declarations:
-        has_tensor_options = TOUtils.check_if_factory_method(decl["arguments"])        
+        has_tensor_options = TOUtils.check_if_factory_method(decl["arguments"])
         is_namespace_fn = 'namespace' in decl['method_of']
         if (has_tensor_options or decl["name"].endswith("_like")) and is_namespace_fn:
             function_definitions.append(
@@ -84,18 +84,21 @@ def gen_variable_factories(out, declarations, template_path, disable_autograd=Fa
           CodeTemplate.from_file(template_path + "/variable_factories.h"),
           {"function_definitions": function_definitions})
 
-def replace_dtype_nullprt(actuals):
-    replaced = actuals[:]
-    index = actuals.index('at::typeMetaToScalarType(options.dtype())')
-    replaced[index] = 'c10::nullopt'
-    return replaced
-    
+def turn_actuals_into_option_calls(actuals):
+    collapsed = actuals[:]
+    index = actuals.index('dtype')
+    collapsed[index] = 'at::typeMetaToScalarType(options.dtype())'
+    collapsed[index + 1] = 'options.layout()'
+    collapsed[index + 2] = 'options.device()'
+    collapsed[index + 3] = 'options.pinned_memory()'
+    return collapsed
+
 def process_function(decl, has_tensor_options, disable_autograd):
     formals = []
     actuals = []
     for argument in decl["arguments"]:
         type = fully_qualified_type(argument["type"])
-        
+
         default = " = {}".format(argument["default"]) if "default" in argument else ""
         if "default" in argument:
             if argument["default"] == False or argument["default"] == True:
@@ -115,7 +118,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
         actuals.insert(-1, '{}.options().layout()'.format(actuals[0]))
         actuals.insert(-1, '{}.options().device()'.format(actuals[0]))
         actuals.insert(-1, '{}.options().pinned_memory()'.format(actuals[0]))
-        
+
     if not disable_autograd:
         pre_record_trace, post_record_trace = format_trace(decl)
         if has_tensor_options:
@@ -136,17 +139,31 @@ def process_function(decl, has_tensor_options, disable_autograd):
             pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
         )
     else:
-        uncollapsed_actuals = TOUtils.collapse_actuals2(actuals)
+        options_calls  = turn_actuals_into_option_calls(actuals)
         collapsed_formals = TOUtils.collapse_formals(formals)
-        uncollapsed_actuals_nullptr = replace_dtype_nullprt(uncollapsed_actuals)
 
         if decl['name'] == 'arange':
+            uncollapsed_actuals_nullptr = options_calls[:]
+            index = options_calls.index('at::typeMetaToScalarType(options.dtype())')
+            uncollapsed_actuals_nullptr[index] = 'c10::nullopt'
+
             return FUNCTION_TEMPLATE_ARANGE.substitute(
-                name=decl["name"], collapsed_formals = collapsed_formals, actuals=actuals, uncollapsed_actuals=uncollapsed_actuals, uncollapsed_actuals_nullptr=uncollapsed_actuals_nullptr, requires_grad=requires_grad,
-                pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
+                name=decl["name"],
+                collapsed_formals = collapsed_formals,
+                actuals=actuals,
+                uncollapsed_actuals=options_calls,
+                uncollapsed_actuals_nullptr=uncollapsed_actuals_nullptr,
+                requires_grad=requires_grad,
+                pre_record_trace=pre_record_trace,
+                post_record_trace=post_record_trace
             )
         else:
             return FUNCTION_TEMPLATE_TENSOR_OPTIONS.substitute(
-                name=decl["name"], collapsed_formals = collapsed_formals, actuals=actuals, uncollapsed_actuals=uncollapsed_actuals, requires_grad=requires_grad,
-                pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
+                name=decl["name"],
+                collapsed_formals = collapsed_formals,
+                actuals=actuals,
+                uncollapsed_actuals=options_calls,
+                requires_grad=requires_grad,
+                pre_record_trace=pre_record_trace,
+                post_record_trace=post_record_trace
             )

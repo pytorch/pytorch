@@ -265,9 +265,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
                  'default': 'c10::nullopt', 'is_nullable': True},
                 {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
-                'default': 'c10::nullopt', 'is_nullable': True},
+                 'default': 'c10::nullopt', 'is_nullable': True},
                 {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
-                'default': 'c10::nullopt', 'is_nullable': True},
+                 'default': 'c10::nullopt', 'is_nullable': True},
             ]
 
         idx += 1

@@ -932,7 +932,7 @@ def create_generic(top_env, declarations):
                 r.append(formal['name'])
 
         if TOUtils.check_if_factory_method(formals):
-            r.append('dtype, device, layout, pin_memory')
+            r.extend(TOUtils.tensor_options_args)
         return r
 
     def format_formal(f):
