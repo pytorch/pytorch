@@ -580,9 +580,14 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::atan2, "aten::atan2(Tensor self, Tensor other) -> Tensor", Tensor (const Tensor &, const Tensor &), promote, wellbehaved)
   KERNEL(at::cross, "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor", Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>), promote, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::bilinear, "aten::bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &), promote, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::tensordot, "aten::tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::dot, "aten::dot(Tensor self, Tensor tensor) -> Tensor", Tensor (const Tensor &, const Tensor &), promote, wellbehaved)
+  KERNEL(at::equal, "aten::equal(Tensor self, Tensor other) -> bool", bool (const Tensor &, const Tensor &), promote, wellbehaved)
   // passthrough
   KERNEL_UNBOXED_ONLY(at::detach_, "aten::detach_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::zero_, "aten::zero_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), passthrough, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::eq_out, "aten::eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, Scalar), passthrough, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::eq_out, "aten::eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), passthrough, wellbehaved)
   ;
 
 /**************************************************************************************
@@ -664,6 +669,7 @@ auto register_user_supplied_out = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::addcmul_out, "aten::addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::atan2_out, "aten::atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), neutral, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::cross_out, "aten::cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, c10::optional<int64_t>), neutral, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::dot_out, "aten::dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), neutral, user_supplied_out)
   ;
 
 }

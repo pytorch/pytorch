@@ -140,7 +140,11 @@ class AmpLists(object):
             ("bilinear", (torch.randn((1,2), dtype=torch.float16, device="cuda"),
                           torch.randn((1,2), dtype=torch.float32, device="cuda"),
                           torch.randn((1,2,2), dtype=torch.float16, device="cuda"),
-                          torch.randn((1,), dtype=torch.float32, device="cuda")))
+                          torch.randn((1,), dtype=torch.float32, device="cuda"))),
+            ("dot", pointwise0_fp16 + pointwise1_fp32),
+            ("tensordot", (torch.randn((2,2,2), dtype=torch.float32, device="cuda"),
+                           torch.randn((2,2,2), dtype=torch.float16, device="cuda"))),
+            ("equal", pointwise0_fp32 + pointwise1_fp16),
         ]
         # self.torch_neutral_inplace = []
         self.torch_neutral_user_supplied_out = [
@@ -150,11 +154,16 @@ class AmpLists(object):
             ("cross", (torch.randn(3, dtype=torch.float32, device="cuda"),
                        torch.randn(3, dtype=torch.float16, device="cuda"),
                        torch.randn(3, dtype=torch.float16, device="cuda"))),
+            ("dot", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
         ]
-        # self.torch_expect_builtin_promote = []
+        self.torch_expect_builtin_promote = [
+            ("eq", pointwise0_fp32 + pointwise1_fp16),
+        ]
         # self.torch_expect_builtin_promote_inplace = []
-        # self.torch_expect_builtin_promote_user_supplied_out = []
-
+        self.torch_expect_builtin_promote_user_supplied_out = [
+            ("eq", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("eq", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+        ]
         # self.torch_need_autocast_sequence_cast_ops = [
         #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
         #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
