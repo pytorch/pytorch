@@ -295,6 +295,7 @@
   name: _th_equal
   cname: equal
   cpu_bool: True
+  cpu_bfloat16: True
   cuda_bool: True
   variants:
     - function
