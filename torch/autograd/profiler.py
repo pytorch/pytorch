@@ -109,30 +109,47 @@ class EventList(list):
             # this technique is proven to give a 4x speedup.
             f.write("[")
             for evt in self:
-                f.write('{"name": "%s", "ph": "X", "ts": %s, ' \
-                        '"dur": %s, "tid": %s, "pid": "CPU functions", ' \
+                f.write('{"name": "%s", '
+                        '"ph": "X", '
+                        '"ts": %s, '
+                        '"dur": %s, '
+                        '"tid": %s, '
+                        '"pid": "CPU functions", '
                         '"args": {}}, ' % (evt.name, evt.cpu_interval.start,
-                                             evt.cpu_interval.elapsed_us(), evt.thread))
+                                           evt.cpu_interval.elapsed_us(), evt.thread))
                 for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
-                    f.write('{"name": "%s", "ph": "s", "ts": %s,' \
-                            '"tid": %s, "pid": "CPU functions", ' \
-                            '"id": %s, "cat": "cpu_to_cuda", "args": {}}, ' \
-                            % (evt.name, evt.cpu_interval.start, evt.thread, next_id))
-                    f.write('{"name": "%s", "ph": "f", "ts": %s, ' \
-                            'tid": %s, "pid": "CUDA functions", ' \
-                            '"id": %s, "cat": "cpu_to_cuda", "args": {}}, ' \
-                            % (k.name, k.interval.start, k.device, next_id))
-                    f.write('{"name": "%s", "ph": "X", "ts": %s, ' \
-                            '"dur": %s, "tid": %s, "pid": "CUDA functions", ' \
+                    f.write('{"name": "%s", '
+                            '"ph": "s", '
+                            '"ts": %s, '
+                            '"tid": %s, '
+                            '"pid": "CPU functions", '
+                            '"id": %s, '
+                            '"cat": "cpu_to_cuda", '
+                            '"args": {}}, ' % (evt.name, evt.cpu_interval.start,
+                                               evt.thread, next_id))
+                    f.write('{"name": "%s", '
+                            '"ph": "f", '
+                            '"ts": %s, '
+                            'tid": %s, '
+                            '"pid": "CUDA functions", '
+                            '"id": %s, '
+                            '"cat": "cpu_to_cuda", '
+                            '"args": {}}, ' % (k.name, k.interval.start, k.device, next_id))
+                    f.write('{"name": "%s", '
+                            '"ph": "X", '
+                            '"ts": %s, '
+                            '"dur": %s, '
+                            '"tid": %s, '
+                            '"pid": "CUDA functions", '
                             '"args": {}}, ' % (k.name, k.interval.start,
-                                                 k.interval.elapsed_us(), k.device))
+                                               k.interval.elapsed_us(), k.device))
                     next_id += 1
 
             # remove trailing whitespace and comma
             f.seek(f.tell()-2, os.SEEK_SET)
-            f.write('')
+            f.truncate()
             f.write("]")
 
     def key_averages(self, group_by_input_shapes=False):
