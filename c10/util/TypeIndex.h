@@ -75,7 +75,7 @@ inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexc
     #else
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
     #endif
-      "]",
+      "; c10::string_view = c10::basic_string_view<char>]",
       __PRETTY_FUNCTION__);
 #endif
 }
