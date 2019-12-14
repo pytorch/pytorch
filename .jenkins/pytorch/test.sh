@@ -108,7 +108,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # work in mobile).  However, UBSAN relies on UBSAN to detect vptr
     # confusion, so at least in this environment, we need our ducks in
     # order!
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:$PWD/torch/lib/libtorch.so
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:$PWD/torch/lib/libtorch_python.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 

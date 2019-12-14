@@ -401,7 +401,14 @@ add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
 set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
 if (USE_MPI)
     target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
-endif ()
+endif()
 target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
+# The CUDA libraries are linked here for a different reason: in some
+# cases we load these libraries with ctypes, and if they weren't opened
+# with RTLD_GLOBAL, we'll do the "normal" search process again (and
+# not find them, because they're usually in non-standard locations)
+if (USE_CUDA)
+  target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+endif()
 
 install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
