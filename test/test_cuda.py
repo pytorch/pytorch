@@ -804,18 +804,19 @@ class TestCuda(TestCase):
             _ = torch.load(buf)
 
     def test_specify_improper_device_name(self):
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save([torch.nn.Parameter(torch.randn(10, 10))], f,
-                       _use_new_zipfile_serialization=True)
-            with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
-                torch.load(f, 'cuda0')
+        import os
+        fname = "tempfile.pt"
+        torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
+                   _use_new_zipfile_serialization=True)
+        torch.load(fname, 'cuda0')
+        os.remove(fname)
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index
-        with self.assertRaiseRegex(RuntimeError, "Expected one of cpu"):
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
             _get_device_index('cuda0', optional=True)
 
-        with self.assertRaiseRegex(ValueError, "Expected a cuda device"):
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
             cpu_device = torch.device('cpu')
             _get_device_index(cpu_device, optional=True)
 
