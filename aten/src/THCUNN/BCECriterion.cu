@@ -11,6 +11,7 @@
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
 #include <thrust/system/cuda/execution_policy.h>
+#include <c10/macros/Macros.h>
 
 template <typename T>
 inline __host__ __device__ T eps();
@@ -39,7 +40,7 @@ struct bce_functor
   {
     Dtype input = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
-    assert(input >= 0. && input <= 1.);
+    CUDA_KERNEL_ASSERT(input >= 0. && input <= 1.);
     return - (t * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(input))
         + (Acctype(1) - t) * safe_log<Acctype>(Acctype(1) - input));
   }
@@ -54,7 +55,7 @@ struct bce_updateOutput_no_reduce_functor
       const Dtype *target,
       Dtype *output)
   {
-    assert(*input >= 0. && *input <= 1.);
+    CUDA_KERNEL_ASSERT(*input >= 0. && *input <= 1.);
     *output = ScalarConvert<Acctype, Dtype>::to(
         -(*target * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(*input)) +
           (Acctype(1) - *target) * safe_log<Acctype>(Acctype(1) - *input)));
@@ -71,7 +72,7 @@ struct bce_functor_weights
     Dtype input = thrust::get<0>(x);
     Dtype t = thrust::get<1>(x);
     Dtype w = thrust::get<2>(x);
-    assert(input >= 0. && input <= 1.);
+    CUDA_KERNEL_ASSERT(input >= 0. && input <= 1.);
     return - w * (t * safe_log<Acctype>(ScalarConvert<Dtype, Acctype>::to(input)) +
         (Acctype(1) - t) * safe_log<Acctype>(Acctype(1) - input));
   }

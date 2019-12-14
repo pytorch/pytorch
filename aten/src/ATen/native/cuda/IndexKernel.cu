@@ -57,7 +57,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     #pragma unroll
     for (int i = 0; i < num_indices; i++) {
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
-      assert(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
+      CUDA_KERNEL_ASSERT(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
       if (index < 0) {
         index += sizes[i];
       }

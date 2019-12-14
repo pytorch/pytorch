@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/macros/Macros.h>
 
 
 namespace c10 {
@@ -120,7 +121,7 @@ struct static_cast_with_inter_type {
 //
 
 #ifdef C10_HOST_DEVICE
-#define ERROR_UNSUPPORTED_CAST assert(false);
+#define ERROR_UNSUPPORTED_CAST CUDA_KERNEL_ASSERT(false);
 #else
 #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
 #endif
@@ -151,12 +152,12 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  assert(ScalarType::scalartype_ == src_type);                                    \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                    \
   return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
 C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  assert(ScalarType::scalartype_ == dest_type);                                   \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                   \
   *(T *)ptr = value;                                                              \
 }
 
