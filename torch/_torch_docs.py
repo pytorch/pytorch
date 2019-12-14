@@ -1029,7 +1029,7 @@ Args:
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
-    out (Tensor, optional): the output matrix
+    out (Tensor, optional): the output Tensor
 
 Example::
 
@@ -1049,7 +1049,7 @@ Example::
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
     >>> a = torch.randn(3, 2, 2)
-    >>> a = torch.matmul(a, a.transpose(-1, -2)) + 1e-03 # make symmetric positive-definite
+    >>> a = torch.matmul(a, a.transpose(-1, -2)) + torch.eye(2) * 1e-03 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> z = torch.matmul(l, l.transpose(-1, -2))
     >>> torch.max(torch.abs(z - a)) # Max non-zero
@@ -1115,26 +1115,27 @@ Example::
 add_docstr(torch.cholesky_inverse, r"""
 cholesky_inverse(input, upper=False, out=None) -> Tensor
 
-Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
-Cholesky factor :math:`u`: returns matrix ``inv``. The inverse is computed using
-LAPACK routines ``dpotri`` and ``spotri`` (and the corresponding MAGMA routines).
+Computes the inverse of a symmetric positive-definite matrix or batch of matrices
+:math:`A` using the Cholesky factor(s) :math:`C`: and the inverse ``inv``.
+The inverse is computed using LAPACK routines ``dpotri`` and ``spotri``
+(and the corresponding MAGMA routines).
 
-If :attr:`upper` is ``False``, :math:`u` is lower triangular
+If :attr:`upper` is ``False`` or not provided, :math:`C` is lower triangular
 such that the returned tensor is
 
 .. math::
-    inv = (uu^{{T}})^{{-1}}
+    inv = (CC^{{T}})^{{-1}}
 
-If :attr:`upper` is ``True`` or not provided, :math:`u` is upper
+If :attr:`upper` is ``True``, :math:`C` is upper
 triangular such that the returned tensor is
 
 .. math::
-    inv = (u^T u)^{{-1}}
+    inv = (C^T C)^{{-1}}
 
 Args:
-    input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
-           Cholesky factor
-    upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
+                batch dimensions consisting of lower or upper triangular Cholesky factor(s)
+    upper (bool, optional): indicates whether :attr:`input` is lower (default) or upper triangular
     out (Tensor, optional): the output tensor for `inv`
 
 Example::
@@ -1154,6 +1155,12 @@ Example::
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
+    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.matmul(a, a.transpose(-1, -2)) + 1e-03 * torch.eye(2) # make symmetric positive-definite
+    >>> l = torch.cholesky(a)
+    >>> z = torch.matmul(l.cholesky_inverse(), a)
+    >>> torch.max(torch.abs(z - torch.eye(2))) # Max non-zero
+    tensor(1.9073e-06)
 """)
 
 add_docstr(torch.clamp,
