@@ -67,12 +67,14 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     return makeCxxInstance(modelPath);
   }
 
+#ifdef __ANDROID__
   static facebook::jni::local_ref<jhybriddata> initHybridAndroidAsset(
       facebook::jni::alias_ref<jclass>,
       facebook::jni::alias_ref<jstring> assetName,
       facebook::jni::alias_ref<jobject> assetManager) {
     return makeCxxInstance(assetName, assetManager);
   }
+#endif
 
 #ifdef TRACE_ENABLED
   static void onFunctionEnter(
@@ -144,8 +146,10 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   static void registerNatives() {
     registerHybrid({
         makeNativeMethod("initHybrid", PytorchJni::initHybrid),
+#ifdef __ANDROID__
         makeNativeMethod(
             "initHybridAndroidAsset", PytorchJni::initHybridAndroidAsset),
+#endif
         makeNativeMethod("forward", PytorchJni::forward),
         makeNativeMethod("runMethod", PytorchJni::runMethod),
     });
