@@ -373,14 +373,33 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        auto data = wireDeserialize(payload.storage().data(), payload.numel());
-        Message message(
-            std::move(data.first),
-            std::move(data.second),
-            work.type_,
-            work.id_);
+
+        // Deserialize incoming message.
+        Message message;
+        try {
+          auto data =
+              wireDeserialize(payload.storage().data(), payload.numel());
+          message = std::move(Message(
+              std::move(data.first),
+              std::move(data.second),
+              work.type_,
+              work.id_));
+        } catch (std::exception& e) {
+          LOG(ERROR) << "Could not deserialize " << payload.numel()
+                     << " byte payload from " << work.from_.id_;
+          return;
+        }
+
         if (message.isRequest()) {
-          auto futureResponse = cb_->operator()(message);
+          // Invoke server request callback to get a future.
+          std::shared_ptr<FutureMessage> futureResponse;
+          try {
+            futureResponse = cb_->operator()(message);
+          } catch (std::exception& e) {
+            futureResponse = std::make_shared<FutureMessage>();
+            futureResponse->setError(e.what());
+          }
+          // Future already completed shortcut.
           if (futureResponse->completed()) {
             if (!futureResponse->hasError()) {
               send(work.from_, std::move(*futureResponse).moveValue());
@@ -391,6 +410,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
                       message, futureResponse->error()->what()));
             }
           } else {
+            // Otherwise, send response when future completes.
             auto fromId = work.from_.id_;
             auto requestId = work.id_;
             futureResponse->addCallback(
@@ -404,6 +424,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
                   } else {
                     std::string errStr = err->what();
                     std::vector<char> payload(errStr.begin(), errStr.end());
+                    // Response messageId must match requestId.
                     Message m(
                         std::move(payload),
                         {},
@@ -414,6 +435,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
                 });
           }
         } else if (message.isResponse()) {
+          // Response handling
+          //
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
           {
