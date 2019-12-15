@@ -56,7 +56,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <functional>
@@ -416,37 +415,29 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
   Tensor result;
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-#endif
     Tensor _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
     result = _self.clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor result;
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-#endif
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
   result = _self.clone(at::MemoryFormat::Contiguous);
   result.masked_fill_(mask, source);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
