@@ -81,7 +81,7 @@ struct ReadyQueue {
   // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
   // To protect read and writes to heap_
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
 
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
@@ -90,6 +90,7 @@ struct ReadyQueue {
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
+  size_t size() const;
 };
 
 // Note [Reentrant backwards]
@@ -177,6 +178,12 @@ auto ReadyQueue::pushShutdownTask() -> void {
     heap_.push(NodeTask({}, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
+}
+
+size_t ReadyQueue::size() const {
+  // Lock mutex for accesses to heap_
+  std::unique_lock<std::mutex> lock(mutex_);
+  return heap_.size();
 }
 
 auto ReadyQueue::pop() -> NodeTask {
@@ -827,6 +834,16 @@ void Engine::queue_callback(std::function<void()> callback) {
 
 bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
+}
+
+size_t Engine::ready_queue_size(at::Device device) {
+  if (ready_queues_.empty()) {
+    // The vector ready_queues_ is initialized in start_threads, but this method
+    // can be called before start_threads. Adding this check to avoid index
+    // out of bound error.
+    return 0;
+  }
+  return ready_queue(device).size();
 }
 
 auto Engine::ready_queue(at::Device device) -> ReadyQueue& {
