@@ -594,6 +594,7 @@ void common_registerNatives() {
 #endif
     return 0;
   }();
+  ((void)once);
 }
 
 } // namespace pytorch_jni
