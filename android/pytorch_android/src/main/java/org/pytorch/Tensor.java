@@ -14,22 +14,21 @@ import java.util.Arrays;
 import java.util.Locale;
 
 /**
- * Representation of a Tensor.  Behavior is similar to PyTorch's tensor objects.
- * <p>
- * Most tensors will be constructed as {@code Tensor.fromBlob(data, shape)},
- * where {@code data} can be an array or a direct {@link Buffer} (of the proper subclass).
- * Helper methods are provided to allocate buffers properly.
- * <p>
- * To access Tensor data, see {@link #dtype()}, {@link #shape()},
- * and various {@code getDataAs*} methods.
- * <p>
- * When constructing {@code Tensor} objects with {@code data} as an array,
- * it is not specified whether this data is is copied or retained as a reference
- * so it is recommended not to modify it after constructing.  {@code data} passed as a
- * {@link Buffer} is not copied, so it can be modified between {@link Module} calls
- * to avoid reallocation.  Data retrieved from {@code Tensor} objects may be copied or
- * may be a reference to the {@code Tensor}'s internal data buffer.
- * {@code shape} is always copied.
+ * Representation of a Tensor. Behavior is similar to PyTorch's tensor objects.
+ *
+ * <p>Most tensors will be constructed as {@code Tensor.fromBlob(data, shape)}, where {@code data}
+ * can be an array or a direct {@link Buffer} (of the proper subclass). Helper methods are provided
+ * to allocate buffers properly.
+ *
+ * <p>To access Tensor data, see {@link #dtype()}, {@link #shape()}, and various {@code getDataAs*}
+ * methods.
+ *
+ * <p>When constructing {@code Tensor} objects with {@code data} as an array, it is not specified
+ * whether this data is is copied or retained as a reference so it is recommended not to modify it
+ * after constructing. {@code data} passed as a {@link Buffer} is not copied, so it can be modified
+ * between {@link Module} calls to avoid reallocation. Data retrieved from {@code Tensor} objects
+ * may be copied or may be a reference to the {@code Tensor}'s internal data buffer. {@code shape}
+ * is always copied.
  */
 public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
@@ -42,7 +41,7 @@ public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_MUST_BE_DIRECT =
       "Data buffer must be direct (java.nio.ByteBuffer#allocateDirect)";
 
-  final long[] shape;
+  @DoNotStrip final long[] shape;
 
   private static final int INT_SIZE_BYTES = 4;
   private static final int FLOAT_SIZE_BYTES = 4;
@@ -51,8 +50,8 @@ public abstract class Tensor {
 
   /**
    * Allocates a new direct {@link java.nio.ByteBuffer} with native byte order with specified
-   * capacity that can be used in {@link Tensor#fromBlob(ByteBuffer, long[])},
-   * {@link Tensor#fromBlobUnsigned(ByteBuffer, long[])}.
+   * capacity that can be used in {@link Tensor#fromBlob(ByteBuffer, long[])}, {@link
+   * Tensor#fromBlobUnsigned(ByteBuffer, long[])}.
    *
    * @param numElements capacity (number of elements) of result buffer.
    */
@@ -122,7 +121,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_uint8(byteBuffer, shape);
+    return initHybrid(new Tensor_uint8(byteBuffer, shape));
   }
 
   /**
@@ -139,7 +138,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_int8(byteBuffer, shape);
+    return initHybrid(new Tensor_int8(byteBuffer, shape));
   }
 
   /**
@@ -156,7 +155,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final IntBuffer intBuffer = allocateIntBuffer((int) numel(shape));
     intBuffer.put(data);
-    return new Tensor_int32(intBuffer, shape);
+    return initHybrid(new Tensor_int32(intBuffer, shape));
   }
 
   /**
@@ -173,7 +172,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final FloatBuffer floatBuffer = allocateFloatBuffer((int) numel(shape));
     floatBuffer.put(data);
-    return new Tensor_float32(floatBuffer, shape);
+    return initHybrid(new Tensor_float32(floatBuffer, shape));
   }
 
   /**
@@ -190,7 +189,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final LongBuffer longBuffer = allocateLongBuffer((int) numel(shape));
     longBuffer.put(data);
-    return new Tensor_int64(longBuffer, shape);
+    return initHybrid(new Tensor_int64(longBuffer, shape));
   }
 
   /**
@@ -207,7 +206,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final DoubleBuffer doubleBuffer = allocateDoubleBuffer((int) numel(shape));
     doubleBuffer.put(data);
-    return new Tensor_float64(doubleBuffer, shape);
+    return initHybrid(new Tensor_float64(doubleBuffer, shape));
   }
 
   /**
@@ -227,7 +226,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_uint8(data, shape);
+    return initHybrid(new Tensor_uint8(data, shape));
   }
 
   /**
@@ -247,7 +246,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int8(data, shape);
+    return initHybrid(new Tensor_int8(data, shape));
   }
 
   /**
@@ -267,7 +266,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int32(data, shape);
+    return initHybrid(new Tensor_int32(data, shape));
   }
 
   /**
@@ -287,7 +286,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float32(data, shape);
+    return initHybrid(new Tensor_float32(data, shape));
   }
 
   /**
@@ -307,7 +306,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int64(data, shape);
+    return initHybrid(new Tensor_int64(data, shape));
   }
 
   /**
@@ -327,12 +326,17 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float64(data, shape);
+    return initHybrid(new Tensor_float64(data, shape));
   }
 
-  @DoNotStrip protected HybridData mHybridData;
+  @DoNotStrip private HybridData mHybridData;
 
   @DoNotStrip private native HybridData initHybrid();
+
+  private static Tensor initHybrid(Tensor tensor) {
+    tensor.mHybridData = tensor.initHybrid();
+    return tensor;
+  }
 
   private Tensor(long[] shape) {
     checkShape(shape);
@@ -344,9 +348,7 @@ public abstract class Tensor {
     return numel(this.shape);
   }
 
-  /**
-   * Calculates the number of elements in a tensor with the specified shape.
-   */
+  /** Calculates the number of elements in a tensor with the specified shape. */
   public static long numel(long[] shape) {
     checkShape(shape);
     int result = 1;
@@ -356,26 +358,22 @@ public abstract class Tensor {
     return result;
   }
 
-  /**
-   * Returns the shape of this tensor.  (The array is a fresh copy.)
-   */
+  /** Returns the shape of this tensor. (The array is a fresh copy.) */
   public long[] shape() {
     return Arrays.copyOf(shape, shape.length);
   }
 
-  /**
-   * @return data type of this tensor.
-   */
+  /** @return data type of this tensor. */
   public abstract DType dtype();
 
   // Called from native
+  @DoNotStrip
   int dtypeJniCode() {
     return dtype().jniCode;
   }
 
   /**
-   * @return a Java byte array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java byte array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-int8 tensor.
    */
   public byte[] getDataAsByteArray() {
@@ -384,8 +382,7 @@ public abstract class Tensor {
   }
 
   /**
-   * @return a Java byte array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java byte array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-uint8 tensor.
    */
   public byte[] getDataAsUnsignedByteArray() {
@@ -394,8 +391,7 @@ public abstract class Tensor {
   }
 
   /**
-   * @return a Java int array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java int array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-int32 tensor.
    */
   public int[] getDataAsIntArray() {
@@ -404,8 +400,7 @@ public abstract class Tensor {
   }
 
   /**
-   * @return a Java float array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java float array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-float32 tensor.
    */
   public float[] getDataAsFloatArray() {
@@ -414,8 +409,7 @@ public abstract class Tensor {
   }
 
   /**
-   * @return a Java long array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java long array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-int64 tensor.
    */
   public long[] getDataAsLongArray() {
@@ -424,8 +418,7 @@ public abstract class Tensor {
   }
 
   /**
-   * @return a Java double array that contains the tensor data.  This may be a copy or reference.
-   *
+   * @return a Java double array that contains the tensor data. This may be a copy or reference.
    * @throws IllegalStateException if it is called for a non-float64 tensor.
    */
   public double[] getDataAsDoubleArray() {
@@ -433,6 +426,7 @@ public abstract class Tensor {
         "Tensor of type " + getClass().getSimpleName() + " cannot return data as double array.");
   }
 
+  @DoNotStrip
   Buffer getRawDataBuffer() {
     throw new IllegalStateException(
         "Tensor of type " + getClass().getSimpleName() + " cannot " + "return raw data buffer.");
@@ -444,13 +438,6 @@ public abstract class Tensor {
     private Tensor_uint8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    private Tensor_uint8(ByteBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -483,13 +470,6 @@ public abstract class Tensor {
     private Tensor_int8(ByteBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    private Tensor_int8(ByteBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -522,13 +502,6 @@ public abstract class Tensor {
     private Tensor_int32(IntBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    private Tensor_int32(IntBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -561,13 +534,6 @@ public abstract class Tensor {
     Tensor_float32(FloatBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    Tensor_float32(FloatBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -600,13 +566,6 @@ public abstract class Tensor {
     private Tensor_int64(LongBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    private Tensor_int64(LongBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -639,13 +598,6 @@ public abstract class Tensor {
     private Tensor_float64(DoubleBuffer data, long[] shape) {
       super(shape);
       this.data = data;
-      this.mHybridData = super.initHybrid();
-    }
-
-    private Tensor_float64(DoubleBuffer data, long[] shape, HybridData hybridData) {
-      super(shape);
-      this.data = data;
-      this.mHybridData = hybridData;
     }
 
     @Override
@@ -699,20 +651,25 @@ public abstract class Tensor {
   // endregion checks
 
   // Called from native
+  @DoNotStrip
   private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+    Tensor tensor = null;
     if (DType.FLOAT32.jniCode == dtype) {
-      return new Tensor_float32(data.asFloatBuffer(), shape, hybridData);
+      tensor = new Tensor_float32(data.asFloatBuffer(), shape);
     } else if (DType.INT32.jniCode == dtype) {
-      return new Tensor_int32(data.asIntBuffer(), shape, hybridData);
+      tensor = new Tensor_int32(data.asIntBuffer(), shape);
     } else if (DType.INT64.jniCode == dtype) {
-      return new Tensor_int64(data.asLongBuffer(), shape, hybridData);
+      tensor = new Tensor_int64(data.asLongBuffer(), shape);
     } else if (DType.FLOAT64.jniCode == dtype) {
-      return new Tensor_float64(data.asDoubleBuffer(), shape, hybridData);
+      tensor = new Tensor_float64(data.asDoubleBuffer(), shape);
     } else if (DType.UINT8.jniCode == dtype) {
-      return new Tensor_uint8(data, shape, hybridData);
+      tensor = new Tensor_uint8(data, shape);
     } else if (DType.INT8.jniCode == dtype) {
-      return new Tensor_int8(data, shape, hybridData);
+      tensor = new Tensor_int8(data, shape);
+    } else {
+      new IllegalArgumentException("Unknown Tensor dtype");
     }
-    throw new IllegalArgumentException("Unknown Tensor dtype");
+    tensor.mHybridData = hybridData;
+    return tensor;
   }
 }

@@ -3,14 +3,17 @@
 
 #include "cmake_macros.h"
 
-#if defined(TRACE_ENABLED) && defined(__ANDROID__)
+#ifdef __ANDROID__
 #include <android/log.h>
-
-#include <android/trace.h>
-#include <dlfcn.h>
-
 #define ALOGI(...) \
   __android_log_print(ANDROID_LOG_INFO, "pytorch-jni", __VA_ARGS__)
+#define ALOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "pytorch-jni", __VA_ARGS__)
+#endif
+
+#if defined(TRACE_ENABLED) && defined(__ANDROID__)
+#include <android/trace.h>
+#include <dlfcn.h>
 #endif
 
 namespace pytorch_jni {
@@ -59,27 +62,6 @@ class Trace {
   static bool is_initialized_;
 };
 
-class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
- public:
-  constexpr static const char* kJavaDescriptor = "Lorg/pytorch/Tensor;";
-
-  explicit TensorHybrid(at::Tensor tensor) : tensor_(tensor) {}
-
-  static facebook::jni::local_ref<TensorHybrid::jhybriddata> initHybrid(
-      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensorThis);
-
-  static facebook::jni::local_ref<TensorHybrid::javaobject>
-  newJTensorFromAtTensor(const at::Tensor& tensor);
-
-  at::Tensor tensor() const;
-
-  static void registerNatives();
-
- private:
-  friend HybridBase;
-  at::Tensor tensor_;
-};
-
 class JIValue : public facebook::jni::JavaClass<JIValue> {
  public:
   constexpr static const char* kJavaDescriptor = "Lorg/pytorch/IValue;";
@@ -108,4 +90,6 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   static at::IValue JIValueToAtIValue(
       facebook::jni::alias_ref<JIValue> jivalue);
 };
+
+void common_registerNatives();
 } // namespace pytorch_jni

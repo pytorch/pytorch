@@ -5,15 +5,12 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);
 }
-
-#if !defined(TH_REAL_IS_BFLOAT16)
 
 static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 {
@@ -53,14 +50,14 @@ static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 }
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb) {
-#ifdef BUILD_NAMEDTENSOR
   if (!at::namedinference::are_names_equal(ta, tb)) {
     return 0;
   }
   at::NoNamesGuard guard;
-#endif
   return THTensor_(equalImpl)(ta, tb);
 }
+
+#if !defined(TH_REAL_IS_BFLOAT16)
 
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
@@ -919,9 +916,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 }
 
 static void THTensor_(propagate_names_if_named_tensor_enabled)(THTensor* result, THTensor* src) {
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
-#endif
 }
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
@@ -1008,7 +1003,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif
 
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
-LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)

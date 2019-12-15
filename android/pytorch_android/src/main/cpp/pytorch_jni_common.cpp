@@ -7,6 +7,10 @@
 #include <fbjni/fbjni.h>
 
 #include "pytorch_jni_common.h"
+#if defined(__ANDROID__)
+#include <caffe2/utils/threadpool/ThreadPool.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#endif
 
 namespace pytorch_jni {
 
@@ -121,71 +125,82 @@ static at::Tensor newAtTensor(
       at::TensorOptions(typeMeta));
 }
 
-facebook::jni::local_ref<TensorHybrid::jhybriddata> TensorHybrid::initHybrid(
-    facebook::jni::alias_ref<TensorHybrid::javaobject> jTensorThis) {
-  static auto cls = TensorHybrid::javaClassStatic();
-  static const auto jMethodDTypeCode = cls->getMethod<jint()>("dtypeJniCode");
-  static const auto jFieldShape = cls->getField<jlongArray>("shape");
-  static const auto jMethodGetDataBuffer = cls->getMethod<
-      facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
-      "getRawDataBuffer");
+class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
+ public:
+  constexpr static const char* kJavaDescriptor = "Lorg/pytorch/Tensor;";
 
-  at::Tensor tensor = newAtTensor(
-      jMethodGetDataBuffer(jTensorThis),
-      jTensorThis->getFieldValue(jFieldShape),
-      jMethodDTypeCode(jTensorThis));
-  return makeCxxInstance(std::move(tensor));
-}
+  explicit TensorHybrid(at::Tensor tensor) : tensor_(tensor) {}
 
-facebook::jni::local_ref<TensorHybrid::javaobject> TensorHybrid::
-    newJTensorFromAtTensor(const at::Tensor& tensor) {
-  const auto scalarType = tensor.scalar_type();
-  int jdtype = 0;
-  if (at::kFloat == scalarType) {
-    jdtype = kTensorDTypeFloat32;
-  } else if (at::kInt == scalarType) {
-    jdtype = kTensorDTypeInt32;
-  } else if (at::kByte == scalarType) {
-    jdtype = kTensorDTypeUInt8;
-  } else if (at::kChar == scalarType) {
-    jdtype = kTensorDTypeInt8;
-  } else if (at::kLong == scalarType) {
-    jdtype = kTensorDTypeInt64;
-  } else if (at::kDouble == scalarType) {
-    jdtype = kTensorDTypeFloat64;
-  } else {
-    facebook::jni::throwNewJavaException(
-        facebook::jni::gJavaLangIllegalArgumentException,
-        "at::Tensor scalar type is not supported on java side");
+  static facebook::jni::local_ref<TensorHybrid::jhybriddata> initHybrid(
+      facebook::jni::alias_ref<TensorHybrid::javaobject> jTensorThis) {
+    static auto cls = TensorHybrid::javaClassStatic();
+    static const auto jMethodDTypeCode = cls->getMethod<jint()>("dtypeJniCode");
+    static const auto jFieldShape = cls->getField<jlongArray>("shape");
+    static const auto jMethodGetDataBuffer = cls->getMethod<
+        facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
+        "getRawDataBuffer");
+
+    at::Tensor tensor = newAtTensor(
+        jMethodGetDataBuffer(jTensorThis),
+        jTensorThis->getFieldValue(jFieldShape),
+        jMethodDTypeCode(jTensorThis));
+    return makeCxxInstance(std::move(tensor));
   }
-  static auto cls = TensorHybrid::javaClassStatic();
-  auto sizes = tensor.sizes();
-  facebook::jni::local_ref<jlongArray> jTensorShape =
-      facebook::jni::make_long_array(sizes.size());
-  jTensorShape->setRegion(0, sizes.size(), sizes.data());
 
-  facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
-      facebook::jni::JByteBuffer::wrapBytes(
-          (uint8_t*)tensor.storage().data(), tensor.nbytes());
-  jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
+  static facebook::jni::local_ref<TensorHybrid::javaobject>
+  newJTensorFromAtTensor(const at::Tensor& tensor) {
+    const auto scalarType = tensor.scalar_type();
+    int jdtype = 0;
+    if (at::kFloat == scalarType) {
+      jdtype = kTensorDTypeFloat32;
+    } else if (at::kInt == scalarType) {
+      jdtype = kTensorDTypeInt32;
+    } else if (at::kByte == scalarType) {
+      jdtype = kTensorDTypeUInt8;
+    } else if (at::kChar == scalarType) {
+      jdtype = kTensorDTypeInt8;
+    } else if (at::kLong == scalarType) {
+      jdtype = kTensorDTypeInt64;
+    } else if (at::kDouble == scalarType) {
+      jdtype = kTensorDTypeFloat64;
+    } else {
+      facebook::jni::throwNewJavaException(
+          facebook::jni::gJavaLangIllegalArgumentException,
+          "at::Tensor scalar type is not supported on java side");
+    }
+    static auto cls = TensorHybrid::javaClassStatic();
+    auto sizes = tensor.sizes();
+    facebook::jni::local_ref<jlongArray> jTensorShape =
+        facebook::jni::make_long_array(sizes.size());
+    jTensorShape->setRegion(0, sizes.size(), sizes.data());
 
-  static const auto jMethodNewTensor =
-      cls->getStaticMethod<facebook::jni::local_ref<TensorHybrid::javaobject>(
-          facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
-          facebook::jni::alias_ref<jlongArray>,
-          jint,
-          facebook::jni::alias_ref<jhybriddata>)>("nativeNewTensor");
-  return jMethodNewTensor(
-      cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
-}
+    facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
+        facebook::jni::JByteBuffer::wrapBytes(
+            (uint8_t*)tensor.storage().data(), tensor.nbytes());
+    jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
 
-at::Tensor TensorHybrid::tensor() const {
-  return tensor_;
-}
+    static const auto jMethodNewTensor =
+        cls->getStaticMethod<facebook::jni::local_ref<TensorHybrid::javaobject>(
+            facebook::jni::alias_ref<facebook::jni::JByteBuffer>,
+            facebook::jni::alias_ref<jlongArray>,
+            jint,
+            facebook::jni::alias_ref<jhybriddata>)>("nativeNewTensor");
+    return jMethodNewTensor(
+        cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
+  }
 
-void TensorHybrid::registerNatives() {
-  registerHybrid({makeNativeMethod("initHybrid", TensorHybrid::initHybrid)});
-}
+  at::Tensor tensor() const {
+    return tensor_;
+  }
+
+  static void registerNatives() {
+    registerHybrid({makeNativeMethod("initHybrid", TensorHybrid::initHybrid)});
+  }
+
+ private:
+  friend HybridBase;
+  at::Tensor tensor_;
+};
 
 facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
     const at::IValue& ivalue) {
@@ -490,8 +505,7 @@ at::IValue JIValue::JIValueToAtIValue(
 
     auto jivalue_first_element = jarray->getElement(0);
     auto first_element = JIValue::JIValueToAtIValue(jivalue_first_element);
-    c10::TypePtr typePtr = first_element.type();
-    c10::impl::GenericList list{typePtr};
+    c10::impl::GenericList list{c10::unshapedType(first_element.type())};
     list.reserve(n);
     list.push_back(first_element);
     for (auto i = 1; i < n; ++i) {
@@ -513,8 +527,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::TypePtr typePtr = firstEntryValue.type();
-    c10::impl::GenericDict dict{c10::StringType::get(), typePtr};
+    c10::impl::GenericDict dict{c10::StringType::get(),
+                                c10::unshapedType(firstEntryValue.type())};
     dict.insert(it->first->toStdString(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
@@ -536,8 +550,8 @@ at::IValue JIValue::JIValueToAtIValue(
     }
 
     auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
-    c10::TypePtr typePtr = firstEntryValue.type();
-    c10::impl::GenericDict dict{c10::IntType::get(), typePtr};
+    c10::impl::GenericDict dict{c10::IntType::get(),
+                                c10::unshapedType(firstEntryValue.type())};
     dict.insert((int64_t)it->first->longValue(), firstEntryValue);
     it++;
     for (; it != jmap->end(); it++) {
@@ -552,6 +566,34 @@ at::IValue JIValue::JIValueToAtIValue(
       facebook::jni::gJavaLangIllegalArgumentException,
       "Unknown IValue typeCode %d",
       typeCode);
+}
+
+#if defined(__ANDROID__)
+class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
+ public:
+  constexpr static auto kJavaDescriptor = "Lorg/pytorch/PyTorchAndroid;";
+
+  static void registerNatives() {
+    javaClassStatic()->registerNatives({
+        makeNativeMethod(
+            "nativeSetNumThreads", PyTorchAndroidJni::setNumThreads),
+    });
+  }
+
+  static void setNumThreads(facebook::jni::alias_ref<jclass>, jint numThreads) {
+    caffe2::mobile_threadpool()->setNumThreads(numThreads);
+  }
+};
+#endif
+
+void common_registerNatives() {
+  static const int once = []() {
+    pytorch_jni::TensorHybrid::registerNatives();
+#if defined(__ANDROID__)
+    pytorch_jni::PyTorchAndroidJni::registerNatives();
+#endif
+    return 0;
+  }();
 }
 
 } // namespace pytorch_jni
