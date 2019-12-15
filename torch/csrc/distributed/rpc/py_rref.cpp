@@ -71,7 +71,7 @@ py::object PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      RRefContext::getInstance().getWorkerName());
+      owner().name_);
 
   if (rref_->isPyObj()) {
     const py::object& value =
