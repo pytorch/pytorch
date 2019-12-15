@@ -7,7 +7,7 @@
 #include <torch/nn/functional/linear.h>
 #include <torch/nn/functional/dropout.h>
 #include <limits>
-#include <ATen/native/cpu/Loops.h>
+#include <ATen/Dispatch.h>
 
 namespace torch {
 namespace nn {
