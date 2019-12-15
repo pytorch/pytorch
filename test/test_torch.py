@@ -34,7 +34,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf
 from multiprocessing.reduction import ForkingPickler
-from common_device_type import instantiate_device_type_tests, \
+from common_device_type import instantiate_device_type_tests, PYTORCH_CUDA_MEMCHECK, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
 import torch.backends.quantized
@@ -4929,6 +4929,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.empty_like(a).shape, a.shape)
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -12673,6 +12674,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(z, x)
 
     @onlyCUDA
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
