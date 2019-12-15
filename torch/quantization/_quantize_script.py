@@ -24,7 +24,8 @@ class ConvPackedParams(torch.nn.Module):
     @torch.jit.export
     def set_weight_bias(self, weight, bias):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride,
+                                                                 self.padding, self.dilation, self.groups)
 
     @torch.jit.export
     def _weight_bias(self):
@@ -81,11 +82,6 @@ def convert_script(model, inplace=False):
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
     if 'fbgemm' in torch.backends.quantized.supported_engines:
         torch._C._jit_pass_insert_prepack_unpack(model._c)
-        if linear_packed_params and conv_packed_params:
-            torch._C._jit_pass_fold_prepack(model._c,
-                                            linear_packed_params,
-                                            conv_packed_params)
-
     return model
 
 # TODO: non-scriptable QConfig will be supported later

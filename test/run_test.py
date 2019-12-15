@@ -62,6 +62,7 @@ TESTS = [
     'type_promotion',
     'jit_disabled',
     'function_schema',
+    'overrides',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -355,7 +356,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
             occurrence (first is default)
 
     Returns:
-        index of the first or last occurance of the given test
+        index of the first or last occurrence of the given test
     """
     idx = 0
     found_idx = -1

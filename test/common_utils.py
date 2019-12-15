@@ -754,7 +754,7 @@ class TestCase(expecttest.TestCase):
                         raise TypeError("Was expecting both tensors to be bool type.")
                     else:
                         if a.dtype == torch.bool and b.dtype == torch.bool:
-                            # we want to respect precision but as bool doesn't support substraction,
+                            # we want to respect precision but as bool doesn't support subtraction,
                             # boolean tensor has to be converted to int
                             a = a.to(torch.int)
                             b = b.to(torch.int)
@@ -902,6 +902,15 @@ class TestCase(expecttest.TestCase):
             return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
+
+    def assertNotWarn(self, callable, msg=''):
+        r"""
+        Test if :attr:`callable` does not raise a warning.
+        """
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            callable()
+            self.assertTrue(len(ws) == 0, msg)
 
     def assertWarns(self, callable, msg=''):
         r"""

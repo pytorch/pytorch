@@ -84,9 +84,9 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    if (size(d) != 1) {
-      if (stride(d) == z) {
-        z *= size(d);
+    if (sizes_[d] != 1) {
+      if (strides_[d] == z) {
+        z *= sizes_[d];
       } else {
         is_contiguous = false;
         break;
@@ -97,12 +97,12 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t expected = 1;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) == expected) {
-          expected *= size(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] == expected) {
+          expected *= sizes_[d];
         } else {
           return false;
         }
@@ -114,12 +114,12 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t min = 0;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) > min) {
-          min = stride(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] > min) {
+          min = strides_[d];
         } else {
           return false;
         }
@@ -132,7 +132,7 @@ bool TensorImpl::compute_strides_like_channels_last() const {
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return size(0) < 2 || stride(0) == 1;
+    return sizes_[0] < 2 || strides_[0] == 1;
   }
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
@@ -180,14 +180,6 @@ int64_t TensorImpl::size(int64_t d) const {
 int64_t TensorImpl::stride(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
-}
-
-TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
-  if (set_zero_dim) {
-    resize_dim(0);
-  }
-  return this;
 }
 
 bool TensorImpl::has_storage() const {
