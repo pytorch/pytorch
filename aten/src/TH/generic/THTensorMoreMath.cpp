@@ -12,8 +12,6 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
   return THTensor_(nElement)(t);
 }
 
-#if !defined(TH_REAL_IS_BFLOAT16)
-
 static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 {
   std::atomic<int> equal{1};
@@ -58,6 +56,8 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb) {
   at::NoNamesGuard guard;
   return THTensor_(equalImpl)(ta, tb);
 }
+
+#if !defined(TH_REAL_IS_BFLOAT16)
 
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
