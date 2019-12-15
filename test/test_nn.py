@@ -6329,6 +6329,12 @@ class TestNN(NNTestCase):
         self.assertEqual(input1.grad, torch.zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
 
+        # check if values are always between 0 and 1.
+        x = torch.tensor([[-0.8948,1.2475,3.9083,6.8356,1.6460,0.0952,-5.5912]])
+        y = torch.tensor([[-0.8950,1.2474,3.9082,6.8355,1.6460,0.0951,-5.5912]])
+        c = F.consine_similarity(x,y, dim=1)
+        self.assertEqual(c.max() - 1.0 == 0.0, prec=1e-7)
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
