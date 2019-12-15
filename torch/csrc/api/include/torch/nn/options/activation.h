@@ -320,14 +320,8 @@ struct TORCH_API GumbelSoftmaxFuncOptions {
 /// Options for MultiheadAttention functional and module.
 struct TORCH_API MultiheadAttentionOptions {
   MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
-    : embed_dim_(embed_dim), num_heads_(num_heads) {
-    if (!kdim_) {
-      kdim_ = embed_dim;
-    }
-    if (!vdim_) {
-      vdim_ = embed_dim;
-    }
-  }
+    : embed_dim_(embed_dim), num_heads_(num_heads),
+      kdim_(embed_dim), vdim_(embed_dim) {}
 
   /// total dimension of the model.
   TORCH_ARG(int64_t, embed_dim);
@@ -348,10 +342,10 @@ struct TORCH_API MultiheadAttentionOptions {
   TORCH_ARG(bool, add_zero_attn) = false;
 
   /// total number of features in key. Default: c10::nullopt.
-  TORCH_ARG(c10::optional<int64_t>, kdim) = c10::nullopt;
+  TORCH_ARG(int64_t, kdim);
 
   /// total number of features in key. Default: c10::nullopt.
-  TORCH_ARG(c10::optional<int64_t>, vdim) = c10::nullopt;
+  TORCH_ARG(int64_t, vdim);
 };
 
 // ============================================================================
@@ -359,9 +353,9 @@ struct TORCH_API MultiheadAttentionOptions {
 namespace functional {
 
 /// Options for `torch::nn::functional::multi_head_attention_forward`
-struct TORCH_API MultiheadAttentionForwardOptions {
+struct TORCH_API MultiheadAttentionForwardFuncOptions {
 
-  MultiheadAttentionForwardOptions(
+  MultiheadAttentionForwardFuncOptions(
     int64_t embed_dim_to_check, int64_t num_heads,
     Tensor in_proj_weight, Tensor in_proj_bias,
     Tensor bias_k, Tensor bias_v,

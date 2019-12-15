@@ -2,11 +2,9 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <bitset>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
 Tensor& rename_(Tensor& self, optional<DimnameList> names) {
@@ -345,7 +343,6 @@ Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList
   return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 // Misc. Dimname overloads that don't have homes. Maybe we should move
 // all of them here or autogenerate them because they look so similar.
 Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
@@ -415,7 +412,5 @@ Tensor squeeze(const Tensor& self, Dimname dim) {
   return at::squeeze(self, dimname_to_position(self, dim));
 }
 
-#endif
 
 }}  // namespace at::native
-#endif

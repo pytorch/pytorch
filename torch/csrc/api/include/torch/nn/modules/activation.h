@@ -528,9 +528,6 @@ class TORCH_API MultiheadAttentionImpl
 
   void _reset_parameters();
 
-  /// Pretty prints the `MultiheadAttention` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
   /// The options with which this `Module` was constructed.
   MultiheadAttentionOptions options;
 
@@ -543,7 +540,7 @@ class TORCH_API MultiheadAttentionImpl
   Tensor q_proj_weight;
   Tensor k_proj_weight;
   Tensor v_proj_weight;
-  int head_dim;
+  int64_t head_dim;
 };
 
 TORCH_MODULE(MultiheadAttention);

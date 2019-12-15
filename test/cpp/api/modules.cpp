@@ -3209,7 +3209,7 @@ namespace detail {
       if (multihead_attn_module->_qkv_same_embed_dim) {
         std::tie(result, result_weight) = F::multi_head_attention_forward(
           _Q, _K, _V,
-          F::MultiheadAttentionForwardOptions(
+          F::MultiheadAttentionForwardFuncOptions(
             /*embed_dim_to_check=*/d_model,
             /*num_heads=*/nheads,
             /*in_proj_weight=*/multihead_attn_module->in_proj_weight,
@@ -3231,7 +3231,7 @@ namespace detail {
       } else {
         std::tie(result, result_weight) = F::multi_head_attention_forward(
           _Q, _K, _V,
-          F::MultiheadAttentionForwardOptions(
+          F::MultiheadAttentionForwardFuncOptions(
             /*embed_dim_to_check=*/d_model,
             /*num_heads=*/nheads,
             /*in_proj_weight=*/{},
@@ -4538,4 +4538,11 @@ TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
     .pos_weight(torch::ones({3, 3}))
     .reduction(torch::kSum))),
     "torch::nn::BCEWithLogitsLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
+  ASSERT_EQ(c10::str(MultiheadAttention(20, 10)),
+    "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
+  ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
+    "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
 }

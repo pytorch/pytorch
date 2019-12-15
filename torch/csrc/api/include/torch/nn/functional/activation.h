@@ -7,6 +7,7 @@
 #include <torch/nn/functional/linear.h>
 #include <torch/nn/functional/dropout.h>
 #include <limits>
+#include <ATen/native/cpu/Loops.h>
 
 namespace torch {
 namespace nn {
@@ -385,7 +386,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
   Tensor q, k, v;
   if (!use_separate_proj_weight) {
-    if (torch::equal(query, key) and torch::equal(key, value)) {
+    if (torch::equal(query, key) && torch::equal(key, value)) {
       // self-attention
       const auto chunks =
         F::linear(query, in_proj_weight, in_proj_bias).chunk(3, /*dim=*/-1);
@@ -412,7 +413,6 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
         // This is inline in_proj function with in_proj_weight and in_proj_bias
         _b = in_proj_bias;
         _start = embed_dim;
-        // _end = {};
         _w = in_proj_weight.slice(/*dim=*/0, _start);
         if (_b.defined()) {
           _b = _b.slice(/*dim=*/0, _start);
@@ -445,7 +445,6 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       _b = in_proj_bias;
       _start = embed_dim * 2;
-      // _end = {};
       _w = in_proj_weight.slice(/*dim=*/0, _start);
       if (_b.defined()) {
         _b = _b.slice(0, _start);
@@ -582,9 +581,15 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   }
   if (key_padding_mask_.defined()) {
     attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
-    attn_output_weights = attn_output_weights.masked_fill(
-      key_padding_mask_.unsqueeze(1).unsqueeze(2),
-      -std::numeric_limits<float>::infinity()
+    attn_output_weights = AT_DISPATCH_FLOATING_TYPES(
+      attn_output_weights.scalar_type(),
+      "attn_output_weights.masked_fill",
+      [&]() {
+        return attn_output_weights.masked_fill(
+          key_padding_mask_.unsqueeze(1).unsqueeze(2),
+          -std::numeric_limits<scalar_t>::infinity()
+        );
+      }
     );
     attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
@@ -606,7 +611,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
 
 inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query, const Tensor& key, const Tensor& value,
-  const MultiheadAttentionForwardOptions& options) {
+  const MultiheadAttentionForwardFuncOptions& options) {
   return detail::multi_head_attention_forward(
     query,
     key,

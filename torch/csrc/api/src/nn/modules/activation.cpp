@@ -394,7 +394,7 @@ void ThresholdImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& options_)
-    : options(options_) {
+    : Module("torch::nn::MultiheadAttention"), options(options_) {
   reset();
 }
 
@@ -402,29 +402,10 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   const Tensor& query, const Tensor& key,
   const Tensor& value, const Tensor& key_padding_mask,
   bool need_weights, const Tensor& attn_mask) {
-  if (_qkv_same_embed_dim) {
+  if (!_qkv_same_embed_dim) {
     return F::multi_head_attention_forward(
       query, key, value, 
-      F::MultiheadAttentionForwardOptions(
-        /*embed_dim_to_check=*/options.embed_dim(),
-        /*num_heads=*/options.num_heads(),
-        /*in_proj_weight=*/in_proj_weight,
-        /*in_proj_bias=*/in_proj_bias,
-        /*bias_k=*/bias_k,
-        /*bias_v=*/bias_v,
-        /*add_zero_attn=*/options.add_zero_attn(),
-        /*dropout_p=*/options.dropout(),
-        /*out_proj_weight=*/out_proj->weight,
-        /*out_proj_bias=*/out_proj->bias
-      ).training(is_training())
-       .key_padding_mask(key_padding_mask)
-       .need_weights(need_weights)
-       .attn_mask(attn_mask)
-    );
-  } else {
-    return F::multi_head_attention_forward(
-      query, key, value, 
-      F::MultiheadAttentionForwardOptions(
+      F::MultiheadAttentionForwardFuncOptions(
         /*embed_dim_to_check=*/options.embed_dim(),
         /*num_heads=*/options.num_heads(),
         /*in_proj_weight=*/in_proj_weight,
@@ -444,6 +425,25 @@ std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
        .k_proj_weight(k_proj_weight)
        .v_proj_weight(v_proj_weight)
     );
+  } else {
+    return F::multi_head_attention_forward(
+      query, key, value, 
+      F::MultiheadAttentionForwardFuncOptions(
+        /*embed_dim_to_check=*/options.embed_dim(),
+        /*num_heads=*/options.num_heads(),
+        /*in_proj_weight=*/in_proj_weight,
+        /*in_proj_bias=*/in_proj_bias,
+        /*bias_k=*/bias_k,
+        /*bias_v=*/bias_v,
+        /*add_zero_attn=*/options.add_zero_attn(),
+        /*dropout_p=*/options.dropout(),
+        /*out_proj_weight=*/out_proj->weight,
+        /*out_proj_bias=*/out_proj->bias
+      ).training(is_training())
+       .key_padding_mask(key_padding_mask)
+       .need_weights(need_weights)
+       .attn_mask(attn_mask)
+    );
   }
 }
 
@@ -453,25 +453,27 @@ void MultiheadAttentionImpl::reset() {
   head_dim = options.embed_dim() / options.num_heads();
   TORCH_CHECK(head_dim * options.num_heads() == options.embed_dim(),
               "embed_dim must be divisible by num_heads");
-  _reset_parameters();
-}
-
-void MultiheadAttentionImpl::_reset_parameters() {
-  using namespace torch::nn::init;
   if (!_qkv_same_embed_dim) {
     q_proj_weight = torch::empty({options.embed_dim(), options.embed_dim()});
-    k_proj_weight = torch::empty({options.embed_dim(), *options.kdim()});
-    v_proj_weight = torch::empty({options.embed_dim(), *options.vdim()});
+    k_proj_weight = torch::empty({options.embed_dim(), options.kdim()});
+    v_proj_weight = torch::empty({options.embed_dim(), options.vdim()});
+    register_parameter("in_proj_weight", {}, /*requires_grad=*/false);
   } else {
     in_proj_weight = torch::empty({3 * options.embed_dim(), options.embed_dim()});
+    register_parameter("q_proj_weight", {}, /*requires_grad=*/false);
+    register_parameter("k_proj_weight", {}, /*requires_grad=*/false);
+    register_parameter("v_proj_weight", {}, /*requires_grad=*/false);
   }
   if (options.bias()) {
     in_proj_bias = torch::empty(3 * options.embed_dim());
   } else {
-    register_parameter("in_proj_bias", {});
+    register_parameter("in_proj_bias", {}, /*requires_grad=*/false);
   }
-  out_proj = Linear(LinearOptions(options.embed_dim(),
-                                  options.embed_dim()).bias(options.bias()));
+  out_proj = register_module(
+    "out_proj",
+    Linear(LinearOptions(options.embed_dim(),
+      options.embed_dim()).bias(options.bias()))
+  );
   if (options.add_bias_kv()) {
     bias_k = torch::empty({1, 1, options.embed_dim()});
     bias_v = torch::empty({1, 1, options.embed_dim()});
@@ -479,6 +481,11 @@ void MultiheadAttentionImpl::_reset_parameters() {
     bias_k = {};
     bias_v = {};
   }
+  _reset_parameters();
+}
+
+void MultiheadAttentionImpl::_reset_parameters() {
+  using namespace torch::nn::init;
   if (_qkv_same_embed_dim) {
     xavier_uniform_(in_proj_weight);
   } else {
@@ -496,10 +503,6 @@ void MultiheadAttentionImpl::_reset_parameters() {
   if (bias_v.defined()) {
     xavier_normal_(bias_v);
   }
-}
-
-void MultiheadAttentionImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiheadAttention(todo)";
 }
 
 } // namespace nn
