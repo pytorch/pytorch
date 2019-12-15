@@ -14,22 +14,22 @@ class LLVMCodeGen : public IRVisitor {
   llvm::IRBuilder<> irb_;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
-  llvm::Function *fn_;
-  llvm::BasicBlock *bb_;
-  llvm::Value *value_;
-  llvm::Type *int32Ty_;
+  llvm::Function* fn_;
+  llvm::BasicBlock* bb_;
+  llvm::Value* value_;
+  llvm::Type* int32Ty_;
 
  public:
   LLVMCodeGen();
-  void visit(const Add *v) override;
-  void visit(const Sub *v) override;
-  void visit(const Mul *v) override;
-  void visit(const Div *v) override;
-  void visit(const IntImm *v) override;
-  void visit(const FloatImm *v) override;
+  void visit(const Add* v) override;
+  void visit(const Sub* v) override;
+  void visit(const Mul* v) override;
+  void visit(const Div* v) override;
+  void visit(const IntImm* v) override;
+  void visit(const FloatImm* v) override;
   int value();
 };
 
-} // namespace nnc
+}  // namespace nnc
 
-#endif // NNC_INCLUDE_LLVM_CODEGEN_H_
+#endif  // NNC_INCLUDE_LLVM_CODEGEN_H_

@@ -1,5 +1,5 @@
-#include "llvm_codegen.h"
 #include "ir.h"
+#include "llvm_codegen.h"
 
 #include <gtest/gtest.h>
 
