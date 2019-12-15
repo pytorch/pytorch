@@ -1,15 +1,13 @@
-#include "ir.h"
 #include "llvm_codegen.h"
+#include "ir.h"
 
-#include <llvm/Support/TargetSelect.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Support/TargetSelect.h>
 #include <memory>
 
 using namespace nnc;
 
-LLVMCodeGen::LLVMCodeGen() 
-  : irb_(context_)
-{
+LLVMCodeGen::LLVMCodeGen() : irb_(context_) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetAsmParser();
@@ -21,15 +19,13 @@ LLVMCodeGen::LLVMCodeGen()
   // Emit prototype.
   int32Ty_ = llvm::Type::getInt32Ty(context_);
 
-  llvm::FunctionType *fntype = llvm::FunctionType::get(
-    int32Ty_, {}, false);
-  fn_ = llvm::Function::Create(
-    fntype, llvm::Function::ExternalLinkage, "pytorch", module_.get());
+  llvm::FunctionType* fntype = llvm::FunctionType::get(int32Ty_, {}, false);
+  fn_ = llvm::Function::Create(fntype, llvm::Function::ExternalLinkage, "pytorch", module_.get());
   bb_ = llvm::BasicBlock::Create(context_, "entry", fn_);
   irb_.SetInsertPoint(bb_);
 }
 
-void LLVMCodeGen::visit(const Add *v) {
+void LLVMCodeGen::visit(const Add* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
   v->rhs().accept(this);
@@ -37,7 +33,7 @@ void LLVMCodeGen::visit(const Add *v) {
   value_ = irb_.CreateAdd(lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const Sub *v) {
+void LLVMCodeGen::visit(const Sub* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
   v->rhs().accept(this);
@@ -45,7 +41,7 @@ void LLVMCodeGen::visit(const Sub *v) {
   value_ = irb_.CreateSub(lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const Mul *v) {
+void LLVMCodeGen::visit(const Mul* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
   v->rhs().accept(this);
@@ -53,7 +49,7 @@ void LLVMCodeGen::visit(const Mul *v) {
   value_ = irb_.CreateMul(lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const Div *v) {
+void LLVMCodeGen::visit(const Div* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
   v->rhs().accept(this);
@@ -61,14 +57,11 @@ void LLVMCodeGen::visit(const Div *v) {
   value_ = irb_.CreateSDiv(lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const IntImm *v) {
-  value_ = llvm::Constant::getIntegerValue(
-    int32Ty_, llvm::APInt(32, v->value()));
+void LLVMCodeGen::visit(const IntImm* v) {
+  value_ = llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, v->value()));
 }
 
-void LLVMCodeGen::visit(const FloatImm *v) {
-  assert(false && "Integer only now sorry");
-}
+void LLVMCodeGen::visit(const FloatImm* v) { assert(false && "Integer only now sorry"); }
 
 int LLVMCodeGen::value() {
   irb_.CreateRet(value_);
