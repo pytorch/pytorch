@@ -633,7 +633,10 @@ class InsertQuantDeQuantHelper {
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<Graph*, std::unordered_map<Value*, QParamMap>> values_to_qparams_;
+  std::unordered_map<
+      Graph*,
+      std::unordered_map<QScheme, std::unordered_map<Value*, QParamMap>>>
+      values_to_qparams_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -659,8 +662,9 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
   auto tp = getQSchemeAndQParamMap(module, v);
+  auto qscheme = std::get<0>(tp);
   auto qparam_map = std::get<1>(tp);
-  values_to_qparams_[g].insert({new_value, qparam_map});
+  values_to_qparams_[g][qscheme].insert({new_value, qparam_map});
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
