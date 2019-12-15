@@ -9,6 +9,7 @@ class Mul;
 class Div;
 class IntImm;
 class FloatImm;
+class Cast;
 class Variable;
 class Let;
 
@@ -20,6 +21,7 @@ class IRVisitor {
   virtual void visit(const Div* v);
   virtual void visit(const IntImm* v);
   virtual void visit(const FloatImm* v);
+  virtual void visit(const Cast* v);
   virtual void visit(const Variable* v);
   virtual void visit(const Let* v);
 };

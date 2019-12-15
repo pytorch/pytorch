@@ -1,8 +1,10 @@
 #ifndef NNC_INCLUDE_EXPR_H_INCLUDED_
 #define NNC_INCLUDE_EXPR_H_INCLUDED_
 
+#include "expr.h"
 #include "ir_visitor.h"
 #include "refcount.h"
+#include "types.h"
 
 namespace nnc {
 
@@ -10,6 +12,19 @@ namespace nnc {
 class BaseExprNode : public RefCounted {
  public:
   virtual void accept(IRVisitor* visitor) const = 0;
+  BaseExprNode() : dtype_(kUninitialized) {}
+  explicit BaseExprNode(Dtype dtype) : dtype_(dtype) {}
+  Dtype dtype() const { return dtype_; }
+
+ protected:
+  void set_dtype(Dtype dtype) {
+    CHECK_EQ(this->dtype_, Dtype::kUninitialized) << "can only set uninitialized dtype";
+    CHECK_NE(dtype, Dtype::kUninitialized) << "new dtype must not be valid";
+    this->dtype_ = dtype;
+  }
+
+ private:
+  Dtype dtype_;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -17,7 +32,9 @@ class BaseExprNode : public RefCounted {
 template <class Op>
 class ExprNode : public BaseExprNode {
  public:
+  using ExprNodeBase = ExprNode<Op>;
   void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
+  explicit ExprNode(Dtype dtype) : BaseExprNode(dtype) {}
 };
 
 // A refcounted pointer to the underlying ExprNode.
@@ -48,6 +65,8 @@ class Expr : public RefHandle<BaseExprNode> {
     Expr* this_non_const = const_cast<Expr*>(this);
     return this_non_const->AsNode<Op>();
   }
+
+  Dtype dtype() const { return node()->dtype(); }
 
   // Handling the math operators.
   Expr operator+(const Expr& other) const;

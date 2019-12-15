@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <atomic>
 
+#include "logging.h"
+
 namespace nnc {
 
 // A refcounted object.
@@ -19,17 +21,17 @@ class RefCounted {
 
   // Increments reference count by one.
   void Ref() const {
-    // TODO: DCHECK_GE(ref_.load(), 1);
+    DCHECK_GE(ref_.load(), 1);
     ref_.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Decrements reference count by one.
   void Unref() const {
-    // TODO: DCHECK_GT(ref_.load(), 0);
+    DCHECK_GT(ref_.load(), 0);
     // If ref_==1, this object is owned only by the caller. Bypass a locked op
     // in that case.
     if (RefCountIsOne() || ref_.fetch_sub(1) == 1) {
-      // TODO: DCHECK((ref_.store(0), true));
+      DCHECK((ref_.store(0), true));
       // TODO: switch to a generic deleter. This assumes this object instance is
       // created through new.
       delete this;
@@ -42,9 +44,7 @@ class RefCounted {
  protected:
   // Make destructor protected so that RefCounted objects cannot
   // be instantiated directly. Only subclasses can be instantiated.
-  virtual ~RefCounted() {
-    // TODO: DCHECK_EQ(ref_.load(), 0);
-  }
+  virtual ~RefCounted() { DCHECK_EQ(ref_.load(), 0); }
 
  private:
   mutable std::atomic_int_fast32_t ref_;

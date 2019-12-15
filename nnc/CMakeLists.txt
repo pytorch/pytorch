@@ -24,8 +24,10 @@ add_definitions(${LLVM_DEFINITIONS})
 
 add_library(nnc
   src/expr.cc
+  src/function.cc
   src/ir_visitor.cc
-  src/llvm_codegen.cc)
+  src/llvm_codegen.cc
+  )
 
 set_source_files_properties(src/llvm_codegen.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
 

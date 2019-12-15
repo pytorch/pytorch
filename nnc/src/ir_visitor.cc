@@ -18,6 +18,7 @@ void IRVisitor::visit(const Div* v) { visit_binary_op(v, this); }
 
 void IRVisitor::visit(const IntImm* v) {}
 void IRVisitor::visit(const FloatImm* v) {}
+void IRVisitor::visit(const Cast* v) { v->src_value().accept(this); }
 void IRVisitor::visit(const Variable* v) {}
 void IRVisitor::visit(const Let* v) {
   v->var().accept(this);
