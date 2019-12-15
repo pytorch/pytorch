@@ -28,6 +28,7 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/guard_elimination.h"
+#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
@@ -1297,6 +1298,25 @@ def c(x):
   // callstack entries for them.
   ASSERT_TRUE(callstack_objects.count("a1") && callstack_objects.count("a2"));
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
+}
+
+void testAutogradSymbols() {
+  Symbol sym = Symbol::fromQualString("aten::test_symbol");
+  Graph graph;
+  auto node = graph.create(sym);
+  TORCH_CHECK(canRunWithAutograd(node));
+
+  sym = Symbol::fromQualString("prim::test_symbol");
+  node =  graph.create(sym);
+  TORCH_CHECK(canRunWithAutograd(node));
+
+  sym = Symbol::fromQualString("prim::FusionGroup");
+  node =  graph.create(sym);
+  TORCH_CHECK(!canRunWithAutograd(node));
+
+  sym = Symbol::fromQualString("custom::test_symbol");
+  node =  graph.create(sym);
+  TORCH_CHECK(!canRunWithAutograd(node));
 }
 
 } // namespace jit

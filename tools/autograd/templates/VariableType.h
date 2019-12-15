@@ -7,7 +7,6 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstdint> // for size_t
 #include <functional> // for function
@@ -24,10 +23,8 @@ namespace torch { namespace autograd {
 using Variable = at::Tensor;
 using at::Context;
 using at::Device;
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
-#endif
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;
