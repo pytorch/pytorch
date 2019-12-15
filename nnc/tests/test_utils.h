@@ -4,56 +4,73 @@
 #include <gtest/gtest.h>
 #include <unordered_map>
 
+#include "function.h"
 #include "ir.h"
+#include "tensor.h"
+#include "types.h"
 
 namespace nnc {
 
-template <typename T>
 class SimpleExprEvaluator : public IRVisitor {
  public:
   void visit(const Add* v) override { visit_binary_op(v); }
-
   void visit(const Sub* v) override { visit_binary_op(v); }
-
   void visit(const Mul* v) override { visit_binary_op(v); }
-
   void visit(const Div* v) override { visit_binary_op(v); }
 
-  template <typename Op>
-  void visit_binary_op(const BinaryOpNode<Op>* v) {
-    v->lhs().accept(this);
-    T lhs_v = this->value_;
-    v->rhs().accept(this);
-    T rhs_v = this->value_;
-    switch (v->expr_type()) {
+  template <typename T>
+  Scalar binary_op(const Scalar& lhs, const Scalar& rhs, ExprNodeType op_type) {
+    T lhs_v = lhs.as<T>();
+    T rhs_v = rhs.as<T>();
+    T result_v = T();
+    switch (op_type) {
       case ExprNodeType::kAdd:
-        this->value_ = lhs_v + rhs_v;
+        result_v = lhs_v + rhs_v;
         break;
       case ExprNodeType::kSub:
-        this->value_ = lhs_v - rhs_v;
+        result_v = lhs_v - rhs_v;
         break;
       case ExprNodeType::kMul:
-        this->value_ = lhs_v * rhs_v;
+        result_v = lhs_v * rhs_v;
         break;
       case ExprNodeType::kDiv:
-        this->value_ = lhs_v / rhs_v;
+        result_v = lhs_v / rhs_v;
         break;
       default:
         // TODO: change to a proper error report
         throw std::runtime_error("invalid operator type");
     }
+    return Scalar(result_v);
   }
 
-  void visit(const IntImm* v) override { value_ = (T)(v->value()); }
-  void visit(const FloatImm* v) override { value_ = (T)(v->value()); }
+  template <typename Op>
+  void visit_binary_op(const BinaryOpNode<Op>* v) {
+    v->lhs().accept(this);
+    Scalar lhs_v = value_;
+    v->rhs().accept(this);
+    Scalar rhs_v = value_;
+    CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
+    ExprNodeType expr_type = v->expr_type();
+    if (lhs_v.dtype() == kFloat32) {
+      value_ = binary_op<float>(lhs_v, rhs_v, expr_type);
+    } else if (lhs_v.dtype() == kInt32) {
+      value_ = binary_op<int>(lhs_v, rhs_v, expr_type);
+    } else {
+      LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
+    }
+  }
+
+  void visit(const IntImm* v) override { value_ = Scalar(v->value()); }
+  void visit(const FloatImm* v) override { value_ = Scalar(v->value()); }
 
   void visit(const Let* v) override {
     const Variable* var = v->var().AsNode<Variable>();
     ASSERT_NE(var, nullptr);
     v->value().accept(this);
-    T value = value_;
+    Scalar value = value_;
     auto iter = eval_context_.find(var);
-    ASSERT_EQ(iter, eval_context_.end());
+    // TODO: make the same value settable multiple times.
+    CHECK(iter == eval_context_.end()) << "var must not exist in the context before";
     eval_context_[var] = value_;
 
     v->body().accept(this);
@@ -63,15 +80,66 @@ class SimpleExprEvaluator : public IRVisitor {
 
   void visit(const Variable* v) override {
     auto iter = eval_context_.find(v);
-    ASSERT_NE(iter, eval_context_.end());
+    CHECK(iter != eval_context_.end()) << "var must be defined in the context before";
     value_ = iter->second;
   }
 
-  T value() const { return value_; }
+  void visit(const Cast* v) override {
+    const Expr& src_value = v->src_value();
+    src_value.accept(this);
+    Dtype dst_dtype = v->dtype();
+    Dtype src_dtype = src_value.dtype();
+    if (src_dtype != dst_dtype) {
+      if (src_dtype == kFloat32 && dst_dtype == kInt32) {
+        int v = static_cast<int>(value_.as<float>());
+        value_ = Scalar(v);
+      } else if (src_dtype == kInt32 && dst_dtype == kFloat32) {
+        float v = static_cast<float>(value_.as<int>());
+        value_ = Scalar(v);
+      }
+    }
+  }
+
+  Scalar value() const { return value_; }
 
  private:
-  T value_ = T();
-  std::unordered_map<const BaseExprNode*, T> eval_context_;
+  Scalar value_;
+  std::unordered_map<const BaseExprNode*, Scalar> eval_context_;
+};
+
+template <class T>
+class SimpleTensorEvaluator {
+ public:
+  void evaluate(const Tensor& t, std::vector<T>* output) {
+    int ndim = t.ndim();
+    std::vector<int> dims;
+    int size = 1;
+    for (int i = 0; i < ndim; i++) {
+      t.dim(i).accept(&expr_eval_);
+      int dim = expr_eval_.value().as<int>();
+      dims.push_back(dim);
+      size *= dim;
+    }
+    const Function& func = t.function();
+    const Expr& body = func.body();
+    eval_func(dims, func, 0, output, body);
+  }
+
+ private:
+  void eval_func(const std::vector<int>& dims, const Function& func, int level,
+                 std::vector<T>* output, const Expr& body) {
+    if (level >= dims.size()) {
+      body.accept(&expr_eval_);
+      output->push_back(expr_eval_.value().as<T>());
+      return;
+    }
+    for (int i = 0; i < dims[level]; i++) {
+      Expr wrapped_body = Let::make(func.arg(level), Expr(i), body);
+      eval_func(dims, func, level + 1, output, wrapped_body);
+    }
+  }
+
+  SimpleExprEvaluator expr_eval_;
 };
 
 }  // namespace nnc
