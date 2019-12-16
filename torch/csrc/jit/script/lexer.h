@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/script/parser_constants.h>
 #include <torch/csrc/jit/source_range.h>
 #include <algorithm>
 #include <clocale>
@@ -104,8 +105,6 @@ namespace script {
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
   _(TK_IMPORT, "import", "import")
-
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
