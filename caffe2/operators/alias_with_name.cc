@@ -13,6 +13,7 @@ OPERATOR_SCHEMA(AliasWithName)
 Similar with AliasOp, storing the alias name as operator argument.
 )DOC")
     .Arg("name", "name of the aliasing")
+    .Arg("is_backward", "weather or not to alias forward or backward")
     .Input(0, "input", "Input tensor whose storage will be shared.")
     .Output(0, "output", "Tensor of same shape as input, sharing its storage.");
 
@@ -20,5 +21,5 @@ Similar with AliasOp, storing the alias name as operator argument.
 
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     AliasWithName,
-    "_caffe2::AliasWithName(Tensor input, str name) -> (Tensor output)",
+    "_caffe2::AliasWithName(Tensor input, str name, bool is_backward = False) -> (Tensor output)",
     caffe2::AliasWithNameOp<caffe2::CPUContext>);

@@ -18,7 +18,9 @@ class AliasWithNameOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         name_(this->template GetSingleArgument<std::string>(
             "name",
-            "invalid_name")) {
+            "invalid_name")),
+        is_backward_(
+            this->template GetSingleArgument<bool>("is_backward", false)) {
     CAFFE_ENFORCE(
         OperatorBase::HasArgument("name"), "You have to specify argument name");
   }
@@ -36,6 +38,7 @@ class AliasWithNameOp final : public Operator<Context> {
 
  protected:
   std::string name_;
+  bool is_backward_;
 };
 
 } // namespace caffe2
