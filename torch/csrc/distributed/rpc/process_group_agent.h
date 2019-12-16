@@ -98,7 +98,7 @@ class ProcessGroupAgent : public RpcAgent {
     uint64_t currentSum_;
     uint64_t currentCount_;
 
-    AverageMetricsTracker(
+    explicit AverageMetricsTracker(
         const std::string& key,
         double currentSum = 0,
         uint64_t currentCount = 0);

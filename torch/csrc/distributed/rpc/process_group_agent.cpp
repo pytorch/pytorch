@@ -633,8 +633,8 @@ void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);
   if (!metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]) {
-    metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] = std::move(
-        c10::guts::make_unique<AverageMetricsTracker>(kGilAverageWaitTime));
+    metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
+        c10::guts::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   }
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]->addData(
       gilWaitTime.count());
