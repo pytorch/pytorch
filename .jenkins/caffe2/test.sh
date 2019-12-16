@@ -40,6 +40,9 @@ for test in $(find "$cpp_test_dir" -executable -type f); do
         LD_LIBRARY_PATH="$ld_library_path" "$test"
       fi
       ;;
+    */*_benchmark)
+      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+      ;;
     *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
@@ -141,7 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.0.0.dev1104
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.0.0.dev1123
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
