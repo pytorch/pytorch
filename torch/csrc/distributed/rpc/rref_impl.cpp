@@ -20,9 +20,10 @@ constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
 constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
 constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
 constexpr int PARENT_IDX = 5; // index of parent in the tuple
+constexpr int TYPE_IDX = 6; // index of parent in the tuple
 
 // NB: if more fields are added, make sure this field is also bumped
-constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
+constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
 
 template <typename T>
 T& unwrapAutogradMessage(
@@ -54,8 +55,9 @@ RRefForkData::RRefForkData(
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId,
-    worker_id_t parent)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent) {}
+    worker_id_t parent,
+    const std::string& type_str)
+    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent), type_str_(type_str) {}
 
 py::tuple RRefForkData::toPyTuple() const {
   return py::make_tuple(
@@ -64,7 +66,8 @@ py::tuple RRefForkData::toPyTuple() const {
       rrefId_.localId_,
       forkId_.createdOn_,
       forkId_.localId_,
-      parent_);
+      parent_,
+      type_str_);
 }
 
 RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
@@ -79,9 +82,11 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
   const RRefId& forkId = RRefId(
       t[FORKID_ON_IDX].cast<worker_id_t>(),
       t[FORKID_ID_IDX].cast<local_id_t>());
-  worker_id_t parent = t[PARENT_IDX].cast<worker_id_t>();
 
-  return RRefForkData(ownerId, rrefId, forkId, parent);
+  worker_id_t parent = t[PARENT_IDX].cast<worker_id_t>();
+  const std::string& typeStr = t[TYPE_IDX].cast<std::string>();
+
+  return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }
 
 //////////////////////////////  RRefBase  /////////////////////////////////////
@@ -92,7 +97,7 @@ RRefBase::RRefBase(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& typ
 RRefForkData RRefBase::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId());
+      ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId(), type_->str());
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -137,8 +142,10 @@ IValue UserRRef::toHere() {
   Message msgToSend;
 
   if (isPyObj()) {
+    std::cout<<"pyobject to here?>?" << type()->str() << std::endl;
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
   } else {
+    std::cout<<"ivalue to here" << std::endl;
     msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
   }
 
@@ -149,7 +156,6 @@ IValue UserRRef::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  RRefContext::handleException(message);
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
   if (isPyObj()) {
@@ -163,18 +169,40 @@ IValue UserRRef::toHere() {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });
   return value_.value();
 }
 
-void OwnerRRef::setValue(IValue&& value) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    value_ = std::move(value);
+bool OwnerRRef::hasValue() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return value_.has_value();
+}
+
+std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (future_.get()) {
+    return future_;
   }
+  future_ = std::make_shared<FutureMessage>();
+  std::shared_ptr<FutureMessage> ret = future_;
+  if (value_.has_value()) {
+    lock.unlock();
+    ret->markCompleted(Message());
+  }
+  return ret;
+}
+
+void OwnerRRef::setValue(IValue&& value) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  value_ = std::move(value);
+  std::shared_ptr<FutureMessage> future;
+  future.swap(future_);
+  lock.unlock();
   valueCV_.notify_all();
+  if (future.get() && !future->completed()) {
+    future->markCompleted(Message());
+  }
 }
 
 } // namespace rpc

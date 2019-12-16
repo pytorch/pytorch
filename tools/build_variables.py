@@ -62,7 +62,6 @@ libtorch_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
-    "torch/csrc/distributed/rpc/future_message.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/python_call.cpp",
     "torch/csrc/distributed/rpc/python_remote_call.cpp",

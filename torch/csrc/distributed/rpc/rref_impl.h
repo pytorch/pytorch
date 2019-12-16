@@ -27,6 +27,7 @@ struct RRefForkData {
   const RRefId rrefId_;
   const ForkId forkId_;
   const worker_id_t parent_;
+  const std::string type_str_;
 
  private:
   friend class RRefBase;
@@ -37,7 +38,8 @@ struct RRefForkData {
       worker_id_t ownerId,
       const RRefId& rrefId_,
       const ForkId& forkId_,
-      worker_id_t parent);
+      worker_id_t parent,
+      const std::string& type_str);
 
 };
 
@@ -214,6 +216,9 @@ class RRefBase : public c10::RRef {
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
+  inline const TypePtr type() {
+    return type_;
+  }
 
  protected:
   friend class RRefContext;
@@ -225,6 +230,8 @@ class RRefBase : public c10::RRef {
   const worker_id_t ownerId_;
   const RRefId rrefId_;
 
+  // type field to denote the type of the element that the RRef is holding
+  // it could be any TypePtr that JIT support, including PyObjectType
   const TypePtr type_;
 };
 
@@ -283,6 +290,11 @@ class OwnerRRef final : public RRefBase {
   // does not create any new py::object.
   void setValue(IValue&& value);
 
+  // Has a value been set?
+  bool hasValue() const;
+  // Gets a future that is satisfied when the value is set.
+  std::shared_ptr<FutureMessage> getFuture();
+
  private:
   friend class RRefContext;
 
@@ -297,6 +309,7 @@ class OwnerRRef final : public RRefBase {
   c10::optional<IValue> value_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
+  std::shared_ptr<FutureMessage> future_;
 };
 
 } // namespace rpc

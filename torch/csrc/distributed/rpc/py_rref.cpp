@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 namespace torch {
 namespace distributed {
@@ -39,7 +40,8 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      return py::cast<py::object>(std::static_pointer_cast<UserRRef>(rref_)->toHere().toPyObject());
+      std::cout<<"to here is pyobject?? "<< str() << std::endl;
+      return jit::toPyObject(std::static_pointer_cast<UserRRef>(rref_)->toHere());
     } else {
       IValue value =
           std::static_pointer_cast<UserRRef>(rref_)->toHere();
@@ -62,7 +64,7 @@ py::object PyRRef::localValue() {
 
   if (rref_->isPyObj()) {
     const py::object& value =
-        py::cast<py::object>(std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue().toPyObject());
+        jit::toPyObject(std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue());
     PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
@@ -109,7 +111,9 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   auto& ctx = RRefContext::getInstance();
   auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
   std::shared_ptr<RRefBase> rref = nullptr;
-  rref = ctx.getOrCreateRRef(rfd, PyObjectType::get());
+  jit::script::ScriptTypeParser typeParser;
+  TypePtr rref_type = typeParser.parseType(rfd.type_str_);
+  rref = ctx.getOrCreateRRef(rfd, rref_type);
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));
