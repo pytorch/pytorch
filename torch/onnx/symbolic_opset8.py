@@ -50,7 +50,8 @@ for black_listed_op in black_listed_operators:
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
@@ -58,7 +59,7 @@ def _interpolate(name, dim, interpolate_mode):
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
             return _unimplemented(name, "torch._C.Value (output_size) indexing")
-        else:
+        if scales is None:
             scales = [1. if i < 2 else
                       float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
                       for i in range(0, dim)]
@@ -74,7 +75,7 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
     if not sym_help._is_none(align_corners) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")

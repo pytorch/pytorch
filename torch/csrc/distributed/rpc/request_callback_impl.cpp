@@ -10,7 +10,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -120,20 +119,51 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
+          ctx.getOwnerRRef<IValue>(srf.rrefId());
+      if (rref->hasValue()) { // optional fast-path
+        return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
+      }
+      auto whenValueSet = rref->getFuture();
+      auto responseFuture = std::make_shared<FutureMessage>();
+
+      // Our response is satisfied when the rpcs come back.
+      whenValueSet->addCallback(
+          [responseFuture, messageId, rref](
+              const rpc::Message& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(m);
+          });
+      return responseFuture;
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
-      SerializedPyObj result =
-          PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+          ctx.getOwnerRRef<py::object>(prf.rrefId());
+      if (rref->hasValue()) { // optional fast-path
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(rref->getValue());
+        return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
+      }
+
+      auto whenValueSet = rref->getFuture();
+      auto responseFuture = std::make_shared<FutureMessage>();
+
+      // Our response is satisfied when the rpcs come back.
+      whenValueSet->addCallback(
+          [responseFuture, messageId, rref](
+              const rpc::Message& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            SerializedPyObj result =
+                PythonRpcHandler::getInstance().serialize(rref->getValue());
+            Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(m);
+          });
+      return responseFuture;
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
@@ -180,7 +210,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       return wrap(getMessageWithAutograd(
           rpcWithAutograd.fromWorkerId(),
-          std::move(*wrappedRpcResponse).moveMessage(),
+          std::move(*wrappedRpcResponse).moveValue(),
           MessageType::FORWARD_AUTOGRAD_RESP));
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
@@ -207,11 +237,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           autogradContext, sendFunction);
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback([responseFuture, messageId](const Message&) {
-        Message m = std::move(PropagateGradientsResp()).toMessage();
-        m.setId(messageId);
-        responseFuture->markCompleted(m);
-      });
+      execFuture->addCallback(
+          [responseFuture, messageId](
+              const Message& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            Message m = std::move(PropagateGradientsResp()).toMessage();
+            m.setId(messageId);
+            responseFuture->markCompleted(std::move(m));
+          });
       return responseFuture;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
