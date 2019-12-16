@@ -19,6 +19,20 @@ docker_config_defaults: &docker_config_defaults
     # This IAM user only allows read-write access to ECR
     aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
+
+executors:
+  windows-with-nvidia-gpu:
+    machine:
+      resource_class: windows.gpu.nvidia.medium
+      image: windows-server-2019-nvidia:stable
+      shell: bash.exe
+
+  windows-cpu-with-nvidia-cuda:
+    machine:
+      # we will change to CPU host when it's ready
+      resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
 commands:
   # NB: This command must be run as the first command in a job. It
   # attaches the workspace at ~/workspace; this workspace is generated
@@ -426,6 +440,67 @@ jobs:
           retrieve_test_reports
     - store_test_results:
         path: test-reports
+
+  pytorch_windows_build:
+    executor: windows-cpu-with-nvidia-cuda
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+      SCCACHE_BUCKET: "ossci-compiler-cache"
+      CUDA_VERSION: "10"
+      USE_CUDA: "1"
+      TORCH_CUDA_ARCH_LIST: "7.5"
+    steps:
+      - checkout
+      - run:
+          name: Install Cuda
+          command: |
+            curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
+            ./cuda_10.1.243_426.00_win10.exe -s
+            rm -f ./cuda_10.1.243_426.00_win10.exe
+      - run:
+          name: Install Cudnn
+          command : |
+            cd c:/
+            choco install -y 7zip curl
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
+            7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
+            cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+      - run:
+          name: Build
+          no_output_timeout: "90m"
+          command: |
+            set -e
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            set -x
+            .jenkins/pytorch/win-build.sh
+  pytorch_windows_test:
+    executor: windows-with-nvidia-gpu
+    parameters:
+      test_name:
+        type: string
+        default: ""
+    environment:
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+      SCCACHE_BUCKET: "ossci-compiler-cache"
+      CUDA_VERSION: "10"
+      JOB_BASE_NAME: <<parameters.test_name>>
+    steps:
+      - checkout
+      - run:
+          name: Test
+          no_output_timeout: "30m"
+          command: |
+            set -e
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            set -x
+            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            choco install -y 7zip curl
+            .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
@@ -669,6 +744,16 @@ jobs:
         no_output_timeout: "1h"
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -851,7 +936,7 @@ jobs:
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -879,7 +964,7 @@ jobs:
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -1298,14 +1383,14 @@ jobs:
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
       - checkout
       - run_brew_for_ios_build
       - run:
-          name: cert install
+          name: Run Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
@@ -1337,9 +1422,9 @@ jobs:
             export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
-            curl --retry 3 -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-            chmod +x ~/Downloads/conda.sh
-            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/conda.sh
+            /bin/bash ~/conda.sh -b -p ~/anaconda
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
 
@@ -1367,7 +1452,7 @@ jobs:
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Test
+          name: Run Build Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -1384,7 +1469,27 @@ jobs:
               echo 'xcodebuild failed!'
               exit 1
             fi
-
+      - run:
+          name: Run Simulator Tests
+          no_output_timeout: "2h"
+          command: |
+            set -e
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+              echo "not SIMULATOR build, skip it."
+              exit 0
+            fi
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            source ~/anaconda/bin/activate
+            #install the latest version of PyTorch and TorchVision
+            pip install torch torchvision
+            #run unit test
+            cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            python trace_model.py
+            ruby setup.rb
+            cd ${PROJ_ROOT}/ios/TestApp
+            instruments -s -devices
+            fastlane scan
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1521,6 +1626,51 @@ jobs:
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               set -x
               cd .circleci/docker && ./build_docker.sh
+  docker_for_ecr_gc_build_job:
+      machine:
+        image: ubuntu-1604:201903-01
+      steps:
+        - checkout
+        - run:
+            name: build_docker_image_for_ecr_gc
+            no_output_timeout: "1h"
+            command: |
+              cd .circleci/ecr_gc_docker
+              docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              eval $(aws ecr get-login --no-include-email)
+              set -x
+              docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+  ecr_gc_job:
+      parameters:
+        project:
+          type: string
+          default: "pytorch"
+        tags_to_keep:  # comma separate values
+          type: string
+      environment:
+        PROJECT: << parameters.project >>
+        IMAGE_TAG: << parameters.tags_to_keep >>
+      docker:
+        - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+          aws_auth:
+            aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+            aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+
+      steps:
+        - run:
+            name: garbage collecting for ecr images
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              set -x
+              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG}
+
+
 
 ##############################################################################
 ##############################################################################
@@ -1532,6 +1682,24 @@ jobs:
 workflows:
   build:
     jobs:
+      # Warning: indentation here matters!
+
+      # Pytorch MacOS builds
+      - pytorch_windows_build:
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_test1
+          test_name: pytorch_windows_test1
+          requires:
+            - setup
+            - pytorch_windows_build
+      - pytorch_windows_test:
+          name: pytorch_windows_test2
+          test_name: pytorch_windows_test2
+          requires:
+            - setup
+            - pytorch_windows_build
       - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py2_7_9_build
@@ -1918,17 +2086,17 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_x86_64_build
+          name: pytorch_ios_11_2_1_x86_64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
           requires:
             - setup
       - pytorch_ios_build:
-          name: pytorch_ios_10_2_1_arm64_build
+          name: pytorch_ios_11_2_1_arm64_build
           context: org-member
-          build_environment: "pytorch-ios-10.2.1-arm64_build"
+          build_environment: "pytorch-ios-11.2.1-arm64_build"
           ios_arch: "arm64"
           ios_platform: "OS"
           requires:
@@ -3775,8 +3943,8 @@ workflows:
               only: nightly
       # Pytorch iOS binary builds
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_x86_64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          name: pytorch_ios_11_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-x86_64-build"
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
@@ -3786,8 +3954,8 @@ workflows:
             branches:
               only: nightly
       - binary_ios_build:
-          name: pytorch_ios_10_2_1_nightly_arm64_build
-          build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          name: pytorch_ios_11_2_1_nightly_arm64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
@@ -3797,12 +3965,12 @@ workflows:
             branches:
               only: nightly
       - binary_ios_upload:
-          build_environment: "libtorch-ios-10.2.1-nightly-binary-build-upload"
+          build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
           context: org-member
           requires:
             - setup
-            - pytorch_ios_10_2_1_nightly_x86_64_build
-            - pytorch_ios_10_2_1_nightly_arm64_build
+            - pytorch_ios_11_2_1_nightly_x86_64_build
+            - pytorch_ios_11_2_1_nightly_arm64_build
           filters:
             branches:
               only: nightly
@@ -5523,6 +5691,7 @@ workflows:
               only:
                 - master
     jobs:
+      - docker_for_ecr_gc_build_job
       - docker_build_job:
           name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
           image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
@@ -5580,3 +5749,30 @@ workflows:
       - docker_build_job:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
+  ecr_gc:
+    triggers:
+      - schedule:
+          cron: "45 * * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - ecr_gc_job:
+            name: ecr_gc_job_for_pytorch
+            project: pytorch
+            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_caffe2
+            project: caffe2
+            tags_to_keep: "348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_translate
+            project: translate
+            tags_to_keep: "8"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_tensorcomp
+            project: tensorcomp
+            tags_to_keep: "34"
+
+

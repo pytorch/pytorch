@@ -78,7 +78,7 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
-// occurences of 1 in `from` are treated as wildcards.
+// occurrences of 1 in `from` are treated as wildcards.
 c10::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
@@ -742,7 +742,7 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
         Node* split_const_node =
             b->owningGraph()->create(onnx::Constant, 1);
         auto tensor = at::empty(split.size(), c10::kLong);
-        int64_t* data = tensor.data<int64_t>();
+        int64_t* data = tensor.data_ptr<int64_t>();
         for (auto split_size : split) {
           *data++ = split_size;
         }

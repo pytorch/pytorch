@@ -83,10 +83,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     case MessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
-    case MessageType::EXCEPTION: {
-      std::string err(response.payload().begin(), response.payload().end());
-      throw std::runtime_error(err);
-    }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
@@ -187,6 +183,8 @@ std::string wireSerialize(
   };
   std::vector<Ent> entries;
   std::string metaEntry;
+  std::vector<jit::WriteableTensorData> tensorData;
+
   if (!payload.empty()) {
     entries.push_back({kPayload, payload.data(), payload.size()});
   }
@@ -201,12 +199,13 @@ std::string wireSerialize(
     pickler.protocol();
     pickler.pushIValue(tensors);
     pickler.stop();
-    auto writeable_tensors = pickler.tensorData();
+    // tensorData is in function scope so that the data() pointers stay valid.
+    tensorData = pickler.tensorData();
     entries.push_back({kMeta, metaEntry.data(), metaEntry.size()});
-    for (size_t i = 0; i < writeable_tensors.size(); i++) {
+    for (size_t i = 0; i < tensorData.size(); i++) {
       entries.push_back({c10::to_string(i),
-                         writeable_tensors[i].data(),
-                         writeable_tensors[i].sizeInBytes()});
+                         tensorData[i].data(),
+                         tensorData[i].sizeInBytes()});
     }
   }
 
@@ -252,8 +251,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t toCopy =
-        std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      size_t toCopy = std::min(metaDataPos + n, metaData.second) - metaDataPos;
       memcpy(buf, metaData.first + metaDataPos, toCopy);
       metaDataPos += toCopy;
       return toCopy;

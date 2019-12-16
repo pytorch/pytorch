@@ -1,4 +1,3 @@
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
@@ -34,6 +33,7 @@
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -53,7 +53,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -134,6 +133,7 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -197,6 +197,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -285,7 +286,7 @@ void initJITBindings(PyObject* module) {
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
-            AutoNoGIL _no_gil;
+            pybind11::gil_scoped_release _no_gil;
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
@@ -362,6 +363,13 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict){
                 UnpackQuantizedWeights(graph, paramsDict);
+                return paramsDict;
+             },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
                 return paramsDict;
              },
              pybind11::return_value_policy::move);
