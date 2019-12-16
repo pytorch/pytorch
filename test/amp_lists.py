@@ -146,8 +146,8 @@ class AmpLists(object):
                            torch.randn((2,2,2), dtype=torch.float16, device="cuda"))),
             ("equal", pointwise0_fp32 + pointwise1_fp16),
         ]
-        # self.torch_neutral_inplace = []
-        self.torch_neutral_user_supplied_out = [
+        # self.torch_firstarg_inplace = []
+        self.torch_firstarg_user_supplied_out = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + (pointwise3_fp16[0].clamp(0.1, 100),)),
             ("addcmul", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + pointwise3_fp16),
             ("atan2", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
@@ -178,8 +178,8 @@ class AmpLists(object):
         # self.nn_fp32_inplace = []
         # self.nn_fp32_user_supplied_out = []
         # self.nn_need_autocast_promote = []
-        # self.nn_neutral_inplace = []
-        # self.nn_neutral_user_supplied_out = []
+        # self.nn_firstarg_inplace = []
+        # self.nn_firstarg_user_supplied_out = []
         # self.nn_expect_builtin_promote = []
         # self.nn_expect_builtin_promote_inplace = []
         # self.nn_expect_builtin_promote_user_supplied_out = []
@@ -201,12 +201,14 @@ class AmpLists(object):
         # self.tensor_only_fp32_inplace = []
         # self.tensor_only_fp32_user_supplied_out = []
         # self.tensor_only_need_autocast_promote = []
-        self.tensor_only_neutral_inplace = [
+        self.tensor_only_firstarg_inplace = [
             ("addcdiv_", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
             ("addcmul_", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
             ("atan2_", pointwise0_fp32 + (pointwise1_fp16[0].clamp(0.1, 100),)),
+            ("eq_", pointwise0_fp32 + pointwise1_fp16),
+            ("eq_", pointwise0_fp32 + pointwise1_fp16),
         ]
-        # self.tensor_only_neutral_user_supplied_out = []
+        # self.tensor_only_firstarg_user_supplied_out = []
         # self.tensor_only_expect_builtin_promote = []
         # self.tensor_only_expect_builtin_promote_inplace = []
         # self.tensor_only_expect_builtin_promote_user_supplied_out = []

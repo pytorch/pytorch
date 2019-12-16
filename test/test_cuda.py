@@ -2181,9 +2181,9 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_torch_neutral_user_supplied_out(self):
+    def test_amp_torch_firstarg_user_supplied_out(self):
         with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.torch_neutral_user_supplied_out:
+            for op, args in self.amp_lists.torch_firstarg_user_supplied_out:
                 self._run_autocast_user_supplied_out(op, args, torch.float32)
 
     @skipIfRocm
@@ -2248,9 +2248,9 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_tensor_only_neutral_inplace(self):
+    def test_amp_tensor_only_firstarg_inplace(self):
         with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.tensor_only_neutral_inplace:
+            for op, args in self.amp_lists.tensor_only_firstarg_inplace:
                 self._run_autocast_inplace(op, args, torch.float32)
 
 

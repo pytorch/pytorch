@@ -40,7 +40,7 @@ enum class CastPolicy : uint8_t {
   fp16 = 0,
   fp32,
   promote, // Run in the widest dtype among several args.
-  neutral, // Run in the dtype of the first argument.
+  firstarg, // Run in the dtype of the first argument.
   passthrough // Run without casting any args (workaround for some ops the boxed fallback can't handle)
 };
 
@@ -229,8 +229,8 @@ macros, and codegen.  Based on the observed commonalities among
 in-place ops and the observed commonalities among ops with
 user-supplied out, I'll try templates for now.
 
-NB:  For in-place ops and ops with a user-supplied out, functions with multiple
-arguments that need type standardization are called "neutral" instead of "promote."
+For in-place ops and ops with a user-supplied out, functions with multiple arguments
+that need type standardization are called "firstarg" instead of "promote."
 They cast other arguments to the type of the in-place or out buffer before running,
 because they must eventually write to that buffer anyway.  This mimics Apex's
 current strategy.
@@ -325,10 +325,10 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(OVERLOAD), OV
   } \
 };
 
-// neutral
-#define SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
+// firstarg
+#define SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(METHOD, OVERLOAD) \
 template<class Ret, class... Args> \
-struct WrapFunction_<CastPolicy::neutral, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
+struct WrapFunction_<CastPolicy::firstarg, Behavior::inplace, decltype(OVERLOAD), OVERLOAD, Ret, guts::typelist::typelist<Args...>> { \
   template<typename... RemainingArgs> static \
   Tensor & peel_first_arg_and_run(Tensor & self, RemainingArgs... args) { \
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId); \
@@ -340,10 +340,10 @@ struct WrapFunction_<CastPolicy::neutral, Behavior::inplace, decltype(OVERLOAD),
 };
 
 // Define the specializations that will serve each 1.b. METHOD.
-// For each specialization, I must also supply a dummy OVERLOAD with the right signature
-// (copied from VariableType) to provide the type information for instantiation.
-// Most of the time there is only one OVERLOAD so no disambiguation is required.
-// pow_ is the exception.  The pow(_) family of overloads is a pain in the neck.
+// For each specialization, I must also supply a dummy function with the right signature
+// (aka the signature copied from VariableType) to provide the type information for instantiation.
+// Most of the time there is only one overload so signature-based disambiguation is not required.
+// pow_ and eq_ are exceptions.
 // fp16 ops
 Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) { return self; }
 SPECIALIZE_FP16_INPLACE_NO_AT_EXPOSURE(addmm_, addmm_)
@@ -356,13 +356,17 @@ Tensor & pow_scalar_(Tensor & self, Scalar exponent) { return self; }
 SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_scalar_)
 Tensor & pow_tensor_(Tensor & self, const Tensor & exponent) { return self; }
 SPECIALIZE_FP32_INPLACE_NO_AT_EXPOSURE(pow_, pow_tensor_)
-// neutral ops
+// firstarg ops
 Tensor & addcdiv_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) { return self; }
-SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(addcdiv_, addcdiv_) \
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(addcdiv_, addcdiv_)
 Tensor & addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) { return self; }
-SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(addcmul_, addcmul_) \
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(addcmul_, addcmul_)
 Tensor & atan2_(Tensor & self, const Tensor & other) { return self; }
-SPECIALIZE_NEUTRAL_INPLACE_NO_AT_EXPOSURE(atan2_, atan2_) \
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(atan2_, atan2_)
+Tensor & eq_scalar_(Tensor & self, Scalar other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(eq_, eq_scalar_)
+Tensor & eq_tensor_(Tensor & self, const Tensor & other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(eq_, eq_tensor_)
 
 // 2.a. Specializations for functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
@@ -406,9 +410,9 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::user_supplied_out, FuncType, F,
   }
 };
 
-// neutral
+// firstarg
 template<class FuncType, FuncType* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::neutral, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+struct WrapFunction_<CastPolicy::firstarg, Behavior::user_supplied_out, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
   template<typename... RemainingArgs>
   static Tensor & peel_first_arg_and_run(Tensor & out, RemainingArgs... args) {
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
@@ -615,7 +619,7 @@ auto register_inplace = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::rsqrt_, "aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::sinh_, "aten::sinh_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::tan_, "aten::tan_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
-  // neutral ops
+  // firstarg ops
   ;
 
 /**************************************************
@@ -629,10 +633,12 @@ auto register_inplace_method_only = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::autocast::erfinv_, "aten::erfinv_(Tensor(a!) self) -> Tensor(a!)", Tensor & (Tensor &), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::pow_scalar_, "aten::pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)", Tensor & (Tensor &, Scalar), fp32, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::pow_tensor_, "aten::pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), fp32, inplace)
-  // neutral ops
-  KERNEL_UNBOXED_ONLY(at::autocast::addcdiv_, "aten::addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), neutral, inplace)
-  KERNEL_UNBOXED_ONLY(at::autocast::addcmul_, "aten::addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), neutral, inplace)
-  KERNEL_UNBOXED_ONLY(at::autocast::atan2_, "aten::atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), neutral, inplace)
+  // firstarg ops
+  KERNEL_UNBOXED_ONLY(at::autocast::addcdiv_, "aten::addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::addcmul_, "aten::addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::atan2_, "aten::atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::eq_scalar_, "aten::eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)", Tensor & (Tensor &, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::eq_tensor_, "aten::eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
   ;
 
 /******************************************************************************************************
@@ -664,12 +670,12 @@ auto register_user_supplied_out = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, Scalar), fp32, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), fp32, user_supplied_out)
   KERNEL_UNBOXED_ONLY(at::pow_out, "aten::pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, Scalar, const Tensor &), fp32, user_supplied_out)
-  // neutral ops
-  KERNEL_UNBOXED_ONLY(at::addcdiv_out, "aten::addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
-  KERNEL_UNBOXED_ONLY(at::addcmul_out, "aten::addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), neutral, user_supplied_out)
-  KERNEL_UNBOXED_ONLY(at::atan2_out, "aten::atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), neutral, user_supplied_out)
-  KERNEL_UNBOXED_ONLY(at::cross_out, "aten::cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, c10::optional<int64_t>), neutral, user_supplied_out)
-  KERNEL_UNBOXED_ONLY(at::dot_out, "aten::dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), neutral, user_supplied_out)
+  // firstarg ops
+  KERNEL_UNBOXED_ONLY(at::addcdiv_out, "aten::addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), firstarg, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::addcmul_out, "aten::addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar), firstarg, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::atan2_out, "aten::atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), firstarg, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::cross_out, "aten::cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, c10::optional<int64_t>), firstarg, user_supplied_out)
+  KERNEL_UNBOXED_ONLY(at::dot_out, "aten::dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), firstarg, user_supplied_out)
   ;
 
 }
