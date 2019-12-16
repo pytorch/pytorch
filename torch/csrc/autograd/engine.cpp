@@ -326,6 +326,9 @@ auto Engine::thread_main(
     // Check if we've completed execution.
     bool gt_completed = graph_task_completed(local_graph_task);
     if (gt_completed) {
+      // We don't need to explicitly notify the owner thread, since
+      // 'mark_graph_task_completed' would mark the Future as completed and this
+      // would notify the owner thread that the task has been completed.
       mark_graph_task_completed(local_graph_task);
     }
 
@@ -777,6 +780,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
+    // graph_task_exec_post_processing is done when the Future is marked as
+    // completed in mark_graph_task_completed.
     return graph_task->future_;
   } else {
     graph_task->owner_ = worker_device;
@@ -785,6 +790,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
       add_thread_pool_task(graph_task);
+      // graph_task_exec_post_processing is done when the Future is marked as
+      // completed in mark_graph_task_completed.
       return graph_task->future_;
     } else {
       // Get back to work while we wait for our new graph_task to

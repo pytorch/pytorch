@@ -47,7 +47,8 @@ struct GraphTask {
   bool keep_graph_;
   bool grad_mode_;
 
-  // To protect reads/writes to no_ready_, dependencies_ and captured_vars_
+  // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
+  // has_error_ and future_.
   std::mutex mutex_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
