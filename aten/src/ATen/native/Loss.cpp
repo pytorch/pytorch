@@ -105,7 +105,7 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 
 Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor loss;
-    // Binary cross entropy matrix is defined by the equation:
+    // Binary cross entropy tensor is defined by the equation:
     // L = -w (y ln(x) + (1-y) ln(1-x))
     loss = (target - 1).mul_(
       (1 - input).log_()
@@ -113,6 +113,16 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
       (-target).mul_(
         input.log()
       )
+    );
+
+    // If any matching elements of input and target are both either
+    // 0 or 1, the above calculation will result in NaN. However,
+    // since that input matches the target, the result should be 0,
+    // so we need to fix that like so
+    loss = at::where(
+      at::isnan(loss),
+      at::zeros_like(loss),
+      loss
     );
 
     if (weight.defined()) {
