@@ -236,49 +236,27 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 5)
         self.run_test(Reshape(), (x,), rtol=1e-3, atol=1e-5)
 
-    def get_image_from_url(self, url):
-        import requests
-        import numpy
-        from PIL import Image
-        from io import BytesIO
-        from torchvision import transforms
-
-        data = requests.get(url)
-        image = Image.open(BytesIO(data.content)).convert("RGB")
-        image = image.resize((300, 200), Image.BILINEAR)
-
-        to_tensor = transforms.ToTensor()
-        return to_tensor(image)
-
-    def get_test_images(self):
-        image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
-        image = self.get_image_from_url(url=image_url)
-        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
-        image2 = self.get_image_from_url(url=image_url2)
-        images = [image]
-        test_images = [image2]
-        return images, test_images
-
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                                  max_size=300)
+        model.eval()
         x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,))
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
         x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,))
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
         model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                                      max_size=300)
         x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,))
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
