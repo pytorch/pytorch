@@ -6,7 +6,6 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/core/MemoryFormat.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
