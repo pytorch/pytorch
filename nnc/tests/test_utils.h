@@ -116,7 +116,7 @@ class SimpleTensorEvaluator {
     int size = 1;
     for (int i = 0; i < ndim; i++) {
       t.dim(i).accept(&expr_eval_);
-      int dim = expr_eval_.value().as<int>();
+      int dim = expr_eval_.value().template as<int>();
       dims.push_back(dim);
       size *= dim;
     }
@@ -130,7 +130,7 @@ class SimpleTensorEvaluator {
                  std::vector<T>* output, const Expr& body) {
     if (level >= dims.size()) {
       body.accept(&expr_eval_);
-      output->push_back(expr_eval_.value().as<T>());
+      output->push_back(expr_eval_.value().template as<T>());
       return;
     }
     for (int i = 0; i < dims[level]; i++) {
