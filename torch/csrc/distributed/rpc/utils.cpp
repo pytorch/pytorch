@@ -85,10 +85,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     case MessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
-    case MessageType::EXCEPTION: {
-      std::string err(response.payload().begin(), response.payload().end());
-      throw std::runtime_error(err);
-    }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
