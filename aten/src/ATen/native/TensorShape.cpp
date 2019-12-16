@@ -13,7 +13,6 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -60,20 +59,15 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   {
     NoNamesGuard guard;
-#endif
     at::_cat_out(result, tensors, dim);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor& cat_out(Tensor& result, TensorList tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
@@ -83,7 +77,6 @@ Tensor cat(TensorList tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
-#endif
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
@@ -212,19 +205,13 @@ Tensor cat(TensorList tensors, int64_t dim) {
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-#endif
   Tensor result;
   {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     result = at::_cat(tensors, dim);
   }
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
@@ -258,10 +245,8 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
   TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
-#ifdef BUILD_NAMEDTENSOR
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
-#endif
 
   int64_t diag_size;
   int64_t storage_offset = self.storage_offset();
@@ -303,14 +288,11 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   // return view with new parameters
   auto result = self.as_strided(sizes, strides, storage_offset);
 
-#ifdef BUILD_NAMEDTENSOR
   no_names_guard.reset();
   namedinference::propagate_names_if_nonempty(result, outnames);
-#endif
   return result;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor diagonal(const Tensor& self, Dimname outdim, Dimname dim1, Dimname dim2, int64_t offset) {
   auto result = at::diagonal(
       self,
@@ -324,7 +306,6 @@ Tensor diagonal(const Tensor& self, Dimname outdim, Dimname dim1, Dimname dim2, 
   new_names[new_names.size() - 1] = outdim;
   return result.refine_names(new_names);
 }
-#endif
 
 Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
   int64_t nDims = self.dim() + 1;
@@ -360,9 +341,7 @@ Tensor expand(const Tensor& self, IntArrayRef size, bool implicit) {
   std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
 
   auto result = self.as_strided(expandedSizes, expandedStrides);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_expand(result, self);
-#endif
   return result;
 }
 
@@ -531,9 +510,7 @@ Tensor alias_with_sizes_and_strides(
     impl->set_sizes_and_strides(sizes, strides);
     self_ = Tensor(std::move(impl));
   }
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(self_, self);
-#endif
   return self_;
 }
 
@@ -607,12 +584,10 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
-#ifdef BUILD_NAMEDTENSOR
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-#endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
@@ -628,17 +603,13 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
   auto result = self.as_strided(sizes, strides, storage_offset);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_except(result, self, {dim});
-#endif
   return result;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
-#endif
 
 Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
@@ -756,9 +727,7 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   auto result = self.as_strided(sizes, strides, storage_offset);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -862,7 +831,6 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 static Tensor& propagate_transposed_names(
     Tensor& result,
     const Tensor& other,
@@ -881,7 +849,6 @@ Tensor transpose(const Tensor& self, Dimname dim0, Dimname dim1) {
       self, dimname_to_position(self, dim0), dimname_to_position(self, dim1));
 }
 
-#endif
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
@@ -928,9 +895,7 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
   auto result = self.as_strided(sizes, strides);
-#ifdef BUILD_NAMEDTENSOR
   propagate_transposed_names(result, self, dim0, dim1);
-#endif
   return result;
 }
 
@@ -1000,10 +965,8 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
@@ -1016,9 +979,7 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
   }
   auto g = inferSqueezeGeometry(self, dim);
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_except(result, self, {dim});
-#endif
   return result;
 }
 
@@ -1121,7 +1082,6 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   return self.reshape(shape);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
@@ -1152,7 +1112,6 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   }
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
-#endif
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
@@ -1172,11 +1131,9 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
   return tensors;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
   return at::unbind(self, dimname_to_position(self, dim));
 }
-#endif
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
