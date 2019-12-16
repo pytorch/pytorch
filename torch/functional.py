@@ -6,7 +6,7 @@ from itertools import product
 from ._overrides import torch_function_dispatch
 
 __all__ = [
-    'align_tensors',  # BUILD_NAMEDTENSOR only
+    'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
     'cdist',

@@ -521,51 +521,50 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     def test_wait_all_workers(self):
-        for _ in range(100):
-            rpc.init_rpc(
-                name="worker%d" % self.rank,
-                backend=self.rpc_backend,
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=self.rpc_backend_options,
-            )
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
 
-            # worker0 drives and waits for worker1 and worker2
-            # throughout the test.
-            if self.rank == 0:
-                self.assertTrue(self.world_size >= 3)
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            self.assertTrue(self.world_size >= 3)
 
-                num_repeat = 30
+            num_repeat = 30
 
-                # Phase 1: Only worker1 has workload.
-                dst = "worker1"
-                futs = []
-                for _ in range(num_repeat):
-                    fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                    futs.append(fut)
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
 
-                for fut in futs:
-                    fut.wait()
-                    self.assertEqual(fut.wait(), 0)
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
 
-                # Phase 2: Only worker2 has workload.
-                # If join is not correctly implemented,
-                # worker2 should be closed by now.
-                dst = "worker2"
-                futs = []
-                for _ in range(num_repeat):
-                    fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                    futs.append(fut)
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
 
-                for fut in futs:
-                    fut.wait()
-                    self.assertEqual(fut.wait(), 0)
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
 
-            # worker0 calls this at the end after waiting for RPC responses.
-            # worker1/2 calls this immediately and has some works after it.
-            # worker3 calls this immediately and has no more work.
-            rpc.api._wait_all_workers()
-            rpc.shutdown(graceful=False)
+        # worker0 calls this at the end after waiting for RPC responses.
+        # worker1/2 calls this immediately and has some works after it.
+        # worker3 calls this immediately and has no more work.
+        rpc.api._wait_all_workers()
+        rpc.shutdown(graceful=False)
 
     @dist_init
     def test_expected_src(self):
@@ -1003,6 +1002,16 @@ class RpcTest(RpcAgentTestFixture):
     def test_local_rref_no_fork(self):
         local_rref = RRef(35)
         self.assertEqual(local_rref.local_value(), 35)
+
+    @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
 
     @dist_init
     def test_return_local_rrefs(self):
