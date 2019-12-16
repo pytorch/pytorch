@@ -1640,7 +1640,7 @@ jobs:
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
-              eval $(aws ecr get-login --no-include-email)
+              eval $(aws ecr get-login --no-include-email --region us-east-1)
               set -x
               docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
   ecr_gc_job:
