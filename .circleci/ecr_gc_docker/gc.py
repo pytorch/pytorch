@@ -135,9 +135,10 @@ for repo in repos(client):
     repositoryName = repo["repositoryName"]
     if not repositoryName.startswith(args.filter_prefix):
         continue
-    print(repositoryName)
+
     # Keep list of image digests to delete for this repository
     digest_to_delete = []
+    print(repositoryName)
 
     for image in images(client, repo):
         tags = image.get("imageTags")
