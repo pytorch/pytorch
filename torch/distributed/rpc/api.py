@@ -154,12 +154,6 @@ def _wait_all_workers():
                         timeout=timeout,
                     )
                 )
-    else:
-        # This is a hack to make the follower linger for a while to finish
-        # sending out the last response message.
-        import time
-
-        time.sleep(0.2)
 
 
 @_require_initialized
