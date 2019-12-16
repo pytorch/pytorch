@@ -139,7 +139,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
+    child_tries.emplace_back(std::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token

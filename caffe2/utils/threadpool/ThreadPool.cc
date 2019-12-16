@@ -74,7 +74,7 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
     }
   }
   LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
-  return caffe2::make_unique<ThreadPool>(numThreads);
+  return std::make_unique<ThreadPool>(numThreads);
 }
 
 ThreadPool::ThreadPool(int numThreads)

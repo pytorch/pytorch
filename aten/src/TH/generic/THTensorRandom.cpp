@@ -303,7 +303,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
 
   // accumulate generator data to be copied into byte tensor
-  auto accum_state = c10::guts::make_unique<THGeneratorStateNew>();
+  auto accum_state = std::make_unique<THGeneratorStateNew>();
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
   auto rng_data = cast_generator->engine().data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;

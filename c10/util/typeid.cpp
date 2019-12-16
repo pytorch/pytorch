@@ -74,7 +74,7 @@ namespace detail {
 template <class T>
 class _guard_long_unique_dummy final {};
 template <class T>
-using _guard_long_unique = c10::guts::conditional_t<
+using _guard_long_unique = std::conditional_t<
     std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
     _guard_long_unique_dummy<T>,
     T>;

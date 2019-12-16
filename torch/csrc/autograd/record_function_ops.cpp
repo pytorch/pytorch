@@ -12,7 +12,7 @@ namespace autograd {
 namespace profiler {
 
 at::Tensor record_function_enter(const std::string& name) {
-  auto rec = at::guts::make_unique<RecordFunction>();
+  auto rec = std::make_unique<RecordFunction>();
   // Only add new scope if profiling is enabled.
   if (auto* current = RecordFunction::current()) {
     AT_ASSERT(

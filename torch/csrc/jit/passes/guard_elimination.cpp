@@ -13,7 +13,7 @@ namespace jit {
 struct GuardElimination {
   GuardElimination(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
+        aliasDb_(std::make_unique<AliasDb>(graph_)) {}
 
   void run() {
     const size_t MAX_ATTEMPTS = 5;

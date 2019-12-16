@@ -470,9 +470,9 @@ class CAFFE2_API Tensor {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
 
   // Returns the index of the hook in the list which can be used to remove hook
   // Register a hook with no return value

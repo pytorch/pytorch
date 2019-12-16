@@ -438,10 +438,10 @@ TensorProtos convertValues(std::string& file_name) {
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
   caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+    return std::make_unique<caffe2::PerfNetObserver>(subject);
   });
   caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+      std::make_unique<caffe2::NetObserverReporterPrint>());
 }
 
 bool backendCudaSet(const string& backend) {

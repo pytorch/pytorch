@@ -103,7 +103,7 @@ IValue pickle_load(const std::vector<char>& data) {
   // Read in the pickle data
 #ifndef C10_MOBILE
   caffe2::serialize::PyTorchStreamReader reader(
-      caffe2::make_unique<VectorReader>(data));
+      std::make_unique<VectorReader>(data));
 
   return readArchiveAndTensors(
       "data",

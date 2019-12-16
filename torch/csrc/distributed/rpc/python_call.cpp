@@ -20,7 +20,7 @@ Message PythonCall::toMessage() && {
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
-  return c10::guts::make_unique<PythonCall>(
+  return std::make_unique<PythonCall>(
       message.payload(), message.tensors());
 }
 

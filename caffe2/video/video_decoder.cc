@@ -65,7 +65,7 @@ void VideoDecoder::getAudioSample(
       // resample the audio data
       out_samples = swr_convert(swr, &output, out_samples, input, in_samples);
       auto sample_size = out_samples * c->channels * sizeof(float);
-      auto buffer = caffe2::make_unique<float[]>(sample_size);
+      auto buffer = std::make_unique<float[]>(sample_size);
       memcpy(buffer.get(), output, sample_size);
       av_freep(&output);
 
