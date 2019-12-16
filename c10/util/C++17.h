@@ -91,17 +91,136 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 
 
+
+namespace detail {
+struct _identity final {
+  template<class T>
+  using type_identity = T;
+
+  template<class T>
+  decltype(auto) operator()(T&& arg) {
+    return std::forward<T>(arg);
+  }
+};
+
+template<class Func, class Enable = void>
+struct function_takes_identity_argument : std::false_type {};
+template<class Func>
+struct function_takes_identity_argument<Func, void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
+
+template<bool Condition>
+struct _if_constexpr;
+
+template<>
+struct _if_constexpr<true> final {
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<function_takes_identity_argument<ThenCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& /* elseCallback */) {
+    // The _identity instance passed in can be used to delay evaluation of an expression,
+    // because the compiler can't know that it's just the identity we're passing in.
+    return thenCallback(_identity());
+  }
+
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<!function_takes_identity_argument<ThenCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& /* elseCallback */) {
+    return thenCallback();
+  }
+};
+
+template<>
+struct _if_constexpr<false> final {
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<function_takes_identity_argument<ElseCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& /* thenCallback */, ElseCallback&& elseCallback) {
+    // The _identity instance passed in can be used to delay evaluation of an expression,
+    // because the compiler can't know that it's just the identity we're passing in.
+    return elseCallback(_identity());
+  }
+
+  template<class ThenCallback, class ElseCallback, std::enable_if_t<!function_takes_identity_argument<ElseCallback>::value, void*> = nullptr>
+  static decltype(auto) call(ThenCallback&& /* thenCallback */, ElseCallback&& elseCallback) {
+    return elseCallback();
+  }
+};
+} // namespace detail
+
+/*
+ * Get something like C++17 if constexpr in C++14.
+ *
+ * Example 1: simple constexpr if/then/else
+ *   template<int arg> int increment_absolute_value() {
+ *     int result = arg;
+ *     if_constexpr<(arg > 0)>(
+ *       [&] { ++result; }  // then-case
+ *       [&] { --result; }  // else-case
+ *     );
+ *     return result;
+ *   }
+ *
+ * Example 2: without else case (i.e. conditionally prune code from assembly)
+ *   template<int arg> int decrement_if_positive() {
+ *     int result = arg;
+ *     if_constexpr<(arg > 0)>(
+ *       // This decrement operation is only present in the assembly for
+ *       // template instances with arg > 0.
+ *       [&] { --result; }
+ *     );
+ *     return result;
+ *   }
+ *
+ * Example 3: branch based on type (i.e. replacement for SFINAE)
+ *   template <class T>
+ *   int func(T t) {
+ *     return if_constexpr<std::is_same<T, MyClass1>::value>(
+ *       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
+ *       [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
+ *     );
+ *   }
+ *
+ * Note: The _ argument passed in Example 3 is the identity function, i.e. it does nothing.
+ *       It is used to force the compiler to delay type checking, because the compiler
+ *       doesn't know what kind of _ is passed in. Without it, the compiler would fail
+ *       when you try to access t.value but the member doesn't exist.
+ */
+template<bool Condition, class ThenCallback, class ElseCallback>
+decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+  return detail::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
+                                                 std::forward<ElseCallback>(elseCallback));
+}
+
+template<bool Condition, class ThenCallback>
+decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
+  return if_constexpr<Condition>(std::forward<ThenCallback>(thenCallback), [] (auto) {});
+}
+
+
+
+
 #ifdef __cpp_lib_apply
+
+template <class F, class... ArgTypes>
+using invoke_result = std::invoke_result<F, ArgTypes...>;
+template<typename F, typename...Args>
+using invoke_result_t = std::invoke_result_t<F, Args...>;
 
 template <class F, class Tuple>
 inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
 
+template< class F, class... Args>
+inline constexpr decltype(auto) invoke(F&& f, Args&&... args)
+  noexcept(std::is_nothrow_invocable_v<F, Args...>) {
+    return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+}
+
 #else
 
 // Implementation from http://en.cppreference.com/w/cpp/utility/apply
 // and https://en.cppreference.com/w/cpp/utility/functional/invoke
+// and https://en.cppreference.com/w/cpp/types/result_of
+// Modifications:
+//  - use c10::if_constexpr instead of C++17 `if constexpr`.
+//  - replace std::***_v type traits with std::***::value (e.g. std::is_base_of_v<T> -> std::is_base_of<T>::value)
+//  - Remove noexcept-handling of invoke() because std::is_nothrow_invocable_v is not available on C++14.
 namespace detail {
 template <class T>
 struct is_reference_wrapper : std::false_type {};
@@ -113,23 +232,29 @@ constexpr bool is_reference_wrapper_v = is_reference_wrapper<T>::value;
 template <class T, class Type, class T1, class... Args>
 constexpr decltype(auto) INVOKE(Type T::* f, T1&& t1, Args&&... args)
 {
-    if constexpr (std::is_member_function_pointer_v<decltype(f)>) {
-        if constexpr (std::is_base_of_v<T, std::decay_t<T1>>)
-            return (std::forward<T1>(t1).*f)(std::forward<Args>(args)...);
-        else if constexpr (is_reference_wrapper_v<std::decay_t<T1>>)
-            return (t1.get().*f)(std::forward<Args>(args)...);
-        else
-            return ((*std::forward<T1>(t1)).*f)(std::forward<Args>(args)...);
-    } else {
-        static_assert(std::is_member_object_pointer_v<decltype(f)>);
+    return if_constexpr<std::is_member_function_pointer<decltype(f)>::value>([&] (auto _) {
+        return if_constexpr<std::is_base_of<T, std::decay_t<T1>>::value>([&] (auto __) {
+            using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
+            return (std::forward<_T1>(t1).*__(_(f)))(std::forward<Args>(args)...);
+        }, /* else if */ [&] { return if_constexpr<is_reference_wrapper<std::decay_t<T1>>::value>([&] (auto __) {
+            return (__(_(t1)).get().*f)(std::forward<Args>(args)...);
+        }, /* else */ [&] (auto __){
+            using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
+            return ((*std::forward<_T1>(__(_(t1)))).*f)(std::forward<Args>(args)...);
+        });});
+    }, /* else */ [&] (auto _) {
+        static_assert(std::is_member_object_pointer<decltype(_(f))>::value);
         static_assert(sizeof...(args) == 0);
-        if constexpr (std::is_base_of_v<T, std::decay_t<T1>>)
-            return std::forward<T1>(t1).*f;
-        else if constexpr (is_reference_wrapper_v<std::decay_t<T1>>)
-            return t1.get().*f;
-        else
-            return (*std::forward<T1>(t1)).*f;
-    }
+        return if_constexpr<std::is_base_of<T, std::decay_t<T1>>::value>([&] (auto __) {
+            using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
+            return std::forward<_T1>(t1).*f;
+        }, /* else if */ [&] {return if_constexpr<is_reference_wrapper<std::decay_t<T1>>::value>([&] (auto __) {
+            return __(_(t1)).get().*f;
+        }, /* else */ [&] (auto __) {
+            using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
+            return (*std::forward<_T1>(__(_(t1)))).*f;
+        });});
+    });
 }
 
 template <class F, class... Args>
@@ -137,12 +262,23 @@ constexpr decltype(auto) INVOKE(F&& f, Args&&... args)
 {
       return std::forward<F>(f)(std::forward<Args>(args)...);
 }
+
+template <typename AlwaysVoid, typename, typename...>
+struct invoke_result { };
+template <typename F, typename...Args>
+struct invoke_result<decltype(void(detail::INVOKE(std::declval<F>(), std::declval<Args>()...))),
+                 F, Args...> {
+    using type = decltype(detail::INVOKE(std::declval<F>(), std::declval<Args>()...));
+};
 } // namespace detail
 
+template <class F, class... ArgTypes>
+struct invoke_result : detail::invoke_result<void, F, ArgTypes...> {};
+template<typename F, typename...Args>
+using invoke_result_t = typename invoke_result<F, Args...>::type;
+
 template< class F, class... Args>
-constexpr std::invoke_result_t<F, Args...> invoke(F&& f, Args&&... args)
-  noexcept(std::is_nothrow_invocable_v<F, Args...>)
-{
+constexpr invoke_result_t<F, Args...> invoke(F&& f, Args&&... args) {
     return detail::INVOKE(std::forward<F>(f), std::forward<Args>(args)...);
 }
 
@@ -150,7 +286,7 @@ namespace detail {
 template <class F, class Tuple, std::size_t... I>
 constexpr decltype(auto) apply_impl(F&& f, Tuple&& t, std::index_sequence<I...>)
 {
-    return std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
+    return invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))...);
 }
 }  // namespace detail
 
@@ -159,10 +295,13 @@ constexpr decltype(auto) apply(F&& f, Tuple&& t)
 {
     return detail::apply_impl(
         std::forward<F>(f), std::forward<Tuple>(t),
-        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+        std::make_index_sequence<std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
 }
 
 #endif
+
+
+
 
 
 
