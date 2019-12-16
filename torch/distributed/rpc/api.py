@@ -70,15 +70,15 @@ _ALL_WORKER_NAMES = None
 # `_SHUTDOWN_INTENT_WORKER_NAMES` is an empty set at beginning.
 # It's only used by leader worker. Leader worker is elected as the first
 # worker in a sorted worker name list.
-# Whenever there is a worker showing shutdown intention to the leader,
-# leader add this worker's name to the set.
-# This set includes the leader's name, for marking that `_wait_all_workers()`
-# has been called. We need this because, we confine `_wait_all_workers()`
-# to be called only once.
+# Whenever there is a worker showing shutdown intention to the leader, by
+# calling _wait_all_workers()`, the leader adds this worker's name to the set.
+# The leader also adds itself's name to the set on calling
+# `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
+# to be called only once, by examing if leader's name has been added to the set.
 _SHUTDOWN_INTENT_WORKER_NAMES = set()
 # Once `_SHUTDOWN_INTENT_WORKER_NAMES == _ALL_WORKER_NAMES`,
 # we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
-# to follower wowrkers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+# to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
 _SHUTDOWN_PROCEED_SIGNAL = threading.Event()
 
 
