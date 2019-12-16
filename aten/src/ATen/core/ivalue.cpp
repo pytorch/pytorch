@@ -21,6 +21,8 @@ TupleTypePtr Tuple::type() const {
   return type_;
 }
 
+// PyObjectHolder::~PyObjectHolder() {}
+
 } // namespace ivalue
 
 
@@ -175,8 +177,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
     case IValue::Tag::PyObject: {
-      auto py_obj = v.toPyObjectHolder();
-      return out << "<PyObject at" << py_obj.get() << ">";
+      auto py_obj = v.toPyObject();
+      return out << "<PyObject at" << py_obj << ">";
     }
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.

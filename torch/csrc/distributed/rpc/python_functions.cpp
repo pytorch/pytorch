@@ -60,15 +60,19 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ") to a builtin operator");
 }
 
-void finishAcceptUserRRef(const Message& message) {
-  RRefContext::handleException(message);
+void finishAcceptUserRRef(
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingUser(rr->forkId());
 }
 
-void finishCreatingOwnerRRef(const Message& message) {
-  RRefContext::handleException(message);
+void finishCreatingOwnerRRef(
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
   auto rr = RemoteRet::fromMessage(message);
   TORCH_INTERNAL_ASSERT(
       rr->rrefId() == rr->forkId(),
@@ -172,6 +176,7 @@ PyRRef pyRemoteBuiltin(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef(dst.id_, ret_type);
+  std::cout<<"user rref holding type " << userRRef->type()->str() << std::endl;
 
   auto scriptRemoteCall = c10::guts::make_unique<ScriptRemoteCall>(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
@@ -181,7 +186,9 @@ PyRRef pyRemoteBuiltin(
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
-  return PyRRef(userRRef);
+  auto py_rref = PyRRef(userRRef);
+  std::cout<<"remote builtin returned userrref holding rref:" << py_rref.str() << std::endl;
+  return py_rref;
 }
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(

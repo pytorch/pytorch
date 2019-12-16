@@ -399,28 +399,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::vector<IValue> slots_;
 };
 
-// ivalue Holder that hold a PyObject*
-struct C10_EXPORT ivalue::PyObjectHolder final : c10::intrusive_ptr_target {
- private:
-  c10::intrusive_ptr<ivalue::PyObjectHolder> intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return c10::intrusive_ptr<ivalue::PyObjectHolder>::reclaim(this);
-  }
+// virtual ivalue Holder that hold a PyObject*, detailed implementation is in python_ivalue.h
+struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
-  static c10::intrusive_ptr<ivalue::PyObjectHolder> create(PyObject* py_obj) {
-    return c10::make_intrusive<ivalue::PyObjectHolder>(py_obj);
-  }
-  PyObject* getPyObject() {
-    return py_obj_;
-  }
-
-  // explicit construction to avoid errornous implicit conversion and copy-initialization
-  explicit PyObjectHolder(PyObject* py_obj): py_obj_(py_obj) {}
- private:
-    PyObject* py_obj_;
+  virtual PyObject* getPyObject() = 0;
+  virtual ~PyObjectHolder() {};
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);

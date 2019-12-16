@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -11,15 +10,16 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -330,11 +330,9 @@ inline IValue createGenericDict(
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-#ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
-#endif
 }
 
 inline IValue toIValue(
@@ -540,7 +538,7 @@ inline IValue toIValue(
     }
     case TypeKind::PyObjectType:
       // convert a pybind11 object to the IValue and hold it
-      return c10::ivalue::PyObjectHolder::create(obj.ptr());
+      return c10::ivalue::ConcretePyObjectHolder::steal(obj.ptr());
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
@@ -721,7 +719,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     return pyObj;
   } else if (ivalue.isPyObject()) {
-    return py::cast<py::object>(ivalue.toPyObject());
+    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

@@ -22,12 +22,12 @@ void RRefContext::destroyInstance(bool ignoreRRefLeak) {
   ctx.checkRRefLeaks(ignoreRRefLeak);
 }
 
-void RRefContext::handleException(const Message& message) {
-  if (message.type() == MessageType::EXCEPTION) {
+void RRefContext::handleException(
+    const c10::optional<utils::FutureError>& futErr) {
+  if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    std::string err(message.payload().begin(), message.payload().end());
-    VLOG(1) << "Got exception: " << err << std::endl << std::flush;
-    throw std::runtime_error(err);
+    VLOG(1) << "Got exception: " << (*futErr).what();
+    throw std::runtime_error((*futErr).what());
   }
 }
 
@@ -118,8 +118,10 @@ void RRefContext::delUser(
         agent_->getWorkerInfo(owner),
         RRefUserDelete(rrefId, forkId).toMessage());
 
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      RRefContext::handleException(futErr);
+    });
   }
 }
 
@@ -129,9 +131,10 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& ownerId = rfd.ownerId_;
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
-  if (ownerId == getWorkerId() && type.has_value()) {
-    return getOrCreateOwnerRRef(rrefId, type);
+  if (ownerId == getWorkerId()) {
+    return getOwnerRRef(rrefId);
   } else {
+    TORCH_INTERNAL_ASSERT(type.has_value());
     return createUserRRef(ownerId, rrefId, forkId, type.value());
   }
 }
@@ -141,16 +144,17 @@ std::shared_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     c10::optional<TypePtr> type) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
-  if (iter == owners_.end() && type.has_value()) {
+  if (iter == owners_.end()) {
     // Scenario (1) the first time this owner knows about this RRef
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
+    TORCH_INTERNAL_ASSERT(type.has_value());
     auto rref =
         std::shared_ptr<OwnerRRef>(new OwnerRRef(getWorkerId(), rrefId, type.value()));
     owners_[rref->rrefId()] = rref;
+    ownerCV_.notify_all();
     return rref;
-
   } else {
     // Scenario (2) retrieving an existing RRef
     return std::static_pointer_cast<OwnerRRef>(iter->second);
@@ -164,6 +168,19 @@ std::shared_ptr<OwnerRRef> RRefContext::createOwnerRRef(const TypePtr& type) {
   // to another worker.
   return std::shared_ptr<OwnerRRef>(
       new OwnerRRef(getWorkerId(), genGloballyUniqueId(), type));
+}
+
+std::shared_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  const auto iter = owners_.find(rrefId);
+  if (iter == owners_.end()) {
+    // Scenario (1) RRef is used before it is created
+    ownerCV_.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
+    return std::static_pointer_cast<OwnerRRef>(owners_[rrefId]);
+  } else {
+    // Scenario (2) retrieving an existing RRef
+    return std::static_pointer_cast<OwnerRRef>(iter->second);
+  }
 }
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
@@ -229,15 +246,20 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // this fork ID.
     auto fm = agent_->send(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const Message& message) { handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
+    });
   } else {
     auto fm = agent_->send(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent](const Message& message) {
-      handleException(message);
+    fm->addCallback([this, forkId, parent](
+                        const Message& /* unused */,
+                        const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });
   }
@@ -291,7 +313,10 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->send(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& message) { handleException(message); });
+  fm->addCallback([](const Message& /* unused */,
+                     const c10::optional<utils::FutureError>& futErr) {
+    handleException(futErr);
+  });
 }
 
 void RRefContext::addSelfAsFork(std::shared_ptr<OwnerRRef>& rref) {
