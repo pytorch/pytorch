@@ -10,9 +10,9 @@
 namespace c10 {
 namespace util {
 
-#if defined(_MSC_VER) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
-// MSVC and GCC<9 have issues with our implementation for constexpr typenames.
-// Any version of Clang and GCC 9 are fine with it.
+#if (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
+// GCC<9 has issues with our implementation for constexpr typenames.
+// Any version of MSVC or Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
 #define C10_TYPENAME_CONSTEXPR
@@ -57,10 +57,10 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
+inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER)
   return extract(
-      "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
 #elif defined(__clang__)
@@ -102,7 +102,7 @@ inline constexpr uint64_t type_index_impl() {
 } // namespace detail
 
 template <typename T>
-inline constexpr type_index get_type_index() noexcept {
+inline constexpr type_index get_type_index() {
 #if !defined(__CUDA_ARCH__)
   // To enforce that this is really computed at compile time, we pass the
   // type index through std::integral_constant.
