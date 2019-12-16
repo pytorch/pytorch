@@ -194,7 +194,10 @@ static void upsample_trilinear3d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_trilinear3d_out_cuda", {input_arg, output_arg});
 
@@ -249,11 +252,11 @@ static void upsample_trilinear3d_out_cuda_template(
         auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_1);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_2);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_3);
 
         upsample_trilinear3d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -277,7 +280,10 @@ static void upsample_trilinear3d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -336,11 +342,11 @@ static void upsample_trilinear3d_backward_out_cuda_template(
         auto odata = grad_output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_1);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_2);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_3);
 
         upsample_trilinear3d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -365,19 +371,25 @@ Tensor& upsample_trilinear3d_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   upsample_trilinear3d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_1, scales_2, scales_3);
   return output;
 }
 
 Tensor upsample_trilinear3d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_1, scales_2, scales_3);
   return output;
 }
 
@@ -386,9 +398,12 @@ Tensor& upsample_trilinear3d_backward_out_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   upsample_trilinear3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2, scales_3);
   return grad_input;
 }
 
@@ -396,10 +411,13 @@ Tensor upsample_trilinear3d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2, scales_3);
   return grad_input;
 }
 

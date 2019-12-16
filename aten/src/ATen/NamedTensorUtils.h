@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensor.h>
 #include <ATen/TensorNames.h>
 
@@ -7,7 +6,6 @@
 #include <ATen/core/DimVector.h>
 #include <functional>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
@@ -167,4 +165,3 @@ CAFFE2_API bool are_names_equal(TensorImpl* self, TensorImpl* other);
 } // namespace namedinference
 
 } // namespace at
-#endif

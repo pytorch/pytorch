@@ -6,6 +6,11 @@ namespace at {
 namespace native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qclamp_fn = void (*)(
+    const at::Tensor& /*qx*/,
+    Scalar min,
+    Scalar max,
+    at::Tensor& /*qy*/);
 using qadd_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qmaxpool_2d_fn = void (*)(
@@ -65,7 +70,9 @@ using qupsample_bilinear2d_fn = void (*)(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners);
+    bool align_corners,
+    float scales_1,
+    float scales_2);
 
 using qcat_nhwc_fn = Tensor (*)(
     const c10::List<Tensor>& qxs,
@@ -77,6 +84,7 @@ using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
+DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);

@@ -1,11 +1,9 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/C++17.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // XXX: This file exists because TensorImpl is in c10, but Dimname is in ATen.
@@ -123,4 +121,3 @@ CAFFE2_API optional<DimnameList> get_opt_names(const TensorImpl* impl);
 } // namespace impl
 
 } // namespace at
-#endif
