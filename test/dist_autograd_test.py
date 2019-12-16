@@ -99,11 +99,6 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 # nodes. This helper allows timeout_seconds for those RPCs to be completed, and
 # ensures that all the contexts have been cleaned up in that timeframe.any
 def _all_contexts_cleaned_up(timeout_seconds=10):
-    assert dist.is_initialized(), "ProcessGroup must be initialized."
-    # Ensure all peers have finished mutating the
-    # `known_context_ids` set.
-    dist.barrier()
-
     global known_context_ids
     start = time.time()
     context_id_to_raised = set()
@@ -715,6 +710,9 @@ class DistAutogradTest(RpcAgentTestFixture):
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
+        # Ensure all peers have finished mutating the
+        # `known_context_ids` set.
+        dist.barrier()
         # check that all contexts have been cleaned up.
         success = _all_contexts_cleaned_up()
         self.assertTrue(success)
@@ -737,6 +735,9 @@ class DistAutogradTest(RpcAgentTestFixture):
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
+        # Ensure all peers have finished mutating the
+        # `known_context_ids` set.
+        dist.barrier()
         # check that all contexts have been cleaned up.
         success = _all_contexts_cleaned_up()
         self.assertTrue(success)
@@ -758,6 +759,9 @@ class DistAutogradTest(RpcAgentTestFixture):
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
+        # Ensure all peers have finished mutating the
+        # `known_context_ids` set.
+        dist.barrier()
         # check that all contexts have been cleaned up.
         success = _all_contexts_cleaned_up()
         self.assertTrue(success)
