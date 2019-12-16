@@ -139,7 +139,6 @@ for repo in repos(client):
     # Keep list of image digests to delete for this repository
     digest_to_delete = []
 
-    print(repositoryName)
     for image in images(client, repo):
         tags = image.get("imageTags")
         if not isinstance(tags, (list,)) or len(tags) == 0:
