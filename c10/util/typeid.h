@@ -65,7 +65,7 @@ class C10_API TypeIdentifier final
     : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
  public:
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
-  friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
+  friend constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
   /**
    * Returns the unique id for the given type T. The id is unique for the type T
@@ -90,7 +90,7 @@ class C10_API TypeIdentifier final
 
 // Allow usage in std::map / std::set
 // TODO Disallow this and rather use std::unordered_map/set everywhere
-inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
+inline constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
@@ -391,7 +391,7 @@ class C10_API TypeMeta final {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(
+  friend bool operator==(
       const TypeMeta& lhs,
       const TypeMeta& rhs) noexcept;
 
@@ -408,8 +408,8 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
-    return Make<T>().name();
+  static C10_TYPENAME_CONSTEXPR c10::string_view TypeName() noexcept {
+    return c10::util::get_fully_qualified_type_name<T>();
   }
 
   template <class T>
@@ -454,12 +454,12 @@ inline TypeMeta::TypeMeta() noexcept
     : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {
 }
 
-inline constexpr bool operator==(
+inline bool operator==(
     const TypeMeta& lhs,
     const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
-inline constexpr bool operator!=(
+inline bool operator!=(
     const TypeMeta& lhs,
     const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
