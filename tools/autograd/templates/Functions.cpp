@@ -430,7 +430,7 @@ Tensor cummax_backward(const Tensor &cummax_output, const Tensor &cummax_indices
   if (input.dim() == 0) {
     return input;
   }
-  return grad * at::scatter(cummax_output, dim, cummax_indices, at::ones(cummax_out.sizes()));
+  return grad * at::scatter(cummax_output, dim, cummax_indices, at::ones(cummax_output.sizes()));
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
