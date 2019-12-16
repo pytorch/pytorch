@@ -27,7 +27,7 @@ namespace orc {
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
 class PytorchLLVMJIT {
  private:
-#if LLVM_VERSION_MAJOR == 8
+#if LLVM_VERSION_MAJOR == 8 || LLVM_VERSION_MAJOR == 9
   using JITLinkingLayer = LegacyRTDyldObjectLinkingLayer;
   template <typename B, typename C>
   using JITCompileLayer = LegacyIRCompileLayer<B, C>;
