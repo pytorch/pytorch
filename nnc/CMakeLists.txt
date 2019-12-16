@@ -27,6 +27,7 @@ add_library(nnc
   src/function.cc
   src/ir_visitor.cc
   src/llvm_codegen.cc
+  src/types.cc
   )
 
 set_source_files_properties(src/llvm_codegen.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
@@ -44,7 +45,9 @@ add_subdirectory(tests/googletest/ EXCLUDE_FROM_ALL)
 
 set(TEST_SRCS
   tests/expr_test.cc
-  tests/llvm_test.cc)
+  tests/llvm_test.cc
+  tests/type_test.cc
+  )
 
 foreach(test_path ${TEST_SRCS})
   get_filename_component(filename ${test_path} NAME)

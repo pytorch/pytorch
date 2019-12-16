@@ -18,8 +18,8 @@ class BaseExprNode : public RefCounted {
 
  protected:
   void set_dtype(Dtype dtype) {
-    CHECK_EQ(this->dtype_, Dtype::kUninitialized) << "can only set uninitialized dtype";
-    CHECK_NE(dtype, Dtype::kUninitialized) << "new dtype must not be valid";
+    CHECK_EQ(this->dtype_, kUninitialized) << "can only set uninitialized dtype";
+    CHECK_NE(dtype, kUninitialized) << "new dtype must not be valid";
     this->dtype_ = dtype;
   }
 
