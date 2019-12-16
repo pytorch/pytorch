@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
 import torch
-import torch.nn.quantized.dynamic as nnqd
+from torch import nn
 
 """
 Microbenchmarks for RNNs.
@@ -17,37 +17,26 @@ qrnn_configs = op_bench.config_list(
         [1, 3, 1],
         [5, 7, 4],
     ],
-    # names: input_size, hiddent_size, num_layers
+    # names: input_size, hidden_size, num_layers
     attr_names=["I", "H", "NL"],
     cross_product_configs={
-        "B": (False, True),  # Bias
-        "D": (False, True),  # Bidirectional
-        "dtype": (torch.qint8, torch.qint32)  # dtype
+        "B": (True,),               # Bias always True for quantized
+        "D": (False, True),         # Bidirectional
+        "dtype": (torch.qint8,)     # Only qint8 dtype works for now
     },
     tags=["short"]
 )
 
-class _RNNBenchmarkBase(op_bench.TorchBenchmarkBase):
-    def init(self, input_size, hidden_size, dtype):
-        print(input_size, hidden_size, dtype)
-        scale = 1.0 / 255
-        zero_point = 0
-        X = torch.randn(16, 1, input_size, dtype=torch.float32)
-        h = torch.randn(16, 1, 1, hidden_size, dtype=torch.float32)
-        self.qX = torch.quantize_per_tensor(X, scale=scale,
-                                            zero_point=zero_point, dtype=dtype)
-        self.qH = torch.quantize_per_tensor(h, scale=scale,
-                                            zero_point=zero_point, dtype=dtype)
-
-    def forward(self):
-        # Assume the child sets `self.cell`
-        return self.cell(self.qX, self.qH)
-
-
-class LSTMBenchmark(_RNNBenchmarkBase):
+class LSTMBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, I, H, NL, B, D, dtype):
-        super(LSTMBenchmark, self).init(I, H, dtype)
-        self.cell = nnqd.LSTM(
+        sequence_len = 128
+        batch_size = 16
+
+        # The quantized.dynamic.LSTM has a bug. That's why we create a regular
+        # LSTM, and quantize it later. See issue #31192.
+        scale = 1.0 / 256
+        zero_point = 0
+        cell_nn = nn.LSTM(
             input_size=I,
             hidden_size=H,
             num_layers=NL,
@@ -55,9 +44,26 @@ class LSTMBenchmark(_RNNBenchmarkBase):
             batch_first=False,
             dropout=0.0,
             bidirectional=D,
-            dtype=dtype
         )
+        cell_temp = nn.Sequential(cell_nn)
+        self.cell = torch.quantization.quantize_dynamic(cell_temp,
+                                                        {nn.LSTM, nn.Linear},
+                                                        dtype=dtype)[0]
+
+        self.x = torch.randn(sequence_len,  # sequence length
+                             batch_size,    # batch size
+                             I)             # Number of featues in X
+        self.h = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                             batch_size,    # batch size
+                             H)             # hidden size
+        self.c = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                             batch_size,    # batch size
+                             H)             # hidden size
+
         self.set_module_name("QLSTM")
+
+    def forward(self):
+        return self.cell(self.x, (self.h, self.c))
 
 op_bench.generate_pt_test(qrnn_configs, LSTMBenchmark)
 

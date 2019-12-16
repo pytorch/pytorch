@@ -18,9 +18,9 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from .api import _init_rpc_backend
+    from .api import _init_rpc_backend, _require_initialized
     from .api import *  # noqa: F401
-    import torch.distributed.autograd
+    import torch.distributed.autograd as dist_autograd
 
     def init_rpc(
         name,
@@ -78,7 +78,17 @@ if is_available():
         # and others might not have. As a result, a node calling
         # torch.distributed.autograd.backward() would run into errors since
         # other nodes might not have been initialized.
-        torch.distributed.autograd._init(rank)
+        dist_autograd._init(rank)
 
         # Initialize RPC.
         _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+
+
+    @_require_initialized
+    def _get_debug_info():
+        from . import _rref_context_get_debug_info
+        from .api import _agent
+        info = _rref_context_get_debug_info()
+        info.update(_agent.get_debug_info())
+        info.update(dist_autograd._get_debug_info())
+        return info

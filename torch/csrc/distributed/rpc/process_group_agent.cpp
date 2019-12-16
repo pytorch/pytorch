@@ -246,25 +246,25 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
             std::chrono::steady_clock::now().time_since_epoch());
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
-      // Set infinite timeout if specified.
+      // Prepare endTime from timeout.
       auto timeout = rpcTimeout_.load();
+      // Set infinite timeout if specified.
       if (timeout.count() == 0) {
         timeout = INFINITE_TIMEOUT;
       }
-      auto& futureInfo = futures_
-                             .emplace(
-                                 std::piecewise_construct,
-                                 std::forward_as_tuple(requestId),
-                                 std::forward_as_tuple(FutureInfo(
-                                     future, futureStartTime, to.id_, timeout)))
-                             .first->second;
-      auto rpcEndTime = getRPCEndTime(futureInfo);
+      std::chrono::milliseconds endTime = timeout == INFINITE_TIMEOUT
+          ? INFINITE_TIMEOUT
+          : futureStartTime + timeout;
+      // Insert future into future map.
+      futures_.emplace(
+          std::piecewise_construct,
+          std::forward_as_tuple(requestId),
+          std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
-      futureTimeouts_[rpcEndTime].push_back(requestId);
+      futureTimeouts_[endTime].push_back(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or if an RPC with a shorter TTL has been created.
-      if (futures_.size() == 1 ||
-          futureTimeouts_.begin()->first == rpcEndTime) {
+      if (futures_.size() == 1 || futureTimeouts_.begin()->first == endTime) {
         futureTimeoutCV_.notify_one();
       }
     }
@@ -375,7 +375,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             work.type_,
             work.id_);
         if (message.isRequest()) {
-          send(work.from_, cb_->operator()(message));
+          auto futureResponse = cb_->operator()(message);
+          if (futureResponse->completed()) {
+            send(work.from_, std::move(*futureResponse).moveMessage());
+          } else {
+            auto fromId = work.from_.id_;
+            futureResponse->addCallback(
+                [this, fromId, futureResponse](const Message&) {
+                  send(
+                      getWorkerInfo(fromId),
+                      std::move(*futureResponse).moveMessage());
+                });
+          }
         } else if (message.isResponse()) {
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
@@ -388,13 +399,13 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
               // by the sender who has determined the future has timed out.
               return;
             }
-
+            // Use futureInfo before destructing it.
             fm = futureInfo->second.future_;
-            auto rpcEndTime = getRPCEndTime(futureInfo->second);
+            auto endTime = futureInfo->second.endTime_;
             futures_.erase(id);
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
-            auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+            auto& futuresAtTime = futureTimeouts_[endTime];
             auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
@@ -402,7 +413,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             futuresAtTime.erase(it);
             if (futuresAtTime.empty()) {
               // remove the key from futureTimeouts_
-              futureTimeouts_.erase(rpcEndTime);
+              futureTimeouts_.erase(endTime);
             }
           }
           // Not holding lock on markCompleted as this could run callbacks that
@@ -546,16 +557,14 @@ const std::chrono::milliseconds ProcessGroupAgent::getRPCRemainingTime(
   return remainingTime;
 }
 
-const std::chrono::milliseconds ProcessGroupAgent::getRPCEndTime(
-    const FutureInfo& futureInfo) const {
-  return futureInfo.timeout_ == INFINITE_TIMEOUT
-      ? INFINITE_TIMEOUT
-      : futureInfo.startTime_ + futureInfo.timeout_;
-}
-
 std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
-  /* For now return an empty map, TODO add metrics like send/recv count etc */
+  {
+    std::unique_lock<std::mutex> lock(futureMutex_);
+    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+  }
+  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
+  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
   return metrics;
 }
 
