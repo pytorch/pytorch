@@ -99,7 +99,7 @@ class ProcessGroupAgent : public RpcAgent {
     uint64_t currentCount_;
 
     AverageMetricsTracker(
-        const std::string key,
+        const std::string& key,
         double currentSum = 0,
         uint64_t currentCount = 0);
 
@@ -222,8 +222,13 @@ class ProcessGroupAgent : public RpcAgent {
   // CV to wake up watchdog thread that watches for timed out futures.
   std::condition_variable futureTimeoutCV_;
   // Metrics tracked for ProcessGroupAgent.
-  std::unordered_map<std::string, std::unique_ptr<AverageMetricsTracker>>
-      metricsMap_;
+  enum ProcessGroupAgentMetrics {
+    GIL_WAIT_TIME = 0,
+
+    N_METRICS,
+  };
+  std::mutex metricsMutex_;
+  std::vector<std::unique_ptr<AverageMetricsTracker>> metrics_;
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 };
 

@@ -29,7 +29,7 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 //////////////////////////  MetricsTracker  /////////////////////////////////
 
 ProcessGroupAgent::AverageMetricsTracker::AverageMetricsTracker(
-    const std::string key,
+    const std::string& key,
     double currentSum,
     uint64_t currentCount)
     : key_(key), currentSum_(currentSum), currentCount_(currentCount) {}
@@ -99,6 +99,7 @@ ProcessGroupAgent::ProcessGroupAgent(
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
+  metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -617,28 +618,26 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   }
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
-  for (const auto& metricInfo : metricsMap_) {
-    metrics[metricInfo.first] =
-        c10::to_string(metricInfo.second->computeAverage());
+  // Add time-series based metrics
+  {
+    std::lock_guard<std::mutex> lock(metricsMutex_);
+    if (metrics_[GIL_WAIT_TIME]) {
+      metrics[kGilAverageWaitTime] =
+          c10::to_string(metrics_[GIL_WAIT_TIME]->computeAverage());
+    }
   }
   return metrics;
 }
 
 void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
-  auto gilMetrics = metricsMap_.find(kGilAverageWaitTime);
-  if (gilMetrics == metricsMap_.end()) {
-    gilMetrics = metricsMap_
-                     .emplace(
-                         std::piecewise_construct,
-                         std::forward_as_tuple(kGilAverageWaitTime),
-                         std::forward_as_tuple(std::move(
-                             c10::guts::make_unique<AverageMetricsTracker>(
-                                 kGilAverageWaitTime))))
-                     .first;
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  if (!metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]) {
+    metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] = std::move(
+        c10::guts::make_unique<AverageMetricsTracker>(kGilAverageWaitTime));
   }
-  auto& metricsPtr = gilMetrics->second;
-  metricsPtr->addData(gilWaitTime.count());
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]->addData(
+      gilWaitTime.count());
 }
 
 } // namespace rpc
