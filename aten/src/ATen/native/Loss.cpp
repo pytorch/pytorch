@@ -10,6 +10,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <iostream>
 
 #define EPSILON 1e-12
 #define _USE_MATH_DEFINES
@@ -108,21 +109,11 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
     // Binary cross entropy tensor is defined by the equation:
     // L = -w (y ln(x) + (1-y) ln(1-x))
     loss = (target - 1).mul_(
-      (1 - input).log_()
+      (1 - input).log_().clamp_min_(-100)
     ).add_(
       (-target).mul_(
-        input.log()
+        input.log().clamp_min_(-100)
       )
-    );
-
-    // If any matching elements of input and target are both either
-    // 0 or 1, the above calculation will result in NaN. However,
-    // since that input matches the target, the result should be 0,
-    // so we need to fix that like so
-    loss = at::where(
-      at::isnan(loss),
-      at::zeros_like(loss),
-      loss
     );
 
     if (weight.defined()) {
@@ -134,11 +125,12 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
 
 Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor grad_input;
+    
     // The gradient is the partial derivative of BCELoss
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
     grad_input = (input - target).div_(
-      (1 - input).mul_(input)
+      ((1 - input).clamp_min_(1e-12)).mul_((input).clamp_min(1e-12))
     ).mul_(grad);
 
     if (weight.defined()) {
