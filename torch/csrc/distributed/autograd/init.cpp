@@ -57,13 +57,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                 }
                 return funcs;
               })
-          .def("_known_worker_ids", [](const ContextPtr& ctx) {
-            std::vector<rpc::worker_id_t> worker_ids;
-            for (const auto worker_id : ctx->getKnownWorkerIds()) {
-              worker_ids.push_back(worker_id);
-            }
-            return worker_ids;
-          });
+          .def("_known_worker_ids", &DistAutogradContext::getKnownWorkerIds);
 
   module.def(
       "_new_context",
