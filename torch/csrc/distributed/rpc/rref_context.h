@@ -18,7 +18,7 @@ class RRefContext {
   static RRefContext& getInstance();
   static void destroyInstance(bool ignoreRRefLeak = true);
 
-  static void handleException(const Message& message);
+  static void handleException(const c10::optional<utils::FutureError>& futErr);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
