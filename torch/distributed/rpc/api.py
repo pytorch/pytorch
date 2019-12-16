@@ -352,9 +352,9 @@ def rpc_async(to, func, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns a Future<Message> object that can be waited
+        Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the Future<Message> object.
+        ``kwargs`` can be retrieved from the Future object.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
