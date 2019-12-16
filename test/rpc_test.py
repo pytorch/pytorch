@@ -944,6 +944,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
+
+    @dist_init
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
