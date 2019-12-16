@@ -56,6 +56,9 @@ if TEST_LIBROSA:
 
 if TEST_DILL:
     import dill
+    HAS_DILL_AT_LEAST_0_3_1 = check_module_version_greater_or_equal(dill, (0, 3, 1))
+else:
+    HAS_DILL_AT_LEAST_0_3_1 = False
 
 SIZE = 100
 
@@ -4154,76 +4157,24 @@ class _TestTorchMixin(object):
         self.assertEqual(j, j_loaded)
 
     @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
-        '"dill" not found or not correct version'
-    )
-    def test_serialization_dill_version_supported(self):
-        x = torch.randn(5, 5)
-
-        with tempfile.NamedTemporaryFile() as f:
-            try:
-                torch.save(x, f, pickle_module=dill)
-            except ValueError:
-                error_was_raised = True
-            else:
-                error_was_raised = False
-
-            self.assertFalse(error_was_raised)
-
-            f.seek(0)
-            try:
-                x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
-            except ValueError:
-                error_was_raised = True
-            else:
-                error_was_raised = False
-            self.assertFalse(error_was_raised)
-
-    @unittest.skipIf(
-        not TEST_DILL or check_module_version_greater_or_equal(dill, (0, 3, 1)),
+        not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
         '"dill" not found or is correct version'
     )
     def test_serialization_dill_version_not_supported(self):
         x = torch.randn(5, 5)
 
         with tempfile.NamedTemporaryFile() as f:
-            try:
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
                 torch.save(x, f, pickle_module=dill)
-            except ValueError:
-                error_was_raised = True
-            else:
-                error_was_raised = False
-
-            self.assertTrue(error_was_raised)
-
             f.seek(0)
-            try:
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
                 x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
-            except ValueError:
-                error_was_raised = True
-            else:
-                error_was_raised = False
-            self.assertTrue(error_was_raised)
 
     @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
+        not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
         '"dill" not found or not correct version'
     )
-    def test_serialization_dill_no_encoding(self):
-        x = torch.randn(5, 5)
-
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(x, f, pickle_module=dill)
-            f.seek(0)
-            x2 = torch.load(f, pickle_module=dill)
-            self.assertIsInstance(x2, type(x))
-            self.assertEqual(x, x2)
-
-    @unittest.skipIf(
-        not TEST_DILL or not check_module_version_greater_or_equal(dill, (0, 3, 1)),
-        '"dill" not found or not correct version'
-    )
-    def test_serialization_dill_encoding(self):
+    def test_serialization_dill(self):
         x = torch.randn(5, 5)
 
         with tempfile.NamedTemporaryFile() as f:
@@ -4232,6 +4183,10 @@ class _TestTorchMixin(object):
             x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
             self.assertIsInstance(x2, type(x))
             self.assertEqual(x, x2)
+            f.seek(0)
+            x3 = torch.load(f, pickle_module=dill)
+            self.assertIsInstance(x3, type(x))
+            self.assertEqual(x, x3)
 
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
