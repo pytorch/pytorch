@@ -168,12 +168,17 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
           facebook::jni::gJavaLangIllegalArgumentException,
           "at::Tensor scalar type is not supported on java side");
     }
-    static auto cls = TensorHybrid::javaClassStatic();
-    auto sizes = tensor.sizes();
-    facebook::jni::local_ref<jlongArray> jTensorShape =
-        facebook::jni::make_long_array(sizes.size());
-    jTensorShape->setRegion(0, sizes.size(), sizes.data());
 
+    const auto& tensorShape = tensor.sizes();
+    std::vector<jlong> tensorShapeVec;
+    for (const auto& s : tensorShape) {
+      tensorShapeVec.push_back(s);
+    }
+    facebook::jni::local_ref<jlongArray> jTensorShape =
+        facebook::jni::make_long_array(tensorShapeVec.size());
+    jTensorShape->setRegion(0, tensorShapeVec.size(), tensorShapeVec.data());
+
+    static auto cls = TensorHybrid::javaClassStatic();
     facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
         facebook::jni::JByteBuffer::wrapBytes(
             (uint8_t*)tensor.storage().data(), tensor.nbytes());
