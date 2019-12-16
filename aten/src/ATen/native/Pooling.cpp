@@ -2,6 +2,7 @@
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 
 #include <tuple>
@@ -102,9 +103,16 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  auto output_and_indices = at::max_pool1d_with_indices(
+
+  auto output = [&]() {
+    NoNamesGuard guard;
+    auto output_and_indices = at::max_pool1d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+    return std::get<0>(output_and_indices);
+  }();
+
+  namedinference::propagate_names(output, self);
+  return output;
 }
 
 Tensor max_pool2d(
@@ -114,17 +122,24 @@ Tensor max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  if (self.is_quantized()) {
-    return at::quantized_max_pool2d(self, kernel_size, stride, padding,
-                                    dilation, ceil_mode);
-  }
-  if (self.is_mkldnn()) {
-    return at::mkldnn_max_pool2d(
+
+  auto output = [&]() {
+    NoNamesGuard guard;
+    if (self.is_quantized()) {
+      return at::quantized_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
-  }
-  auto output_and_indices = at::max_pool2d_with_indices(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+    }
+    if (self.is_mkldnn()) {
+      return at::mkldnn_max_pool2d(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+    }
+    auto output_and_indices = at::max_pool2d_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode);
+    return std::get<0>(output_and_indices);
+  }();
+
+  namedinference::propagate_names(output, self);
+  return output;
 }
 
 Tensor max_pool3d(
@@ -134,9 +149,16 @@ Tensor max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  auto output_and_indices = at::max_pool3d_with_indices(
+
+  auto output = [&]() {
+    NoNamesGuard guard;
+    auto output_and_indices = at::max_pool3d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
-  return std::get<0>(output_and_indices);
+    return std::get<0>(output_and_indices);
+  }();
+
+  namedinference::propagate_names(output, self);
+  return output;
 }
 } // namespace native
 } // namespace at
