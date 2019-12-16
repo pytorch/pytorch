@@ -106,7 +106,6 @@ class class_ {
   }
 
  private:
-
   template<typename R, typename Func>
   void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
