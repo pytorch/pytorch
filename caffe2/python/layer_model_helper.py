@@ -201,10 +201,9 @@ class LayerModelHelper(model_helper.ModelHelper):
                 )
             # check if the original initializer is the same as the one intended
             # now
-            assert utils.OpAlmostEqual(
+            assert utils.OpEqualExceptDebugInfo(
                 initializer_op,
                 self.global_constant_initializers[blob_name],
-                'debug_info'
             ), \
                 "conflict initializers for global constant %s, " \
                 "previous %s, now %s" % (

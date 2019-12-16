@@ -21,27 +21,19 @@ OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 ITERATION_MUTEX_NAME = "iteration_mutex"
 
 
-def OpAlmostEqual(op_a, op_b, ignore_fields=None):
+def OpEqualExceptDebugInfo(op_a, op_b):
     '''
-    Two ops are identical except for each field in the `ignore_fields`.
+    Two ops are identical except `debug_info`.
+    This is a faster version of `OpAlmostEqual`.
     '''
-    ignore_fields = ignore_fields or []
-    if not isinstance(ignore_fields, list):
-        ignore_fields = [ignore_fields]
-
-    assert all(isinstance(f, text_type) for f in ignore_fields), (
-        'Expect each field is text type, but got {}'.format(ignore_fields))
-
-    def clean_op(op):
-        op = copy.deepcopy(op)
-        for field in ignore_fields:
-            if op.HasField(field):
-                op.ClearField(field)
-        return op
-
-    op_a = clean_op(op_a)
-    op_b = clean_op(op_b)
-    return op_a == op_b
+    debug_info_a = op_a.debug_info
+    debug_info_b = op_b.debug_info
+    op_a.debug_info = ''
+    op_b.debug_info = ''
+    ret_val = (op_a == op_b)
+    op_a.debug_info = debug_info_a
+    op_b.debug_info = debug_info_b
+    return ret_val
 
 
 def CaffeBlobToNumpyArray(blob):

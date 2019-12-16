@@ -244,8 +244,8 @@ def is_request_only_scalar(scalar):
     return True
 
 # Contains features accessed in a model layer of a given type
-# type: A string representing the kind of feature, consistent with FeatureSpec
-# ids: A set of feature IDs that are accessed in the model layer
+# `type`: A string representing the kind of feature, consistent with FeatureSpec
+# `ids`: A set of feature IDs that are accessed in the model layer
 AccessedFeatures = namedtuple("AccessedFeatures", ["type", "ids"])
 
 class ModelLayer(object):
@@ -391,8 +391,7 @@ class ModelLayer(object):
 
             # do not add duplicated init ops
             if any(
-                utils.OpAlmostEqual(op, init_op, "debug_info")
-                for op in init_net._net.op
+                utils.OpEqualExceptDebugInfo(op, init_op) for op in init_net._net.op
             ):
                 continue
 
