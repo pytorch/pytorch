@@ -1048,6 +1048,11 @@ class TestNamedTensor(TestCase):
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
         with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
             tensor.unflatten('D', (('H', 3), ('W', 5)))
 

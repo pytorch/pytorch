@@ -322,13 +322,14 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList
       "up to the size of dim ", dim, " (", self.names()[dim], ": ", self.size(dim),
       ") in Tensor", self.names());
 
+  int64_t dim_wrap = maybe_wrap_dim(dim, self.dim());
   auto outnames = self.names().vec();
-  outnames.erase(outnames.begin() + dim);
-  outnames.insert(outnames.begin() + dim, names.begin(), names.end());
+  outnames.erase(outnames.begin() + dim_wrap);
+  outnames.insert(outnames.begin() + dim_wrap, names.begin(), names.end());
 
   auto new_sizes = self.sizes().vec();
-  new_sizes.erase(new_sizes.begin() + dim);
-  new_sizes.insert(new_sizes.begin() + dim, sizes.begin(), sizes.end());
+  new_sizes.erase(new_sizes.begin() + dim_wrap);
+  new_sizes.insert(new_sizes.begin() + dim_wrap, sizes.begin(), sizes.end());
 
   Tensor result;
   {
