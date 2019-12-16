@@ -274,6 +274,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-using IntList [[deprecated]] = ArrayRef<int64_t>;
+[[deprecated]] typedef ArrayRef<int64_t> IntList;
 
 } // namespace c10
