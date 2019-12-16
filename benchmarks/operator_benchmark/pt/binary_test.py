@@ -47,6 +47,7 @@ binary_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
     attrs=[
         ['add', torch.add],
+        ['copy_', lambda in1, in2: in1.copy_(in2)],
     ],
 )
 
