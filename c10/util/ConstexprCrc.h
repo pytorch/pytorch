@@ -100,23 +100,11 @@ constexpr uint64_t crc64_table[] = {
 
 inline C10_HOST_CONSTEXPR uint64_t
 crc64impl(uint64_t accumulator, const char* data, size_t size) {
-#if __cpp_constexpr >= 201304
-  // if we are in C++14, just use a for loop. This compiles faster.
   for (size_t i = 0; i < size; ++i) {
     accumulator =
         crc64_table[(accumulator ^ data[i]) & 0xFF] ^ (accumulator >> 8);
   }
   return accumulator;
-#else
-  // if we are in C++11, we need to do it recursively because of constexpr
-  // restrictions.
-  return (size == 0)
-      ? accumulator
-      : crc64impl(
-            crc64_table[(accumulator ^ *data) & 0xFF] ^ (accumulator >> 8),
-            data + 1,
-            size - 1);
-#endif
 }
 } // namespace detail
 
