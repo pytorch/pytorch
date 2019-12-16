@@ -11,7 +11,7 @@ ENDIF(C_AVX2_FOUND)
 
 SET(hdr
   THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
-  THLapack.h THLogAdd.h THVector.h )
+  THLapack.h THVector.h )
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
@@ -28,7 +28,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLogAdd.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.cpp
@@ -80,7 +79,6 @@ INSTALL(FILES
   THGenerateQInt32Type.h
   THGenerateQTypes.h
   THLapack.h
-  THLogAdd.h
   THMemoryFile.h
   THSize.h
   THStorage.h
