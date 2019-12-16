@@ -338,6 +338,11 @@ void TensorSerializer::Serialize(
         }
       }
     } break;
+    case TensorProto_DataType_ZERO_COLLISION_HASH: {
+      CAFFE_ENFORCE(
+          false,
+          "Serialization for zero collision hash type is supported by specialized serializer ZeroCollisionIdHashSerializer");
+    } break;
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -632,6 +637,11 @@ void TensorDeserializer::DeserializeToTensor(
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
+    } break;
+    case TensorProto_DataType_ZERO_COLLISION_HASH: {
+      CAFFE_ENFORCE(
+          false,
+          "Deserialization for zero collision hash type is supported by specialized deserializer ZeroCollisionIdHashDeserializer");
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }

@@ -48,6 +48,7 @@ namespace jit {
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
   _(ClassParser)                       \
+  _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
   _(InsertBailOuts)                    \
@@ -74,7 +75,11 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
-  _(CommonAncestor)
+  _(AutogradSymbols)                   \
+  _(CommonAncestor)                    \
+  _(AutogradSymbols)                   \
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterPrim)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
