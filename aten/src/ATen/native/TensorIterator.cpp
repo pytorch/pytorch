@@ -3,7 +3,6 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/native/TypeProperties.h>
 
 namespace at {
@@ -335,7 +334,6 @@ void TensorIterator::allocate_outputs() {
   }
 }
 
-#ifdef BUILD_NAMEDTENSOR
 void TensorIterator::compute_names() {
   bool should_infer_names = std::any_of(
       operands_.begin(),
@@ -379,7 +377,6 @@ void TensorIterator::propagate_names_to_outputs() {
     }
   }
 }
-#endif
 
 void TensorIterator::coalesce_dimensions() {
   if (ndim() <= 1) {
@@ -970,10 +967,8 @@ void TensorIterator::build() {
   // Check that the outputs have no internal overlap
   // and do not share memory with inputs.
   check_mem_overlaps();
-#ifdef BUILD_NAMEDTENSOR
   // Check that input dimensions are aligned correctly & compute outnames.
   compute_names();
-#endif
   // compute the broadcasted shape
   compute_shape();
   // compute the result dtype and device
@@ -990,10 +985,8 @@ void TensorIterator::build() {
     // coalesce adjacent dimensions when possible
     coalesce_dimensions();
   }
-#ifdef BUILD_NAMEDTENSOR
   // perform name inference
   propagate_names_to_outputs();
-#endif
 
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());

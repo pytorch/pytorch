@@ -422,6 +422,9 @@ class WorkerSpecificIterableDataset(IterableDataset):
         assert worker_info is not None
         return iter(range(self.sizes_for_all_workers[worker_info.id]))
 
+    def __len__(self):
+        return sum(self.sizes_for_all_workers)
+
 
 # Inspired by https://stackoverflow.com/a/26703365
 # If all workers will call `sync_once`, they will be blocked until all workers
@@ -961,8 +964,8 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(d, torch._six.int_classes)
             self.assertEqual(d, i)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
 
         # [no auto-batching] multiprocessing loading
         num_workers = 3
@@ -978,8 +981,26 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(a, torch._six.int_classes)
             self.assertEqual(a, b)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
+        # When loading more than len(dataset) data, after accessing len(dataloader),
+        # we should get a warning. See NOTE [ IterableDataset and __len__ ].
+        dataset = CountingIterableDataset(20)
+        dataloader = DataLoader(dataset, num_workers=num_workers,
+                                worker_init_fn=set_faulthander_if_available)
+        it = iter(dataloader)
+        for _ in range(40):
+            self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
+        self.assertEqual(len(dataloader), len(dataset))
+        self.assertEqual(len(dataloader), 20)
+        it = iter(dataloader)
+        for _ in range(20):
+            self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
+        for _ in range(3):
+            self.assertWarnsRegex(
+                lambda: next(it),
+                r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                "Should always warn after exceeding length")
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
@@ -1484,7 +1505,6 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
-    # FIXME: conversion from np.float64 to torch.DoubleTensor does not work
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
         import numpy as np
@@ -1500,7 +1520,7 @@ class TestDataLoader(TestCase):
                 return 4
 
         dtypes = {
-            # np.float64: torch.DoubleTensor,
+            np.float64: torch.DoubleTensor,
             np.float32: torch.FloatTensor,
             np.float16: torch.HalfTensor,
             np.int64: torch.LongTensor,
