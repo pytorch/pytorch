@@ -5260,6 +5260,35 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertTrue(r2.dtype == t_dtype)
                 self.assertTrue(r2.requires_grad)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_parse_numpy_int(self):
+        self.assertRaisesRegex(RuntimeError, "Overflow",
+                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))
+        # https://github.com/pytorch/pytorch/issues/29252
+        for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
+            scalar = 3
+            np_arr = np.array([scalar], dtype=nptype)
+            np_val = np_arr[0]
+
+            # np integral type can be treated as a python int in native functions with
+            # int parameters:
+            self.assertEqual(torch.ones(5).diag(scalar), torch.ones(5).diag(np_val))
+            self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
+
+            # numpy integral type parses like a python int in custom python bindings:
+            self.assertEqual(torch.Storage(np_val).size(), scalar)
+
+            tensor = torch.tensor([2], dtype=torch.int)
+            tensor[0] = np_val
+            self.assertEqual(tensor[0], np_val)
+
+            # Original reported issue, np integral type parses to the correct 
+            # PyTorch integral type when passed for a `Scalar` parameter in
+            # arithmetic operations:
+            t = torch.from_numpy(np_arr)
+            self.assertEqual((t + np_val).dtype, t.dtype)
+            self.assertEqual((np_val + t).dtype, t.dtype)
+
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,
@@ -5861,6 +5890,25 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(output3, outputs[i])
             self.assertEqual(output3, output1)
             self.assertEqual(output3, output2)
+
+    def test_tensor_grad_warnings(self):
+        dummy = torch.empty(1)
+
+        with warnings.catch_warnings(record=True) as w:
+            # Accessing .grad on leaf
+            dummy.requires_grad_()
+            foo = dummy.grad
+            self.assertEqual(len(w), 0)
+
+            # Accessing .grad on non-leaf
+            dummy = dummy.clone()
+            foo = dummy.grad
+            self.assertEqual(len(w), 1)
+
+            # Accessing .grad on non-leaf that retains gradients
+            dummy.retain_grad()
+            foo = dummy.grad
+            self.assertEqual(len(w), 1)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -9742,6 +9790,12 @@ class TestTorchDeviceType(TestCase):
         # shifts/dims should align
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
         self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
+
+        # test bool tensor
+        t = torch.zeros(6, dtype=torch.bool, device=device)
+        t[0] = True
+        t[3] = True
+        self.assertEqual(torch.tensor([False, True, False, False, True, False]), t.roll(1, 0))
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):

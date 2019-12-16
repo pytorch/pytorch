@@ -87,6 +87,10 @@ int ThreadPool::getNumThreads() const {
   return numThreads_;
 }
 
+void ThreadPool::setNumThreads(size_t numThreads) {
+  numThreads_ = numThreads;
+}
+
 // Sets the minimum work size (range) for which to invoke the
 // threadpool; work sizes smaller than this will just be run on the
 // main (calling) thread
@@ -96,11 +100,13 @@ void ThreadPool::setMinWorkSize(size_t size) {
 }
 
 void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
+  const auto numThreads = numThreads_.load(std::memory_order_relaxed); 
+
   std::lock_guard<std::mutex> guard(executionMutex_);
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
   const bool runLocally = range < minWorkSize_ ||
-      FLAGS_caffe2_threadpool_force_inline || (numThreads_ == 0);
+      FLAGS_caffe2_threadpool_force_inline || (numThreads == 0);
   if (runLocally) {
     // Work is small enough to just run locally; multithread overhead
     // is too high
@@ -125,9 +131,9 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   };
 
   CAFFE_ENFORCE_GE(numThreads_, 1);
-  const size_t unitsPerTask = (range + numThreads_ - 1) / numThreads_;
-  tasks_.resize(numThreads_);
-  for (size_t i = 0; i < numThreads_; ++i) {
+  const size_t unitsPerTask = (range + numThreads - 1) / numThreads;
+  tasks_.resize(numThreads);
+  for (size_t i = 0; i < numThreads; ++i) {
     if (!tasks_[i]) {
       tasks_[i].reset(new FnTask());
     }
@@ -143,7 +149,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
     CAFFE_ENFORCE_LE(task->start_, range);
     CAFFE_ENFORCE_LE(task->end_, range);
   }
-  CAFFE_ENFORCE_LE(tasks_.size(), numThreads_);
+  CAFFE_ENFORCE_LE(tasks_.size(), numThreads);
   CAFFE_ENFORCE_GE(tasks_.size(), 1);
   workersPool_->Execute(tasks_);
 }
