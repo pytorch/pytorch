@@ -143,7 +143,7 @@ class class_ {
   std::vector<Value*> addInputs_(
       Func f,
       std::shared_ptr<Graph> graph,
-      at::guts::index_sequence<arg_indices...>) {
+      std::index_sequence<arg_indices...>) {
     using argTypes =
         typename at::guts::infer_function_traits_t<Func>::parameter_types;
     std::vector<Value*> res = {
@@ -155,7 +155,7 @@ class class_ {
   std::vector<Value*> addInputs(Func f, std::shared_ptr<Graph> graph) {
     constexpr auto numArgs =
         at::guts::infer_function_traits_t<Func>::number_of_parameters;
-    return addInputs_(f, graph, at::guts::make_index_sequence<numArgs>());
+    return addInputs_(f, graph, std::make_index_sequence<numArgs>());
   }
 
   template <typename Last>
