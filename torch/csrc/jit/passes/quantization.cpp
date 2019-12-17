@@ -464,9 +464,11 @@ void InsertObserversHelper::insertObservers(
     insertObservers(invoked_module, invoked_method_name);
   }
 
+  // We need to do this check after we call insertObservers on invoked modules
+  // since qconfig can be None for parent module and valid for invoked modules
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
   if (!qconfig_opt) {
-    // the module is added by us, e.g.: observer module or
+    // qconfig is None because the module is added by us, e.g.: observer module or
     // no qconfig is specified for the module
     return;
   }
