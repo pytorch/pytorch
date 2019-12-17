@@ -18,6 +18,7 @@ from functools import partial, reduce
 import operator
 
 import torch
+from torch._six import string_classes
 import common_utils as common
 from torch import nn
 import torch.nn.functional as F
@@ -321,6 +322,45 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
+
+
+class MyPythonStore(c10d.Store):
+    def __init__(self):
+        super(MyPythonStore, self).__init__()
+        self.store = dict()
+
+    def set(self, key, value):
+        if not isinstance(key, string_classes):
+            raise AssertionError("Expected set to be called with string key")
+        if type(value) is not bytes:
+            raise AssertionError("Expected set to be called with bytes value")
+        self.store[key] = value
+
+    def get(self, key):
+        value = self.store.get(key, b"")
+        if type(value) is not bytes:
+            raise AssertionError("Expected get to return bytes value")
+        return value
+
+    def add(self, key, value):
+        new = int(self.store.get(key, 0)) + value
+        self.set(key, bytes(str(new).encode("utf-8")))
+        return new
+
+
+class PythonStoreTest(TestCase):
+    def setUp(self):
+        super(PythonStoreTest, self).setUp()
+
+    def test_set_get(self):
+        # If we were to inherit from StoreTestBase and try to use
+        # its test_set_get function, we would exercise the Python
+        # API directly, instead of going through the C++ trampoline.
+        # We care about testing the C++ trampoline, so run the
+        # equivalent of StoreTestBase.test_set_get from C++.
+        # See `torch/csrc/distributed/c10d/init.cpp` for the definition
+        # of this test function.
+        c10d._test_python_store(MyPythonStore())
 
 
 class RendezvousTest(TestCase):
@@ -1509,6 +1549,45 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
+    def test_round_robin(self):
+        num_process_groups = 2
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d._round_robin_process_groups([
+            c10d.ProcessGroupGloo(
+                c10d.PrefixStore(str(i), store),
+                self.rank,
+                self.world_size)
+            for i in range(num_process_groups)
+        ])
+
+        # Run a few collectives so that we have called each process group
+        for _ in range(num_process_groups + 1):
+            tensor = torch.full([100, 100], self.rank)
+            pg.broadcast(tensor, root=0).wait()
+            self.assertEqual(torch.full([100, 100], 0), tensor)
+
+    def test_round_robin_create_destroy(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+
+        def create(num, prefix):
+            return c10d._round_robin_process_groups([
+                c10d.ProcessGroupGloo(
+                    c10d.PrefixStore("%s/%d" % (prefix, i), store),
+                    self.rank,
+                    self.world_size)
+                for i in range(num)
+            ])
+
+        # Run create/use/destroy twice
+        for i in range(2):
+            num_process_groups = 2
+            pg = create(num=num_process_groups, prefix=i)
+            for _ in range(3):
+                tensor = torch.ones([10, 10])
+                pg.allreduce(tensor).wait()
+                self.assertEqual(torch.full([10, 10], self.world_size), tensor)
+            del pg
+
 
 @requires_nccl()
 class ProcessGroupNCCLTest(TestCase):
@@ -2439,6 +2518,76 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
 
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_global_local_unused_params_grad(self):
+        """
+        By simulating a multi-task training, this test is to make sure:
+        1) DDP does not touch the grad of globally unused parameters.
+        2) DDP does update the grad of locally unused parameters.
+        """
+        class GlobalLocalUnusedParamModule(nn.Module):
+            class Task(nn.Module):
+                def __init__(self):
+                    super(GlobalLocalUnusedParamModule.Task, self).__init__()
+                    self.p = nn.Parameter(torch.ones(2, 2))
+
+                def forward(self, x):
+                    return self.p + x
+
+            def __init__(self):
+                super(GlobalLocalUnusedParamModule, self).__init__()
+                self.t0 = self.Task()
+                self.t1 = self.Task()
+                self.task_unused = self.Task()
+
+            def task_parameters(self):
+                return (self.t0.p, self.t1.p, self.task_unused.p)
+
+            def forward(self, x, rank):
+                return self.t0(x) if rank == 0 else self.t1(x)
+
+        def run_and_verify_grad(model):
+            # Run forward
+            output = model(8, self.rank)
+
+            # The grads of all parameters should be None at this point.
+            t0_p, t1_p, task_unused_p = model.module.task_parameters()
+            self.assertIsNone(t0_p.grad)
+            self.assertIsNone(t1_p.grad)
+            self.assertIsNone(task_unused_p.grad)
+
+            # Run backward
+            output.mean().backward()
+
+            # Now locally unused parameter should have grad updated on all ranks.
+            # However the globally unused parameter should still have None grad.
+            self.assertIsNotNone(t0_p.grad)
+            self.assertIsNotNone(t1_p.grad)
+            self.assertIsNone(task_unused_p.grad)
+
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            GlobalLocalUnusedParamModule().cpu(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(cpu_model)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            GlobalLocalUnusedParamModule().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(gpu_model)
+
     @requires_nccl()
     @skip_if_not_multigpu
     @skip_if_rocm
@@ -2946,9 +3095,9 @@ class ReducerTest(TestCase):
         output.backward()
 
         # The reducer will have marked the grad of fc3 as ready, because
-        # it doesn't show up in the autograd graph of `output`.
-        # This should result in its contents being equal to zero.
-        self.assertEqual(torch.zeros(model.fc3.weight.size()), model.fc3.weight.grad)
+        # it doesn't show up in the autograd graph of `output`. Since fc3.weight
+        # is considered being globally unused, it will be kept untouched as None.
+        self.assertEqual(None, model.fc3.weight.grad)
 
     def test_forward_backward_optimizer(self):
         batch_size = 10
@@ -3092,9 +3241,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
                 # Operation would time out in blocking mode.
                 work.wait()
+            # Run some GPU operations to make sure cuda does not stuck to
+            # run new events. It was observed cuda could stuck if not
+            # aborting nccl communicators before throwing Operation timed out
+            a = torch.rand(10).cuda(self.rank)
         else:
             func()
 
@@ -3159,12 +3312,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
                 c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
-
-            total_time = time.time() - start
-
-            self.assertLess(abs(total_time - timeout), 0.5)
         else:
             # Ensure the other rank sleeps to trigger timeout.
             time.sleep(2 * timeout)

@@ -9,10 +9,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
-// arithmetic, comparisions, and trigonometric functions. It handles
+// arithmetic, comparisons, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
 // This is inspired by NumPy's Array Iterator API (NpyIter).
@@ -301,7 +300,7 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
   bool needs_dynamic_casting() const {
-    return (common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_;
+    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
@@ -343,6 +342,10 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
+  void dynamic_cast_if(bool condition) {
+    force_dynamic_casting_ = force_dynamic_casting_ || condition;
+  }
+
   void build();
 
 protected:
@@ -357,19 +360,15 @@ protected:
   void allocate_outputs();
   void fast_set_up();
   bool can_use_fast_set_up();
-#ifdef BUILD_NAMEDTENSOR
   void compute_names();
   void propagate_names_to_outputs();
-#endif
   void coalesce_dimensions();
   void analyze_memory_format();
 
 protected:
   DimVector shape_;
   DimVector perm_;
-#ifdef BUILD_NAMEDTENSOR
   NameVector names_;
-#endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
@@ -383,6 +382,7 @@ protected:
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool have_differing_types_ = false;
+  bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
 };
