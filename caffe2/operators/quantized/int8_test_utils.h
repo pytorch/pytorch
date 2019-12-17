@@ -22,7 +22,7 @@ inline float addErrorTolerance(float scale) {
 
 inline std::unique_ptr<int8::Int8TensorCPU> q(
     const std::vector<int64_t>& dims) {
-  auto r = caffe2::make_unique<int8::Int8TensorCPU>();
+  auto r = std::make_unique<int8::Int8TensorCPU>();
   r->scale = 0.01;
   r->zero_point = static_cast<int32_t>(std::numeric_limits<uint8_t>::max()) / 2;
   ReinitializeTensor(&r->t, dims, at::dtype<uint8_t>().device(CPU));
@@ -38,7 +38,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
 inline std::unique_ptr<int8::Int8TensorCPU> biasq(
     const std::vector<int64_t>& dims,
     double scale) {
-  auto r = caffe2::make_unique<int8::Int8TensorCPU>();
+  auto r = std::make_unique<int8::Int8TensorCPU>();
   r->scale = scale;
   r->zero_point = 0;
   r->t.Resize(dims);
@@ -53,7 +53,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
 }
 
 inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
-  auto r = caffe2::make_unique<Tensor>(CPU);
+  auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
   for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
@@ -64,7 +64,7 @@ inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
 }
 
 inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
-  auto r = caffe2::make_unique<Tensor>(CPU);
+  auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
   for (auto i = 0; i < r->numel(); ++i) {
     r->mutable_data<float>()[i] =
@@ -101,7 +101,7 @@ inline void add_input(
     const string& name,
     Workspace* ws) {
   // auto* t = ws->CreateBlob(name)->GetMutable<TensorCPU>();
-  auto t = caffe2::make_unique<Tensor>(CPU);
+  auto t = std::make_unique<Tensor>(CPU);
   t->Resize(shape);
   std::copy(values.begin(), values.end(), t->mutable_data<float>());
   BlobGetMutableTensor(ws->CreateBlob(name), CPU)->CopyFrom(*t);

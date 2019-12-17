@@ -24,7 +24,7 @@ private:
     int val;
 };
 
-template<class T> using is_my_movable_only_class = std::is_same<MovableOnly, remove_cv_t<remove_reference_t<T>>>;
+template<class T> using is_my_movable_only_class = std::is_same<MovableOnly, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 struct CopyCounting {
     int move_count;
@@ -45,7 +45,7 @@ struct CopyCounting {
     }
 };
 
-template<class T> using is_my_copy_counting_class = std::is_same<CopyCounting, remove_cv_t<remove_reference_t<T>>>;
+template<class T> using is_my_copy_counting_class = std::is_same<CopyCounting, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 namespace test_extract_arg_by_filtered_index {
     class MyClass {};
