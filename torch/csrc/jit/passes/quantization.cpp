@@ -39,7 +39,7 @@ struct PatternInfo {
 
   static PatternInfo parse_from_str(std::string pattern_string) {
     PatternInfo rv{std::move(pattern_string),
-                   at::guts::make_unique<Graph>(),
+                   std::make_unique<Graph>(),
                    decltype(vmap){}};
     script::parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
@@ -743,7 +743,7 @@ std::tuple<QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQParamMap(
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
-      "getQSchemeAndQParamMap expects the corresponding observer for ",
+      "getQSchemeAndParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();
