@@ -742,7 +742,7 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
         Node* split_const_node =
             b->owningGraph()->create(onnx::Constant, 1);
         auto tensor = at::empty(split.size(), c10::kLong);
-        int64_t* data = tensor.data<int64_t>();
+        int64_t* data = tensor.data_ptr<int64_t>();
         for (auto split_size : split) {
           *data++ = split_size;
         }

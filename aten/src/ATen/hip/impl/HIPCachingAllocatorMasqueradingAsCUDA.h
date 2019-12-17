@@ -4,11 +4,15 @@
 #include <ATen/hip/impl/HIPAllocatorMasqueradingAsCUDA.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
-namespace c10 { namespace hip {
+namespace c10 {
+// forward declaration
+class DataPtr;
+namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
 Allocator* get();
-C10_HIP_API void recordStreamMasqueradingAsCUDA(void *ptr, HIPStreamMasqueradingAsCUDA stream);
+C10_HIP_API void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream);
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA
-}} // namespace c10::hip
+} // namespace hip
+} // namespace c10
