@@ -536,14 +536,15 @@ inline IValue toIValue(
         return py::cast<double>(obj);
       }
     }
-    case TypeKind::PyObjectType:
-      // convert a pybind11 object to the IValue and hold it
-      return c10::ivalue::ConcretePyObjectHolder::steal(obj.ptr());
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
     case TypeKind::QSchemeType:
       break;
+    case TypeKind::PyObjectType:
+      // convert a pybind11 object to the IValue that holds the
+      // PyObject and steal the reference to take ownership of it.
+      return c10::ivalue::ConcretePyObjectHolder::steal(obj.ptr());
     case TypeKind::RRefType:
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");

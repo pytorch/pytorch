@@ -86,7 +86,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     IValue rrefId,
     IValue forkId) {
-  auto pythonRemoteCall = c10::guts::make_unique<PythonRemoteCall>(
+  auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
   // set forceGradRecording to true as even if the args does not contain any
@@ -154,7 +154,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
-  auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
+  auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   return sendMessageWithAutograd(
       agent, dst, std::move(*scriptCall).toMessage());
 }
@@ -175,9 +175,8 @@ PyRRef pyRemoteBuiltin(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef(dst.id_, ret_type);
-  std::cout<<"user rref holding type " << userRRef->type()->str() << std::endl;
 
-  auto scriptRemoteCall = c10::guts::make_unique<ScriptRemoteCall>(
+  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
   auto fm = sendMessageWithAutograd(
@@ -186,7 +185,6 @@ PyRRef pyRemoteBuiltin(
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
   auto py_rref = PyRRef(userRRef);
-  std::cout<<"remote builtin returned userrref holding rref:" << py_rref.str() << std::endl;
   return py_rref;
 }
 
@@ -195,7 +193,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
-  auto pythonCall = c10::guts::make_unique<PythonCall>(
+  auto pythonCall = std::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
   return sendMessageWithAutograd(

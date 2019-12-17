@@ -40,7 +40,6 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      std::cout<<"to here is pyobject?? "<< str() << std::endl;
       return jit::toPyObject(std::static_pointer_cast<UserRRef>(rref_)->toHere());
     } else {
       IValue value =
@@ -60,7 +59,7 @@ py::object PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      RRefContext::getInstance().getWorkerName());
+      owner().name_);
 
   if (rref_->isPyObj()) {
     const py::object& value =

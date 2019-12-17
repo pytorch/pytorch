@@ -142,10 +142,8 @@ IValue UserRRef::toHere() {
   Message msgToSend;
 
   if (isPyObj()) {
-    std::cout<<"pyobject to here?>?" << type()->str() << std::endl;
     msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
   } else {
-    std::cout<<"ivalue to here" << std::endl;
     msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
   }
 
