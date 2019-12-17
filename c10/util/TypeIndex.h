@@ -10,7 +10,7 @@
 namespace c10 {
 namespace util {
 
-#if (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
+#if defined(__CUDACC__) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
 // GCC<9 has issues with our implementation for constexpr typenames.
 // Any version of MSVC or Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
