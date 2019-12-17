@@ -156,7 +156,7 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
 
     command = executable + argv
-    return shell(command, test_directory, env)
+    return shell(command, test_directory)
 
 
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
