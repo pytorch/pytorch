@@ -21,6 +21,11 @@ ReLU6Options::ReLU6Options(bool inplace) : inplace_(inplace) {}
 
 SoftshrinkOptions::SoftshrinkOptions(double lambda) : lambda_(lambda) {}
 
+MultiheadAttentionOptions::MultiheadAttentionOptions(
+  int64_t embed_dim, int64_t num_heads)
+    : embed_dim_(embed_dim), num_heads_(num_heads),
+      kdim_(embed_dim), vdim_(embed_dim) {}
+
 namespace functional {
 
 SoftmaxFuncOptions::SoftmaxFuncOptions(int64_t dim) : dim_(dim) {}

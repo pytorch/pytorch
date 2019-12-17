@@ -319,9 +319,7 @@ struct TORCH_API GumbelSoftmaxFuncOptions {
 
 /// Options for MultiheadAttention functional and module.
 struct TORCH_API MultiheadAttentionOptions {
-  MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
-    : embed_dim_(embed_dim), num_heads_(num_heads),
-      kdim_(embed_dim), vdim_(embed_dim) {}
+  MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads);
 
   /// total dimension of the model.
   TORCH_ARG(int64_t, embed_dim);
