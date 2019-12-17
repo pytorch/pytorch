@@ -19,10 +19,13 @@ def save_to_s3(project, data):
                 href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
                 integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
                 crossorigin="anonymous">
+            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.20/css/jquery.dataTables.css">
+            <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+            <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.10.20/js/jquery.dataTables.js"></script>
             <title>{project} nightly and permanent docker image info</title>
         </head>
         <body>
-            <table class="table table-striped table-hover">
+            <table class="table table-striped table-hover" id="docker">
             <thead class="thead-dark">
                 <tr>
                 <th scope="col">repo</th>
@@ -37,6 +40,11 @@ def save_to_s3(project, data):
             </tbody>
             </table>
         </body>
+        <script>
+            $(document).ready( function () {{
+                $('#docker').DataTable({{paging: false}});
+            }} );
+        </script>
     </html>
     """
     client.put_object(
@@ -152,8 +160,8 @@ for repo in repos(client):
         if tag.isdigit() or tag.count("-") == 4 or tag in ignore_tags:
             window = stable_window
             if tag in ignore_tags:
-                window = "infinite"
-            if age < window:
+                stable_window_tags.append((repositoryName, tag, "", age, created))
+            elif age < window:
                 stable_window_tags.append((repositoryName, tag, window, age, created))
         else:
             window = unstable_window
