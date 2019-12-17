@@ -96,14 +96,16 @@ void DistAutogradContext::setGraphTask(
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::Message& message) {
-    if (message.type() == rpc::MessageType::EXCEPTION) {
-      // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err(
-          std::string(message.payload().begin(), message.payload().end()));
-      graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
-    }
-  });
+  futureMessage->addCallback(
+      [this](
+          const rpc::Message& /* unused */,
+          const c10::optional<utils::FutureError>& futErr) {
+        if (futErr) {
+          // If we have an error, let the local autograd engine know about it.
+          std::runtime_error err((*futErr).what());
+          graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
+        }
+      });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
@@ -122,14 +124,17 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
   if (outStandingRpcs.empty()) {
-    state->future->markCompleted();
+    state->future->markCompleted(rpc::Message());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback([state](const rpc::Message&) {
-        if (--state->remaining == 0) {
-          state->future->markCompleted();
-        }
-      });
+      rpc->addCallback(
+          [state](
+              const rpc::Message& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            if (--state->remaining == 0) {
+              state->future->markCompleted(rpc::Message());
+            }
+          });
     }
   }
   return state->future;
