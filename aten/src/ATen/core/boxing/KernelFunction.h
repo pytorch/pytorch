@@ -90,7 +90,7 @@ public:
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(guts::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_unique<MyFunctor>());
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
@@ -112,7 +112,7 @@ public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor([] {
-   * >   return guts::make_unique<MyFunctor>();
+   * >   return std::make_unique<MyFunctor>();
    * > });
    */
   template<class KernelFunctor, bool AllowLegacyTypes = false>
@@ -134,7 +134,7 @@ public:
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(guts::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(std::make_unique<MyFunctor>());
    */
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
