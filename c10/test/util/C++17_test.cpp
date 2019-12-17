@@ -113,13 +113,13 @@ TEST(if_constexpr, returnTypeCanDiffer_withIdentityArg) {
         [&](auto) -> int64_t { return 3; },
         [&](auto) -> std::string { return "3"; }
     );
-    static_assert(std::is_same<std::string, decltype(a_string)>::value);
+    static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
     auto an_int = if_constexpr<true>(
         [&](auto) -> int64_t { return 3; },
         [&](auto) -> std::string { return "3"; }
     );
-    static_assert(std::is_same<int64_t, decltype(an_int)>::value);
+    static_assert(std::is_same<int64_t, decltype(an_int)>::value, "");
 }
 
 TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
@@ -127,13 +127,13 @@ TEST(if_constexpr, returnTypeCanDiffer_withoutIdentityArg) {
         [&] () -> int64_t { return 3; },
         [&] () -> std::string { return "3"; }
     );
-    static_assert(std::is_same<std::string, decltype(a_string)>::value);
+    static_assert(std::is_same<std::string, decltype(a_string)>::value, "");
 
     auto an_int = if_constexpr<true>(
         [&] () -> int64_t { return 3; },
         [&] () -> std::string { return "3"; }
     );
-    static_assert(std::is_same<int64_t, decltype(an_int)>::value);
+    static_assert(std::is_same<int64_t, decltype(an_int)>::value, "");
 }
 
 }
