@@ -202,6 +202,7 @@ std::string wireSerialize(
       return storageSize >= kMinRecopyBytes &&
           storageSize >= usefulSize * kMinMultiple;
     };
+    pTensors.reserve(tensors.size());
     for (const auto& t : tensors) {
       pTensors.push_back(worthRecopying(t) ? t.clone() : t);
     }
