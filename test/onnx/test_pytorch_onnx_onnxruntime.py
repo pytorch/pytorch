@@ -1671,7 +1671,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(model, x)
 
-
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1684,6 +1683,14 @@ class TestONNXRuntime(unittest.TestCase):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
                 return torch.flatten(input, 1)
+
+        x = torch.randint(10, (1, 2, 3, 4))
+        self.run_test(FlattenModel(), x)
+
+    def test_flatten2d_neg(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.flatten(x, 1, -1), torch.flatten(x, 0, -2), torch.flatten(x, 1, -2)
 
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
