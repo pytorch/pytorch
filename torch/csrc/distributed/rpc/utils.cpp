@@ -201,21 +201,10 @@ std::string wireSerialize(
       return storageSize >= kMinRecopyBytes &&
           storageSize >= usefulSize * kMinMultiple;
     };
-    const std::vector<at::Tensor>* pTensors = &tensors;
-    bool needRecopying = false;
+    c10::List<at::Tensor> pTensors;
+    pTensors.reserve(tensors.size());
     for (const auto& t : tensors) {
-      if (worthRecopying(t)) {
-        needRecopying = true;
-        break;
-      }
-    }
-    std::vector<at::Tensor> copiedTensors;
-    if (needRecopying) {
-      copiedTensors.reserve(tensors.size());
-      for (const auto& t : tensors) {
-        copiedTensors.push_back(worthRecopying(t) ? t.clone() : t);
-      }
-      pTensors = &copiedTensors;
+      pTensors.push_back(worthRecopying(t) ? t.clone() : t);
     }
 
     torch::jit::Pickler pickler(
@@ -225,7 +214,7 @@ std::string wireSerialize(
         },
         nullptr);
     pickler.protocol();
-    pickler.pushIValue(*pTensors);
+    pickler.pushIValue(std::move(pTensors));
     pickler.stop();
     // tensorData is in function scope so that the data() pointers stay valid.
     tensorData = pickler.tensorData();
