@@ -289,7 +289,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   const auto& selfType = selfType_->expect<ClassType>();
 
-  if (const auto& t = selfType->findAttribute(field) && t->is_module()) {
+  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
