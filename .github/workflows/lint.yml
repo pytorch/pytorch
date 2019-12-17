@@ -17,6 +17,8 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          ref: v1.4.0
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -52,6 +54,8 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
+        with:
+          ref: v1.4.0
       - name: Checkout PR tip
         run: |
           set -eux
@@ -88,6 +92,8 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
+        with:
+          ref: v1.4.0
       - name: Checkout PR tip
         run: |
           set -eux
@@ -127,6 +133,8 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
+        with:
+          ref: v1.4.0
       - name: Checkout PR tip
         run: |
           set -eux
