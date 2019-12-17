@@ -202,9 +202,8 @@ std::string wireSerialize(
       return storageSize >= kMinRecopyBytes &&
           storageSize >= usefulSize * kMinMultiple;
     };
-    for (size_t i = 0; i < tensors.size(); ++i) {
-      pTensors.push_back(
-          worthRecopying(tensors[i]) ? tensors[i].clone() : tensors[i]);
+    for (const auto& t : tensors) {
+      pTensors.push_back(worthRecopying(t) ? t.clone() : t);
     }
 
     torch::jit::Pickler pickler(
