@@ -465,7 +465,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
   if (nDim > nDimI) {
     auto indices_accessor = indices.accessor<int64_t, 2>();
     for (int64_t k = 0; k < sparse._nnz(); k++) {
-      Tensor& dstBuffer = resultBuffer;
+      Tensor dstBuffer = resultBuffer;
       for (int64_t d = 0; d < sparse.sparse_dim(); d++) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
