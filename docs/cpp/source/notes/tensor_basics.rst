@@ -2,7 +2,7 @@ Tensor Basics
 =============
 
 The ATen tensor library backing PyTorch is a simple tensor library thats exposes
-the Tensor operations in Torch directly in C++11. ATen's API is auto-generated
+the Tensor operations in Torch directly in C++14. ATen's API is auto-generated
 from the same declarations PyTorch uses so the two APIs will track each other
 over time.
 

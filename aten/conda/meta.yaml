@@ -26,7 +26,7 @@ requirements:
 about:
   home: https://github.com/zdevito/ATen
   license: BSD
-  summary: A TENsor library for C++11
+  summary: A TENsor library for C++14
 
 extra:
   recipe-maintainers:
