@@ -27,6 +27,11 @@ from itertools import product
 from copy import deepcopy
 from numbers import Number
 import tempfile
+import json
+if sys.version_info[0] == 2:
+    from urllib2 import urlopen  # noqa f811
+else:
+    from urllib.request import urlopen
 
 import __main__
 import errno
@@ -580,6 +585,34 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+disabled_test_from_issues = None
+def check_disabled(test_name):
+    global disabled_test_from_issues
+    if disabled_test_from_issues is None:
+        disabled_test_from_issues = {}
+
+        def read_and_process():
+            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            contents = urlopen(url, timeout=1).read().decode('utf-8')
+            the_response = json.loads(contents)
+            for item in the_response['items']:
+                title = item['title']
+                key = 'DISABLED '
+                if title.startswith(key):
+                    test_name = title[len(key):].strip()
+                    disabled_test_from_issues[test_name] = item['html_url']
+
+        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+            try:
+                read_and_process()
+            except Exception:
+                print("Couldn't download test skip set, leaving all tests enabled...")
+
+    if test_name in disabled_test_from_issues:
+        raise unittest.SkipTest(
+            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -634,10 +667,14 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
+
     def setUp(self):
+
+
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+        check_disabled(str(self))
 
         set_rng_seed(SEED)
 
