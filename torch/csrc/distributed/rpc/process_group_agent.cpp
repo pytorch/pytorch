@@ -337,21 +337,21 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         // the lock
         std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
         const auto dst = work.to_.id_;
-          std::vector<torch::Tensor> payload = {torch::from_blob(
-              (void*)serializedPayload.c_str(),
-              serializedPayload.length(),
-              {torch::kChar})};
-          pendingSends.reserve(2);
+        std::vector<torch::Tensor> payload = {torch::from_blob(
+            (void*)serializedPayload.c_str(),
+            serializedPayload.length(),
+            {torch::kChar})};
+        pendingSends.reserve(2);
 
-          sendCounts_.increment(dst);
+        sendCounts_.increment(dst);
 
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-            pendingSends.emplace_back(
-                pg_->send(payload, dst, dst /* channelTag */));
-          }
+        {
+          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+          pendingSends.emplace_back(
+              pg_->send(preamble, dst, dst /* channelTag */));
+          pendingSends.emplace_back(
+              pg_->send(payload, dst, dst /* channelTag */));
+        }
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
         }
