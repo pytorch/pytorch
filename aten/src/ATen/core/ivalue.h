@@ -177,10 +177,10 @@ struct CAFFE2_API IValue final {
 
   template <
       typename... Args,
-      c10::guts::enable_if_t<
-          !c10::guts::disjunction<
+      std::enable_if_t<
+          !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              guts::negation<std::is_constructible<IValue, Args>>...>::
               value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);

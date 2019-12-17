@@ -319,7 +319,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         #    recursively scripting them.
         for name, module_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module)
+            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
@@ -425,12 +425,18 @@ def get_overload_name_mapping(overload_info):
             overload_name_mappings[original_name].append(overload_name)
     return overload_name_mappings
 
+def _check_no_signature(func):
+    signature = torch.jit.annotations.get_signature(func, None, None)
+    if signature is None:
+        qual_name = torch.jit._qualified_name(func)
+        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
     for orig_fn, overloads in overload_info.items():
         orig_ast = torch.jit.get_jit_def(orig_fn, self_name="RecursiveScriptModule")
         for overload_name, overload_fn in overloads:
-            torch.jit._check_no_signature(overload_fn)
+            _check_no_signature(overload_fn)
             over_ast = torch.jit.get_jit_def(overload_fn, self_name="RecursiveScriptModule")
             new_ast = torch._C._replace_overloaded_method_decl(over_ast.decl(), orig_ast, overload_name)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(orig_fn)
