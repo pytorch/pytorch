@@ -4,7 +4,6 @@
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
@@ -131,9 +130,7 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
 #if !defined(THC_REAL_IS_BOOL)
 
 static void propagate_names_if_named_tensor_enabled(THCTensor* result, THCTensor* src) {
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names(result, src);
-#endif
 }
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
@@ -181,7 +178,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<scalar_t>::atan,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<scalar_t>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<scalar_t>::erf,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<scalar_t>::erfc,  Real)
-IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cinv, THCNumerics<scalar_t>::cinv,  Real)
 
 #endif
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_

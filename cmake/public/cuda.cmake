@@ -206,9 +206,13 @@ set_property(
 # library.
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    target_link_libraries(torch::cudart INTERFACE "${CUDA_cudart_static_LIBRARY}")
+    set_property(
+        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_cudart_static_LIBRARY}")
     if (NOT WIN32)
-      target_link_libraries(torch::cudart INTERFACE rt dl)
+      set_property(
+          TARGET torch::cudart APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+          rt dl)
     endif()
 else()
     set_property(
@@ -230,7 +234,8 @@ if(CAFFE2_USE_CUDNN)
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    target_link_libraries(caffe2::cudnn INTERFACE
+    set_property(
+        TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
   endif()
 endif()
@@ -241,7 +246,8 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
-    target_link_libraries(caffe2::curand INTERFACE
+    set_property(
+        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
@@ -256,7 +262,8 @@ set_property(
 # interface library similar to cudart.
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    target_link_libraries(caffe2::cufft INTERFACE
+    set_property(
+        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a"
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
@@ -401,12 +408,12 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
   list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
 endforeach()
 
-# Set C++11 support
+# Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (MSVC)
   list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "/EHa")
 else()
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
+  list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 

@@ -11,6 +11,9 @@ namespace raw {
   namespace weak_intrusive_ptr {
     inline void incref(intrusive_ptr_target* self);
   }
+  namespace intrusive_ptr {
+    inline void incref(intrusive_ptr_target * self);
+  }
 }
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
@@ -65,6 +68,8 @@ class C10_API intrusive_ptr_target {
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
+  friend inline void raw::intrusive_ptr::incref(intrusive_ptr_target* self);
+
   template <typename T, typename NullType>
   friend class weak_intrusive_ptr;
   friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
@@ -190,7 +195,7 @@ class intrusive_ptr final {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
-      const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
+      const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
@@ -342,10 +347,6 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
-        owning_ptr == NullType::singleton() || owning_ptr->refcount_.load() > 0,
-        "intrusive_ptr: Can only intrusive_ptr::reclaim() owning pointers that were created using intrusive_ptr::release().");
     return intrusive_ptr(owning_ptr);
   }
 
@@ -690,10 +691,9 @@ namespace intrusive_ptr {
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass
   // NullType::singleton to this function
   inline void incref(intrusive_ptr_target* self) {
-    auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
-    auto ptr_copy = ptr;
-    ptr_copy.release();
-    ptr.release();
+    if (self) {
+      ++self->refcount_;
+    }
   }
 
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass
