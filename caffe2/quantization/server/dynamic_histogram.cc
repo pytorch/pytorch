@@ -95,7 +95,7 @@ void DynamicHistogram::Add(float f) {
   max_ = std::max(max_, f);
 
   if (histogram_ == nullptr) {
-    histogram_ = caffe2::make_unique<Histogram>(
+    histogram_ = std::make_unique<Histogram>(
         nbins_ * OVER_BINNING_FACTOR, min_, max_);
     histogram_->Add(f);
     return;
@@ -136,7 +136,7 @@ void DynamicHistogram::Add(const float* f, int len) {
   max_ = maximum;
 
   if (histogram_ == nullptr) {
-    histogram_ = caffe2::make_unique<Histogram>(
+    histogram_ = std::make_unique<Histogram>(
         nbins_ * OVER_BINNING_FACTOR, min_, max_);
     histogram_->Add(f, len);
     return;

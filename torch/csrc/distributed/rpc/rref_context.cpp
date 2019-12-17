@@ -22,12 +22,12 @@ void RRefContext::destroyInstance(bool ignoreRRefLeak) {
   ctx.checkRRefLeaks(ignoreRRefLeak);
 }
 
-void RRefContext::handleException(const Message& message) {
-  if (message.type() == MessageType::EXCEPTION) {
+void RRefContext::handleException(
+    const c10::optional<utils::FutureError>& futErr) {
+  if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    std::string err(message.payload().begin(), message.payload().end());
-    VLOG(1) << "Got exception: " << err << std::endl << std::flush;
-    throw std::runtime_error(err);
+    VLOG(1) << "Got exception: " << (*futErr).what();
+    throw std::runtime_error((*futErr).what());
   }
 }
 
@@ -36,9 +36,16 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     owners_.clear();
   }
+}
+
+std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
+  std::unordered_map<std::string, std::string> info;
+  std::lock_guard<std::mutex> lock(mutex_);
+  info["num_owner_rrefs"] = c10::to_string(owners_.size());
+  return info;
 }
 
 void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
@@ -64,7 +71,7 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
           << "GC has deleted them before calling shutdown(): \n"
           << ss.str();
     } else {
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
 }
@@ -72,8 +79,12 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
 template <typename T>
 std::shared_ptr<UserRRef<T>> RRefContext::createUserRRef(worker_id_t ownerId) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-  return createUserRRef<T>(
-      ownerId, genGloballyUniqueId(), genGloballyUniqueId());
+  // Explicitly creating rrefId before forkId to make sure the order is
+  // deterministic, as the argument evaluation order is system and compiler
+  // dependent.
+  const auto rrefId = genGloballyUniqueId();
+  const auto forkId = genGloballyUniqueId();
+  return createUserRRef<T>(ownerId, rrefId, forkId);
 }
 
 template std::shared_ptr<UserRRef<IValue>> RRefContext::createUserRRef<IValue>(
@@ -125,8 +136,10 @@ void RRefContext::delUser(
         agent_->getWorkerInfo(owner),
         RRefUserDelete(rrefId, forkId).toMessage());
 
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      RRefContext::handleException(futErr);
+    });
   }
 }
 
@@ -136,7 +149,7 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
   if (ownerId == getWorkerId()) {
-    return getOrCreateOwnerRRef<T>(rrefId);
+    return getOwnerRRef<T>(rrefId);
   } else {
     return createUserRRef<T>(ownerId, rrefId, forkId);
   }
@@ -161,8 +174,8 @@ std::shared_ptr<OwnerRRef<T>> RRefContext::getOrCreateOwnerRRef(
     auto rref =
         std::shared_ptr<OwnerRRef<T>>(new OwnerRRef<T>(getWorkerId(), rrefId));
     owners_[rref->rrefId()] = rref;
+    ownerCV_.notify_all();
     return rref;
-
   } else {
     // Scenario (2) retrieving an existing RRef
     return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
@@ -190,6 +203,26 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::createOwnerRRef<
 
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::createOwnerRRef<
     py::object>();
+
+template <typename T>
+std::shared_ptr<OwnerRRef<T>> RRefContext::getOwnerRRef(const RRefId& rrefId) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  const auto iter = owners_.find(rrefId);
+  if (iter == owners_.end()) {
+    // Scenario (1) RRef is used before it is created
+    ownerCV_.wait(lock, [&] { return owners_.find(rrefId) != owners_.end(); });
+    return std::static_pointer_cast<OwnerRRef<T>>(owners_[rrefId]);
+  } else {
+    // Scenario (2) retrieving an existing RRef
+    return std::static_pointer_cast<OwnerRRef<T>>(iter->second);
+  }
+}
+
+template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOwnerRRef<IValue>(
+    const RRefId& rrefId);
+
+template std::shared_ptr<OwnerRRef<py::object>> RRefContext::getOwnerRRef<
+    py::object>(const RRefId& rrefId);
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
   auto rfd = rref->fork();
@@ -254,15 +287,20 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // this fork ID.
     auto fm = agent_->send(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const Message& message) { handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
+    });
   } else {
     auto fm = agent_->send(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent](const Message& message) {
-      handleException(message);
+    fm->addCallback([this, forkId, parent](
+                        const Message& /* unused */,
+                        const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });
   }
@@ -316,7 +354,10 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->send(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& message) { handleException(message); });
+  fm->addCallback([](const Message& /* unused */,
+                     const c10::optional<utils::FutureError>& futErr) {
+    handleException(futErr);
+  });
 }
 
 template <typename T>
@@ -375,7 +416,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
     }
   }
   if (deletedRRef && deletedRRef->isPyObj()) {
-    AutoGIL ag;
+    pybind11::gil_scoped_acquire ag;
     deletedRRef.reset();
   }
 }
