@@ -116,21 +116,25 @@ void initTreeViewBindings(PyObject* module) {
           "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
-      .def(py::init([](const Expr& type, const Ident& name, bool kwarg_only) {
-        return Param::create(
-            name.range(),
-            name,
-            Maybe<Expr>::create(type.range(), type),
-            Maybe<Expr>::create(name.range()),
-            kwarg_only);
-      }))
-      .def(py::init(
-          [](const Maybe<Expr>& type, const Ident& name, bool kwarg_only) {
+      // .def(py::init([](const Expr& type, const Ident& name, bool kwarg_only)
+      // {
+      //   return Param::create(
+      //       name.range(),
+      //       name,
+      //       Maybe<Expr>::create(type.range(), type),
+      //       Maybe<Expr>::create(name.range()),
+      //       kwarg_only);
+      // }))
+      .def(
+          py::init([](const Maybe<Expr>& type,
+                      const Ident& name,
+                      const Maybe<Expr>& default_value,
+                      bool kwarg_only) {
             return Param::create(
                 name.range(),
                 name,
                 type,
-                Maybe<Expr>::create(name.range()),
+                default_value,
                 kwarg_only);
           }));
   py::class_<Attribute, TreeView>(m, "Attribute")
@@ -334,9 +338,12 @@ void initTreeViewBindings(PyObject* module) {
       .def(py::init([](const SourceRange& range, Expr expr) {
         return Starred::create(range, expr);
       }));
-  py::class_<Maybe<Expr>, TreeView>(m, "EmptyTypeAnnotation")
+  py::class_<Maybe<Expr>, TreeView>(m, "Maybe")
       .def(py::init(
-          [](const SourceRange& range) { return Maybe<Expr>::create(range); }));
+          [](const SourceRange& range) { return Maybe<Expr>::create(range); }))
+  // py::class_<Maybe<Expr>, TreeView>(m, "Maybe")
+      .def(py::init(
+          [](const SourceRange& range, const Expr& expr) { return Maybe<Expr>::create(range, expr); }));
 }
 
 } // namespace script

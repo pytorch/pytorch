@@ -217,6 +217,12 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 
 def build_param_list(ctx, py_args, self_name):
+
+    def get_default(i):
+        if i >= len(py_args.defaults):
+            return None
+        return py_args.defaults[i]
+
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -227,13 +233,18 @@ def build_param_list(ctx, py_args, self_name):
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if not PY2 and py_args.kw_defaults:
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
+
+    def call_build_param(index, arg, kwarg_only):
+        default = None if kwarg_only else get_default(index)
+        return build_param(ctx, arg, self_name, kwarg_only=kwarg_only, default=default)
+
+    result = [call_build_param(index, arg, kwarg_only=False) for index, arg in enumerate(py_args.args)]
     if not PY2:
-        result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+        result += [call_build_param(index, arg, kwarg_only=True) for index, arg in enumerate(py_args.kwonlyargs)]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only):
+def build_param(ctx, py_arg, self_name, kwarg_only, default):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
     name = py_arg.id if PY2 else py_arg.arg
@@ -241,10 +252,15 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
     elif self_name is not None and name == 'self':
-        annotation_expr = Var(Ident(r, self_name))
+        annotation_expr = Maybe(r, Var(Ident(r, self_name)))
     else:
-        annotation_expr = EmptyTypeAnnotation(r)
-    return Param(annotation_expr, Ident(r, name), kwarg_only)
+        annotation_expr = Maybe(r)
+
+    if default is None:
+        default = Maybe(r)
+    else:
+        default = Maybe(r, build_expr(ctx, default))
+    return Param(annotation_expr, Ident(r, name), default, kwarg_only)
 
 
 def get_default_args(fn):

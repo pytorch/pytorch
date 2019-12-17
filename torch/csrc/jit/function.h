@@ -62,6 +62,7 @@ struct TORCH_API Function {
   }
 
   Function& setSchema(FunctionSchema schema) {
+    std::cout << "Setting schema on " << this << "\n";
     schema_ = make_unique<FunctionSchema>(std::move(schema));
     return *this;
   }

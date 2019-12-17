@@ -396,11 +396,11 @@ static StrongFunctionPtr script_compile_function(
       {pythonResolver(std::move(rcb))},
       nullptr,
       true);
-  TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
-  auto& defined = defined_functions[0];
-  defined->setSchema(getSchemaWithNameAndDefaults(
-      def.range(), defined->getSchema(), def.name().name(), defaults));
-  StrongFunctionPtr ret(std::move(cu), defined);
+  // TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
+  // auto& defined = defined_functions[0];
+  // defined->setSchema(getSchemaWithNameAndDefaults(
+  //     def.range(), defined->getSchema(), def.name().name(), defaults));
+  StrongFunctionPtr ret(std::move(cu), defined_functions.at(0));
   didFinishEmitFunction(ret);
   return ret;
 }

@@ -343,12 +343,12 @@ struct Param : public TreeView {
       const SourceRange& range,
       const Ident& ident,
       const Maybe<Expr>& type,
-      const Maybe<Expr>& def,
+      const Maybe<Expr>& default_value,
       bool kwarg_only) {
     TreeRef kwarg_only_tree =
         Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
-    return Param(
-        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
+    return Param(Compound::create(
+        TK_PARAM, range, {ident, type, default_value, kwarg_only_tree}));
   }
   Ident ident() const {
     return Ident(subtree(0));
