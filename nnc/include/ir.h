@@ -2,12 +2,13 @@
 #define NNC_INCLUDE_IR_H_INCLUDED_
 
 #include <string>
+#include <vector>
 
 #include "expr.h"
 
 namespace nnc {
 
-enum ExprNodeType {
+enum IRNodeType {
   kAdd,
   kSub,
   kMul,
@@ -36,12 +37,12 @@ class BinaryOpNode : public ExprNode<Op> {
  public:
   const Expr& lhs() const { return this->lhs_; }
   const Expr& rhs() const { return this->rhs_; }
-  ExprNodeType expr_type() const { return expr_type_; }
+  IRNodeType expr_type() const { return expr_type_; }
 
   static Expr make(const Expr& lhs, const Expr& rhs) { return Expr(new Op(lhs, rhs)); }
 
  protected:
-  BinaryOpNode(const Expr& lhs_v, const Expr& rhs_v, ExprNodeType expr_type)
+  BinaryOpNode(const Expr& lhs_v, const Expr& rhs_v, IRNodeType expr_type)
       : ExprNode<Op>(BinaryOpDtype(lhs_v.dtype(), rhs_v.dtype())),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
         rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())),
@@ -57,30 +58,30 @@ class BinaryOpNode : public ExprNode<Op> {
 
   Expr lhs_;
   Expr rhs_;
-  ExprNodeType expr_type_;
+  IRNodeType expr_type_;
 };
 
 class Add : public BinaryOpNode<Add> {
  private:
-  Add(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, ExprNodeType::kAdd) {}
+  Add(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kAdd) {}
   friend class BinaryOpNode<Add>;
 };
 
 class Sub : public BinaryOpNode<Sub> {
  private:
-  Sub(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, ExprNodeType::kSub) {}
+  Sub(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kSub) {}
   friend class BinaryOpNode<Sub>;
 };
 
 class Mul : public BinaryOpNode<Mul> {
  private:
-  Mul(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, ExprNodeType::kMul) {}
+  Mul(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kMul) {}
   friend class BinaryOpNode<Mul>;
 };
 
 class Div : public BinaryOpNode<Div> {
  private:
-  Div(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, ExprNodeType::kDiv) {}
+  Div(const Expr& lhs, const Expr& rhs) : BinaryOpNode(lhs, rhs, IRNodeType::kDiv) {}
   friend class BinaryOpNode<Div>;
 };
 
@@ -150,6 +151,144 @@ class Let : public ExprNode<Let> {
   Expr var_;
   Expr value_;
   Expr body_;
+};
+
+class Block : public StmtNode<Block> {
+ public:
+  static Stmt make(const std::vector<Stmt>& stmts) { return Stmt(new Block(stmts)); }
+  int nstmts() const { return stmts_.size(); }
+  const Stmt& stmt(int index) const { return stmts_[index]; }
+
+ private:
+  explicit Block(const std::vector<Stmt>& stmts) : stmts_(stmts) {}
+  std::vector<Stmt> stmts_;
+};
+
+class For : public StmtNode<For> {
+ public:
+  const Var& var() const { return var_; }
+  const Expr& start() const { return start_; }
+  const Expr& stop() const { return stop_; }
+  const Stmt& body() const { return body_; }
+  static Stmt make(const Var& var, const Expr& start, const Expr& stop, const Stmt& body) {
+    return Stmt(new For(var, start, stop, body));
+  }
+
+ private:
+  For(const Var& var, const Expr& start, const Expr& stop, const Stmt& body)
+      : var_(var), start_(start), stop_(stop), body_(body) {}
+  Var var_;
+  Expr start_;
+  Expr stop_;
+  Stmt body_;
+};
+
+// Represents a ramp vector node:
+//     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
+class Ramp : public ExprNode<Ramp> {
+ public:
+  const Expr& base() const { return base_; }
+  const Expr& stride() const { return stride_; }
+  static Expr make(const Expr& base, const Expr& stride, int lanes) {
+    return Expr(new Ramp(base, stride, lanes));
+  }
+
+ private:
+  Ramp(const Expr& base, const Expr& stride, int lanes)
+      : ExprNodeBase(Dtype(base.dtype(), lanes)), base_(base), stride_(stride), lanes_(lanes) {
+    CHECK_EQ(stride.dtype(), base.dtype());
+  }
+
+  Expr base_;
+  Expr stride_;
+  int lanes_;
+};
+
+class Buffer {
+ public:
+  Buffer(const Var& data, const Dtype& dtype, const std::vector<Expr>& dims)
+      : data_(data), dtype_(dtype), dims_(dims) {
+    CHECK_EQ(data.dtype(), kHandle);
+  }
+  const Var& data() const { return data_; }
+  const Dtype& dtype() const { return dtype_; }
+  int ndim() const { return dims_.size(); }
+  const Expr& dim(int index) const { return dims_[index]; }
+
+ private:
+  Var data_;
+  Dtype dtype_;
+  std::vector<Expr> dims_;
+  // TODO: add strides
+};
+
+class Load : public ExprNode<Load> {
+ public:
+  const Var& base_handle() const { return base_handle_; }
+  const Expr& index() const { return index_; }
+  const Expr& mask() const { return mask_; }
+  static Expr make(const Buffer& buffer, const Expr& index, const Expr& mask) {
+    return Expr(new Load(buffer, index, mask));
+  }
+
+ private:
+  Load(const Buffer& buffer, const Expr& index, const Expr& mask)
+      : ExprNodeBase(ChooseDtype(buffer.dtype(), index.dtype())),
+        base_handle_(buffer.data()),
+        index_(index),
+        mask_(mask) {
+    CHECK_EQ(base_handle_.dtype(), kHandle);
+    CHECK_EQ(index.dtype().lanes(), mask.dtype().lanes());
+    CHECK_EQ(index.dtype().scalar_type(), kInt32);
+  }
+  static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
+    return Dtype(buffer_dtype, index_dtype.lanes());
+  }
+
+  Var base_handle_;
+  Expr index_;
+  Expr mask_;
+};
+
+class Store : public StmtNode<Store> {
+ public:
+  const Var& base_handle() const { return base_handle_; }
+  const Expr& index() const { return index_; }
+  const Expr& value() const { return value_; }
+  const Expr& mask() const { return mask_; }
+
+  static Stmt make(const Buffer& buffer, const Expr& index, const Expr& value, const Expr& mask) {
+    return Stmt(new Store(buffer, index, value, mask));
+  }
+
+ private:
+  // TODO: merge this with Load.
+  Store(const Buffer& buffer, const Expr& index, const Expr& value, const Expr& mask)
+      : StmtNodeBase(), base_handle_(buffer.data()), index_(index), value_(value), mask_(mask) {
+    CHECK_EQ(base_handle_.dtype(), kHandle);
+    CHECK_EQ(index.dtype().lanes(), mask.dtype().lanes());
+    CHECK_EQ(index.dtype().lanes(), value.dtype().lanes());
+    CHECK_EQ(index.dtype().scalar_type(), kInt32);
+    CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
+  }
+
+  Var base_handle_;
+  Expr index_;
+  Expr value_;
+  Expr mask_;
+};
+
+class Broadcast : public ExprNode<Broadcast> {
+ public:
+  const Expr& value() const { return value_; }
+  int lanes() const { return lanes_; }
+  static Expr make(const Expr& value, int lanes) { return Expr(new Broadcast(value, lanes)); }
+
+ private:
+  Broadcast(const Expr& value, int lanes)
+      : ExprNodeBase(Dtype(value.dtype(), lanes)), value_(value), lanes_(lanes) {}
+  Expr value_;
+  int lanes_;
 };
 
 }  // namespace nnc

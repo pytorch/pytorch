@@ -8,23 +8,27 @@
 
 namespace nnc {
 
-// The common base between all IR expression node.
-class BaseExprNode : public RefCounted {
+// The commomn class between all IR nodes.
+class IRNode : public RefCounted {
  public:
   virtual void accept(IRVisitor* visitor) const = 0;
-  BaseExprNode() : dtype_(kUninitialized) {}
+  virtual ~IRNode() {}
+};
+
+// The common base between all expression node.
+class BaseExprNode : public IRNode {
+ public:
   explicit BaseExprNode(Dtype dtype) : dtype_(dtype) {}
   Dtype dtype() const { return dtype_; }
 
- protected:
-  void set_dtype(Dtype dtype) {
-    CHECK_EQ(this->dtype_, kUninitialized) << "can only set uninitialized dtype";
-    CHECK_NE(dtype, kUninitialized) << "new dtype must not be valid";
-    this->dtype_ = dtype;
-  }
-
  private:
   Dtype dtype_;
+};
+
+// The common base between all statement node.
+class BaseStmtNode : public IRNode {
+ public:
+  BaseStmtNode() {}
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -35,6 +39,14 @@ class ExprNode : public BaseExprNode {
   using ExprNodeBase = ExprNode<Op>;
   void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
   explicit ExprNode(Dtype dtype) : BaseExprNode(dtype) {}
+};
+
+template <class Op>
+class StmtNode : public BaseStmtNode {
+ public:
+  using StmtNodeBase = StmtNode<Op>;
+  void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
+  StmtNode() {}
 };
 
 // A refcounted pointer to the underlying ExprNode.
@@ -51,19 +63,12 @@ class Expr : public RefHandle<BaseExprNode> {
     node()->accept(visitor);
   }
 
-  explicit Expr(int v);
-  explicit Expr(float v);
-
-  template <class Op>
-  Op* AsNode() {
-    BaseExprNode* node = this->node();
-    return dynamic_cast<Op*>(node);
-  }
+  Expr(int v);
+  Expr(float v);
 
   template <class Op>
   const Op* AsNode() const {
-    Expr* this_non_const = const_cast<Expr*>(this);
-    return this_non_const->AsNode<Op>();
+    return dynamic_cast<const Op*>(this->node());
   }
 
   Dtype dtype() const { return node()->dtype(); }
@@ -73,6 +78,19 @@ class Expr : public RefHandle<BaseExprNode> {
   Expr operator-(const Expr& other) const;
   Expr operator*(const Expr& other) const;
   Expr operator/(const Expr& other) const;
+};
+
+class Stmt : public RefHandle<BaseStmtNode> {
+ public:
+  using BaseHandle = RefHandle<BaseStmtNode>;
+  explicit Stmt(BaseStmtNode* node) : BaseHandle(node) {}
+
+  void accept(IRVisitor* visitor) const { node()->accept(visitor); }
+
+  template <class Op>
+  const Op* AsNode() const {
+    return dynamic_cast<const Op*>(this->node());
+  }
 };
 
 }  // namespace nnc

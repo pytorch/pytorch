@@ -19,21 +19,21 @@ class SimpleExprEvaluator : public IRVisitor {
   void visit(const Div* v) override { visit_binary_op(v); }
 
   template <typename T>
-  Scalar binary_op(const Scalar& lhs, const Scalar& rhs, ExprNodeType op_type) {
+  Scalar binary_op(const Scalar& lhs, const Scalar& rhs, IRNodeType op_type) {
     T lhs_v = lhs.as<T>();
     T rhs_v = rhs.as<T>();
     T result_v = T();
     switch (op_type) {
-      case ExprNodeType::kAdd:
+      case IRNodeType::kAdd:
         result_v = lhs_v + rhs_v;
         break;
-      case ExprNodeType::kSub:
+      case IRNodeType::kSub:
         result_v = lhs_v - rhs_v;
         break;
-      case ExprNodeType::kMul:
+      case IRNodeType::kMul:
         result_v = lhs_v * rhs_v;
         break;
-      case ExprNodeType::kDiv:
+      case IRNodeType::kDiv:
         result_v = lhs_v / rhs_v;
         break;
       default:
@@ -50,7 +50,7 @@ class SimpleExprEvaluator : public IRVisitor {
     v->rhs().accept(this);
     Scalar rhs_v = value_;
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
-    ExprNodeType expr_type = v->expr_type();
+    IRNodeType expr_type = v->expr_type();
     if (lhs_v.dtype() == kFloat32) {
       value_ = binary_op<float>(lhs_v, rhs_v, expr_type);
     } else if (lhs_v.dtype() == kInt32) {
