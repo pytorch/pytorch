@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/profiling_record.h>
 
 namespace torch {
 namespace jit {
@@ -58,7 +59,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
     if (t.isTensor()) {
 
       if (t.toTensor().defined()) {
-        auto pttp = TensorType::create(t.toTensor());
+        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
         std::lock_guard<std::mutex> lock(this->mutex_);
         if (auto type = pno->type()->cast<TensorType>()) {
           if (!first) {
@@ -125,15 +126,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto pop = pr->createProfileNode(counter, {});
   new_g->appendNode(pop);
   return pr;
-}
-
-TensorTypePtr ProfilingRecord::toTensorTypePtr(const IValue& ival) {
-  if (ival.isTensor()) {
-    auto tensor = ival.toTensor();
-    return TensorType::create(tensor);
-  }
-
-  return {nullptr};
 }
 
 } // namespace jit
