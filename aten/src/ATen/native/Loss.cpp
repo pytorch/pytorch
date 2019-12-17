@@ -105,10 +105,14 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 }
 
 Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-    Tensor loss;
+    TORCH_CHECK(
+        (input >= 0).mul_(input <= 1).all().item<bool>(),
+        "all elements of input should be between 0 and 1"
+    );
+
     // Binary cross entropy tensor is defined by the equation:
     // L = -w (y ln(x) + (1-y) ln(1-x))
-    loss = (target - 1).mul_(
+    Tensor loss = (target - 1).mul_(
       (1 - input).log_().clamp_min_(-100)
     ).add_(
       (-target).mul_(
@@ -124,13 +128,11 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
 }
 
 Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-    Tensor grad_input;
-    
     // The gradient is the partial derivative of BCELoss
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
-    grad_input = (input - target).div_(
-      ((1 - input).clamp_min_(1e-12)).mul_((input).clamp_min(1e-12))
+    Tensor grad_input = (input - target).div_(
+      ((1 - input).clamp_min_(EPSILON)).mul_(input.clamp_min(EPSILON))
     ).mul_(grad);
 
     if (weight.defined()) {

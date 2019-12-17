@@ -5989,6 +5989,20 @@ class TestNN(NNTestCase):
         weight = torch.rand(1, dtype=torch.float)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
+    def test_bce_loss_input_range(self):
+        bceloss = nn.BCELoss()
+
+        target = torch.rand(25, 25)
+        output_valid = torch.rand(25, 25)
+        output_too_negative = output_valid - 1.0
+        output_too_positive = output_valid + 1.0
+
+        loss_valid = bceloss(output_valid, target)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            loss_too_negative = bceloss(output_too_negative, target)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            loss_too_positive = bceloss(output_too_positive, target)
+
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 64*1024
         y_size = 1024
