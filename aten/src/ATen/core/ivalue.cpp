@@ -21,8 +21,6 @@ TupleTypePtr Tuple::type() const {
   return type_;
 }
 
-// PyObjectHolder::~PyObjectHolder() {}
-
 } // namespace ivalue
 
 
