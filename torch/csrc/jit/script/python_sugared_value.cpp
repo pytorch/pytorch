@@ -218,10 +218,6 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
-    if (!attrType) {
-      continue;
-    }
-
     if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
@@ -273,7 +269,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   const auto& selfType = selfType_->expect<ClassType>();
 
-  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
+  if (const auto& t = selfType->findAttribute(field) && t->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
