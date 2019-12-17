@@ -2,7 +2,6 @@
 
 #include <ATen/Backtrace.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
@@ -498,6 +497,30 @@ void addInputs(
     const c10::optional<at::MemoryFormat>& value) {
   if (value) {
     detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, value);
   } else {
     Graph* g = n->owningGraph();
     Value* none = g->insertNode(g->createNone())->output();
