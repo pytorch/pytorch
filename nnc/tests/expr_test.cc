@@ -11,7 +11,7 @@ namespace nnc {
 TEST(ExprTest, BasicValueTest) {
   Expr a = IntImm::make(2), b = IntImm::make(3);
   Expr c = Add::make(a, b);
-  SimpleExprEvaluator eval;
+  SimpleIREvaluator eval;
   c.accept(&eval);
   EXPECT_EQ(eval.value().as<int>(), 5);
 }
@@ -22,7 +22,7 @@ TEST(ExprTest, BasicValueTest02) {
   Expr c(4.0f);
   Expr d(5.0f);
   Expr f = (a + b) - (c + d);
-  SimpleExprEvaluator eval;
+  SimpleIREvaluator eval;
   f.accept(&eval);
   EXPECT_EQ(eval.value().as<float>(), -4.0f);
 }
@@ -32,7 +32,7 @@ TEST(ExprTest, LetTest01) {
   Expr value = Expr(3.f);
   Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f));
   Expr result = Let::make(x, Expr(3.f), body);
-  SimpleExprEvaluator eval;
+  SimpleIREvaluator eval;
   result.accept(&eval);
   EXPECT_EQ(eval.value().as<float>(), 2 + (3 * 3 + 4));
 }
@@ -44,7 +44,7 @@ TEST(ExprTest, LetTest02) {
   Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f) * y);
   Expr e1 = Let::make(x, Expr(3.f), body);
   Expr e2 = Let::make(y, Expr(6.f), e1);
-  SimpleExprEvaluator eval;
+  SimpleIREvaluator eval;
   e2.accept(&eval);
   EXPECT_EQ(eval.value().as<float>(), 2 + (3 * 3 + 4 * 6));
 }
@@ -77,7 +77,7 @@ TEST(ExprTest, VectorAdd01) {
 
   /*
   Build the following:
-    for (int index = 0; index < kVectorSize; index++) {
+    for (int index = 0; index < kVectorCount; index++) {
       store(c_buf, ramp(index * 8, 1, 8),
             load(a_buf, ramp(index * 8, 1, 8) +
             load(b_buf, ramp(index * 8, 1, 8))))
@@ -91,11 +91,33 @@ TEST(ExprTest, VectorAdd01) {
   Expr value = load_a + load_b;
   Stmt store_c = Store::make(c_buf, Ramp::make(index * kVectorSize, 1, kVectorSize), value,
                              Broadcast::make(1, kVectorSize));
-  Stmt stmt = For::make(index, 0, kVectorSize, store_c);
+  Stmt stmt = For::make(index, 0, kVectorCount, store_c);
 
   EXPECT_EQ(load_a.dtype(), Dtype(kFloat32, kVectorSize));
   EXPECT_EQ(load_b.dtype(), Dtype(kFloat32, kVectorSize));
   EXPECT_EQ(value.dtype(), Dtype(kFloat32, kVectorSize));
+
+  SimpleIREvaluator ir_eval;
+  SimpleIREvaluator::BufferMapping buffer_mapping;
+  const int kPadding = 8;
+  float kPaddingValue = 0.1357;
+  std::vector<float> a_v(kTotalSize + 2 * kPadding, kPaddingValue);
+  std::vector<float> b_v(kTotalSize + 2 * kPadding, kPaddingValue);
+  std::vector<float> c_v(kTotalSize + 2 * kPadding, kPaddingValue);
+  std::vector<float> c_ref(kTotalSize + 2 * kPadding, kPaddingValue);
+  for (int i = 0; i < kTotalSize; i++) {
+    a_v[i + kPadding] = i * i;
+    b_v[i + kPadding] = i * i * 4;
+    c_ref[i + kPadding] = a_v[i + kPadding] + b_v[i + kPadding];
+  }
+  buffer_mapping[a_buf.data().node()] = &a_v[kPadding];
+  buffer_mapping[b_buf.data().node()] = &b_v[kPadding];
+  buffer_mapping[c_buf.data().node()] = &c_v[kPadding];
+  ir_eval.SetBufferMapping(buffer_mapping);
+  stmt.accept(&ir_eval);
+  for (int i = 0; i < c_v.size(); ++i) {
+    ASSERT_NEAR(c_v[i], c_ref[i], 1e-5) << "i: " << i;
+  }
 }
 
 }  // namespace nnc
