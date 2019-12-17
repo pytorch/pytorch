@@ -145,7 +145,7 @@ TORCH_API double getSamplingProbability();
 TORCH_API bool shouldRunSampledCallbacks();
 TORCH_API void runBeforeCallbacks(
     RecordFunction* rf,
-    const std::string funcName);
+    const std::string& funcName);
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \

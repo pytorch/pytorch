@@ -137,7 +137,7 @@ bool hasNonSampledCallbacks() {
   return manager().hasNonSampledCallbacks();
 }
 
-void runBeforeCallbacks(RecordFunction* rf, const std::string funcName) {
+void runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
   TORCH_INTERNAL_ASSERT(
       rf != nullptr, "Passed in RecordFunction cannot be null.");
   if (hasCallbacks()) {
