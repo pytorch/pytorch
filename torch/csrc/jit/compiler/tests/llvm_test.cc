@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-using namespace nnc;
+using namespace torch::jit::compiler;
 
 TEST(ExprTest, IntImmTest) {
   auto a = IntImm::make(2);

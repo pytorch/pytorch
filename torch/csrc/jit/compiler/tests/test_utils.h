@@ -10,7 +10,9 @@
 #include "tensor.h"
 #include "types.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 class Value {
  public:
@@ -321,6 +323,8 @@ class SimpleTensorEvaluator {
   SimpleIREvaluator expr_eval_;
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_TESTS_TEST_UTILS_H_INCLUDED__

@@ -7,7 +7,9 @@
 #include "function.h"
 #include "refcount.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 class TensorNode : public RefCounted {
  public:
@@ -47,6 +49,8 @@ Tensor Compute(const std::vector<Expr>& dims, std::vector<std::string> arg_name_
 Tensor Compute(const std::vector<Expr>& dims, std::vector<std::string> arg_name_hints,
                std::function<Expr(const std::vector<Var>&)> body_func);
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_TENSOR_H_INCLUDED__

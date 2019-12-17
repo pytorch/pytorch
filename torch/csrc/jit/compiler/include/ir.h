@@ -6,7 +6,9 @@
 
 #include "expr.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 enum IRNodeType {
   kAdd,
@@ -294,6 +296,8 @@ class Broadcast : public ExprNode<Broadcast> {
   int lanes_;
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_IR_H_INCLUDED_

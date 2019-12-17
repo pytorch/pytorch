@@ -2,7 +2,7 @@
 
 #include "test_utils.h"
 
-namespace nnc {
+using namespace torch::jit::compiler;
 
 TEST(TypeTest, Test01) {
   {
@@ -30,5 +30,3 @@ TEST(TypeTest, Test01) {
     EXPECT_EQ(float32x8, BinaryOpDtype(float32x8, float32x8));
   }
 }
-
-}  // namespace nnc

@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include "test_utils.h"
 
-namespace nnc {
+using namespace torch::jit::compiler;
 
 TEST(ExprTest, BasicValueTest) {
   Expr a = IntImm::make(2), b = IntImm::make(3);
@@ -119,5 +119,3 @@ TEST(ExprTest, VectorAdd01) {
     ASSERT_NEAR(c_v[i], c_ref[i], 1e-5) << "i: " << i;
   }
 }
-
-}  // namespace nnc

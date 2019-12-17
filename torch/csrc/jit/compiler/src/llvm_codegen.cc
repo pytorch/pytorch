@@ -5,7 +5,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <memory>
 
-using namespace nnc;
+using namespace torch::jit::compiler;
 
 LLVMCodeGen::LLVMCodeGen() : irb_(context_) {
   llvm::InitializeNativeTarget();

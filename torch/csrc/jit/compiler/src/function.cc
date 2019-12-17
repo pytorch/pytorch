@@ -2,7 +2,9 @@
 
 #include "tensor.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 namespace {
 
@@ -65,4 +67,6 @@ Tensor Compute(const std::vector<Expr>& dims, std::vector<std::string> arg_name_
   return Tensor(func, 0);
 }
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
