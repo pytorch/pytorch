@@ -2817,10 +2817,8 @@ graph(%Ra, %Rb):
             # create a scope and do the conversion -> ivalue -> pyobject
             # this func return a new pyobject that refcount + 1
             inp_refcount = sys.getrefcount(inp)
-            print(inp_refcount)
             ivalue_holder = torch._C._ivalue_debug_python_object(inp)
-            print(sys.getrefcount(ivalue_holder))
-            self.assertEqual(inp_refcount + 2, sys.getrefcount(ivalue_holder))
+            self.assertEqual(inp_refcount + 1, sys.getrefcount(ivalue_holder))
             return ivalue_holder + 1
 
         test_input = 2200
