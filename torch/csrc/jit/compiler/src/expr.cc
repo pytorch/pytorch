@@ -2,7 +2,9 @@
 
 #include "ir.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 Expr Expr::operator+(const Expr& other) const { return Add::make(*this, other); }
 
@@ -16,4 +18,6 @@ Expr::Expr(int v) : Expr(std::move(IntImm::make(v))) {}
 
 Expr::Expr(float v) : Expr(std::move(FloatImm::make(v))) {}
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch

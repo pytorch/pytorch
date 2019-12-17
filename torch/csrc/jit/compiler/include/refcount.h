@@ -6,7 +6,9 @@
 
 #include "logging.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 // A refcounted object.
 // Callers can call "Ref()" and "Unref" to increment and decrement its reference
@@ -97,6 +99,8 @@ class RefHandle {
   NodeType* node_ = nullptr;
 };
 
-}  /// namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_REFCOUNT_H_INCLUDED_

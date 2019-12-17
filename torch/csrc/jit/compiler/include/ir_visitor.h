@@ -1,7 +1,9 @@
 #ifndef NNC_INCLUDE_IR_VISITOR_H_INCLUDED_
 #define NNC_INCLUDE_IR_VISITOR_H_INCLUDED_
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 class Add;
 class Sub;
@@ -38,6 +40,8 @@ class IRVisitor {
   virtual void visit(const Broadcast* v);
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_IR_VISITOR_H_INCLUDED_

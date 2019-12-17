@@ -5,7 +5,9 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 // TODO: Switch the entire file to the PT version
 
@@ -136,6 +138,8 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
   while (false) CHECK_OP(val1, val2, >)
 #endif  // NDEBUG
 
-}  // namespace
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_LOGGING_H_INCLUDED__

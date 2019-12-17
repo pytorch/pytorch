@@ -2,7 +2,9 @@
 
 #include "logging.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 enum ScalarType {
   kScalarUninitialized,
@@ -53,4 +55,7 @@ std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
     ;
   }
 }
-}  // namespace nnc
+
+} // namespace compiler
+} // namespace jit
+} // namespace torch

@@ -1,6 +1,8 @@
 #include "ir.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 template <typename Op>
 static void visit_binary_op(const BinaryOpNode<Op>* v, IRVisitor* visitor) {
@@ -59,4 +61,6 @@ void IRVisitor::visit(const For* v) {
 
 void IRVisitor::visit(const Broadcast* v) { v->value().accept(this); }
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch

@@ -6,7 +6,9 @@
 #include "refcount.h"
 #include "types.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 // The commomn class between all IR nodes.
 class IRNode : public RefCounted {
@@ -93,6 +95,8 @@ class Stmt : public RefHandle<BaseStmtNode> {
   }
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_EXPR_H_INCLUDED_

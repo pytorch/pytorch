@@ -6,7 +6,9 @@
 
 #include "logging.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 using int32 = std::int32_t;
 
@@ -68,6 +70,8 @@ inline Dtype BinaryOpDtype(Dtype op1_dtype, Dtype op2_dtype) {
   LOG(FATAL) << "Invalid dtypes: " << op1_dtype << ", " << op2_dtype;
 }
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  //  NNC_INCLUDE_DTYPES_H_INCLUDED__

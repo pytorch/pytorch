@@ -6,7 +6,9 @@
 
 #include <llvm/IR/IRBuilder.h>
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 class LLVMCodeGen : public IRVisitor {
  private:
@@ -30,6 +32,8 @@ class LLVMCodeGen : public IRVisitor {
   int value();
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_LLVM_CODEGEN_H_

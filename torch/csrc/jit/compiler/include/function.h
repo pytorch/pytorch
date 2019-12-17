@@ -8,7 +8,9 @@
 #include "ir.h"
 #include "refcount.h"
 
-namespace nnc {
+namespace torch {
+namespace jit {
+namespace compiler {
 
 // represent a range [start, stop)
 class Range {
@@ -57,6 +59,8 @@ class Function : public RefHandle<FunctionNode> {
   const Expr& body() const { return node()->body(); }
 };
 
-}  // namespace nnc
+} // namespace compiler
+} // namespace jit
+} // namespace torch
 
 #endif  // NNC_INCLUDE_FUNCTION_H_INCLUDED__
