@@ -213,12 +213,12 @@ EncoderBase::EncoderBase(
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
-  // we pin IR version to version 4 (01/22/2019) instead of using
+  // we pin IR version to version 6 (12/11/2019) instead of using
   // onnx::IR_VERSION. with this change, the test_operators.py will be more
   // stable. only bump it when it's necessary
-  model_proto_.set_ir_version(4);
+  model_proto_.set_ir_version(onnx_torch::IR_VERSION);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.3");
+  model_proto_.set_producer_version(onnx_torch::PRODUCER_VERSION);
 }
 
 void EncoderBase::EncodeValueInfo(

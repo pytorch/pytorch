@@ -39,7 +39,7 @@ struct PatternInfo {
 
   static PatternInfo parse_from_str(std::string pattern_string) {
     PatternInfo rv{std::move(pattern_string),
-                   at::guts::make_unique<Graph>(),
+                   std::make_unique<Graph>(),
                    decltype(vmap){}};
     script::parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
@@ -634,6 +634,9 @@ class InsertQuantDeQuantHelper {
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
   std::unordered_map<Graph*, std::unordered_map<Value*, QParamMap>> values_to_qparams_;
+  // Record qscheme for every graph, this is for checking
+  // each graph is only quantized with one type of QScheme
+  std::unordered_map<Graph*, QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -659,6 +662,13 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   Value* new_value = observer->input(1);
   v->replaceAllUsesWith(new_value);
   auto tp = getQSchemeAndQParamMap(module, v);
+  auto qscheme = std::get<0>(tp);
+  if (qscheme_for_graph_.count(g)) {
+    TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
+                "Quantizing same graph with multiple QScheme is not supported");
+  } else {
+    qscheme_for_graph_[g] = qscheme;
+  }
   auto qparam_map = std::get<1>(tp);
   values_to_qparams_[g].insert({new_value, qparam_map});
 }
@@ -743,7 +753,7 @@ std::tuple<QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQParamMap(
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
-      "getQSchemeAndQParamMap expects the corresponding observer for ",
+      "getQSchemeAndParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
   auto observer_module = module.attr(observer_name.value()).toModule();

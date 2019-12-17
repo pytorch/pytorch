@@ -22,7 +22,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
 )
-pip install -q ninja future hypothesis "librosa>=0.6.2" psutil pillow
+:: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+pip install -q ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
