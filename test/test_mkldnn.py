@@ -537,6 +537,18 @@ class TestMkldnn(TestCase):
                 softmax(x),
                 softmax(x.to_mkldnn()).to_dense())
 
+    def test_softmax_backward(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim in range(x.ndim):
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            softmax = torch.nn.Softmax(dim=dim)
+            y1 = softmax(x1).sum()
+            y2 = softmax(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+
     def test_sigmoid(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         mkldnn_x = x.to_mkldnn()

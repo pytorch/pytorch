@@ -2596,6 +2596,7 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
+    MkldnnCPU: mkldnn_softmax_backward
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method

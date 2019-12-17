@@ -14,6 +14,14 @@ Tensor mkldnn_softmax(
   AT_ERROR("mkldnn_softmax: ATen not compiled with MKLDNN support");
 }
 
+Tensor mkldnn_softmax_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    int64_t dim,
+    const Tensor& self) {
+  AT_ERROR("mkldnn_softmax_backward: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 
@@ -36,6 +44,20 @@ Tensor mkldnn_softmax(
   ideep::tensor y;
   ideep::softmax_forward::compute(x, y, wrapped_dim);
   return new_with_itensor_mkldnn(std::move(y), self.options());
+}
+
+Tensor mkldnn_softmax_backward(
+    const Tensor& grad_output,
+    const Tensor& output,
+    int64_t dim,
+    const Tensor& self) {
+
+  const int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
+  ideep::tensor& y = itensor_from_mkldnn(output);
+  ideep::tensor& grady = itensor_from_mkldnn(grad_output);
+  ideep::tensor gradx;
+  ideep::softmax_backward::compute(y, grady, gradx, wrapped_dim);
+  return new_with_itensor_mkldnn(std::move(gradx), self.options());
 }
 
 } // namespace native
