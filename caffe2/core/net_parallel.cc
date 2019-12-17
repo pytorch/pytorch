@@ -19,7 +19,7 @@ ParallelNet::ParallelNet(
   CAFFE_ENFORCE_GT(
       num_workers_, 0, "Expected positive number of worker threads");
 
-  helper_ = caffe2::make_unique<ParallelNetExecutorHelper>(this);
+  helper_ = std::make_unique<ParallelNetExecutorHelper>(this);
 
   // initialize operators
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
