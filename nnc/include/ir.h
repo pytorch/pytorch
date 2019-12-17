@@ -27,7 +27,7 @@ class Cast : public ExprNode<Cast> {
 
 template <typename T>
 Expr cast(const Expr& src_value) {
-  return Cast::make(ToDtype<T>(), src_value);
+  return Cast::make(Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
 }
 
 // Represent the expression node for binary operators.
@@ -131,6 +131,7 @@ class Var : public Expr {
   Var(Dtype dtype) : Expr(std::move(Variable::make(dtype))) {}
   Var(const std::string& name_hint, Dtype dtype)
       : Expr(std::move(Variable::make(name_hint, dtype))) {}
+  const Variable* node() const { return static_cast<const Variable*>(Expr::node()); }
 };
 
 // Bind the value to the var and evaluate the body.
@@ -192,6 +193,7 @@ class Ramp : public ExprNode<Ramp> {
   static Expr make(const Expr& base, const Expr& stride, int lanes) {
     return Expr(new Ramp(base, stride, lanes));
   }
+  int lanes() const { return lanes_; }
 
  private:
   Ramp(const Expr& base, const Expr& stride, int lanes)
@@ -265,6 +267,7 @@ class Store : public StmtNode<Store> {
   // TODO: merge this with Load.
   Store(const Buffer& buffer, const Expr& index, const Expr& value, const Expr& mask)
       : StmtNodeBase(), base_handle_(buffer.data()), index_(index), value_(value), mask_(mask) {
+    CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
     CHECK_EQ(base_handle_.dtype(), kHandle);
     CHECK_EQ(index.dtype().lanes(), mask.dtype().lanes());
     CHECK_EQ(index.dtype().lanes(), value.dtype().lanes());
