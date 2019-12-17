@@ -710,6 +710,15 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
 
+    def test_alias_with_name_is_in_place(self):
+        device = "cuda" if workspace.has_cuda_support else "cpu"
+        x = torch.Tensor([3, 42]).to(device)
+        y = torch.ops._caffe2.AliasWithName(x, "new_name")
+        x[1] = 6
+        torch.testing.assert_allclose(x, torch.Tensor([3, 6]).to(device))
+        # y should also change because y is alias of x
+        torch.testing.assert_allclose(y, torch.Tensor([3, 6]).to(device))
+
 
 if __name__ == '__main__':
     unittest.main()
