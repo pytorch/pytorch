@@ -205,6 +205,15 @@ size_t DistAutogradContainer::numAutogradContexts() const {
   return autograd_context_.size();
 }
 
+ContextPusher::ContextPusher(int64_t toPushContextId)
+    : prevId_(current_context_id_) {
+  current_context_id_ = toPushContextId;
+}
+
+ContextPusher::~ContextPusher() {
+  current_context_id_ = prevId_;
+}
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

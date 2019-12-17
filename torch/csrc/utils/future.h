@@ -79,10 +79,14 @@ class TORCH_API Future final {
   }
 
   void setError(std::string errorMsg) {
+    setError(FutureError(std::move(errorMsg)));
+  }
+
+  void setError(FutureError error) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(!completed());
     // Set error first as completed_ is accessed without lock
-    error_ = FutureError(std::move(errorMsg));
+    error_ = std::move(error);
     completed_ = true;
 
     // Move callbacks to a vector on the stack so we can access it without

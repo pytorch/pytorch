@@ -134,7 +134,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               const c10::optional<utils::FutureError>& /* unused */) {
             Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
             m.setId(messageId);
-            responseFuture->markCompleted(m);
+            responseFuture->markCompleted(std::move(m));
           });
       return responseFuture;
     }
@@ -161,7 +161,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
                 PythonRpcHandler::getInstance().serialize(rref->getValue());
             Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
             m.setId(messageId);
-            responseFuture->markCompleted(m);
+            responseFuture->markCompleted(std::move(m));
           });
       return responseFuture;
     }
@@ -200,18 +200,38 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           autogradContext != nullptr,
           "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
           "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
+      auto contextId = autogradContext->contextId();
+      autogradContainer.setCurrentContextId(contextId);
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      auto fromWorkerId = rpcWithAutograd.fromWorkerId();
       auto wrappedRpcResponse = processRpc(
           rpcWithAutograd.wrappedRpc(), wrappedMessageType, messageId);
-      wrappedRpcResponse->waitNoThrow(); // TODO: make async
 
-      return wrap(getMessageWithAutograd(
-          rpcWithAutograd.fromWorkerId(),
-          std::move(*wrappedRpcResponse).moveValue(),
-          MessageType::FORWARD_AUTOGRAD_RESP));
+      // Create a future that handles the response.
+      auto responseFuture = std::make_shared<FutureMessage>();
+      wrappedRpcResponse->addCallback(
+          [responseFuture,
+           messageId,
+           wrappedRpcResponse,
+           fromWorkerId,
+           contextId](
+              const Message& /* unused */,
+              const c10::optional<utils::FutureError>& err) {
+            ContextPusher pusher(contextId);
+            if (err) {
+              responseFuture->setError(*err);
+            } else {
+              Message m = getMessageWithAutograd(
+                  fromWorkerId,
+                  std::move(*wrappedRpcResponse).moveValue(),
+                  MessageType::FORWARD_AUTOGRAD_RESP);
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            }
+          });
+      return responseFuture;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);

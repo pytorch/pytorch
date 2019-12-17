@@ -123,6 +123,15 @@ class TORCH_API DistAutogradContainer {
   int64_t max_id_;
 };
 
+class ContextPusher {
+ public:
+  explicit ContextPusher(int64_t toPushContextId);
+  ~ContextPusher();
+
+ private:
+  const int64_t prevId_;
+};
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch
