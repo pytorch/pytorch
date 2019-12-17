@@ -153,7 +153,7 @@ static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
-C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
+[[deprecated]] static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add method definition in Functions.h
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
