@@ -41,7 +41,7 @@ llvm_map_components_to_libnames(LLVM_LINK_LIBS
 target_link_libraries(nnc PRIVATE ${LLVM_LINK_LIBS})
 
 add_custom_target(cpptest)
-add_subdirectory(../third_party/googletest/ googletest EXCLUDE_FROM_ALL)
+add_subdirectory(../../../../third_party/googletest/ googletest EXCLUDE_FROM_ALL)
 
 set(TEST_SRCS
   tests/expr_test.cc
