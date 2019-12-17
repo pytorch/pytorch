@@ -104,6 +104,11 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 }
 
 Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss;
+    return at::binary_cross_entropy_out(loss, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_out(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     TORCH_CHECK(
         (input >= 0).mul_(input <= 1).all().item<bool>(),
         "all elements of input should be between 0 and 1"
@@ -111,7 +116,7 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
 
     // Binary cross entropy tensor is defined by the equation:
     // L = -w (y ln(x) + (1-y) ln(1-x))
-    Tensor loss = (target - 1).mul_(
+    loss = (target - 1).mul_(
       (1 - input).log_().clamp_min_(-100)
     ).add_(
       (-target).mul_(
@@ -123,14 +128,20 @@ Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Ten
       loss.mul_(weight);
     }
 
-    return apply_loss_reduction(loss, reduction);
+    loss = apply_loss_reduction(loss, reduction);
+    return loss;
 }
 
 Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input;
+    return at::binary_cross_entropy_backward_out(grad_input, grad, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_backward_out(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     // The gradient is the partial derivative of BCELoss
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
-    Tensor grad_input = (input - target).div_(
+    grad_input = (input - target).div_(
       (1 - input).mul_(input).clamp_min_(EPSILON)
     ).mul_(grad);
 

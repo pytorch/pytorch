@@ -2080,7 +2080,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    return torch.binary_cross_entropy(
+    return torch._C._nn.binary_cross_entropy(
         input, target, weight, reduction_enum)
 
 
