@@ -99,5 +99,11 @@ struct InterpreterContinuation {
   bool grad_mode_enabled;
 };
 
+// what is the tensors type, including state from the current execution context
+// that modifies how the tensor behaves. For instance if no_grad is enabled
+// this will cause the TensorType to have requires_grad=False.
+TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
+    const at::Tensor& t);
+
 } // namespace jit
 } // namespace torch
