@@ -209,6 +209,9 @@ class _InverseTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         return -self._inv.log_abs_det_jacobian(y, x)
 
+    def __repr__(self):
+        return self.__class__.__name__ + '({})'.format(self._inv)
+
 
 class ComposeTransform(Transform):
     """
