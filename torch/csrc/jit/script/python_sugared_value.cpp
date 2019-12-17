@@ -323,9 +323,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   } else if (
-      const auto builtin_name = concreteType_->findBuiltinFunction(field)) {
-    return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(*builtin_name), c10::nullopt);
+      const auto builtin = concreteType_->findBuiltinFunction(field)) {
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
 
   // 6. Check if it's an attribute of the original Python class that this

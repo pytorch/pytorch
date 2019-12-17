@@ -283,6 +283,34 @@ class TestTypeSharing(JitTestCase):
 
         self.assertDifferentType(fn1_mod, fn2_mod)
 
+    def test_builtin_function_same(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.add)
+
+        self.assertSameType(c1, c2)
+
+    def test_builtin_function_different(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.sub)
+
+        self.assertDifferentType(c1, c2)
+
     def test_script_function_attribute_same(self):
         """
         Same functions passed in should lead to same types

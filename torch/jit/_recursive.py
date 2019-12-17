@@ -186,11 +186,12 @@ def infer_concrete_type_builder(nn_module):
 
             continue
 
-        if callable(value):
-            builtin_symbol_name = _find_builtin(value)
-            if builtin_symbol_name:
-                concrete_type_builder.add_builtin_function(name, builtin_symbol_name)
-                continue
+        # Handle calls to builtin functions (either bespoke builtins from torch.jit._builtins or
+        # a call to an aten function like torch.add)
+        builtin_symbol_name = _find_builtin(value)
+        if builtin_symbol_name:
+            concrete_type_builder.add_builtin_function(name, builtin_symbol_name)
+            continue
 
         # Handle Script function attributes
         if isinstance(value, torch.jit.ScriptFunction):

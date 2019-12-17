@@ -160,7 +160,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Function attributes that are calls to builtin functions. These get de-sugared
   // directly into the correpsonding aten:: call.
   // The map is attribute name -> aten symbol name
-  std::unordered_map<std::string, std::string> builtinFunctions_;
+  std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
 
@@ -192,7 +192,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
-  c10::optional<std::string> findBuiltinFunction(const std::string& name) const;
+  c10::optional<c10::Symbol> findBuiltinFunction(const std::string& name) const;
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;

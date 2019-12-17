@@ -130,7 +130,7 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   return c10::nullopt;
 }
 
-c10::optional<std::string> ConcreteModuleType::findBuiltinFunction(
+c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
     const std::string& name) const {
   const auto it = data_.builtinFunctions_.find(name);
   if (it != data_.builtinFunctions_.end()) {
@@ -204,7 +204,8 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
     std::string name,
     std::string symbol_name) {
-  builtinFunctions_.emplace(std::move(name), std::move(symbol_name));
+  builtinFunctions_.emplace(
+      std::move(name), c10::Symbol::fromQualString(symbol_name));
 }
 
 void ConcreteModuleTypeBuilder::addModule(
