@@ -26,4 +26,37 @@ void IRVisitor::visit(const Let* v) {
   v->body().accept(this);
 }
 
+void IRVisitor::visit(const Ramp* v) {
+  v->base().accept(this);
+  v->stride().accept(this);
+}
+
+void IRVisitor::visit(const Load* v) {
+  v->base_handle().accept(this);
+  v->index().accept(this);
+  v->mask().accept(this);
+}
+
+void IRVisitor::visit(const Store* v) {
+  v->base_handle().accept(this);
+  v->index().accept(this);
+  v->value().accept(this);
+  v->mask().accept(this);
+}
+
+void IRVisitor::visit(const Block* v) {
+  for (int i = 0; i < v->nstmts(); i++) {
+    v->stmt(i).accept(this);
+  }
+}
+
+void IRVisitor::visit(const For* v) {
+  v->var().accept(this);
+  v->start().accept(this);
+  v->stop().accept(this);
+  v->body().accept(this);
+}
+
+void IRVisitor::visit(const Broadcast* v) { v->value().accept(this); }
+
 }  // namespace nnc
