@@ -1195,7 +1195,7 @@ struct CAFFE2_API PyObjectType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "PyObjectType";
+    return "PyObject";
   }
   static const TypeKind Kind = TypeKind::PyObjectType;
   // global singleton

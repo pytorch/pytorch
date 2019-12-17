@@ -147,9 +147,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       std::shared_ptr<OwnerRRef> rref =
           ctx.getOwnerRRef(prf.rrefId());
-      std::cout<<"here??? owner rref holding type" << rref->type()->str() << std::endl;
       if (rref->hasValue()) { // optional fast-path
-      std::cout<<"has value???" << std::endl;
         SerializedPyObj result =
             PythonRpcHandler::getInstance().serialize(jit::toPyObject(rref->getValue()));
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());

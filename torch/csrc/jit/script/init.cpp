@@ -1119,8 +1119,15 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
   m.def("_ivalue_debug_python_object", [](py::object py_obj) {
+    // convert to IValue first, IValue will steal/increase the refcount
     IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
-    py::handle ret = pyobj_ivalue.toPyObject();
+    // convert back to PyObject by borrowing the reference, which also
+    // increase the refcount of the underlying PyObject, so ret should
+    // have original refcount + 2
+    // after the return of this function, the caller should expect the
+    // refcount of py_obj increased by 1 as IValue destructor decrease
+    // the refcount by 1, so only 1 additional borrowed refcount is visble
+    py::object ret = toPyObject(pyobj_ivalue);
     return ret;
   });
   m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);

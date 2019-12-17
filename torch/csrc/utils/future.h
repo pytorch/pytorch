@@ -108,6 +108,11 @@ class TORCH_API Future final {
     return error_ ? true : false;
   }
 
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
+  }
+
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback) {
     std::unique_lock<std::mutex> lock(mutex_);
