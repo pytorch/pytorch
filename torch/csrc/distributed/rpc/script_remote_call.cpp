@@ -48,8 +48,11 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   values.pop_back();
 
   auto scriptCallPtr = ScriptCall::fromIValues(values);
-  return c10::guts::make_unique<ScriptRemoteCall>(
-      scriptCallPtr->op(), std::move(values), retRRefId, retForkId);
+  return std::make_unique<ScriptRemoteCall>(
+      scriptCallPtr->op(),
+      std::move(values),
+      std::move(retRRefId),
+      std::move(retForkId));
 }
 
 } // namespace rpc

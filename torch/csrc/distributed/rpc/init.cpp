@@ -286,6 +286,9 @@ If the future completes with an error, an exception is thrown.
         return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
       });
 
+  // TODO This python future wrapper wraps c10::ivalue::Future.
+  // Will merge with JIT PythonFutureWrapper while merging generic Future with
+  // c10::ivalue::Future later on.
   struct PythonFutureWrapper {
     explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
         : fut(std::move(fut)) {}
@@ -293,7 +296,12 @@ If the future completes with an error, an exception is thrown.
     c10::intrusive_ptr<c10::ivalue::Future> fut;
   };
 
-  py::class_<PythonFutureWrapper>(module, "PythonFutureWrapper")
+  // Since FutureMessage is binded to Future, here we need to bind the
+  // PythonFutureWrapper to a different name.
+  // TODO Once pyObject can be tagged as IValue and c10::ivalue::Future is
+  // implemented as generic Future<IValue>, we can consider all rpc call
+  // to return a future<IValue> later on.
+  py::class_<PythonFutureWrapper>(module, "pyFuture")
       .def("wait", [](PythonFutureWrapper& fut) {
         fut.fut->wait();
         auto res = fut.fut->value();

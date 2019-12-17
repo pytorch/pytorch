@@ -19,7 +19,8 @@ TORCH_API std::unique_ptr<RpcCommandBase> deserializeResponse(
 // Given an RPC message received as a response over the wire, deserialize it
 // into the valid IValue if the message is for a script rpc result,
 // otherwise deserialize it into dummy none ivalue that will never be used.
-// In this desrialization, we also attach recv rpc backward functions if needed.
+// In this deserialization, we also attach recv rpc backward functions if
+// needed.
 IValue deserializeResptoIValueInternal(
     RpcCommandBase& rpc,
     MessageType messageType);

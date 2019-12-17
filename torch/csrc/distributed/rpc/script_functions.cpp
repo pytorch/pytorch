@@ -16,7 +16,7 @@ c10::IValue rpcTorchscriptCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack) {
   auto scriptCall =
-      c10::guts::make_unique<ScriptCall>(qualifiedName, std::move(stack));
+      std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
   auto agent = RpcAgent::getDefaultRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
@@ -29,8 +29,8 @@ c10::IValue rpcTorchscriptCall(
                      .returns();
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
-      "Return value of a annotated torchScript function should be a single "
-      "IValue, got a vector of size ",
+      "Return value of an annotated torchScript function should be a single "
+      "IValue.",
       returns.size());
   auto returnType = returns.at(0).type();
 

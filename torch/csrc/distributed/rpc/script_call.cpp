@@ -19,11 +19,7 @@ ScriptCall::ScriptCall(
     : qualifiedName_(qualifiedName), stack_(args) {}
 
 bool ScriptCall::hasOp() const {
-  if (op_) {
-    return true;
-  } else {
-    return false;
-  }
+  return op_ ? true : false;
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
@@ -31,11 +27,7 @@ std::shared_ptr<Operator> ScriptCall::op() const {
 }
 
 bool ScriptCall::hasQualifiedName() const {
-  if (qualifiedName_) {
-    return true;
-  } else {
-    return false;
-  }
+  return qualifiedName_ ? true : false;
 }
 
 const c10::QualifiedName ScriptCall::qualifiedName() const {
@@ -87,7 +79,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
   // Last element in the vector is always qualifiedName for both
   // builitin operator and TorchScript function
-  // If the qualifiedName is not an builtin operator name, then treat it
+  // If the qualifiedName is not a builtin operator name, then treat it
   // as TorchScript function name
   const std::string& qualifiedName = ivalues.back().toStringRef();
 
@@ -98,10 +90,10 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
 
     ivalues.pop_back();
     // remove str_schema from ivalues
-    return c10::guts::make_unique<ScriptCall>(op, std::move(ivalues));
+    return std::make_unique<ScriptCall>(op, std::move(ivalues));
   } else {
     ivalues.pop_back();
-    return c10::guts::make_unique<ScriptCall>(
+    return std::make_unique<ScriptCall>(
         c10::QualifiedName(qualifiedName), std::move(ivalues));
   }
 }

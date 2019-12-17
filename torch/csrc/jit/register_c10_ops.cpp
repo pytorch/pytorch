@@ -165,7 +165,7 @@ struct Registerer final {
     // this immediately calls the listener on all existing ops,
     // and calls it in future whenever a new op is registered
     c10::Dispatcher::singleton().addRegistrationListener(
-      c10::guts::make_unique<RegistrationListener>()
+      std::make_unique<RegistrationListener>()
     );
   }
 };

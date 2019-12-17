@@ -22,7 +22,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
  public:
   // Constructor for builitin operator call.
   ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
-  // COnstructor for TorchScript function call.
+  // Constructor for TorchScript function call.
   ScriptCall(
       const c10::QualifiedName& qualifiedName,
       std::vector<at::IValue>&& args);
