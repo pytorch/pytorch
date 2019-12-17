@@ -542,7 +542,7 @@ class RpcTest(RpcAgentTestFixture):
                     rpc.rpc_sync("worker{}".format(dst), my_sleep_func, args=(1, ))
                 else:
                     fut = rpc.rpc_async("worker{}".format(dst), my_sleep_func, args=(1, ))
-                   time.sleep(3)
+                    time.sleep(3)
                     fut.wait()
             # for both sync and async, should show ~1 second time for the RPCs.
             print(prof.key_averages())
