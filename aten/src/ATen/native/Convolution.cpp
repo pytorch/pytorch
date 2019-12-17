@@ -1,3 +1,4 @@
+#include <limits>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
@@ -34,7 +35,8 @@ struct ConvParams {
   bool is_stride_nonpos() const;
   void view1d_as_2d();
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_cudnn(const at::Tensor& input) const;
+  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
@@ -146,7 +148,31 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
 #endif
 }
 
-auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
+auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  int64_t numel_input = input.numel();
+  // empty input
+  if (numel_input == 0) {
+    return false;
+  }
+  // input size can not be reduced to the range of int by splitting the batch dim
+  int64_t n = input.size(0);
+  if (numel_input / n > int_max) {
+    return true;
+  }
+  // output size can not be reduced to the range of int by splitting the batch dim
+  int64_t outsize = weight.size(0);
+  for (size_t d = 2; d < input.dim(); ++d) {
+    auto kernel = dilation[d - 2] * (weight.size(d) - 1) + 1;
+    outsize *= (input.size(d) + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+  }
+  return outsize > int_max;
+}
+
+auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
   if (!detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }
@@ -333,7 +359,7 @@ auto ConvParams::use_cudnn_depthwise(
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
-                         use_cudnn(input) &&
+                         use_cudnn(input, weight) &&
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
@@ -593,7 +619,7 @@ at::Tensor _convolution(
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
-  } else if (params.use_cudnn(input)) {
+  } else if (params.use_cudnn(input, weight)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same");
