@@ -6387,22 +6387,13 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.bool)
     def test_diag(self, device, dtype):
-        x = torch.rand(100, 100, dtype=dtype, device=device)
+        x = torch.rand(100, 100, device=device).to(dtype=dtype)
         res1 = torch.diag(x)
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.diag(x, out=res2)
         self.assertEqual(res1, res2)
-
-    def test_diag_bool(self, device):
-        # test bool tensor
-        a = torch.tensor([True, False, True], device=device)
-        res = torch.diag(a)
-        expected = torch.tensor([[True, False, False],
-                                 [False, False, False],
-                                 [False, False, True]])
-        self.assertEqual(res, expected)
 
     def test_diagonal(self, device):
         x = torch.randn((100, 100), device=device)
