@@ -64,9 +64,6 @@
 #include <THNN/generic/BCECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/ELU.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/GatedLinearUnit.c>
 #include <TH/THGenerateFloatTypes.h>
 
