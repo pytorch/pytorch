@@ -14,8 +14,14 @@ class NativePeer implements INativePeer {
 
   private static native HybridData initHybrid(String moduleAbsolutePath);
 
+  private static native HybridData initHybridAndroidAsset(String assetName, /* android.content.res.AssetManager */ Object androidAssetManager);
+
   NativePeer(String moduleAbsolutePath) {
     mHybridData = initHybrid(moduleAbsolutePath);
+  }
+
+  NativePeer(String assetName, /* android.content.res.AssetManager */ Object androidAssetManager) {
+    mHybridData = initHybridAndroidAsset(assetName, androidAssetManager);
   }
 
   public void resetNative() {

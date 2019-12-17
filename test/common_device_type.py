@@ -2,6 +2,7 @@ import inspect
 import threading
 from functools import wraps
 import unittest
+import os
 import torch
 from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
@@ -246,6 +247,8 @@ class CUDATestBase(DeviceTypeTestBase):
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
+
+PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.
