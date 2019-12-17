@@ -131,7 +131,7 @@ Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, co
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
     Tensor grad_input = (input - target).div_(
-      ((1 - input).clamp_min_(EPSILON)).mul_(input.clamp_min(EPSILON))
+      (1 - input).mul_(input).clamp_min_(EPSILON)
     ).mul_(grad);
 
     if (weight.defined()) {
