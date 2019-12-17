@@ -116,7 +116,7 @@ struct C10_API TensorOptions {
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+           typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -130,7 +130,7 @@ struct C10_API TensorOptions {
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
   template <typename... Args,
-            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+            typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
