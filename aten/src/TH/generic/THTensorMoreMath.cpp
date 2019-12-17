@@ -5,15 +5,12 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);
 }
-
-#if !defined(TH_REAL_IS_BFLOAT16)
 
 static int THTensor_(equalImpl)(THTensor *ta, THTensor* tb)
 {
@@ -59,6 +56,8 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb) {
   at::NoNamesGuard guard;
   return THTensor_(equalImpl)(ta, tb);
 }
+
+#if !defined(TH_REAL_IS_BFLOAT16)
 
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
@@ -1303,44 +1302,6 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
       const int bin = (int)((*tensor_data-minval) / (maxval-minval) * nbins);
       h_data[THMin(bin, nbins-1)] += 1;
     }
-  );
-}
-
-void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
-{
-  THArgCheck(THTensor_(nDimensionLegacyAll)(tensor) < 3, 2, "invalid dimension %d, the input must be a 2d tensor", THTensor_(nDimensionLegacyAll)(tensor));
-
-  int dimension = 1;
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(tensor), 2, "invalid dimension %d",
-      dimension);
-
-  scalar_t minval;
-  scalar_t maxval;
-
-  THTensor_(resize2d)(hist, THTensor_sizeLegacyNoScalars(tensor, 0), nbins);
-  THTensor_(zero)(hist);
-
-  minval = minvalue;
-  maxval = maxvalue;
-  if (minval == maxval)
-  {
-    minval = THTensor_(minall)(tensor);
-    maxval = THTensor_(maxall)(tensor);
-  }
-  if (minval == maxval)
-  {
-    minval = minval - 1;
-    maxval = maxval + 1;
-  }
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, tensor, scalar_t, hist, dimension, int64_t i;
-                        for(i = 0; i < tensor_size; i++)
-                        {
-                          if(tensor_data[i*tensor_stride] >= minval && tensor_data[i*tensor_stride] <= maxval) {
-                            const int bin = (int)((tensor_data[i*tensor_stride]-minval) / (maxval-minval) * nbins);
-                            hist_data[THMin(bin, nbins-1)] += 1;
-                          }
-                        }
   );
 }
 
