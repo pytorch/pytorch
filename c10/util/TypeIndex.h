@@ -10,8 +10,9 @@
 namespace c10 {
 namespace util {
 
-#if (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
+#if (defined(_MSC_VER) && defined(__CUDACC__)) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
 // GCC<9 has issues with our implementation for constexpr typenames.
+// So does nvcc on Windows.
 // Any version of MSVC or Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
@@ -43,6 +44,11 @@ namespace detail {
 #error "You're running a too old version of GCC. We need GCC 5 or later."
 #endif
 
+#if defined(__clang__) && __clang_major__ < 4
+// Getting __PRETTY_FUNCTION__ at compile time only works with Clang >= 4
+#error "You're running a too old version of Clang. We need Clang 4 or later."
+#endif
+
 inline constexpr string_view extract(
     string_view prefix,
     string_view suffix,
@@ -57,7 +63,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() {
+inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER)
   return extract(
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
