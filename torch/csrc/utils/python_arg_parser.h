@@ -52,10 +52,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
-#endif
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -147,11 +144,9 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-#ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
-#endif
   inline at::MemoryFormat memoryformat(int i);
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
@@ -406,7 +401,6 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline at::Dimname PythonArgs::dimname(int i) {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
@@ -439,7 +433,6 @@ inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
   }
   return parseDimnameList(arg);
 }
-#endif
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   if (!args[i]) return at::MemoryFormat::Contiguous;

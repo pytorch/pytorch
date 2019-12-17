@@ -83,10 +83,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     case MessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
-    case MessageType::EXCEPTION: {
-      std::string err(response.payload().begin(), response.payload().end());
-      throw std::runtime_error(err);
-    }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
@@ -255,8 +251,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t toCopy =
-        std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      size_t toCopy = std::min(metaDataPos + n, metaData.second) - metaDataPos;
       memcpy(buf, metaData.first + metaDataPos, toCopy);
       metaDataPos += toCopy;
       return toCopy;
