@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/autograd/profiler.h>
 
 namespace torch {
 
@@ -9,7 +10,7 @@ namespace utils {
 // FutureError inherits from std::exception, it can return const char* or
 // std::string error message
 class TORCH_API FutureError final : public std::exception {
-public:
+ public:
   FutureError(std::string errorMsg) : errorMsg_(std::move(errorMsg)) {}
 
   FutureError() = default;
@@ -18,7 +19,7 @@ public:
     return errorMsg_.c_str();
   }
 
-private:
+ private:
   std::string errorMsg_;
 };
 
@@ -76,6 +77,10 @@ class TORCH_API Future final {
       callback(value_, error_);
     }
     finished_cv_.notify_all();
+    // if recording, run end callbacks.
+    if (rf_) {
+      rf_->end();
+    }
   }
 
   void setError(std::string errorMsg) {
@@ -124,6 +129,11 @@ class TORCH_API Future final {
     callbacks_.push_back(callback);
   }
 
+  void attachRecFunction(
+      std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+    rf_ = rf;
+  }
+
  private:
   mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
@@ -131,7 +141,8 @@ class TORCH_API Future final {
   std::vector<Callback> callbacks_;
   T value_;
   c10::optional<FutureError> error_;
+  std::shared_ptr<torch::autograd::profiler::RecordFunction> rf_;
 };
 
-}
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

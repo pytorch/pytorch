@@ -274,6 +274,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
+    rf = torch.autograd._RecordFunction() if torch.autograd._profiler_enabled() else None
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
@@ -287,7 +288,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
     return fut
 
 

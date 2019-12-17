@@ -103,6 +103,22 @@ struct TORCH_API RecordFunction {
 
   void end();
 
+  inline void setThreadId(uint16_t threadId) const {
+    threadId_ = threadId;
+  }
+
+  inline bool overrideThreadId() const {
+    return overrideThreadId_;
+  }
+
+  inline void setOverrideThreadId(bool shouldOverride=true) const {
+    overrideThreadId_ = shouldOverride;
+  }
+
+  inline uint16_t getThreadId() const {
+    return threadId_;
+  }
+
  private:
   void processCallbacks();
 
@@ -115,6 +131,8 @@ struct TORCH_API RecordFunction {
 
   bool initialized_ = false;
   bool run_sampled_ = false;
+  mutable bool overrideThreadId_ = false;
+  mutable uint16_t threadId_;
 };
 
 TORCH_API bool hasCallbacks();
@@ -125,6 +143,9 @@ TORCH_API void setSamplingProbability(double);
 TORCH_API double getSamplingProbability();
 
 TORCH_API bool shouldRunSampledCallbacks();
+TORCH_API void runBeforeCallbacks(
+    RecordFunction* rf,
+    const std::string funcName);
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \

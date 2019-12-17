@@ -154,8 +154,37 @@ void enableProfiler(ProfilerConfig config) {
         } else {
           pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
         }
+        fn.setThreadId(thread_id);
       },
-      [](const RecordFunction& /* unused */) { popRange(); },
+      [](const RecordFunction& fn) {
+        if (fn.overrideThreadId()) {
+          if (state == ProfilerState::Disabled) {
+            return;
+          } else {
+            std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+            for (const auto& elist : all_event_lists) {
+              const auto& blocks = elist->blocks;
+              for (auto& eventList : blocks) {
+                auto event = eventList.front();
+                if (fn.getThreadId() == event.thread_id()) {
+                  elist->record(
+                      EventKind::PopRange,
+                      StringView(""),
+                      fn.getThreadId(),
+                      state == ProfilerState::CUDA);
+                  return;
+                }
+              }
+            }
+            // We should not get here, since we should have found an event with
+            // thread_id equal to the one set in the record function.
+            TORCH_INTERNAL_ASSERT(
+                false, "Did not find thread_id matching ", fn.getThreadId());
+          }
+        } else {
+          popRange();
+        }
+      },
       config.report_input_shapes);
   state = new_state;
 

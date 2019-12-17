@@ -280,9 +280,15 @@ If the future completes with an error, an exception is thrown.
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
-      });
+         std::vector<torch::Tensor>& tensors,
+         std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
 
   module.def(
       "_invoke_remote_builtin",

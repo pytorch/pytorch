@@ -533,6 +533,27 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
+    def _profiler_test_with_rpc(self, use_async=False):
+        dst = (self.rank + 1) % self.world_size
+        # only run profiler on rank 0.
+        if self.rank in {0}:
+            with torch.autograd.profiler.profile() as prof:
+                if not use_async:
+                    rpc.rpc_sync("worker{}".format(dst), my_sleep_func, args=(1, ))
+                else:
+                    fut = rpc.rpc_async("worker{}".format(dst), my_sleep_func, args=(1, ))
+                    import time ; time.sleep(3)
+                    fut.wait()
+            print(prof.key_averages())
+
+    @dist_init
+    def test_profiler_with_sync_rpc(self):
+        self._profiler_test_with_rpc(use_async=False)
+
+    @dist_init
+    def test_profiler_with_async_rpc(self):
+        self._profiler_test_with_rpc(use_async=True)
+
     @dist_init
     def test_py_class_constructor(self):
         n = self.rank + 1

@@ -21,7 +21,8 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
-    std::vector<torch::Tensor>& tensors);
+    std::vector<torch::Tensor>& tensors,
+    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf);
 
 PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
