@@ -1276,7 +1276,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
     else:
         _check_directly_compile_overloaded(obj)
-        maybe_already_compiled_fn = _try_get_jit_cached_key(obj)
+        maybe_already_compiled_fn = _try_get_jit_cached_function(obj)
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
         ast = get_jit_def(obj)
@@ -1285,7 +1285,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
-        _set_jit_cache(obj, fn)
+        _set_jit_function_cache(obj, fn)
         return fn
 
 def interface(obj):
@@ -1741,7 +1741,7 @@ if _enabled:
         # dir is defined by the base nn.Module, so instead of throwing if
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
-            self_method = getattr(self, "__dir__")
+            self_method = self.__dir__
             if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
                 return super(RecursiveScriptModule, self).__dir__()
             return self_method()
@@ -1750,7 +1750,7 @@ if _enabled:
         # is defined then returns true for classes. because __iter__() on this
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
-            self_method = getattr(self, "__bool__")
+            self_method = self.__bool__
             if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__bool__"):
                 return True
             return self_method()
@@ -1977,25 +1977,39 @@ _builtin_ops = [
 
 
 
-# Caching: we currently cache compilation of free functions.
+# Caching: we currently cache compilation of free functions and overloaded functions.
 # To cache free functions we hold a weak ref to the function object and
 # map to the compiled fn's qualified name.
+# To cache overloaded functions we hold a weak ref to the function obj and
+# map to all of its overloaded compiled fns.
 # In the future we could consider caching more types of objects so that
 # aliasing is preserved across separate compilations of the same object.
 
 _jit_caching_layer = weakref.WeakKeyDictionary()
+_jit_function_overload_caching = weakref.WeakKeyDictionary()
 
-def _try_get_jit_cached_key(key):
+def _try_get_jit_cached_overloads(key):
+    qual_names = _jit_function_overload_caching.get(key, None)
+    if qual_names:
+        return [_python_cu.find_function(qual_name) for qual_name in qual_names]
+    else:
+        return None
+
+def _set_jit_overload_cache(key, compiled_fns):
+    _jit_function_overload_caching[key] = [fn.qualified_name for fn in compiled_fns]
+
+def _try_get_jit_cached_function(key):
     qual_name = _jit_caching_layer.get(key, None)
     if qual_name:
         return _python_cu.find_function(qual_name)
     else:
         return None
 
-def _set_jit_cache(key, value):
+def _set_jit_function_cache(key, value):
     # only free functions currently supported
     assert isinstance(value, torch.jit.ScriptFunction)
     _jit_caching_layer[key] = value.qualified_name
+
 
 
 # lazily built to ensure the correct initialization order
@@ -2051,57 +2065,49 @@ def _get_script_class(name):
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
 
-# qualified name => list[compiled fns]
-_compiled_overloaded_fns = {}
+def _check_overload_defaults(impl_defaults, overload_defaults, loc):
+    for name, overload_value in overload_defaults.items():
+        if name not in impl_defaults or impl_defaults[name] != overload_value:
+            raise torch.jit.frontend.FrontendError(
+                loc, "Default parameters on overloads do not affect the runtime so they "
+                "must equal to the default parameter on the implementation function. Found on "
+                "parameter {name}".format(name=name))
 
-def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
+def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
+    overload_decl = torch.jit.get_jit_def(overload_fn).decl()
+    overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None)
     impl_ast = torch.jit.get_jit_def(impl_fn)
+    overload_defaults = get_default_args(overload_fn)
+    implementation_defaults = get_default_args(impl_fn)
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
-    fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
+    _check_overload_defaults(implementation_defaults, overload_defaults, overload_decl.range())
+    fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb,
+                                               implementation_defaults, overload_signature)
     return fn
-
-def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func, None, None)
-    if signature is None:
-        qual_name = _qualified_name(func)
-        raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
-
-def _get_overload_decl_and_defaults(func):
-    _check_no_signature(func)
-    return (torch.jit.get_jit_def(func).decl(), get_default_args(func))
 
 def _get_overloads(obj):
     # check for cached compiled fns
+    existing_compiled_fns = _try_get_jit_cached_overloads(obj)
     qual_name = _qualified_name(obj)
-    global _compiled_overloaded_fns
-    compiled_overloads = _compiled_overloaded_fns.get(qual_name, None)
-    if compiled_overloads is not None:
-        return compiled_overloads
+    uncompiled_overloads = _jit_internal._get_fn_overloads(qual_name)
+    if uncompiled_overloads is None:
+        return existing_compiled_fns
 
-    # check for not yet compiled overloads
-    overloads = _jit_internal._get_fn_overloads(qual_name)
-    if overloads is None:
-        return None
     compiled_fns = []
-    # TODO: use default args from the implementation, not from the overload
-    # This is more complicated because you can have a default arg with a type
-    # incompatible with a type of parameter in an overload, and other validation.
-    # This is still an internal api so for now use defaults from overload
-    for overload_fn in overloads:
-        overload_decl, overload_defaults = _get_overload_decl_and_defaults(overload_fn)
-        compiled_fn = _compile_function_with_overload(qual_name, obj, overload_decl, overload_defaults)
-        compiled_fns.append(compiled_fn)
+    for overload_fn in uncompiled_overloads:
+        compiled_fns.append(_compile_function_with_overload(overload_fn, qual_name, obj))
+
+    if existing_compiled_fns:
+        compiled_fns = existing_compiled_fns + compiled_fns
 
     # cache compilation, remove information stored to do compilation
-    _compiled_overloaded_fns[qual_name] = compiled_fns
+    _set_jit_overload_cache(obj, compiled_fns)
     _jit_internal._clear_fn_overloads(qual_name)
     return compiled_fns
 
 def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
-    global _compiled_overloaded_fns
-    global _overloaded_fns
-    if qual_name in _compiled_overloaded_fns or _jit_internal._get_fn_overloads(qual_name):
+    if _jit_internal._get_fn_overloads(qual_name) or _try_get_jit_cached_overloads(obj):
         raise RuntimeError("Function {} cannot be directly compiled because it"
                            " is overloaded. It must be used in a context of a function"
                            " where its inputs can determine which overload to call.".format(qual_name))
