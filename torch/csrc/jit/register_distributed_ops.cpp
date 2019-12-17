@@ -1,21 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/stack.h>
 
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/operator.h>
 
-using Stack = std::vector<c10::IValue>;
 using at::Scalar;
 using at::Tensor;
-using torch::jit::drop;
-using torch::jit::pack;
-using torch::jit::peek;
-using torch::jit::pop;
-using torch::jit::push;
-
 namespace dist_autograd = torch::distributed::autograd;
 
 namespace torch {
