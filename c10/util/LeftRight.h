@@ -12,11 +12,11 @@ namespace detail {
 struct IncrementRAII final {
 public:
     explicit IncrementRAII(std::atomic<int32_t> *counter): _counter(counter) {
-        _counter->fetch_add(1, );
+        _counter->fetch_add(1);
     }
 
     ~IncrementRAII() {
-        _counter->fetch_sub(1, );
+        _counter->fetch_sub(1);
     }
 private:
     std::atomic<int32_t> *_counter;
