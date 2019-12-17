@@ -7,9 +7,10 @@ Torch and Tensor Unsupported Attributes
 ------------------------------------------
 
 
-TorchScript supports most methods defined on `torch` and `torch.Tensor`, but we do not have full coverage.
+TorchScript supports most methods defined on ``torch`` and ``torch.Tensor``, but we do not have full coverage.
 Here are specific known ops and categories of ops which have diverging behavior between
-Python and TorchScript. Deprecated ops are not listed below.
+Python and TorchScript. If you encounter something else that is not supported please
+file a GitHub issue. Deprecated ops are not listed below.
 
 
 
@@ -20,7 +21,7 @@ Functions Not Correctly Bound on Torch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The following functions will fail if used in TorchScript, either because they
-are not bound on `torch` or because python expects a different schema than
+are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
   * :func:`torch.cdist`
@@ -35,7 +36,7 @@ TorchScript.
 Ops With Divergent Schemas Between Torch & Python
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The following category's of ops have divergent schemas:
+The following categories of ops have divergent schemas:
 
 Functions which construct tensors from non-tensor inputs do not support the `requires_grad`
 argument, except for `torch.tensor`. This covers the following ops:
@@ -67,7 +68,7 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.zeros_like`
 
 The following functions require `dtype`, `layout`, `device` as parameters in TorchScript,
-but are optional in python.
+but these parameters are optional in Python.
 
   * :func:`torch.empty_like`
   * :func:`torch.full_like`
@@ -83,9 +84,9 @@ but are optional in python.
 PyTorch Unsupported Modules and Classes
 ------------------------------------------
 
-TorchScript cannot currently compile a number of other commonly used pytorch
+TorchScript cannot currently compile a number of other commonly used PyTorch
 constructs. Below are listed the modules that TorchScript does not support, and
-an incomplete list of pytorch classes that are not supported. For unsupported modules
+an incomplete list of PyTorch classes that are not supported. For unsupported modules
 we suggest using :meth:`torch.jit.trace`.
 
   * :class:`torch.nn.RNN`

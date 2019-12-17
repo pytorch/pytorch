@@ -1657,7 +1657,7 @@ functions that PyTorch provides. Most methods on Tensor as well as functions in
 the ``torch`` namespace, all functions in ``torch.nn.functional`` and
 most modules from ``torch.nn`` are supported in TorchScript.
 
-See :ref:`jit_unsupported` for a list of unsupported pytorch functions and modules.
+See :ref:`jit_unsupported` for a list of unsupported PyTorch functions and modules.
 
 Python Functions and Modules
 ----------------------------
