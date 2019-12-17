@@ -65,9 +65,6 @@ inline long long stoll(const std::string& str) {
 }
 
 inline long long stoll(const std::string& str, size_t pos, int base) {
-  // Anything other than 0 for both of these is unimplemented
-  AT_ASSERT(pos == 0);
-  AT_ASSERT(base == 0);
   // std::stoll doesn't exist in our Android environment, we need to implement
   // it ourselves.
   std::stringstream s;
