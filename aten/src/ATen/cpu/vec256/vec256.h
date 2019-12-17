@@ -86,13 +86,13 @@ DEFINE_FLOAT_INT_CAST(int16_t, float, s)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
 inline gather(const double* base_addr, const Vec256<int64_t>& vindex) {
   return _mm256_i64gather_pd(base_addr, vindex, scale);
 }
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
 inline gather(const float* base_addr, const Vec256<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
@@ -100,14 +100,14 @@ inline gather(const float* base_addr, const Vec256<int32_t>& vindex) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
 inline mask_gather(const Vec256<double>& src, const double* base_addr,
                    const Vec256<int64_t>& vindex, const Vec256<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
 inline mask_gather(const Vec256<float>& src, const float* base_addr,
                    const Vec256<int32_t>& vindex, const Vec256<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
