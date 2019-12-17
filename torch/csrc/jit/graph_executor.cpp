@@ -736,7 +736,7 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void runOptimization(std::shared_ptr<Graph>& graph) {
+void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
   // Basic graph preprocessing to eliminate noise.
   EliminateDeadCode(graph);
   EliminateCommonSubexpression(graph);
@@ -747,8 +747,10 @@ void runOptimization(std::shared_ptr<Graph>& graph) {
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  UnrollLoops(graph);
-  EliminateCommonSubexpression(graph);
+  if (unroll) {
+    UnrollLoops(graph);
+    EliminateCommonSubexpression(graph);
+  }
 
   CheckInplace(graph);
 }

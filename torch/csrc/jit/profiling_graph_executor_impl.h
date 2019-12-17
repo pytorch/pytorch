@@ -12,6 +12,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ~ProfilingGraphExecutorImpl() override = default;
 
  private:
+  void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   std::shared_ptr<Graph> prepareGraph(
       const std::shared_ptr<Graph>& graph,
       Stack& stack);
