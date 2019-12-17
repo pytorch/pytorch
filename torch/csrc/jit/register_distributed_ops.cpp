@@ -33,27 +33,17 @@ at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
-}
-
-RegisterOperators reg({
-    Operator(
-        "aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-        [](Stack& stack) {
-          int64_t contextId;
-          pop(stack, contextId);
-          const auto& autogradContext =
-              dist_autograd::DistAutogradContainer::getInstance()
-                  .retrieveContext(contextId);
-          const auto& result = IValue(autogradContext->getGradients());
-          push(stack, result);
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-});
+auto reg_distributed_ops =
+    torch::RegisterOperators()
+        .op("aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+                .catchAllKernel([](int64_t context_id) {
+                  const auto& autogradContext =
+                      dist_autograd::DistAutogradContainer::getInstance()
+                          .retrieveContext(context_id);
+                  return autogradContext->getGradients();
+                }));
 
 } // namespace
 } // namespace jit
