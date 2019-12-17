@@ -116,6 +116,14 @@ DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
+ScalarTypeTypePtr ScalarTypeType::get() {
+static auto value = ScalarTypeType::create();
+return value;
+}
+LayoutTypePtr LayoutType::get() {
+static auto value = LayoutType::create();
+return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
