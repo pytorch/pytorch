@@ -399,7 +399,7 @@ namespace detail {
 struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t){};
 };
-using _guarded_unsigned_long = c10::guts::conditional_t<
+using _guarded_unsigned_long = std::conditional_t<
     std::is_same<unsigned long, uint32_t>::value ||
         std::is_same<unsigned long, uint64_t>::value,
     _guarded_unsigned_long_unique_dummy,
@@ -546,7 +546,7 @@ namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
     const std::vector<IValue>& t,
-    c10::guts::index_sequence<INDEX...>) {
+    std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
 }
@@ -554,11 +554,11 @@ Tuple generic_to_tuple_impl(
 
 template <
     typename... Args,
-    typename Indices = c10::guts::make_index_sequence<sizeof...(Args)>,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    typename Indices = std::make_index_sequence<sizeof...(Args)>,
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
   auto vals = ivalue.toTuple()->elements();
@@ -655,10 +655,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 }
 template <
     typename... Args,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(

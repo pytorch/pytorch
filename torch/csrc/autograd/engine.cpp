@@ -769,7 +769,7 @@ variable_list Engine::graph_task_exec_post_processing(
 }
 
 std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
   // Lock mutex for GraphTask.

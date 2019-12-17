@@ -170,7 +170,7 @@ struct TORCH_API Engine {
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
-      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root);
 
   // Enqueues a blocked task for execution on the CPU thread. A blocked task is
