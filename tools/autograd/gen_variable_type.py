@@ -27,11 +27,9 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-try:
-    from src.ATen.tensor_options_utils import *
-except ImportError:
-    from tools.shared.module_loader import import_module
-    TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+
 
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
@@ -856,7 +854,7 @@ def emit_body(declaration):
                 if TOUtils.check_if_factory_method(declaration['arguments']):
                     api_name_prefix = TOUtils.API_NAME_PREFIX
 
-                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined, api_name_prefix = api_name_prefix)
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined, api_name_prefix=api_name_prefix)
             else:
                 unpacked_method_args = combined['unpacked_args'][1:]
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(

@@ -19,14 +19,14 @@ def check_if_factory_method(args):
             return False
 
     has_opt_TO_args = any(arg['type'] == 'c10::optional<ScalarType>' for arg in args) and \
-                      any(arg['type'] == 'c10::optional<Layout>' for arg in args) and \
-                      any(arg['type'] == 'c10::optional<Device>' for arg in args) and \
-                      any(arg['type'] == 'c10::optional<bool>' for arg in args)
+        any(arg['type'] == 'c10::optional<Layout>' for arg in args) and \
+        any(arg['type'] == 'c10::optional<Device>' for arg in args) and \
+        any(arg['type'] == 'c10::optional<bool>' for arg in args)
 
     has_TO_args = any(arg['type'] == 'ScalarType' for arg in args) and \
-                  any(arg['type'] == 'Layout' for arg in args) and \
-                  any(arg['type'] == 'Device' for arg in args) and \
-                  any(arg['type'] == 'bool' for arg in args)
+        any(arg['type'] == 'Layout' for arg in args) and \
+        any(arg['type'] == 'Device' for arg in args) and \
+        any(arg['type'] == 'bool' for arg in args)
 
     has_TO_arg = any('TensorOptions' in arg['type'] for arg in args)
 
@@ -46,7 +46,7 @@ def collapse_actuals(actuals):
     if (any(actual == 'dtype' for actual in actuals) and
         any(actual == 'layout' for actual in actuals) and
         any(actual == 'device' for actual in actuals) and
-        any(actual == 'pin_memory' for actual in actuals)):
+            any(actual == 'pin_memory' for actual in actuals)):
         index = collapsed.index('dtype')
 
         collapsed.pop(index)
@@ -117,7 +117,7 @@ def collapse_formals_list(formals):
     if (any(formal['type'] == 'c10::optional<ScalarType>' for formal in collapsed) and
         any(formal['type'] == 'c10::optional<Layout>' for formal in collapsed) and
         any(formal['type'] == 'c10::optional<Device>' for formal in collapsed) and
-        any(formal['type'] == 'c10::optional<bool>' for formal in collapsed)):
+            any(formal['type'] == 'c10::optional<bool>' for formal in collapsed)):
         index = 0
         for i in range(len(collapsed)):
             if collapsed[i]['type'] == 'c10::optional<ScalarType>':
@@ -140,7 +140,7 @@ def collapse_formals_list(formals):
     if (any(formal['type'] == 'ScalarType' for formal in collapsed) and
         any(formal['type'] == 'Layout' for formal in collapsed) and
         any(formal['type'] == 'Device' for formal in collapsed) and
-        any(formal['type'] == 'bool' for formal in collapsed)):
+            any(formal['type'] == 'bool' for formal in collapsed)):
         index = 0
         for i in range(len(collapsed)):
             if collapsed[i]['type'] == 'ScalarType':

@@ -7,11 +7,8 @@ import re
 from .utils import CodeTemplate, write
 from .gen_variable_type import format_trace
 
-try:
-    from src.ATen.tensor_options_utils import *
-except ImportError:
-    from tools.shared.module_loader import import_module
-    TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
 
 # This is a hack.
 # issue #30405
@@ -101,7 +98,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
 
         default = " = {}".format(argument["default"]) if "default" in argument else ""
         if "default" in argument:
-            if argument["default"] == False or argument["default"] == True:
+            if argument["default"] == 'False' or argument["default"] == 'True':
                 default = default.lower()
 
         formals.append("{} {}{}".format(type, argument["name"], default))
@@ -139,7 +136,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
             pre_record_trace=pre_record_trace, post_record_trace=post_record_trace
         )
     else:
-        options_calls  = turn_actuals_into_option_calls(actuals)
+        options_calls = turn_actuals_into_option_calls(actuals)
         collapsed_formals = TOUtils.collapse_formals(formals)
 
         if decl['name'] == 'arange':
@@ -149,7 +146,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
 
             return FUNCTION_TEMPLATE_ARANGE.substitute(
                 name=decl["name"],
-                collapsed_formals = collapsed_formals,
+                collapsed_formals=collapsed_formals,
                 actuals=actuals,
                 uncollapsed_actuals=options_calls,
                 uncollapsed_actuals_nullptr=uncollapsed_actuals_nullptr,
@@ -160,7 +157,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
         else:
             return FUNCTION_TEMPLATE_TENSOR_OPTIONS.substitute(
                 name=decl["name"],
-                collapsed_formals = collapsed_formals,
+                collapsed_formals=collapsed_formals,
                 actuals=actuals,
                 uncollapsed_actuals=options_calls,
                 requires_grad=requires_grad,

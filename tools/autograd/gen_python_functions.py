@@ -457,8 +457,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         unpack = has_tensor_options
         for arg in inputs:
             if out_idx is not None and arg_idx == out_idx:
-                #skip output
-                arg_idx+=1
+                # skip output
+                arg_idx += 1
 
             if has_tensor_options and arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
                 expr, formal = parse_arg(arg, arg_idx)
@@ -474,10 +474,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
             arg_idx += 1
 
-        # This is a hack to insert 'requires_grad'. 
-        # This should happen automatically based on native_functions.yaml schemas 
+        # This is a hack to insert 'requires_grad'.
+        # This should happen automatically based on native_functions.yaml schemas
         # issue #30405
-        if has_tensor_options and check_is_factory_or_like_or_new_function(declaration):  
+        if has_tensor_options and check_is_factory_or_like_or_new_function(declaration):
             added = False
             i = 0
             for f in formal_args:
@@ -488,7 +488,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     break
                 else:
                     i += 1
-            
+
             if not added:
                 formal_args.append('c10::optional<bool> requires_grad')
                 actuals.append('requires_grad')
@@ -556,7 +556,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         dtype = parsed_type_args[0] if parsed_type_args else None
         add_requires_grad = check_is_factory_or_like_or_new_function(declaration)
-        
+
         if has_tensor_options:
             body.append('auto dtype = ' + dtype + ';')
             body.append('auto layout = ' + layout + '.layout;')
@@ -671,7 +671,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # this probably won't work if one of the returns is not a tensor, but it will
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
-                
+
         category_override = declaration['category_override']
         is_like_function = name.endswith('_like') or category_override == 'like'
         is_new_function = name.startswith('new_') or category_override == 'new'

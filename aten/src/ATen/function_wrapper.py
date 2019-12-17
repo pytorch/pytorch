@@ -1215,11 +1215,10 @@ def create_generic(top_env, declarations):
             if TOUtils.check_if_factory_method(option['arguments']):
                 option['api_name_prefix'] = '_'
 
-            return FunctionCode(
-            declaration=TENSOR_METHOD_DECLARATION.substitute(
-                option, static_dispatch_method_body=static_dispatch_method_body),
-            definition=C10_TENSOR_METHOD_DEFINITION.substitute(
-                option, static_dispatch_method_body=static_dispatch_method_body))
+            return FunctionCode(declaration=TENSOR_METHOD_DECLARATION.substitute(option,
+                                                                                 static_dispatch_method_body=static_dispatch_method_body),
+                                definition=C10_TENSOR_METHOD_DEFINITION.substitute(option,
+                                                                                   static_dispatch_method_body=static_dispatch_method_body))
 
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
@@ -1270,8 +1269,8 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.insert(index, 'options.pinned_memory()')
             expanded_native_actuals.insert(index, 'options.device()')
 
-             # special case for 'sparse_coo_tensor' and '_sparse_coo_tensor_unsafe'
-             # issue #30405
+            # special case for 'sparse_coo_tensor' and '_sparse_coo_tensor_unsafe'
+            # issue #30405
             if (option['name'] == 'sparse_coo_tensor' or option['name'] == '_sparse_coo_tensor_unsafe'):
                 expanded_native_actuals.insert(index, 'options.layout_opt()')
             else:
@@ -1283,7 +1282,7 @@ def create_generic(top_env, declarations):
 
         def gen_native_dispatch_declaration(option):
             declaration = NATIVE_DISPATCH_DECLARATION_CONST
-            fn_declaration = declaration.substitute(option, type_method_formals = TOUtils.collapse_formals(option['method_formals_with_defaults']))
+            fn_declaration = declaration.substitute(option, type_method_formals=TOUtils.collapse_formals(option['method_formals_with_defaults']))
 
             expanded_native_actuals = option['collapsed_method_actuals'][:]
             expanded_native_actuals.remove('const_cast<Tensor&>(*this)')
@@ -1295,9 +1294,9 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.insert(index, 'dtype')
 
             if option['name'] == 'to':
-                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option, collapsed_formals = TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option, collapsed_formals=TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
             else:
-                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option, collapsed_formals = TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option, collapsed_formals=TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         assert find_formal('Type', formals) is None, \
