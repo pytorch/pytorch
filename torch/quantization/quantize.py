@@ -365,7 +365,7 @@ class Shadow(nn.Module):
         self.dequant = nnq.DeQuantize()
 
         self.orig_ob = torch.quantization.RecordingObserver()
-        self.shadow_ob =  torch.quantization.RecordingObserver()
+        self.shadow_ob = torch.quantization.RecordingObserver()
 
     def forward(self, x):
         output = self.orig_module(x)
@@ -386,7 +386,7 @@ class Shadow(nn.Module):
 
 def add_shadow_module(mod, mapping):
     new_mod = mod
-     # Always replace dequantstub with dequantize
+    # Always replace dequantstub with dequantize
     if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
         if type(mod) in mapping:
             if type(mod) == QuantStub or type(mod) == DeQuantStub:
