@@ -20,7 +20,7 @@ void LayerNormKernelImplInternal(
     const Tensor& beta,
     int64_t M,
     int64_t N,
-    T eps,
+    double eps,
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
@@ -79,7 +79,7 @@ void LayerNormKernelImpl(
     Tensor* rstd) {
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(), "LayerNormKernelImpl", [&]() {
     LayerNormKernelImplInternal<scalar_t>(
-        X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+        X, gamma, beta, M, N, eps, Y, mean, rstd);
   });
 }
 
@@ -127,7 +127,7 @@ void LayerNormBackwardKernelImplInternal(
       ACC_T db = 0;
       for (int64_t j = 0; j < N; ++j) {
         const ACC_T gamma_v = gamma_null ? ACC_T(1) : gamma_data[j];
-        ds += dY_ptr[j] * X_ptr[j] * gamma_v;
+        ds += ACC_T(dY_ptr[j]) * ACC_T(X_ptr[j]) * gamma_v;
         db += dY_ptr[j] * gamma_v;
       }
       const ACC_T a = rstd_data[i];

@@ -174,7 +174,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
 Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
 #if AT_MKL_ENABLED()
-  if (self.scalar_type() != at::ScalarType::BFloat16 && cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     bernoulli_mkl_stub(kCPU, self, p, gen);
     return self;
   }
