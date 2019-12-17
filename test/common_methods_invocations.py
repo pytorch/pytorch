@@ -5,11 +5,11 @@ from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
 from torch.testing import make_non_contiguous
-from torch.testlib.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
-from torch.testlib.common_utils import (prod_single_zero, random_square_matrix_of_rank,
-                                        random_symmetric_matrix, random_symmetric_psd_matrix,
-                                        random_symmetric_pd_matrix, make_nonzero_det,
-                                        random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+from torch.testing._internal.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
+from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
+                                                  random_symmetric_matrix, random_symmetric_psd_matrix,
+                                                  random_symmetric_pd_matrix, make_nonzero_det,
+                                                  random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
 
 def index_variable(shape, max_indices):
@@ -892,9 +892,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
-        # I'm not too sure why this one is failing on CUDA.
-        # More discussion at https://github.com/pytorch/pytorch/issues/30820
-        ('to_sparse', (S, S), (), '', (), (), [expectedFailureCUDA], lambda x: x.to_dense()),
+        ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, device=None):

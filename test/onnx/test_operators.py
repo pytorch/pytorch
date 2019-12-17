@@ -14,7 +14,7 @@ import inspect
 import glob
 import os
 import shutil
-import torch.testlib.common_utils as common
+import torch.testing._internal.common_utils as common
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -569,9 +569,19 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    def test_upsample_nearest(self):
+    def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest', use_scale_factor=True), x)
+
+    def test_upsample_nearest_scale_default_scale_factor(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest'), x)
+
+    def test_upsample_nearest_size(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)

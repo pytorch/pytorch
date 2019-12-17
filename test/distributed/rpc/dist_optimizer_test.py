@@ -2,14 +2,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import unittest
 
-from torch.testlib.dist_utils import dist_init
+from torch.testing._internal.dist_utils import dist_init
 from torch import optim
 from torch.distributed.optim import DistributedOptimizer
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import threading
-from torch.testlib.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 
 class MyModule:

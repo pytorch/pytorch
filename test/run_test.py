@@ -155,13 +155,6 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args + list(extra_unittest_args)
 
-    # Add 'test_directory' to PYTHONPATH so that imports work.
-    env = os.environ.copy()
-    if 'PYTHONPATH' in env:
-        env['PYTHONPATH'] = os.pathsep.join([env['PYTHONPATH'], test_directory])
-    else:
-        env['PYTHONPATH'] = test_directory
-
     command = executable + argv
     return shell(command, test_directory, env)
 

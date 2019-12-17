@@ -3,10 +3,10 @@ import unittest
 import torch
 from torch import nn
 import torch.nn.parallel as dp
-from torch.testlib.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testlib.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
-from torch.testlib.common_utils import _assertGradAndGradgradChecks
-from torch.testlib.common_utils import dtype2prec
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm, repeat_test_for_types, ALL_TENSORTYPES, PY3
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import dtype2prec
 import torch.nn.functional as F
 from copy import deepcopy
 from collections import OrderedDict

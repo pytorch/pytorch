@@ -1,6 +1,6 @@
 import unittest
-from torch.testlib.common_utils import TestCase, run_tests, TEST_NUMPY
-from torch.testlib.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testing._internal.common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
 import functools
@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -1948,11 +1945,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

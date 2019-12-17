@@ -12,8 +12,8 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testlib.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
-from torch.testlib.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -143,6 +143,33 @@ class TestQuantizedOps(TestCase):
                     qY_hat = op(qX, inplace=inplace)
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
+
+    """Tests the correctness of the quantized::clamp op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           min_val=st.floats(-1e6, 1e6, allow_nan=False),
+           max_val=st.floats(-1e6, 1e6, allow_nan=False))
+    def test_qclamp(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
 
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),

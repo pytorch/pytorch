@@ -12,17 +12,17 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
-from torch.testlib.common_utils import load_tests
-import torch.testlib.dist_utils
-from torch.testlib.dist_utils import dist_init
+from torch.testing._internal.common_utils import load_tests
+import torch.testing._internal.dist_utils
+from torch.testing._internal.dist_utils import dist_init
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
-from torch.testlib.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -944,6 +944,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
+
+    @dist_init
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1277,7 +1287,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
-                torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name
+                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
             ],
             rank=self.rank,
             world_size=self.world_size,
@@ -1316,7 +1326,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
-                torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name
+                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
             ],
             rank=self.rank,
             world_size=self.world_size,
@@ -1351,7 +1361,7 @@ class RpcTest(RpcAgentTestFixture):
         # multiple times.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name],
+            backend=rpc.backend_registry.BackendType[torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name],
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options
@@ -1416,7 +1426,7 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if torch.testlib.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
+        if torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
