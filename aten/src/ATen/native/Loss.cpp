@@ -10,7 +10,6 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <iostream>
 
 #define EPSILON 1e-12
 #define _USE_MATH_DEFINES
