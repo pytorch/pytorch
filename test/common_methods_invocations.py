@@ -892,9 +892,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
-        # I'm not too sure why this one is failing on CUDA.
-        # More discussion at https://github.com/pytorch/pytorch/issues/30820
-        ('to_sparse', (S, S), (), '', (), (), [expectedFailureCUDA], lambda x: x.to_dense()),
+        ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, device=None):
