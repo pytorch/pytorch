@@ -3055,8 +3055,8 @@ namespace detail {
   namespace F = torch::nn::functional;
 
   torch::Tensor _batchmatmul(const torch::Tensor& a, const torch::Tensor& b) {
-    assert(a.size(0) == b.size(0));
-    assert(a.size(1) == b.size(1));
+    TORCH_INTERNAL_ASSERT(a.size(0) == b.size(0));
+    TORCH_INTERNAL_ASSERT(a.size(1) == b.size(1));
     auto retval = torch::zeros({a.size(0), a.size(1), a.size(2), b.size(3)}, torch::kFloat32);
     for (int i = 0; i < a.size(0); i++) {
       for (int j = 0; j < a.size(1); j++) {

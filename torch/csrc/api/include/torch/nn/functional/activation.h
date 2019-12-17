@@ -376,8 +376,8 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const auto& tgt_len = query_sizes[0];
   const auto& bsz = query_sizes[1];
   const auto& embed_dim = query_sizes[2];
-  assert(embed_dim == embed_dim_to_check);
-  assert(key.sizes() == value.sizes());
+  TORCH_INTERNAL_ASSERT(embed_dim == embed_dim_to_check);
+  TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
   const auto head_dim = embed_dim / num_heads;
   TORCH_CHECK(head_dim * num_heads == embed_dim,
@@ -406,7 +406,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       q = F::linear(query, _w, _b);
 
       if (!key.defined()) {
-        assert(!value.defined());
+        TORCH_INTERNAL_ASSERT(!value.defined());
         k = {};
         v = {};
       } else {
