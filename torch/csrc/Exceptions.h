@@ -168,7 +168,7 @@ struct python_error : public std::exception {
     // Try to retrieve the error message from the value.
     if (value != nullptr) {
       // Reference count should not be zero.
-      TORCH_INTERNAL_ASSERT(value->ob_refcnt > 0);
+      TORCH_INTERNAL_ASSERT(Py_REFCNT(value) > 0);
 
       PyObject* pyStr = PyObject_Str(value);
       if (pyStr != nullptr) {
