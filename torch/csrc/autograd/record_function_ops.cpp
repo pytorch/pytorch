@@ -32,10 +32,15 @@ void record_function_exit(const at::Tensor& handle) {
   // We don't actually need to do anything with handle just need to persist the
   // lifetime until now.
   auto& rec = at::cpp_custom_type_hack::cast<RecordFunction>(handle);
-  if (auto* current = RecordFunction::current()) {
-    AT_ASSERT(current->parent() == &rec, "rec must be parent");
-    AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
-    current->end();
+  auto* current = RecordFunction::current();
+  if (rec.active() && current) {
+    if (current != &rec) {
+      AT_ASSERT(current->parent() == &rec, "rec must be parent");
+      AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+      current->end();
+    } else {
+      AT_ASSERT(current == &rec, "rec must be active");
+    }
     rec.end();
   }
 }
