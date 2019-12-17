@@ -720,6 +720,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     return pyObj;
   } else if (ivalue.isPyObject()) {
+    // return borrowed reference to ensure it correctly incref the underlying PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else {
     AT_ERROR(

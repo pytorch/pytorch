@@ -399,7 +399,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::vector<IValue> slots_;
 };
 
-// virtual ivalue Holder that hold a PyObject*, detailed implementation is in python_ivalue.h
+// virtual ivalue PyObjectHolder that hold a PyObject*, we make this virtual
+// because we need to carefully maintain the refcounting of the PyObject* and
+// this could only happen in libtorch_python
+// see concrete implementation in python_ivalue.h
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
