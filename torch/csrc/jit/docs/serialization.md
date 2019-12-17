@@ -3,6 +3,20 @@
 This document explains the TorchScript serialization format, and the anatomy
 of a call to `torch::jit::save()` or `torch::jit::load()`.
 
+  - [Overview](#overview)
+    - [Design Notes](#design-notes)
+  - [`code/`: How code is serialized](#code-how-code-is-serialized)
+    - [Printing code objects as Python source](#printing-code-objects-as-python-source)
+    - [Placing the source code in the archive](#placing-the-source-code-in-the-archive)
+  - [`data.pkl`: How data is serialized](#datapkl-how-data-is-serialized)
+  - [`tensors/`: How tensors are serialized](#tensors-how-tensors-are-serialized)
+  - [`constants.pkl`: Constants in code](#constantspkl-constants-in-code)
+  - [`torch:jit::load()`](#torchjitload)
+  - [`__getstate__` and `__setstate__`](#getstate-and-setstate)
+  - [Appendix: `CompilationUnit` and code object ownership](#appendix-compilationunit-and-code-object-ownership)
+    - [`CompilationUnit` ownership semantics](#compilationunit-ownership-semantics)
+    - [Code object naming](#code-object-naming)
+
 ## Overview
 
 A serialized model (call it `model.pt`) is a ZIP archive containing many
@@ -11,7 +25,6 @@ file structure looks like:
 
 ```
 model.pt
-|-- model.json
 |-- code/
     |-- __torch__.py
     |-- __torch__.py.debug_pkl
@@ -19,6 +32,7 @@ model.pt
         |-- bar.py
         |-- bar.py.debug_pkl
 |-- data.pkl
+|-- constants.pkl
 |-- tensors/
     |-- 0
     |-- 1
@@ -77,62 +91,6 @@ many times you saved/loaded them).
 instantaneous to a human. Anything that takes a long time (reading in tensor
 data, for example) should be done lazily.
 
-## `model.json`
-
-The `model.json` file holds metadata about the model and how it was produced.
-It also contains a table of tensor metadata, which stores metadata about each
-tensor along with a reference to a file in the `tensors/` folder that
-actually contains the tensor data. The full description of `model.json`'s
-schema can be found in [torch.proto](../../../../caffe2/proto/torch.proto).
-
-Here is small example `model.json`. **NOTE: we want to kill `model.json` and
-pickle tensors directly, this will happen soon.**
-
-```
-{
-  "protoVersion": "6",
-  "producerName": "pytorch",
-  "producerVersion": "1.0",
-  "tensors": [
-    {
-      "dims": [
-        "2",
-        "2"
-      ],
-      "offset": "0",
-      "strides": [
-        "2",
-        "1"
-      ],
-      "requiresGrad": false,
-      "dataType": "FLOAT",
-      "data": {
-        "key": "tensors/0"
-      },
-      "device": "cpu"
-    },
-    {
-      "dims": [
-        "2",
-        "2"
-      ],
-      "offset": "0",
-      "strides": [
-        "2",
-        "1"
-      ],
-      "requiresGrad": false,
-      "dataType": "FLOAT",
-      "data": {
-        "key": "tensors/1"
-      },
-      "device": "cpu"
-    },
-    ...
-  ]
-}
-```
-
 ## `code/`: How code is serialized
 
 At a high level, code serialization means:
@@ -166,12 +124,12 @@ below).
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
 `PythonPrint` encouters a constant tensor it will emit a reference to a
-global `CONSTANTS` table (like `foo = CONSTANTS.c0`). This table is the same
-as the general tensor table (described in the `tensors/` section below).
+global `CONSTANTS` table (like `foo = CONSTANTS.c0`).
 
 When importing, the importer will know how to resolve this reference into an
 actual tensor by looking it up in the tensor table. So `CONSTANTS.c0` means
-"this is the `0th` tensor in the tensor list in `model.json`."
+"this is the `0th` tensor in the tensor tuple in `constants.pkl`." See
+[the constants section](#constantspkl-Constants-in-code) for more info.
 
 **Original source range records**. To aid debugging, `PythonPrint` remembers
 the "original" (user-written) location of the source code it's emitting. That
@@ -278,30 +236,52 @@ necessary for pickling a module object.
  doing the same with attributes avoids introducing yet another format
 
 All data is written into the `data.pkl` file with the exception of tensors
-(see "tensors" below). PyTorch functions defined in
-[torch/jit/_pickle.py](../../../jit/_pickle.py) used to mark special data
-types, such as this tensor table index or specialized lists.
+(see [the tensor section](#tensors-How-tensors-are-serialized) below).
+"Data" means all parts of the module object state, like attributes,
+submodules, etc.
+
+PyTorch functions defined in [torch/jit/_pickle.py](../../../jit/_pickle.py)
+used to mark special data types, such as this tensor table index or
+specialized lists.
 
 ## `tensors/`: How tensors are serialized
 
-UNDER CONSTRUCTION/WILL CHANGE IF WE KILL TENSORS
-
 During export a list of all the tensors in a model is created. Tensors can
-come from either module parameters or Tensor type attributes. Metadata about
-each tensor is stored in `model.json` with an index into this list. The data
-field refers to the file which contains the tensor storage data. Tensors are
-saved by directly writing the Tensor storage to a file.
+come from either module parameters or attributes of Tensor type.
+
+Tensors are treated differently from other data (which is pickled using the
+standard pickling process) for a few reasons:
+
+- Tensors regularly exceed the `pickle` file size limit.
+- We'd like to be able to `mmap` Tensors directly.
+- We'd like to maintain compatibility with regular `PyTorch`'s serialization
+  format
+
+## `constants.pkl`: Constants in code
+
+The `pickle` format enforces a separation between data and code, which the
+TorchScript serialization process represents by having `code/` and
+`data.pkl + tensors/`.
+
+However, TorchScript inlines constants (i.e. `prim::Constant` nodes) directly
+into `code/`. This poses a problem for tensor constants, which are not easily
+representable in string form.
+
+We can't put tensor constants in `data.pkl`, because the source code must be
+loaded *before* `data.pkl`, and so putting the tensor constants there would
+create a cyclic loading dependency.
+
+We solve this problem by creating a separate `pickle` file called
+`constants.pkl`, which holds all tensor constants referenced in code. The
+load order will be explained in the next section.
 
 ## `torch:jit::load()`
 
 The load process has the following steps:
 
-1. Look up `model.json` deserialize it.
-2. Load the tensor table into an in-memory mapping between offsets and `at::Tensor` objects.
-3. Unpickle `data.pkl` into the top-level `script::Module` and return it
-
-The first two steps will go away soon, so this section will focus on the
-unpickling.
+1. Unpickle `constants.pkl`, which produces a tuple of all tensor constants
+   referenced in code.
+2. Unpickle `data.pkl` into the top-level `script::Module` and return it.
 
 The unpickling process consists of a single call to unpickle the module
 object contained `data.pkl`. The `Unpickler` is given a callback that lets it
