@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <cstdint>
 
@@ -86,7 +85,7 @@ class TORCH_API DistAutogradContext {
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  void clearAndWaitForOutstandingRpcs();
+  std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
 
   const int64_t contextId_;
 
