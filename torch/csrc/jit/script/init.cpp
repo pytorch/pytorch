@@ -609,7 +609,7 @@ struct slot_dict_impl {
   }
 
   void setattr(const std::string& name, py::object value) {
-    const TypePtr& type = module_->type()->findAttribute(name);
+    const TypePtr& type = module_->type()->getAttribute(name);
     script::Module(module_).setattr(name, toIValue(std::move(value), type));
   }
 
