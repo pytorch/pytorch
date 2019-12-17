@@ -255,4 +255,22 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 
+#if defined(__CUDA_ARCH__)
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#endif
+#else
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#endif
+#endif
+
 #endif // C10_MACROS_MACROS_H_
