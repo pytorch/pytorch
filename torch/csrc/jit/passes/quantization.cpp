@@ -635,7 +635,10 @@ class InsertQuantDeQuantHelper {
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  std::unordered_map<Graph*, std::unordered_map<Value*, QParamMap>> values_to_qparams_;
+  // value to qparam map is per Graph and per module instance
+  // we need to put Graph as the first key since we need to check whether the graph
+  // is quantized before or not
+  std::unordered_map<Graph*, std::unordered_map<script::ModulePtr, std::unordered_map<Value*, QParamMap>>> values_to_qparams_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, QScheme> qscheme_for_graph_;
@@ -672,7 +675,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
     qscheme_for_graph_[g] = qscheme;
   }
   auto qparam_map = std::get<1>(tp);
-  values_to_qparams_[g].insert({new_value, qparam_map});
+  values_to_qparams_[g][module._ivalue()].insert({new_value, qparam_map});
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
@@ -704,7 +707,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g,
   if (!values_to_qparams_.count(g)) {
     return;
   }
-  for (auto& pr : values_to_qparams_.at(g)) {
+  for (auto& pr : values_to_qparams_.at(g).at(module._ivalue())) {
     auto* v = pr.first;
     const auto& qparams = pr.second;
     for (auto& pr : qparams) {
@@ -847,7 +850,7 @@ void InsertQuantDeQuantHelper::run(
   // We only need to register new parameters if the graph has
   // been quantized before
   if (values_to_qparams_.count(graph.get())) {
-    for (auto& pr : values_to_qparams_.at(graph.get())) {
+    for (auto& pr : values_to_qparams_.at(graph.get()).at(module._ivalue())) {
       Value* v = pr.first;
       const std::unordered_map<std::string, IValue>& qparams = pr.second;
       for (const auto& pr : qparams) {
