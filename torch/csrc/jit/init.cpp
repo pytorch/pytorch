@@ -428,7 +428,7 @@ void initJITBindings(PyObject* module) {
           buffer.attr("write")(std::move(bytes));
           return size;
         };
-        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void *, size_t)> &>())
       .def("write_record",
@@ -480,8 +480,8 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
-        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
-        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
