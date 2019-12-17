@@ -146,6 +146,20 @@ class AmpLists(object):
                            torch.randn((2,2,2), dtype=torch.float16, device="cuda"))),
             ("equal", pointwise0_fp32 + pointwise1_fp16),
         ]
+        self.torch_passthrough_user_supplied_out = [
+            ("eq", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("eq", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+            ("ge", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("ge", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+            ("gt", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("gt", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+            ("le", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("le", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+            ("lt", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("lt", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+            ("ne", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
+            ("ne", pointwise0_fp32 + pointwise1_fp16 + (1,)),
+        ]
         # self.torch_firstarg_inplace = []
         self.torch_firstarg_user_supplied_out = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16 + (pointwise3_fp16[0].clamp(0.1, 100),)),
@@ -157,13 +171,15 @@ class AmpLists(object):
             ("dot", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
         ]
         self.torch_expect_builtin_promote = [
-            ("eq", pointwise0_fp32 + pointwise1_fp16),
+            ("eq", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("ge", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("gt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("le", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("lt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("ne", pointwise0_fp32 + pointwise1_fp16, torch.bool),
         ]
         # self.torch_expect_builtin_promote_inplace = []
-        self.torch_expect_builtin_promote_user_supplied_out = [
-            ("eq", pointwise0_fp32 + pointwise1_fp16 + pointwise0_fp32),
-            ("eq", pointwise0_fp32 + pointwise1_fp16 + (1,)),
-        ]
+        # self.torch_expect_builtin_promote_user_supplied_out = []
         # self.torch_need_autocast_sequence_cast_ops = [
         #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
         #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
@@ -205,8 +221,18 @@ class AmpLists(object):
             ("addcdiv_", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
             ("addcmul_", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
             ("atan2_", pointwise0_fp32 + (pointwise1_fp16[0].clamp(0.1, 100),)),
+            ("eq_", pointwise0_fp32 + (1,)),
             ("eq_", pointwise0_fp32 + pointwise1_fp16),
-            ("eq_", pointwise0_fp32 + pointwise1_fp16),
+            ("ge_", pointwise0_fp32 + (1,)),
+            ("ge_", pointwise0_fp32 + pointwise1_fp16),
+            ("gt_", pointwise0_fp32 + (1,)),
+            ("gt_", pointwise0_fp32 + pointwise1_fp16),
+            ("le_", pointwise0_fp32 + (1,)),
+            ("le_", pointwise0_fp32 + pointwise1_fp16),
+            ("lt_", pointwise0_fp32 + (1,)),
+            ("lt_", pointwise0_fp32 + pointwise1_fp16),
+            ("ne_", pointwise0_fp32 + (1,)),
+            ("ne_", pointwise0_fp32 + pointwise1_fp16),
         ]
         # self.tensor_only_firstarg_user_supplied_out = []
         # self.tensor_only_expect_builtin_promote = []

@@ -2145,8 +2145,8 @@ t2.start()
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_amp_torch_expect_builtin_promote(self):
         with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.torch_expect_builtin_promote:
-                self._run_autocast_outofplace(op, args, torch.float32, out_type=torch.bool)
+            for op, args, out_type in self.amp_lists.torch_expect_builtin_promote:
+                self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
 
     def _run_autocast_user_supplied_out(self, op, args, run_as_type, out_type=None):
         # For ops with a user-supplied output, we can't cast the output.  Instead, backend runs
@@ -2181,16 +2181,16 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_torch_firstarg_user_supplied_out(self):
+    def test_amp_torch_passthrough_user_supplied_out(self):
         with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.torch_firstarg_user_supplied_out:
+            for op, args in self.amp_lists.torch_passthrough_user_supplied_out:
                 self._run_autocast_user_supplied_out(op, args, torch.float32)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_amp_torch_expect_builtin_promote_user_supplied_out(self):
+    def test_amp_torch_firstarg_user_supplied_out(self):
         with torch.cuda.amp.autocast():
-            for op, args in self.amp_lists.torch_expect_builtin_promote_user_supplied_out:
+            for op, args in self.amp_lists.torch_firstarg_user_supplied_out:
                 self._run_autocast_user_supplied_out(op, args, torch.float32)
 
     def _run_autocast_inplace(self, op, args, run_as_type):
