@@ -623,7 +623,7 @@ class InsertQuantDeQuantHelper {
   // Get quantization parameter map of the given Value in Graph
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
-  std::tuple<QScheme, QParamMap> getQSchemeAndQParamMap(script::Module& module, Value* v);
+  std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(script::Module& module, Value* v);
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -739,7 +739,7 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQParamMap(
+std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQParamMap(
     script::Module& module, Value* v) {
   TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
   auto observer_name = findObserverName(v);
