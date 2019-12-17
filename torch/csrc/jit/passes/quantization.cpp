@@ -665,7 +665,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   auto qscheme = std::get<0>(tp);
   if (qscheme_for_graph_.count(g)) {
     TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
-                "Quantizing same graph with multiple QScheme is not supported");
+                "Quantizing same graph with different QSchemes is not supported");
   } else {
     qscheme_for_graph_[g] = qscheme;
   }
