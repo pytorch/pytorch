@@ -41,7 +41,7 @@ llvm_map_components_to_libnames(LLVM_LINK_LIBS
 target_link_libraries(nnc PRIVATE ${LLVM_LINK_LIBS})
 
 add_custom_target(cpptest)
-add_subdirectory(tests/googletest/ EXCLUDE_FROM_ALL)
+add_subdirectory(../third_party/googletest/ googletest EXCLUDE_FROM_ALL)
 
 set(TEST_SRCS
   tests/expr_test.cc
@@ -55,6 +55,6 @@ foreach(test_path ${TEST_SRCS})
   add_executable(${test_exec} ${test_path})
   add_dependencies(cpptest ${test_exec})
   target_link_libraries(${test_exec} nnc gtest_main gtest)
-  set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_ALL 1)
+  #set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_ALL 1)
   set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
 endforeach()
