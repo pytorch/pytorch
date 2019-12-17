@@ -51,6 +51,17 @@ namespace jit {
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
+TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return TensorType::get()->withUndefined();
+  }
+  auto r = TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
+
 namespace {
 
 // insert Drop nodes to kill references for anything unused:
@@ -1010,9 +1021,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = t.defined() ? TensorType::create(t)
-                                      : TensorType::get()->withUndefined();
-            const TypePtr &expected = af.types[inst.X];
+            auto actual = tensorTypeInCurrentExecutionContext(t);
+            const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;
