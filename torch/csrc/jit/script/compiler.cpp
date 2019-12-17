@@ -2764,20 +2764,26 @@ struct to_ir {
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
         TypePtr elem_type = TensorType::get();
-        if (type_hint && type_hint->kind() == TypeKind::ListType) {
-          elem_type = type_hint->expect<ListType>()->getElementType();
+        if (type_hint) {
+          if (type_hint->kind() == TypeKind::ListType) {
+            elem_type = type_hint->expect<ListType>()->getElementType();
+          } else {
+            // If the type hint was not a List[T] throw an error
+            throw ErrorReport(tree)
+                << "Expected a List type hint but instead got "
+                << type_hint->python_str();
+          }
         } else if (!values.empty()) {
-          elem_type = values.at(0)->type();
+          std::stringstream ss;
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+          auto maybe_elem_type = unifyTypeList(types, ss);
+          if (!maybe_elem_type) {
+            throw ErrorReport(tree) << "Lists must contain only a single type\n"
+                                    << ss.str();
+          }
+          elem_type = maybe_elem_type.value();
         }
 
-        // Tensors are special because they have dymnamic properties. So any
-        // list containing tensors should be typed with the unified typeof all
-        // the elements.
-        if (elem_type->isSubtypeOf(TensorType::get())) {
-          for (const auto& value : values) {
-            elem_type = unifyTypes(elem_type, value->type()).value();
-          }
-        }
         for (auto v : values) {
           std::stringstream ss;
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
