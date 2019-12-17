@@ -17,7 +17,6 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -149,6 +148,9 @@ Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
+Tensor square(const Tensor& self) { return at::pow(self, 2); }
+Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
+
 Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
@@ -267,7 +269,7 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -278,7 +280,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
