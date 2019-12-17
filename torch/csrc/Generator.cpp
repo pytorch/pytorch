@@ -47,30 +47,41 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-    "Generator(Device device=None)"
+    "Generator(Device device=None)",
+    "Generator(int64_t impl=0)"
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
+  if (r.idx == 0) {
+    auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
-  THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
+    THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
-  if (device.type() == at::kCPU) {
-    self->cdata = new CPUGenerator();
-  } else if (device.type() == at::kCUDA){
-    self->cdata = new CUDAGenerator(device.index());
-  } else {
-    AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
-             " is not supported for torch.Generator() api.");
-  }
-#else
-  TORCH_CHECK(device.type() == at::kCPU,
-              "Device type ", c10::DeviceTypeName(device.type()),
+    if (device.type() == at::kCPU) {
+      self->cdata = new CPUGenerator();
+    } else if (device.type() == at::kCUDA){
+      self->cdata = new CUDAGenerator(device.index());
+    } else {
+      AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
               " is not supported for torch.Generator() api.");
-  self->cdata = new CPUGenerator();
+    }
+#else
+    TORCH_CHECK(device.type() == at::kCPU,
+                "Device type ", c10::DeviceTypeName(device.type()),
+                " is not supported for torch.Generator() api.");
+    self->cdata = new CPUGenerator();
 #endif
-  self->owner = true;
-  return (PyObject*)self.release();
+    self->owner = true;
+    return (PyObject*)self.release();
+  } else if (r.idx == 1) {
+    const auto impl = r.toInt64(0);
+    TORCH_INTERNAL_ASSERT(impl != 0, "Generator implementation must be specified");
+    THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
+    self->cdata = reinterpret_cast<Generator*>(impl);
+    self->owner = true;
+    return (PyObject*)self.release();
+  }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
