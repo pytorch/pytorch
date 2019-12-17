@@ -69,6 +69,14 @@ void initPythonCustomClassBindings(PyObject* module) {
         graph->eraseOutput(graph->outputs().size() - i - 1);
       }
       graph->registerOutput(self);
+
+      auto orig_schema = class_type->getMethod("__init__")->getSchema();
+      auto new_args = orig_schema.arguments();
+      new_args.erase(new_args.begin());
+      std::vector<Argument> new_returns{Argument("", class_type)};
+      auto schema = orig_schema.cloneWithArguments(new_args).cloneWithReturns(
+          new_returns);
+      ctor_wrapper->setSchema(schema);
     }
 
     return StrongFunctionPtr(classCU(), ctor_wrapper);
