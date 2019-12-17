@@ -73,13 +73,6 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
 int64_t SparseTensorImpl::dim() const {
   return sparse_dim_ + dense_dim_;
 }
-TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  TORCH_CHECK(condition_when_zero_dim == (dim() == 0),
-           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
-           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
-           " changing dimensionality via maybe_zero_dim");
-  return this;
-}
 bool SparseTensorImpl::has_storage() const {
   return false;
 }
@@ -99,7 +92,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(), ") must match device type of device().type()", device().type(), ")");
   TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", typeMetaToScalarType(dtype()), ")");
   TORCH_CHECK(indices.scalar_type() == kLong, "indices must be an int64 tensor");
-  TORCH_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
+  TORCH_CHECK(indices.options().backend() == values.options().backend(), "backend of indices (", indices.options().backend(), ") must match backend of values (", values.options().backend(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());

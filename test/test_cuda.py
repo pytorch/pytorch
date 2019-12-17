@@ -47,7 +47,8 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
-    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
+                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -960,9 +961,9 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # copy 10 MB tensor from CPU-GPU which should take some time
+        # Operate on 10 MB tensor which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(non_blocking=True)
+        tensor2 = tensor1.cuda(non_blocking=True) + 1
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1822,7 +1823,6 @@ class TestCuda(TestCase):
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/26838")
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -2075,7 +2075,6 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
-
 
 if __name__ == '__main__':
     run_tests()

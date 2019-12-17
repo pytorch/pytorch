@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/macros/Macros.h>
 
 
 namespace c10 {
@@ -65,11 +66,13 @@ struct maybe_real<true, src_t> {
 
 
 template <typename dest_t, typename src_t>
-C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
-  constexpr bool real = needs_real<dest_t, src_t>::value;
-  return static_cast<dest_t>(
-    static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
-}
+struct static_cast_with_inter_type {
+  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+    constexpr bool real = needs_real<dest_t, src_t>::value;
+    return static_cast<dest_t>(
+      static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
+  }
+};
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -118,13 +121,13 @@ C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
 //
 
 #ifdef C10_HOST_DEVICE
-#define ERROR_UNSUPPORTED_CAST assert(false);
+#define ERROR_UNSUPPORTED_CAST CUDA_KERNEL_ASSERT(false);
 #else
 #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
 #endif
 
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
+#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t, type>::apply(*(const type *)ptr);
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
@@ -136,7 +139,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 }
 
 // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type>(value); return;
+#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type, src_t>::apply(value); return;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
@@ -149,12 +152,12 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  assert(ScalarType::scalartype_ == src_type);                                    \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                    \
   return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
 C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  assert(ScalarType::scalartype_ == dest_type);                                   \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                   \
   *(T *)ptr = value;                                                              \
 }
 
