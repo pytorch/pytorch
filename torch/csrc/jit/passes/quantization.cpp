@@ -13,6 +13,8 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
+#include <c10/core/QScheme.h>
+
 #include <algorithm>
 #include <stack>
 
@@ -641,7 +643,7 @@ class InsertQuantDeQuantHelper {
   std::unordered_map<Graph*, std::unordered_map<script::ModulePtr, std::unordered_map<Value*, QParamMap>>> values_to_qparams_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
-  std::unordered_map<Graph*, QScheme> qscheme_for_graph_;
+  std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
