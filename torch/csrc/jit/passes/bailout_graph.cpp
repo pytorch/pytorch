@@ -140,20 +140,20 @@ struct BailOutGraphBuilderForNode {
     auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
 
     // We need to be careful when mapping `block_outputs` to continuation
-    // loop's inputs since `cloneFrom` will replace `%4` with the same value 
+    // loop's inputs since `cloneFrom` will replace `%4` with the same value
     // in both, `prim::Loop` and `aten::cat` in the example below:
     //
-    // ... : Tensor = prim::Loop(%MAX_TRIP_COUNT, %COND, ..., %4) 
+    // ... : Tensor = prim::Loop(%MAX_TRIP_COUNT, %COND, ..., %4)
     //   block0(%i.2 : int, ...):
     //     ...
     //     %y.5 : Double(3) = aten::cat(%22, %4)
     //     ...
     //
     // However for the cloned loop node, the values should be different.
-    // Namely, the value in `prim::Loop` should come from `lv.bodyBlock()->outputs()`
-    // which are mapped to the outputs of the current iteration
-    // whereas `%4` in `aten::cat` needs to be mapped to the cloned value of `%4`
-    // in a bailout graph.
+    // Namely, the value in `prim::Loop` should come from
+    // `lv.bodyBlock()->outputs()` which are mapped to the outputs of the
+    // current iteration whereas `%4` in `aten::cat` needs to be mapped to the
+    // cloned value of `%4` in a bailout graph.
 
     // remember the continuation loop carried dependencies
     // these will become `prim::Loop` inputs after cloning
@@ -161,11 +161,11 @@ struct BailOutGraphBuilderForNode {
         block_outputs, [this](Value* v) { return getOrAddInputForValue(v); });
 
     // add a dummy input for every loop input that we haven't seen
-    // so far unless it's a constant. 
+    // so far unless it's a constant.
     // a dummy value will prevent us adding/capturing new values into
     // a bailout graph since we already have the right values (i.e.
-    // continuation_block_outputs) we just want to avoid adding them to `old_to_new_`
-    // in order to avoid naming clashes described above
+    // continuation_block_outputs) we just want to avoid adding them to
+    // `old_to_new_` in order to avoid naming clashes described above
     for (auto li : lv.carriedInputsWithCond()) {
       if (li->node()->kind() == prim::Constant) {
         getOrAddInputForValue(li);
@@ -176,7 +176,7 @@ struct BailOutGraphBuilderForNode {
 
     auto new_loop = cloneNode(outer_node);
     LoopView new_lv(new_loop);
-    //finally, hook up new_loop->inputs() to `continuation_block_outputs`
+    // finally, hook up new_loop->inputs() to `continuation_block_outputs`
     const size_t MAX_TRIP_COUNT_INDEX = 0;
     new_loop->replaceInput(MAX_TRIP_COUNT_INDEX, updated_max_trip_count);
     const size_t LOOP_CARRIED_DEPS_WITH_COND = 1;
