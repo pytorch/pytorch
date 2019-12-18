@@ -859,10 +859,10 @@ void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-      std::cout << " in raw_cudnn_convolution_forward_out\n";
-    std::cout << input.sizes() << " " << input.strides() << "\n";
-    std::cout << output.sizes() << " " << output.strides() << "\n";
-      std::cout << weight.sizes() << " " << weight.strides() << "\n";
+    //   std::cout << " in raw_cudnn_convolution_forward_out\n";
+    // std::cout << input.sizes() << " " << input.strides() << "\n";
+    // std::cout << output.sizes() << " " << output.strides() << "\n";
+    //   std::cout << weight.sizes() << " " << weight.strides() << "\n";
   auto dataType = getCudnnDataType(input);
 
   ConvolutionArgs args{ input, output, weight };
@@ -882,7 +882,7 @@ void raw_cudnn_convolution_forward_out(
   cudnnConvolutionFwdAlgoPerf_t fwdAlgPerf;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlgPerf);
 
-  std::cout << " chooseAlgorithm raw_cudnn_convolution_forward_out\n";
+  // std::cout << " chooseAlgorithm raw_cudnn_convolution_forward_out\n";
 
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not
@@ -892,7 +892,7 @@ void raw_cudnn_convolution_forward_out(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  std::cout << " cudnnSetConvolutionMathType raw_cudnn_convolution_forward_out\n";
+  // std::cout << " cudnnSetConvolutionMathType raw_cudnn_convolution_forward_out\n";
 
   AT_CUDNN_CHECK(cudnnConvolutionForward(
     args.handle,
@@ -900,7 +900,7 @@ void raw_cudnn_convolution_forward_out(
     args.wdesc.desc(), weight.data_ptr(),
     args.cdesc.desc(), fwdAlgPerf.algo, workspace.data, workspace.size,
     &zero, args.odesc.desc(), output.data_ptr()));
-    std::cout << " out raw_cudnn_convolution_forward_out\n";
+    // std::cout << " out raw_cudnn_convolution_forward_out\n";
 }
 
 Tensor cudnn_convolution_forward(
@@ -927,9 +927,8 @@ Tensor cudnn_convolution_forward(
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // See #4500
-  // Tensor weight_contig = weight->contiguous(input->suggest_memory_format());
-  Tensor weight_contig = weight->contiguous();
-  // weight_contig.resize_(weight_contig.sizes(), input->suggest_memory_format());
+  Tensor weight_contig = weight->contiguous(input->suggest_memory_format());
+  weight_contig.resize_(weight_contig.sizes(), input->suggest_memory_format());
 
   raw_cudnn_convolution_forward_out(
       *output, *input, weight_contig,
@@ -943,13 +942,13 @@ Tensor cudnn_convolution(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
-  std::cout << "cudnn_convolution" << "\n";
-  std::cout << padding << "\n";
-  std::cout << stride << "\n";
-  std::cout << dilation << "\n";
-  std::cout << groups << "\n";
-  std::cout << benchmark << "\n";
-  std::cout << deterministic << "\n";
+  // std::cout << "cudnn_convolution" << "\n";
+  // std::cout << padding << "\n";
+  // std::cout << stride << "\n";
+  // std::cout << dilation << "\n";
+  // std::cout << groups << "\n";
+  // std::cout << benchmark << "\n";
+  // std::cout << deterministic << "\n";
 
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },

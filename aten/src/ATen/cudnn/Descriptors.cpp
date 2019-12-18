@@ -127,7 +127,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   dim = std::max(dim, pad);
   cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
   if (t.suggest_memory_format(/*channels_last_strides_exact_match=*/true) == at::MemoryFormat::ChannelsLast) {
-    std::cout << "Weights is channels last\n";
+    // std::cout << "Weights is channels last\n";
     filter_format = CUDNN_TENSOR_NHWC;
   } else {
     std::cout << "Weights is " << t.suggest_memory_format(/*channels_last_strides_exact_match=*/true) << " " << t.sizes() << " " << t.strides() << "\n";
