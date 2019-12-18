@@ -16,19 +16,7 @@ from torch._C import parse_schema
 #     believe you can land your diff before then.
 #
 # Whitelist entries can be removed after the date listed on them passes.
-white_list = [
-    ('c10_experimental', datetime.date(2020, 1, 1)),
-    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
-    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
-    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
-    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
-    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
-    ('_aten', datetime.date(2019, 12, 22)),
-    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
-    ('thnn_conv3d', datetime.date(9999, 1, 1)),
-    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
-    ('grad', datetime.date(2020, 1, 1)),
-]
+white_list = []
 
 
 def white_listed(schema, white_list):
@@ -43,6 +31,8 @@ def white_listed(schema, white_list):
 
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
+    is_bc = True
+    broken_ops = []
     for existing_schema in existing_schemas:
         if white_listed(existing_schema, white_list):
             print("skipping schema: ", str(existing_schema))
@@ -60,13 +50,17 @@ def check_bc(new_schema_dict):
                   .format(
                       str(existing_schema),
                       "\n\t".join(str(s) for s in new_schemas)))
-            print('The PR is introducing backward incompatible changes to the '
-                  'operator library. Please contact PyTorch team to confirm '
-                  'whether this change is wanted or not.')
             # TODO Print out more details about why candidates don't match.
-            return False
-    print('Found backward compatible schemas for all existing schemas')
-    return True
+            broken_ops.append(str(existing_schema))
+            is_bc = False
+    if is_bc:
+        print('Found backward compatible schemas for all existing schemas')
+    else:
+        print('The PR is introducing backward incompatible changes to the '
+              'operator library. Please contact PyTorch team to confirm '
+              'whether this change is wanted or not. \n Broken ops: [\n{}]'
+              .format("\n".join(broken_ops)))
+    return is_bc
 
 
 if __name__ == '__main__':
