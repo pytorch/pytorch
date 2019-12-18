@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/DispatchStub.h>
 
 
 /**
@@ -43,6 +44,16 @@
 
 namespace at {
 namespace native {
+
+using upsampling_1d = void(*)(Tensor& output, const Tensor& input, double scales_1);
+using upsampling_2d = void(*)(Tensor& output, const Tensor& input, double scales_1, double scales_2);
+using upsampling_3d = void(*)(Tensor& output, const Tensor& input, double scales_1, double scales_2, double scales_3);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_kernel);
+DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_backward_kernel);
+DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_backward_kernel);
+DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_backward_kernel);
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
