@@ -109,6 +109,10 @@ def _get_builtin_table():
     if PY37:
         _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
+    import torch.distributed.autograd as dist_autograd
+    if dist_autograd.is_available():
+        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
+
     return _builtin_table
 
 
