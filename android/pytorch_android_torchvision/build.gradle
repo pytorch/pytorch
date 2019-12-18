@@ -13,7 +13,9 @@ android {
         versionName "0.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-
+        ndk {
+            abiFilters ABI_FILTERS.split(",")
+        }
     }
 
     buildTypes {
@@ -23,6 +25,12 @@ android {
         }
         release {
             minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
         }
     }
 

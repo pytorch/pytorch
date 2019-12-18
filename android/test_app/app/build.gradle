@@ -49,6 +49,7 @@ android {
     }
     packagingOptions {
         doNotStrip '**.so'
+        pickFirst '**/libfbjni.so'
     }
 }
 
