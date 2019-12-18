@@ -40,7 +40,7 @@ struct TORCH_API Object {
           v.type()->python_str(),
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
-    } else if (_ivalue()->type()->findConstantSlot(name)) {
+    } else if (_ivalue()->type()->hasConstant(name)) {
       TORCH_CHECK(
           false,
           "Can't set constant '",
