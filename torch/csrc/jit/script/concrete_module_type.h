@@ -196,7 +196,8 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, py::object> getConstantsPy() const;
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
-  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
+  std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
+  getModulesPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
     if (jitType_ == other.jitType_) {
