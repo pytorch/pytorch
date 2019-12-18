@@ -20,22 +20,26 @@ of a call to `torch::jit::save()` or `torch::jit::load()`.
 ## Overview
 
 A serialized model (call it `model.pt`) is a ZIP archive containing many
-files. It can be directly inspected by calling `unzip` on it. The archive's
-file structure looks like:
+files. If you want to manually crack it open, you can call `unzip` on it to
+inspect the file structure directly:
 
 ```
-model.pt
-|-- code/
-    |-- __torch__.py
-    |-- __torch__.py.debug_pkl
-    |-- foo/
-        |-- bar.py
-        |-- bar.py.debug_pkl
-|-- data.pkl
-|-- constants.pkl
-|-- tensors/
-    |-- 0
-    |-- 1
+$ unzip model.pt
+Archive:  model.pt
+  extracting ...
+
+$ tree model/
+├── code/
+│   ├── __torch__.py
+│   ├── __torch__.py.debug_pkl
+│   ├── foo/
+│   │   ├── bar.py
+│   │   ├── bar.py.debug_pkl
+├── data.pkl
+├── constants.pkl
+└── tensors/
+    ├── 0
+    └── 1
 ```
 
 You'll notice that there are `.py` and `.pkl` files in this archive. That's
@@ -241,7 +245,7 @@ All data is written into the `data.pkl` file with the exception of tensors
 submodules, etc.
 
 PyTorch functions defined in [torch/jit/_pickle.py](../../../jit/_pickle.py)
-used to mark special data types, such as this tensor table index or
+are used to mark special data types, such as this tensor table index or
 specialized lists.
 
 ## `tensors/`: How tensors are serialized
@@ -284,7 +288,7 @@ The load process has the following steps:
 2. Unpickle `data.pkl` into the top-level `script::Module` and return it.
 
 The unpickling process consists of a single call to unpickle the module
-object contained `data.pkl`. The `Unpickler` is given a callback that lets it
+object contained in `data.pkl`. The `Unpickler` is given a callback that lets it
 resolved any qualified names it encounters into `ClassType`s. This is done by
 resolving the qualified name to the appropriate file in `code/`, then
 compiling that file and returning the appropriate `ClassType`.
