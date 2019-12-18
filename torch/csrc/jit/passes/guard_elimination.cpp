@@ -67,16 +67,56 @@ struct GuardElimination {
       }
     }
 
-    if (b->owningNode() &&
-        isLoweredGradOf(
-            b->owningNode()) /*b->owningNode()->kind() == prim::If*/) {
-      for (auto it = b->nodes().begin(); it != b->nodes().end();) {
-        auto block_node = *it++;
-        if (block_node->kind() != prim::Guard) {
+    if (b->owningNode() && b->owningNode()->kind() == prim::If) {
+      auto other_index = static_cast<size_t>(b->owningNode()->blocks()[0] == b);
+      auto other = b->owningNode()->blocks()[other_index];
+      std::unordered_map<Value*, Value*> other_guards;
+      for (auto other_node : other->nodes()) {
+        if (other_node->kind() != prim::Guard) {
           break;
         }
-        block_node->moveBefore(b->owningNode());
-        changed = true;
+        GRAPH_DEBUG("adding ", getHeader(other_node), " to other_guards");
+        other_guards[other_node->input(0)] = other_node->output();
+      }
+
+      for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+        auto this_node = *it++;
+        if (this_node->kind() != prim::Guard) {
+          break;
+        }
+
+        auto this_type = this_node->output()->type()->expect<TensorType>();
+
+        // this guard wasn't profiled, so no point to hoist it out
+        if (this_type == TensorType::get()) {
+          GRAPH_DEBUG(getHeader(this_node), " wasn't profiled");
+          continue;
+        }
+
+        // there's no corresponding guard in the other block of this If
+        if (other_guards.count(this_node->input(0)) == 0) {
+          GRAPH_DEBUG(
+              "Couldn't find the matching guard for %",
+              this_node->input(0)->debugName());
+          continue;
+        }
+
+        auto other_type =
+            other_guards[this_node->input(0)]->type()->expect<TensorType>();
+        // if the other type wasn't profiled
+        // let's hoist this guard out
+        if (other_type == TensorType::get()) {
+          this_node->moveBefore(b->owningNode());
+          changed = true;
+        } else {
+          // TODO: implement merge of two profiled tensors
+          // Note, this is different from TensorType::merge since
+          // we don't want to degrade profiling information
+          GRAPH_DEBUG(
+              "other guard ",
+              getHeader(other_guards[this_node->input(0)]->node()),
+              " is profiled.");
+        }
       }
     }
 
