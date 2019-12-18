@@ -45,6 +45,7 @@
 // Only catch torch-specific exceptions
 #define CATCH_TH_ERRORS(retstmnt)                                    \
     catch (python_error & e) {                                       \
+      e.restore();                                                   \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
