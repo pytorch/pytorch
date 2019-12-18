@@ -1,4 +1,4 @@
-#include "llvm_jit.h"
+#include "torch/csrc/jit/compiler/include/llvm_jit.h"
 
 #include <algorithm>
 #include <memory>
