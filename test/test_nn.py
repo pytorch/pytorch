@@ -9260,6 +9260,7 @@ class TestNNDeviceType(NNTestCase):
                     grad_input, = torch.autograd.grad(output, input, create_graph=True)
                     grad_input.sum().backward()
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
