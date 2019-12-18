@@ -538,6 +538,13 @@ rather build up the result tensor out-of-place with ``torch.cat``:
 
     ...
 
+.. _Builtin functions:
+
+Built-in Functions and Modules
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+See :ref:`builtin-functions` for a full reference of supported functions.
+
 
 Frequently Asked Questions
 --------------------------
