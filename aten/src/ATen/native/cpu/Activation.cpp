@@ -235,7 +235,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void softshrink_kernel(TensorIterator& iter, Scalar lambd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
       return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
@@ -272,6 +272,45 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
         });
   });
 }
+
+static void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    auto zero_vec = Vec((scalar_t)(0));
+    auto one_vec = Vec((scalar_t)(1));
+    scalar_t negval = negval_.to<scalar_t>();
+    Vec negval_v = Vec(negval);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t a) -> scalar_t {
+          return a > scalar_t(0) ? a : a * negval;
+        },
+        [&](Vec a) -> Vec {
+          auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
+          return a * r;
+        });
+  });
+}
+
+static void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    auto zero_vec = Vec((scalar_t)(0));
+    auto one_vec = Vec((scalar_t)(1));
+    scalar_t negval = negval_.to<scalar_t>();
+    Vec negval_v = Vec(negval);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t a, scalar_t b) -> scalar_t {
+          return a > scalar_t(0) ? b : b * negval;
+        },
+        [&](Vec a, Vec b) -> Vec {
+          auto r = Vec::blendv(negval_v, one_vec, a > zero_vec);
+          return b * r;
+        });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
@@ -283,6 +322,8 @@ REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
+REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
+REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 
 } // namespace native
 } // namespace at

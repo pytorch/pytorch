@@ -36,20 +36,6 @@ TH_API void THNN_(GatedLinear_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t input
           int dim);                    // dimension for halving operation
 
-TH_API void THNN_(LeakyReLU_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // [MODIFIED] input tensor
-          THTensor *output,            // [OUT] output tensor
-          accreal negval,              // negative part slope
-          bool inplace);               // if true, modifies the input tensor and sets the output tensor on it (no additional memory is allocated)
-TH_API void THNN_(LeakyReLU_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *gradOutput,        // [MODIFIED] gradient w.r.t. module's output
-          THTensor *gradInput,         // [OUT] gradient w.r.t. the input
-          accreal negval,              // negative part slope
-          bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
-
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
