@@ -1,6 +1,6 @@
-#include "expr.h"
+#include "torch/csrc/jit/compiler/include/expr.h"
 
-#include "ir.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
 
 namespace torch {
 namespace jit {

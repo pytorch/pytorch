@@ -1,12 +1,11 @@
-#ifndef NNC_INCLUDE_FUNCTION_H_INCLUDED__
-#define NNC_INCLUDE_FUNCTION_H_INCLUDED__
+#pragma once
 
 #include <functional>
 #include <vector>
 
-#include "expr.h"
-#include "ir.h"
-#include "refcount.h"
+#include "torch/csrc/jit/compiler/include/expr.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
+#include "torch/csrc/jit/compiler/include/refcount.h"
 
 namespace torch {
 namespace jit {
@@ -62,5 +61,3 @@ class Function : public RefHandle<FunctionNode> {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_FUNCTION_H_INCLUDED__

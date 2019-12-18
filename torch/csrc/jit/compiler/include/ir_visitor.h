@@ -1,5 +1,4 @@
-#ifndef NNC_INCLUDE_IR_VISITOR_H_INCLUDED_
-#define NNC_INCLUDE_IR_VISITOR_H_INCLUDED_
+#pragma once
 
 namespace torch {
 namespace jit {
@@ -43,5 +42,3 @@ class IRVisitor {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_IR_VISITOR_H_INCLUDED_

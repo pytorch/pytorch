@@ -1,11 +1,10 @@
-#ifndef NNC_INCLUDE_TENSOR_H_INCLUDED__
-#define NNC_INCLUDE_TENSOR_H_INCLUDED__
+#pragma once
 
 #include <vector>
 
-#include "expr.h"
-#include "function.h"
-#include "refcount.h"
+#include "torch/csrc/jit/compiler/include/expr.h"
+#include "torch/csrc/jit/compiler/include/function.h"
+#include "torch/csrc/jit/compiler/include/refcount.h"
 
 namespace torch {
 namespace jit {
@@ -52,5 +51,3 @@ Tensor Compute(const std::vector<Expr>& dims, std::vector<std::string> arg_name_
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_TENSOR_H_INCLUDED__

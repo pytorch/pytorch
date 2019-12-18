@@ -1,5 +1,4 @@
-#ifndef NNC_INCLUDE_LOGGING_H_INCLUDED__
-#define NNC_INCLUDE_LOGGING_H_INCLUDED__
+#pragma once
 
 #include <iostream>
 #include <sstream>
@@ -141,5 +140,3 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_LOGGING_H_INCLUDED__

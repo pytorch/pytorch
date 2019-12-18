@@ -1,6 +1,6 @@
-#include "function.h"
+#include "torch/csrc/jit/compiler/include/function.h"
 
-#include "tensor.h"
+#include "torch/csrc/jit/compiler/include/tensor.h"
 
 namespace torch {
 namespace jit {

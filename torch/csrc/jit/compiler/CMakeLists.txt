@@ -33,7 +33,7 @@ add_library(nnc
 
 set_source_files_properties(src/llvm_jit.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
 
-target_include_directories(nnc PUBLIC "include")
+target_include_directories(nnc PUBLIC "../../../../")
 
 llvm_map_components_to_libnames(LLVM_LINK_LIBS
   support core irreader analysis executionengine instcombine object orcJIT
