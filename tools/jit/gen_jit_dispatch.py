@@ -385,6 +385,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
+        'use_c10_dispatcher': 'unboxed_only',
     } for name in ['sizes', 'strides', 'dim', 'numel']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
@@ -458,8 +459,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
-                                                 op=emit_decl_variant(decl)))
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
+                shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+                                                     op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
         env = {
