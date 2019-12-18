@@ -70,9 +70,6 @@
 #include <THNN/generic/LogSigmoid.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SoftMarginCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/RReLU.c>
 #include <TH/THGenerateFloatTypes.h>
 
