@@ -257,14 +257,6 @@ public final class TensorImageUtils {
     }
   }
 
-  private static final int clamp0255(int c) {
-    return c > 255 ? 255 : c < 0 ? 0 : c;
-  }
-
-  private static final int clamp(int c, int min, int max) {
-    return c < min ? min : c > max ? max : c;
-  }
-
   private static void checkNormStdArg(float[] normStdRGB) {
     if (normStdRGB.length != 3) {
       throw new IllegalArgumentException("normStdRGB length must be 3");
