@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
@@ -50,6 +51,7 @@ Reducer::Reducer(
       require_finalize_(false),
       next_bucket_(0),
       has_marked_unused_parameters_(false),
+      local_used_maps_reduced_(false),
       backward_stats_base_(0) {
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -159,6 +161,35 @@ Reducer::Reducer(
         backward_stats_.end(),
         [=](std::vector<int64_t>& v) { v.resize(variable_count); });
   }
+
+  // Initialize locally used parameter maps
+  {
+    const auto replica_count = replicas_.size();
+    const auto variable_count = replicas_[0].size();
+    local_used_maps_.resize(replica_count);
+    local_used_maps_dev_.resize(replica_count);
+
+    for (size_t i = 0; i < replica_count; i++) {
+      at::TensorOptions options, options_host;
+      options = options.dtype(at::kInt);
+
+      if (replicas_[i][0].is_cuda()) {
+        at::DeviceGuard g(replicas_[i][0].device());
+        local_used_maps_[i] = at::zeros(
+            {static_cast<long>(variable_count)}, options.pinned_memory(true));
+      } else {
+        local_used_maps_[i] =
+            at::zeros({static_cast<long>(variable_count)}, options);
+      }
+
+      // This tensor needs to be on the same device as replica because backend
+      // such as NCCL may not support CPU tensors, and hence it might not work
+      // if we always put it on CPU.
+      options = options.device(replicas_[i][0].device());
+      local_used_maps_dev_[i] =
+          at::empty({static_cast<long>(variable_count)}, options);
+    }
+  }
 }
 
 Reducer::~Reducer() noexcept(false) {
@@ -238,6 +269,11 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  // Since it gets here, this param has been used for this iteration. We want
+  // to mark it in local_used_maps_. During no_sync session, the same var can
+  // be set multiple times, which is OK as does not affect correctness. As long
+  // as it is used once during no_sync session, it is marked as used.
+  local_used_maps_[index.replica_index][index.variable_index] = 1;
 
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
@@ -328,8 +364,17 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     }
   }
 
-  // Run finalizer function once the final bucket was marked ready.
+  // Run finalizer function and kick off reduction for local_used_maps once the
+  // final bucket was marked ready.
   if (next_bucket_ == buckets_.size()) {
+    // H2D from local_used_maps_ to local_used_maps_dev_
+    for (size_t i = 0; i < local_used_maps_.size(); i++) {
+      // We do async H2D to avoid the blocking overhead. The async copy and
+      // allreduce respect the current stream, so will be sequenced correctly.
+      local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+    }
+    local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
+
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       this->finalize_backward();
@@ -475,6 +520,7 @@ void Reducer::initialize_buckets(
           .intra_bucket_index = intra_bucket_index++,
       };
     }
+    bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
     buckets_.push_back(std::move(bucket));
   }
@@ -575,20 +621,61 @@ void Reducer::prepare_for_backward(
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  for (auto& replica : bucket.replicas) {
+  for (size_t replica_index = 0; replica_index < bucket.replicas.size();
+       replica_index++) {
+    auto& replica = bucket.replicas[replica_index];
     for (size_t intra_bucket_index = 0;
          intra_bucket_index < replica.variables.size();
          intra_bucket_index++) {
       auto& variable = replica.variables[intra_bucket_index];
       const auto offset = replica.offsets[intra_bucket_index];
       const auto length = replica.lengths[intra_bucket_index];
+
+      // Determine if this param has been used globally or not.
+      //
+      // If the variable was used locally, it is also used globally and then
+      // we don't need to wait for the reduction. Otherwise we lazily wait for
+      // the reduction to complete, only when we see a variable that was unused
+      // locally. Then we end up delaying the synchronization point that
+      // local_used_work_->wait() implies. If we don't have any unused
+      // parameters at all, we can skip waiting for the work to complete
+      // altogether, and cause negligible performance overhead for models where
+      // all parameters are used. Such lazily waiting means minimizing
+      // performance impact for the big majority of models where all parameters
+      // are always used. Then we only pay the overhead cost if there is indeed
+      // a parameter that is locally unused, because we need to check if it's
+      // also globally unused.
+      size_t variable_index = bucket.variable_indices[intra_bucket_index];
+      // Note: global_unused might not be global yet. As we lazily wait for the
+      // reduction to complete, it becomes really global only if we get to the
+      // point as below where we wait for the reduction work, make D2H copy,
+      // and update global_unused with the real global consensus, i.e.
+      // local_used_maps_reduced_ is true.
+      bool global_unused =
+          local_used_maps_[replica_index][variable_index].item<int>() == 0;
+      if (global_unused && !local_used_maps_reduced_) {
+        // Wait for local_used_maps reduction to complete.
+        local_used_work_->wait();
+        // D2H from local_used_maps_dev_ to local_used_maps_
+        for (size_t i = 0; i < local_used_maps_.size(); i++) {
+          local_used_maps_[i].copy_(local_used_maps_dev_[i]);
+        }
+        global_unused =
+            local_used_maps_[replica_index][variable_index].item<int>() == 0;
+        local_used_maps_reduced_ = true;
+      }
+
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
       auto& grad = variable.grad();
-      if (!grad.defined()) {
-        grad = at::empty(bucket_view.sizes(), bucket_view.options());
+
+      // If a parameter is globally unused, we keep its grad untouched.
+      if (!global_unused) {
+        if (!grad.defined()) {
+          grad = at::empty(bucket_view.sizes(), bucket_view.options());
+        }
+        grad.copy_(bucket_view);
       }
-      grad.copy_(bucket_view);
     }
   }
 }
@@ -628,6 +715,21 @@ void Reducer::finalize_backward() {
       finalize_bucket_dense(bucket);
     }
   }
+
+  // Reset unused parameter accounting.
+  for (auto& local_used : local_used_maps_) {
+    local_used.fill_(0);
+  }
+  // Due to the lazy wait, it is possible that reduction of the current
+  // iteration is still going when the one for next iteration gets kicked off.
+  // For such case, we want to wait explicitly to make sure the reduction does
+  // complete before kicking off next one. Otherwise the prevous one may
+  // interfere, write to the device-side memory and clobber the content of
+  // local_unused_maps_dev_.
+  if (!local_used_maps_reduced_) {
+    local_used_work_->wait();
+  }
+  local_used_maps_reduced_ = false;
 }
 
 namespace {

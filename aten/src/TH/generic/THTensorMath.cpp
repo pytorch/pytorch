@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
 
