@@ -69,7 +69,7 @@ class Conf(object):
             job_def["requires"].append("update_s3_htmls_for_nightlies_devtoolset7")
             job_def["filters"] = {"branches": {"only": "postnightly"}}
         else:
-            job_def["filters"] = {"branches": {"only": "nightly"}}
+            job_def["filters"] = {"branches": {"only": ["nightly","/rc-.*/"]}}
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
