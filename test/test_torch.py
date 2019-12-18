@@ -7472,7 +7472,7 @@ class TestTorchDeviceType(TestCase):
         chol = torch.cholesky(a)
         chol_inv = torch.triangular_solve(torch.eye(5, device=device, dtype=dtype),
                                           chol, upper=False)[0]
-        inv0 = chol_inv.t() @ chol_inv
+        inv0 = chol_inv.t().mm(chol_inv)
 
         # default case
         chol = torch.cholesky(a)
