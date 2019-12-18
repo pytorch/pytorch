@@ -196,8 +196,8 @@ std::string wireSerialize(
     auto worthRecopying = [](const at::Tensor& t) -> bool {
       auto storageSize = t.storage().elementSize() * t.storage().numel();
       auto usefulSize = t.element_size() * t.numel();
-      static const size_t kMinMultiple = 2;
-      static const size_t kMinRecopyBytes = 8 * 1024;
+      constexpr size_t kMinMultiple = 2;
+      constexpr size_t kMinRecopyBytes = 8 * 1024;
       return storageSize >= kMinRecopyBytes &&
           storageSize >= usefulSize * kMinMultiple;
     };

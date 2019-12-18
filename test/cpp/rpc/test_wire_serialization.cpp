@@ -40,7 +40,7 @@ TEST(WireSerialize, Base) {
 
 TEST(WireSerialize, RecopySparseTensors) {
   // Take a 1K row of a 1M tensors, and make sure we don't send across 1M rows.
-  static const size_t k1K = 1024;
+  constexpr size_t k1K = 1024;
   at::Tensor main = torch::randn({k1K, k1K});
   at::Tensor tiny = main.select(0, 2); // Select a row in the middle
   EXPECT_EQ(tiny.numel(), k1K);

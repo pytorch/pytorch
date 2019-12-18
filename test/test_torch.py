@@ -19,6 +19,7 @@ import types
 import textwrap
 import zipfile
 from torch._utils_internal import get_file_path_2
+from torch.serialization import check_module_version_greater_or_equal
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
@@ -28,7 +29,7 @@ from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
-from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, TEST_DILL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
@@ -53,7 +54,15 @@ if TEST_SCIPY:
 if TEST_LIBROSA:
     import librosa
 
+if TEST_DILL:
+    import dill
+    HAS_DILL_AT_LEAST_0_3_1 = check_module_version_greater_or_equal(dill, (0, 3, 1))
+else:
+    HAS_DILL_AT_LEAST_0_3_1 = False
+
 SIZE = 100
+
+
 
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
@@ -4146,6 +4155,38 @@ class _TestTorchMixin(object):
         self.assertTrue(m.kernel_size == m_loaded.kernel_size)
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
+
+    @unittest.skipIf(
+        not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
+        '"dill" not found or is correct version'
+    )
+    def test_serialization_dill_version_not_supported(self):
+        x = torch.randn(5, 5)
+
+        with tempfile.NamedTemporaryFile() as f:
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
+                torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
+                x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+
+    @unittest.skipIf(
+        not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
+        '"dill" not found or not correct version'
+    )
+    def test_serialization_dill(self):
+        x = torch.randn(5, 5)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+            self.assertIsInstance(x2, type(x))
+            self.assertEqual(x, x2)
+            f.seek(0)
+            x3 = torch.load(f, pickle_module=dill)
+            self.assertIsInstance(x3, type(x))
+            self.assertEqual(x, x3)
 
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
