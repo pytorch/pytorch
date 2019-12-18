@@ -270,12 +270,12 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
-    const {
-  std::vector<std::pair<std::string, TypePtr>> ret;
+std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
+ConcreteModuleType::getModulesPy() const {
+  std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_->getJitType()));
+    ret.emplace_back(std::make_pair(info.name_, info.meta_));
   }
   return ret;
 }
