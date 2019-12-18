@@ -5440,29 +5440,17 @@
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_forward_out
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward_out
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_forward
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward
 
 - func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_backward_out
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward_out
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_backward
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5532,35 +5520,23 @@
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_leaky_relu_forward_out
-    CUDA: legacy::cuda::_thnn_leaky_relu_forward_out
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_leaky_relu_forward
-    CUDA: legacy::cuda::_thnn_leaky_relu_forward
 
 - func: leaky_relu_backward.grad_input(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_leaky_relu_backward_out
-    CUDA: legacy::cuda::_thnn_leaky_relu_backward_out
+    CPU: leaky_relu_backward_out
+    CUDA: leaky_relu_backward_out
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_leaky_relu_backward
-    CUDA: legacy::cuda::_thnn_leaky_relu_backward
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_leaky_relu_forward_
-    CUDA: legacy::cuda::_thnn_leaky_relu_forward_
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
