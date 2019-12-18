@@ -198,7 +198,6 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 template<class T>
 class List final {
 private:
-
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.

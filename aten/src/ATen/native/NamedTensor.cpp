@@ -2,11 +2,9 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <bitset>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
 Tensor& rename_(Tensor& self, optional<DimnameList> names) {
@@ -324,13 +322,14 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList
       "up to the size of dim ", dim, " (", self.names()[dim], ": ", self.size(dim),
       ") in Tensor", self.names());
 
+  int64_t dim_wrap = maybe_wrap_dim(dim, self.dim());
   auto outnames = self.names().vec();
-  outnames.erase(outnames.begin() + dim);
-  outnames.insert(outnames.begin() + dim, names.begin(), names.end());
+  outnames.erase(outnames.begin() + dim_wrap);
+  outnames.insert(outnames.begin() + dim_wrap, names.begin(), names.end());
 
   auto new_sizes = self.sizes().vec();
-  new_sizes.erase(new_sizes.begin() + dim);
-  new_sizes.insert(new_sizes.begin() + dim, sizes.begin(), sizes.end());
+  new_sizes.erase(new_sizes.begin() + dim_wrap);
+  new_sizes.insert(new_sizes.begin() + dim_wrap, sizes.begin(), sizes.end());
 
   Tensor result;
   {
@@ -345,7 +344,6 @@ Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList
   return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 // Misc. Dimname overloads that don't have homes. Maybe we should move
 // all of them here or autogenerate them because they look so similar.
 Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
@@ -415,7 +413,5 @@ Tensor squeeze(const Tensor& self, Dimname dim) {
   return at::squeeze(self, dimname_to_position(self, dim));
 }
 
-#endif
 
 }}  // namespace at::native
-#endif

@@ -173,10 +173,10 @@ struct CAFFE2_API IValue final {
 
   template <
       typename... Args,
-      c10::guts::enable_if_t<
-          !c10::guts::disjunction<
+      std::enable_if_t<
+          !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              guts::negation<std::is_constructible<IValue, Args>>...>::
               value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
@@ -275,7 +275,6 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(const std::vector<T>& v);
 
-
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
   bool isGenericDict() const { return Tag::GenericDict == tag; }
@@ -287,7 +286,7 @@ struct CAFFE2_API IValue final {
 
   template<class Key, class Value>
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+  [[deprecated("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 

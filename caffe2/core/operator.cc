@@ -62,7 +62,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       newstyle_outputs_(),
 #endif
       input_size_(operator_def.input_size()),
-      event_(caffe2::make_unique<Event>(device_option_)) {
+      event_(std::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
   inputs_.reserve(operator_def.input_size());
   for (const string& input_str : operator_def.input()) {

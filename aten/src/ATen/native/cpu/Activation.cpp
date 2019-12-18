@@ -135,6 +135,28 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 #endif // AT_MKL_ENABLED()
 
+void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    cpu_kernel(it, [=](scalar_t a) -> scalar_t {
+      return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+    });
+  });
+}
+
+void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    cpu_kernel(it, [=](scalar_t a, scalar_t b) -> scalar_t {
+      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    });
+  });
+}
+
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
@@ -197,7 +219,7 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
   }
 }
 
-void hardshrink_cpu_kernel(TensorIterator& iter, Scalar lambd) {
+void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
@@ -212,8 +234,17 @@ void hardshrink_cpu_kernel(TensorIterator& iter, Scalar lambd) {
   });
 }
 
-void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
+void softshrink_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cuda", [&]() {
+    auto lambd_val = lambd.to<scalar_t>();
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+      return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
+    });
+  });
+}
+
+void shrink_backward_kernel(TensorIterator& iter, Scalar lambd) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
         iter,
@@ -227,15 +258,31 @@ void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
   });
 }
 
+void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
+    auto min_val = min.to<scalar_t>();
+    auto max_val = max.to<scalar_t>();
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t grad_val, scalar_t self_val) {
+          return (self_val <= min_val || self_val >= max_val) ? scalar_t(0) : grad_val;
+        },
+        [=](Vec256<scalar_t> grad_val, Vec256<scalar_t> self_val) {
+          return ((self_val > min_val) & (self_val < max_val)) & grad_val;
+        });
+  });
+}
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
+REGISTER_DISPATCH(elu_stub, &elu_kernel);
+REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
 REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
-REGISTER_DISPATCH(hardshrink_cpu_stub, &hardshrink_cpu_kernel);
-REGISTER_DISPATCH(
-    hardshrink_backward_cpu_stub,
-    &hardshrink_backward_cpu_kernel);
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
+REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
+REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 
 } // namespace native
 } // namespace at

@@ -1981,6 +1981,31 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
+add_docstr(torch.floor_divide,
+           r"""
+floor_divide(input, other) -> Tensor
+
+Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
+for type promotion and broadcasting rules.
+
+.. math::
+    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+
+""" + r"""
+Args:
+    input (Tensor): the numerator tensor
+    other (Tensor or Scalar): the denominator
+
+Example::
+
+    >>> a = torch.tensor([4.0, 3.0])
+    >>> b = torch.tensor([2.0, 2.0])
+    >>> torch.floor_divide(a, b)
+    tensor([2.0, 1.0])
+    >>> torch.floor_divide(a, 1.4)
+    tensor([2.0, 2.0])
+""".format(**common_args))
+
 add_docstr(torch.fmod,
            r"""
 fmod(input, other, out=None) -> Tensor
@@ -3099,7 +3124,7 @@ add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
 
-Returns the maximum value of all elements in the :attr:`input` tensor.
+Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
@@ -3119,10 +3144,16 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each maximum value found
 (argmax).
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having 1 fewer dimension than :attr:`input`.
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    maximal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
+
+If ``keepdim`` is ``True``, the output tensors are of the same size
+as ``input`` except in the dimension ``dim`` where they are of size 1.
+Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
@@ -3143,15 +3174,15 @@ Example::
 
 .. function:: max(input, other, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise maximum is taken.
+Each element of the tensor ``input`` is compared with the corresponding
+element of the tensor ``other`` and an element-wise maximum is taken.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match,
+The shapes of ``input`` and ``other`` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \max(\text{tensor}_i, \text{other}_i)
-""" + r"""
+    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
+
 .. note:: When the shapes do not match, the shape of the returned output tensor
           follows the :ref:`broadcasting rules <broadcasting-semantics>`.
 
@@ -3339,6 +3370,12 @@ Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
 value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each minimum value found
 (argmin).
+
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    minimal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -4320,7 +4357,8 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, \
+        dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -5050,6 +5088,25 @@ Example::
     tensor([-2.0755,  1.0226,  0.0831,  0.4806])
     >>> torch.sqrt(a)
     tensor([    nan,  1.0112,  0.2883,  0.6933])
+""".format(**common_args))
+
+add_docstr(torch.square,
+           r"""
+square(input, out=None) -> Tensor
+
+Returns a new tensor with the square of the elements of :attr:`input`.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    >>> torch.square(a)
+    tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
 """.format(**common_args))
 
 add_docstr(torch.squeeze,

@@ -65,7 +65,7 @@ std::shared_ptr<Operator> ScriptCall::fromIValues(
     // remove str_schema from ivalues
     return op;
   } else {
-    AT_ERROR("Unrecognized qualified name ", qualifiedName);
+    TORCH_CHECK(false, "Unrecognized qualified name ", qualifiedName);
   }
 }
 
@@ -89,7 +89,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
 
   auto values = value.toTuple()->elements();
   auto op = fromIValues(values);
-  return c10::guts::make_unique<ScriptCall>(op, std::move(values));
+  return std::make_unique<ScriptCall>(op, std::move(values));
 }
 
 std::shared_ptr<Operator> ScriptCall::matchOperator(
@@ -107,7 +107,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
     }
   }
 
-  AT_ERROR("Cannot find matching operator for schema ", str_schema);
+  TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
 }
 
 } // namespace rpc

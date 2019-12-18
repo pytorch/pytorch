@@ -9,7 +9,7 @@ using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::TensorTypeId;
 using c10::Stack;
-using c10::guts::make_unique;
+using std::make_unique;
 using c10::intrusive_ptr;
 using c10::Dict;
 using at::Tensor;

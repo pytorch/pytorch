@@ -42,12 +42,6 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
     // schema was explicitly specified. Check it matches the inferred one and register the op.
 
     const FunctionSchema& schema = options.schemaOrName_->right();
-    TORCH_CHECK(
-        options.aliasAnalysisKind_ == AliasAnalysisKind::FROM_SCHEMA ||
-            !schema.hasAnyAliasInfo(),
-        "In operator registration: Tried to register operator ",
-        options.schemaOrName_->right(),
-        " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
 
     for (auto& kernel : options.kernels) {
       if (nullptr != kernel.inferred_function_schema.get()) {

@@ -399,7 +399,7 @@ namespace detail {
 struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t){};
 };
-using _guarded_unsigned_long = c10::guts::conditional_t<
+using _guarded_unsigned_long = std::conditional_t<
     std::is_same<unsigned long, uint32_t>::value ||
         std::is_same<unsigned long, uint64_t>::value,
     _guarded_unsigned_long_unique_dummy,
@@ -471,7 +471,7 @@ struct _fake_type {};
 // based on the return type.
 template <class Elem>
 // TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
-//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
+//[[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")]]
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -519,7 +519,7 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
+[[deprecated("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
@@ -546,7 +546,7 @@ namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
     const std::vector<IValue>& t,
-    c10::guts::index_sequence<INDEX...>) {
+    std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
 }
@@ -554,11 +554,11 @@ Tuple generic_to_tuple_impl(
 
 template <
     typename... Args,
-    typename Indices = c10::guts::make_index_sequence<sizeof...(Args)>,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    typename Indices = std::make_index_sequence<sizeof...(Args)>,
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
   auto vals = ivalue.toTuple()->elements();
@@ -665,10 +665,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 }
 template <
     typename... Args,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
