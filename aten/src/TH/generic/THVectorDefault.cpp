@@ -136,8 +136,35 @@ void THVector_(divs_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, c
 // stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...
 static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
                                                   const scalar_t mean,
-                                                  const scalar_t stddev)
+                                                  const scalar_t stddev,
+                                                  at::CPUGenerator* gen)
 {
+#ifdef TH_REAL_IS_BFLOAT16
+  std::vector<float> tmp(16);
+  for (int j = 0; j < 16; ++j) {
+    at::uniform_real_distribution<float> uniform(0, 1);
+    tmp[j] = uniform(gen);
+  }
+  for (int j = 0; j < 8; ++j) {
+    const float u1 = 1 - tmp[j]; // [0, 1) -> (0, 1] for log.
+    const float u2 = tmp[j + 8];
+
+    const float radius = sqrt(-2 * log(u1));
+    const float theta = 2.0f * M_PI * u2;
+
+    data[j] = radius * cos(theta) * stddev + mean;
+    data[j + 8] = radius * std::sin(theta) * stddev + mean;
+  }
+#else
+  for (int j = 0; j < 16; ++j) {
+#ifdef TH_REAL_IS_FLOAT
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[j] = uniform(gen);
+#else
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[j] = uniform(gen);
+#endif
+  }
   for (int j = 0; j < 8; ++j) {
     const scalar_t u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
     const scalar_t u2 = data[j + 8];
@@ -148,6 +175,7 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
     data[j] = radius * cos(theta) * stddev + mean;
     data[j + 8] = radius * std::sin(theta) * stddev + mean;
   }
+#endif
 }
 
 void THVector_(normal_fill_DEFAULT)(scalar_t *data,
@@ -160,34 +188,25 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
   auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  
-  for (int64_t i = 0; i < size; ++i) {
-#ifdef TH_REAL_IS_FLOAT
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(gen);
-#else
-    at::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(gen);
-#endif
-  }
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-    THVector_(interleaved_normal_fill_16)(data + i, mean, stddev);
+    THVector_(interleaved_normal_fill_16)(data + i, mean, stddev, gen);
   }
 
   if (size % 16 != 0) {
-    // Recompute the last 16 values.
-    data = data + size - 16;
-    for (int64_t i = 0; i < 16; ++i) {
-#ifdef TH_REAL_IS_FLOAT
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(gen);
+    //Make sure that the number of using random generators is equal to size.
+    for (int64_t i = size - size % 16; i < size; ++i) {
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_BFLOAT16)
+      at::uniform_real_distribution<float> uniform(0, 1);
+      data[i] = uniform(gen);
 #else
-    at::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(gen);
+      at::uniform_real_distribution<double> uniform(0, 1);
+      data[i] = uniform(gen);
 #endif
     }
-    THVector_(interleaved_normal_fill_16)(data, mean, stddev);
+    // Recompute the last 16 values.
+    data = data + size - 16;
+    THVector_(interleaved_normal_fill_16)(data, mean, stddev, gen);
   }
 }
 

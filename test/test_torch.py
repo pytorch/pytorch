@@ -252,10 +252,7 @@ class _TestTorchMixin(object):
             compare_reference(input, torch.bfloat16)
 
         def check_non_contiguous(shape, dtype):
-            if dtype is torch.bfloat16:
-                contig = torch.randn(shape).bfloat16()
-            else:
-                contig = torch.randn(shape, dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            contig = torch.randn(shape, dtype=dtype)
             non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
             non_contig.copy_(contig)
             self.assertFalse(non_contig.is_contiguous())
@@ -271,10 +268,7 @@ class _TestTorchMixin(object):
             check_non_contiguous((1024,), torch.bfloat16)
 
         def check_non_contiguous_index(dtype):
-            if dtype is torch.bfloat16:
-                contig = torch.randn((2, 2, 1, 2)).bfloat16()
-            else:
-                contig = torch.randn((2, 2, 1, 2), dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            contig = torch.randn((2, 2, 1, 2), dtype=dtype)
             non_contig = contig[:, 1, ...]
             contig = non_contig.clone()
             self.assertFalse(non_contig.is_contiguous())
@@ -286,10 +280,7 @@ class _TestTorchMixin(object):
             check_non_contiguous_index(torch.bfloat16)
 
         def check_non_contiguous_expand(shape, dtype):
-            if dtype is torch.bfloat16:
-                contig = torch.randn(shape).bfloat16()
-            else:
-                contig = torch.randn(shape, dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            contig = torch.randn(shape, dtype=dtype)
             non_contig = contig.clone().expand(3, -1, -1)
             self.assertFalse(non_contig.is_contiguous())
             contig = torchfn(contig)
@@ -309,10 +300,7 @@ class _TestTorchMixin(object):
         # If size(dim) == 1, stride(dim) is not defined.
         # The code needs to be able to handle this
         def check_contiguous_size1(dtype):
-            if dtype is torch.bfloat16:
-                contig = torch.randn((5, 100)).bfloat16()
-            else:
-                contig = torch.randn((5, 100), dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            contig = torch.randn((5, 100), dtype=dtype)
             contig = contig[:1, :50]
             contig2 = torch.empty(contig.size(), dtype=dtype)
             contig2.copy_(contig)
@@ -326,10 +314,7 @@ class _TestTorchMixin(object):
             check_contiguous_size1(torch.bfloat16)
 
         def check_contiguous_size1_largedim(dtype):
-            if dtype is torch.bfloat16:
-                contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4)).bfloat16()
-            else:
-                contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
             contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
             contig2 = torch.empty(contig.size(), dtype=dtype)
             contig2.copy_(contig)
@@ -343,10 +328,7 @@ class _TestTorchMixin(object):
             check_contiguous_size1_largedim(torch.bfloat16)
 
         def check_large(dtype):
-            if dtype is torch.bfloat16:
-                input = torch.randn(1024, 512).bfloat16()
-            else:
-                input = torch.randn(1024, 512, dtype=dtype) # TODO: modify it after enabling randn to BFloat16
+            input = torch.randn(1024, 512, dtype=dtype)
             actual = torchfn(input)
             expected = torch.stack([torchfn(slice) for slice in input])
             self.assertEqual(actual, expected, 'large')
@@ -2193,6 +2175,15 @@ class _TestTorchMixin(object):
         torch.manual_seed(123456)
         torch.randn(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
+
+        #bfloat16
+        torch.manual_seed(123456)
+        res3 = torch.randn(SIZE, SIZE, dtype=torch.bfloat16)
+        res4 = torch.Tensor().bfloat16()
+        torch.manual_seed(123456)
+        torch.randn(SIZE, SIZE, out=res4)
+        self.assertEqual(res3, res4)
+        self.assertEqual(res2, res4, 0.01)
 
     def test_slice(self):
         empty = torch.empty(0, 4)
@@ -11485,7 +11476,7 @@ class TestTorchDeviceType(TestCase):
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
-        bfloat16s = doubles.bfloat16() # TODO: modify it after enabling randn to BFloat16
+        bfloat16s = torch.randn(2 * sz, dtype=dtype, device=device)
         positives = torch.randint(1, 100, (2 * sz,), device=device).double()
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
