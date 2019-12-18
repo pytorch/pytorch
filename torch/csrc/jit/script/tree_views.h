@@ -800,12 +800,16 @@ struct Const : public Expr {
     return !isFloatingPoint();
   }
   int64_t asIntegral() const {
-    return c10::stoll(subtree(0)->stringValue());
+    try {
+      return c10::stoll(subtree(0)->stringValue());
+    } catch (const std::out_of_range& e) {
+      throw ErrorReport(range()) << "Integral constant out of range "
+                                    "(must fit in a signed 64 bit integer)";
+    }
   }
   double asFloatingPoint() const {
-    char* dummy;
     return torch::jit::script::strtod_c(
-        subtree(0)->stringValue().c_str(), &dummy);
+        subtree(0)->stringValue().c_str(), /*endptr=*/nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
