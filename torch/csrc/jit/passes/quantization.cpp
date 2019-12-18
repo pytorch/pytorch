@@ -13,6 +13,8 @@
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
+#include <c10/core/QScheme.h>
+
 #include <algorithm>
 #include <stack>
 
