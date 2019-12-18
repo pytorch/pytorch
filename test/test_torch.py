@@ -7701,6 +7701,10 @@ class TestTorchDeviceType(TestCase):
         data = torch.tensor([])
         self.assertEqual(data, data.flip(0))
 
+        # test bool tensor
+        a = torch.tensor([False, True])
+        self.assertEqual(a.flip(0), torch.tensor([True, False]))
+
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
         self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
