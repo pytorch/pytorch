@@ -626,6 +626,14 @@ class InsertQuantDeQuantHelper {
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
   std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(script::Module& module, Value* v);
+  void checkQScheme(Graph* g, c10::QScheme qscheme) {
+    if (qscheme_for_graph_.count(g)) {
+      TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
+                  "Quantizing same graph with different QSchemes is not supported");
+    } else {
+      qscheme_for_graph_[g] = qscheme;
+    }
+  }
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -641,6 +649,9 @@ class InsertQuantDeQuantHelper {
   // Map from Graph to a map of output Value of forward call of observer to
   // the original Value (input[1] of observer forward call)
   std::unordered_map<Graph*, std::unordered_map<Value*, Value*>> values_to_quantize_;
+  // Record qscheme for every graph, this is for checking
+  // each graph is only quantized with one type of QScheme
+  std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -714,6 +725,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g,
     auto* observer_output = vs.first;
     auto* original_value = vs.second;
     auto tp = getQSchemeAndQParamMap(module, observer_output);
+    checkQScheme(g, std::get<0>(tp));
     auto qparam_map = std::get<1>(tp);
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
@@ -851,6 +863,24 @@ void InsertQuantDeQuantHelper::run(
 
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+
+  // We only need to register new parameters if the graph has
+  // been quantized before
+  if (values_to_quantize_.count(graph.get())) {
+    for (auto& vs : values_to_quantize_.at(graph.get())) {
+      auto* observer_output = vs.first;
+      auto* original_value = vs.second;
+      auto tp = getQSchemeAndQParamMap(module, observer_output);
+      checkQScheme(graph.get(), std::get<0>(tp));
+      auto qparam_map = std::get<1>(tp);
+      for (auto& pr : qparam_map) {
+        const auto& name = pr.first;
+        const auto& qparam = pr.second;
+        module._ivalue()->setAttr(original_value->debugName() + name, qparam);
+      }
+    }
+    return;
+  }
 
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
