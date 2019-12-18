@@ -65,15 +65,15 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
-from common_nn import module_tests, new_module_tests, criterion_tests
-from common_methods_invocations import method_tests as autograd_method_tests
-from common_methods_invocations import create_input, unpack_variables, \
+from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
+from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # For testing truediv in python 2
-from test_module.future_div import div_int_future, div_float_future
-from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
+from torch.testing._internal.test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
 from collections import namedtuple, OrderedDict

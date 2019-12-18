@@ -756,10 +756,6 @@ if __name__ == '__main__':
 
     extensions, cmdclass, packages, entry_points = configure_extension_build()
 
-    packages.append('torch.testing._internal')
-    packages.append('torch.testing._internal.data')
-    packages.append('torch.testing._internal.expect')
-    packages.append('torch.testing._internal.distributed.rpc')
     setup(
         name=package_name,
         version=version,
@@ -770,13 +766,6 @@ if __name__ == '__main__':
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
-        # Use package_dir to avoid moving the test directory.
-        package_dir={
-            'torch.testing._internal' : './test',
-            'torch.testing._internal.data' : './test/data',
-            'torch.testing._internal.expect' : './test/expect',
-            'torch.testing._internal.distributed.rpc' : './test/distributed/rpc'
-        },
         package_data={
             'torch': [
                 'py.typed',

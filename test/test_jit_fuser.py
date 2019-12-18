@@ -309,7 +309,7 @@ class TestFuser(JitTestCase):
             with enable_profiling_mode():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'aten::Float'})
+            self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
