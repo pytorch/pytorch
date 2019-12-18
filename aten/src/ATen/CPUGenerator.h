@@ -10,16 +10,21 @@ namespace at {
 struct CAFFE2_API CPUGenerator : public Generator {
   // Constructors
   CPUGenerator(uint64_t seed_in = default_rng_seed_val);
-  ~CPUGenerator() = default;
+  virtual ~CPUGenerator() = default;
 
   // CPUGenerator methods
   std::shared_ptr<CPUGenerator> clone() const;
-  void set_current_seed(uint64_t seed) override;
-  uint64_t current_seed() const override;
-  uint64_t seed() override;
+  virtual void set_current_seed(uint64_t seed) = 0;
+  virtual uint64_t current_seed() const = 0;
+  virtual uint64_t seed() = 0;
   static DeviceType device_type();
-  uint32_t random();
-  uint64_t random64();
+  /**
+   * Gets a random 32 bit unsigned integer from the engine
+   *
+   * See Note [Acquire lock when using random generators]
+   */
+  virtual uint32_t random() = 0;
+  virtual uint64_t random64();
   c10::optional<float> next_float_normal_sample();
   c10::optional<double> next_double_normal_sample();
   void set_next_float_normal_sample(c10::optional<float> randn);
@@ -27,8 +32,8 @@ struct CAFFE2_API CPUGenerator : public Generator {
   at::mt19937 engine();
   void set_engine(at::mt19937 engine);
 
-private:
-  CPUGenerator* clone_impl() const override;
+protected:
+  // CPUGenerator* clone_impl() const override;
   at::mt19937 engine_;
   c10::optional<float> next_float_normal_sample_;
   c10::optional<double> next_double_normal_sample_;

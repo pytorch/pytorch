@@ -3,6 +3,7 @@
 #include <structmember.h>
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
+#include <ATen/MT19937CPUGenerator.h>
 
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
@@ -58,7 +59,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
     THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
     if (device.type() == at::kCPU) {
-      self->cdata = new CPUGenerator();
+      self->cdata = new MT19937CPUGenerator();
     } else if (device.type() == at::kCUDA){
       self->cdata = new CUDAGenerator(device.index());
     } else {
