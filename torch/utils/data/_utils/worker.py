@@ -11,6 +11,7 @@ from collections import namedtuple
 from torch._six import queue
 from torch._utils import ExceptionWrapper
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS
+import psutil
 
 if IS_WINDOWS:
     import ctypes
@@ -155,6 +156,8 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         watchdog = ManagerWatchdog()
 
+        p = psutil.Process()
+        affinity = p.cpu_affinity()
         while watchdog.is_alive():
             try:
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
@@ -175,6 +178,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 init_exception = None
             else:
                 try:
+                    p.cpu_affinity([affinity[worker_id % len(affinity)]])
                     data = fetcher.fetch(index)
                 except Exception as e:
                     if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
