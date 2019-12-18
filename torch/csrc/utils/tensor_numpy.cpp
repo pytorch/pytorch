@@ -299,18 +299,18 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);
+
+      // __cuda_array_interface__ strides use bytes. Torch strides use element counts.
+      for (auto& stride : strides) {
+        if (stride%dtype_size_in_bytes != 0) {
+          throw ValueError(
+              "given array strides not a multiple of the element byte size. "
+              "Make a copy of the array to reallocate the memory.");
+          }
+        stride /= dtype_size_in_bytes;
+      }
     } else {
       strides = at::detail::defaultStrides(sizes);
-    }
-
-    // __cuda_array_interface__ strides use bytes. Torch strides use element counts.
-    for (auto& stride : strides) {
-      if (stride%dtype_size_in_bytes != 0) {
-        throw ValueError(
-            "given array strides not a multiple of the element byte size. "
-            "Make a copy of the array to reallocate the memory.");
-        }
-      stride /= dtype_size_in_bytes;
     }
   }
 
