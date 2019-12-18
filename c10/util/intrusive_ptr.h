@@ -94,7 +94,7 @@ class C10_API intrusive_ptr_target {
 #  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
 // When making changes to intrusive pointer, enable this define and run the tests
-// to ensure intrusive_ptr is not broken. These are not part of the normal code becuase
+// to ensure intrusive_ptr is not broken. These are not part of the normal code because
 // they add significant overhead.
 // #define TORCH_INTRUSIVE_PTR_ASSERTS
 #ifdef TORCH_INTRUSIVE_PTR_ASSERTS
@@ -191,6 +191,7 @@ class intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_refcount = ++target_->refcount_;
+      (void) new_refcount;
 #ifdef TORCH_INTRUSIVE_PTR_ASSERTS
       AT_ASSERTM(
           new_refcount != 1,
