@@ -3563,6 +3563,11 @@ graph(%Ra, %Rb):
             def hints_bad_types(x, a=10, b=0.5):  # noqa: T484
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
+        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+            @torch.jit.script
+            def add_tensor_tensor(x : Dict[str, int] = None):
+                return x
+
 
     def test_module_default_values(self):
         four = torch.tensor(4)
