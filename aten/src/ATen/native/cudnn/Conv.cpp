@@ -200,6 +200,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   return t.narrow(dim, group_idx * group_size, group_size);
 }
 
+bool support_channels_last(const Tensor& input, const Tensor& weight, int groups) {
+  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+  return (groups == 1 || cudnn_version >= 7600) &&
+      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+}
+
 // ---------------------------------------------------------------------
 //
 // Checking
@@ -903,11 +909,13 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
+  auto layout = support_channels_last(*input, *weight, groups) ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation, groups),
                     input->options(),
-                    input->suggest_memory_format());
+                    layout);
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -918,10 +926,11 @@ Tensor cudnn_convolution_forward(
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(input->suggest_memory_format());
+  Tensor weight_contig = weight->contiguous(layout);
+  Tensor input_contig = input->contiguous(layout);
 
   raw_cudnn_convolution_forward_out(
-      *output, *input, weight_contig,
+      *output, input_contig, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return *output;
@@ -1044,17 +1053,20 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
+  auto layout = support_channels_last(*grad_output, *weight, groups) ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+  auto grad_input_t = at::empty(input_size, grad_output->options(), layout);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
   // See #4500
-  Tensor weight_contig = weight->contiguous(grad_output->suggest_memory_format());
+  Tensor weight_contig = weight->contiguous(layout);
+  Tensor grad_output_contig = grad_output->contiguous(layout);
 
   raw_cudnn_convolution_backward_input_out(
-      *grad_input, *grad_output, weight_contig,
+      *grad_input, grad_output_contig, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return *grad_input;
