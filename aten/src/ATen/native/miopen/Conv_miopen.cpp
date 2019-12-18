@@ -596,7 +596,7 @@ Tensor miopen_convolution_forward(
 
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups),
+                                     padding, stride, dilation),
                     input->options());
 
   if (output_t.numel() == 0) {
@@ -677,7 +677,7 @@ Tensor miopen_depthwise_convolution_forward(
 
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups),
+                                     padding, stride, dilation),
                     input->options());
 
   TensorArg output{ output_t, "result", 0 };
