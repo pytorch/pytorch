@@ -1465,11 +1465,6 @@ class ScriptMeta(type):
                 # the scripted versions.
                 concrete_type = self._actual_script_module._concrete_type
                 for name in concrete_type.get_attributes():
-                    if hasattr(cls, name) and isinstance(getattr(cls, name), property):
-                        # TODO giant hack. Right now we are encoding properties
-                        # as attributes (this is what recursive script does
-                        # today, but it is wrong)
-                        continue
                     delattr(self, name)
                 for name, _ in concrete_type.get_modules():
                     delattr(self, name)
