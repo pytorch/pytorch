@@ -18,7 +18,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Deprecated.h>
 
 #include <array>
 #include <iterator>
@@ -275,6 +274,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
+[[deprecated]] typedef ArrayRef<int64_t> IntList;
 
 } // namespace c10
