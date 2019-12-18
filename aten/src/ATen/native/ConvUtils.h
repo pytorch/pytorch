@@ -24,18 +24,19 @@ constexpr int max_dim = 3;
 
 static inline std::vector<int64_t> conv_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
+  bool has_dilation = dilation.size() > 0;
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_output_channels_dim];
   for (size_t d = 2; d < dim; ++d) {
-    auto kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    output_size[d] = (input_size[d] + (2 * padding[d - 2])
-                        - kernel) / stride[d - 2] + 1;
+    auto dilation_ = has_dilation ? dilation[d - 2] : 1;
+    auto kernel = dilation_ * (weight_size[d] - 1) + 1;
+    output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
   }
   return output_size;
 }
