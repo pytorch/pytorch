@@ -4,6 +4,9 @@ import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.media.Image;
 
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
+
 import org.pytorch.Tensor;
 
 import java.nio.Buffer;
@@ -213,7 +216,10 @@ public final class TensorImageUtils {
 
   private static class NativePeer {
     static {
-      System.loadLibrary("pytorch_vision_jni");
+      if (!NativeLoader.isInitialized()) {
+        NativeLoader.init(new SystemDelegate());
+      }
+      NativeLoader.loadLibrary("pytorch_vision_jni");
     }
 
     private static native void imageYUV420CenterCropToFloatBuffer(
