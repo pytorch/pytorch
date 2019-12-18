@@ -387,6 +387,18 @@ Tensor & ne_scalar_(Tensor & self, Scalar other) { return self; }
 SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(ne_, ne_scalar_)
 Tensor & ne_tensor_(Tensor & self, const Tensor & other) { return self; }
 SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(ne_, ne_tensor_)
+Tensor & add_tensor_(Tensor & self, const Tensor & other, Scalar alpha) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(add_, add_tensor_)
+Tensor & add_scalar_(Tensor & self, Scalar other, Scalar alpha) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(add_, add_scalar_)
+Tensor & div_tensor_(Tensor & self, const Tensor & other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(div_, div_tensor_)
+Tensor & div_scalar_(Tensor & self, Scalar other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(div_, div_scalar_)
+Tensor & mul_tensor_(Tensor & self, const Tensor & other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(mul_, mul_tensor_)
+Tensor & mul_scalar_(Tensor & self, Scalar other) { return self; }
+SPECIALIZE_FIRSTARG_INPLACE_NO_AT_EXPOSURE(mul_, mul_scalar_)
 
 // 2.a. Specializations for functions with out=... arguments
 // According to VariableType, these don't support automatic differentiation.
@@ -622,6 +634,9 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::lt_out, "aten::lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), passthrough, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::ne_out, "aten::ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, Scalar), passthrough, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::ne_out, "aten::ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), passthrough, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::add_out, "aten::add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar), passthrough, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::div_out, "aten::div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), passthrough, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::mul_out, "aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, const Tensor &), passthrough, wellbehaved)
   ;
 
 /**************************************************************************************
@@ -679,6 +694,12 @@ auto register_inplace_method_only = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::autocast::lt_tensor_, "aten::lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::ne_scalar_, "aten::ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)", Tensor & (Tensor &, Scalar), firstarg, inplace)
   KERNEL_UNBOXED_ONLY(at::autocast::ne_tensor_, "aten::ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::add_tensor_, "aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::add_scalar_, "aten::add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)", Tensor & (Tensor &, Scalar, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::div_tensor_, "aten::div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::div_scalar_, "aten::div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)", Tensor & (Tensor &, Scalar), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::mul_tensor_, "aten::mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)", Tensor & (Tensor &, const Tensor &), firstarg, inplace)
+  KERNEL_UNBOXED_ONLY(at::autocast::mul_scalar_, "aten::mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)", Tensor & (Tensor &, Scalar), firstarg, inplace)
   ;
 
 /******************************************************************************************************
