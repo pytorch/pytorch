@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/ConvUtils.h>
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
@@ -161,10 +162,17 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
     return true;
   }
   // output size can not be reduced to the range of int by splitting the batch dim
-  int64_t outsize = weight.size(0);
-  for (size_t d = 2; d < input.dim(); ++d) {
-    auto kernel = dilation[d - 2] * (weight.size(d) - 1) + 1;
-    outsize *= (input.size(d) + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+  int64_t outsize = 1;
+  if (transposed) {
+    std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
+    for (int64_t i = 1; i < o.size(); i++) {
+      outsize *= o[i];
+    }
+  } else {
+    std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
+    for (int64_t i = 1; i < o.size(); i++) {
+      outsize *= o[i];
+    }
   }
   return outsize > int_max;
 }
