@@ -801,7 +801,7 @@ struct Const : public Expr {
   }
   int64_t asIntegral() const {
     try {
-      return c10::stoll(subtree(0)->stringValue());
+      return c10::stoll(subtree(0)->stringValue(), /*pos=*/0, /*base=*/0);
     } catch (const std::out_of_range& e) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";
