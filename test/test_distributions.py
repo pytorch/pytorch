@@ -1004,7 +1004,7 @@ class TestDistributions(TestCase):
         self.assertEqual(bin2.log_prob(zero_counts), zero_counts)
 
     def test_binomial_vectorized_count(self):
-        set_rng_seed(0)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         total_count = torch.tensor([[4, 7], [3, 8]])
         bin0 = Binomial(total_count, torch.tensor(1.))
         self.assertEqual(bin0.sample(), total_count)
