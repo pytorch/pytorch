@@ -626,6 +626,14 @@ class InsertQuantDeQuantHelper {
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
   std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(script::Module& module, Value* v);
+  void checkQScheme(Graph* g, c10::QScheme qscheme) {
+    if (qscheme_for_graph_.count(g)) {
+      TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
+                  "Quantizing same graph with different QSchemes is not supported");
+    } else {
+      qscheme_for_graph_[g] = qscheme;
+    }
+  }
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -637,10 +645,9 @@ class InsertQuantDeQuantHelper {
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  // value to qparam map is per Graph and per module instance
-  // we need to put Graph as the first key since we need to check whether the graph
-  // is quantized before or not
-  std::unordered_map<Graph*, std::unordered_map<script::ModulePtr, std::unordered_map<Value*, QParamMap>>> values_to_qparams_;
+  // Map from Graph to a map of output Value of forward call of observer to
+  // the original Value (input[1] of observer forward call)
+  std::unordered_map<Graph*, std::unordered_map<Value*, Value*>> values_to_quantize_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
@@ -666,18 +673,11 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer);
   // GetAttr node for observer module
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
-  Value* new_value = observer->input(1);
-  v->replaceAllUsesWith(new_value);
-  auto tp = getQSchemeAndQParamMap(module, v);
-  auto qscheme = std::get<0>(tp);
-  if (qscheme_for_graph_.count(g)) {
-    TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
-                "Quantizing same graph with different QSchemes is not supported");
-  } else {
-    qscheme_for_graph_[g] = qscheme;
-  }
-  auto qparam_map = std::get<1>(tp);
-  values_to_qparams_[g][module._ivalue()].insert({new_value, qparam_map});
+  Value* original_value = observer->input(1);
+  v->replaceAllUsesWith(original_value);
+  // `v` is observer output, `original_value` is the value that's
+  // originally observed by observer
+  values_to_quantize_[g].insert({v, original_value});
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
@@ -706,19 +706,22 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
 }
 
 void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
-  if (!values_to_qparams_.count(g)) {
+  if (!values_to_quantize_.count(g)) {
     return;
   }
-  for (auto& pr : values_to_qparams_.at(g).at(module._ivalue())) {
-    auto* v = pr.first;
-    const auto& qparams = pr.second;
-    for (auto& pr : qparams) {
+  for (auto& vs : values_to_quantize_.at(g)) {
+    auto* observer_output = vs.first;
+    auto* original_value = vs.second;
+    auto tp = getQSchemeAndQParamMap(module, observer_output);
+    checkQScheme(g, std::get<0>(tp));
+    auto qparam_map = std::get<1>(tp);
+    for (auto& pr : qparam_map) {
       const auto& name = pr.first;
       const auto& qparam = pr.second;
-      module.register_attribute(v->debugName() + name, qparam.type(), qparam);
+      module.register_attribute(original_value->debugName() + name, qparam.type(), qparam);
     }
-    bool is_per_channel = qparams.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, v, is_per_channel);
+    bool is_per_channel = qparam_map.at("_scale").isTensor();
+    insertQuantDeQuantCall(self, original_value, is_per_channel);
   }
 }
 
@@ -851,14 +854,17 @@ void InsertQuantDeQuantHelper::run(
 
   // We only need to register new parameters if the graph has
   // been quantized before
-  if (values_to_qparams_.count(graph.get())) {
-    for (auto& pr : values_to_qparams_.at(graph.get()).at(module._ivalue())) {
-      Value* v = pr.first;
-      const std::unordered_map<std::string, IValue>& qparams = pr.second;
-      for (const auto& pr : qparams) {
+  if (values_to_quantize_.count(graph.get())) {
+    for (auto& vs : values_to_quantize_.at(graph.get())) {
+      auto* observer_output = vs.first;
+      auto* original_value = vs.second;
+      auto tp = getQSchemeAndQParamMap(module, observer_output);
+      checkQScheme(graph.get(), std::get<0>(tp));
+      auto qparam_map = std::get<1>(tp);
+      for (auto& pr : qparam_map) {
         const auto& name = pr.first;
         const auto& qparam = pr.second;
-        module._ivalue()->setAttr(v->debugName() + name, qparam);
+        module._ivalue()->setAttr(original_value->debugName() + name, qparam);
       }
     }
     return;
