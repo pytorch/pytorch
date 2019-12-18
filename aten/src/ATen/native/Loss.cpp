@@ -159,6 +159,46 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     return apply_loss_reduction(loss, reduction);
 }
 
+Tensor& soft_margin_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto z = at::exp(-target * input);
+  // inplace version of: grad_input = -norm * target * z / (1. + z) * grad_output;
+  at::mul_out(grad_input, target, z).mul_(-norm);
+  z.add_(1);
+  grad_input.div_(z).mul_(grad_output);
+  return grad_input;
+}
+
+Tensor soft_margin_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto grad_input = at::empty({0}, input.options());
+  at::soft_margin_loss_backward_out(grad_input, grad_output, input, target, reduction);
+  return grad_input;
+}
+
+Tensor& soft_margin_loss_out(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  if (reduction != Reduction::None) {
+    auto tmp = apply_loss_reduction(output, reduction);
+    output.resize_({});
+    output.copy_(tmp);
+  }
+  return output;
+}
+
+Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  auto output = at::empty({0}, input.options());
+  at::soft_margin_loss_out(output, input, target, reduction);
+  return output;
+}
+
 Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
   Tensor loss;
   auto iter = TensorIterator::binary_op(loss, input, target);
