@@ -27,27 +27,19 @@ class TestUnsupportedOps(JitTestCase):
 
         # Complete issue and set of ops is https://github.com/pytorch/pytorch/issues/30761
         # only testing some because they should be fixed all at once
+        def ones():
+            return torch.ones([2], requires_grad=True)
 
-        with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
-            def foo():
-                return torch.ones([2], requires_grad=True)
-            foo()
-            torch.jit.script(foo)
-        self.assertTrue(thrown)
+        def randn():
+            return torch.randn([2], requires_grad=True)
 
-        with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
-            def foo():
-                return torch.randn([2], requires_grad=True)
-            foo()
-            torch.jit.script(foo)
+        def zeros():
+            return torch.zeros([2], requires_grad=True)
 
-        with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
-            def foo():
-                return torch.zeros([2], requires_grad=True)
-            foo()
-            torch.jit.script(foo)
-
-
+        for func in [ones, randn, zeros]:
+            func()
+            with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
+                torch.jit.script(func)
 
     def test_tensor_options_behavior_mismatch(self):
         # Any schema declaration which contains a non-optional (ScalarType dtype, Layout layout, Device device)
