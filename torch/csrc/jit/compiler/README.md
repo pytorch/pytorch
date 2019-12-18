@@ -8,7 +8,7 @@ whatever makes sense for your platform.
 ```
 mkdir -p build
 cd build
-cmake .. -G Ninja -DCMAKE_PREFIX_PATH=/usr/locla/opt/llvm
+cmake .. -G Ninja -DCMAKE_PREFIX_PATH=/usr/local/opt/llvm
 ninja all
 ./expr_test
 ```
