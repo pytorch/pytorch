@@ -134,6 +134,12 @@ class Var : public Expr {
   Var(const std::string& name_hint, Dtype dtype)
       : Expr(std::move(Variable::make(name_hint, dtype))) {}
   const Variable* node() const { return static_cast<const Variable*>(Expr::node()); }
+  bool operator==(const Var& other) const {
+    return this->node() == other.node();
+  }
+  bool operator!=(const Var& other) const {
+    return !(*this == other);
+  }
 };
 
 // Bind the value to the var and evaluate the body.
