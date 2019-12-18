@@ -51,15 +51,8 @@ struct BailOutGraphBuilderForNode {
     return new_value;
   }
 
-  Value* getOrAddInputForValue(Value* v, Value* default_val = nullptr) {
+  Value* getOrAddInputForValue(Value* v) {
     if (this->old_to_new_.count(v) == 0) {
-      // default_val is used in cases where we don't want to create a new value
-      // and capture it as a parameter of a bailout graph
-      // because another value will be assigned to `v` later
-      if (default_val) {
-        this->old_to_new_[v] = default_val;
-        return default_val;
-      }
       return addNewInputForValue(v);
     } else {
       return this->old_to_new_[v];
@@ -153,37 +146,28 @@ struct BailOutGraphBuilderForNode {
     // Namely, the value in `prim::Loop` should come from
     // `lv.bodyBlock()->outputs()` which are mapped to the outputs of the
     // current iteration whereas `%4` in `aten::cat` needs to be mapped to the
-    // cloned value of `%4` in a bailout graph.
+    // cloned value of `%4` in a bailout graph. To work around this, we manually
+    // clone loop nodes
 
-    // remember the continuation loop carried dependencies
-    // these will become `prim::Loop` inputs after cloning
-    auto continuation_block_outputs = fmap(
-        block_outputs, [this](Value* v) { return getOrAddInputForValue(v); });
-
-    // add a dummy input for every loop input that we haven't seen
-    // so far unless it's a constant.
-    // a dummy value will prevent us adding/capturing new values into
-    // a bailout graph since we already have the right values (i.e.
-    // continuation_block_outputs) we just want to avoid adding them to
-    // `old_to_new_` in order to avoid naming clashes described above
-    for (auto li : lv.carriedInputsWithCond()) {
-      if (li->node()->kind() == prim::Constant) {
-        getOrAddInputForValue(li);
-      } else {
-        getOrAddInputForValue(li, one);
-      }
+    // map the residual loop's inputs to the outputs of the current iteration
+    // (i.e. `block_outputs`)
+    auto new_loop =
+        copy_graph_->insertNode(copy_graph_->create(prim::Loop, {}, 0))
+            ->setSourceRange(outer_node->sourceRange());
+    new_loop->addInput(updated_max_trip_count);
+    for (auto bo : block_outputs) {
+      new_loop->addInput(getOrAddInputForValue(bo));
     }
 
-    auto new_loop = cloneNode(outer_node);
+    // clone the loop body and map old loop's outputs to new loop's outputs
+    auto new_loop_body = new_loop->addBlock();
+    auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+    new_loop_body->cloneFrom(lv.bodyBlock(), env);
+    for (auto ov : lv.carriedOutputs()) {
+      auto no = new_loop->addOutput();
+      mapValueAndCopyMetadata(ov, no);
+    }
     LoopView new_lv(new_loop);
-    // finally, hook up new_loop->inputs() to `continuation_block_outputs`
-    const size_t MAX_TRIP_COUNT_INDEX = 0;
-    new_loop->replaceInput(MAX_TRIP_COUNT_INDEX, updated_max_trip_count);
-    const size_t LOOP_CARRIED_DEPS_WITH_COND = 1;
-    for (auto i = 0; i < continuation_block_outputs.size(); i++) {
-      new_loop->replaceInput(
-          LOOP_CARRIED_DEPS_WITH_COND + i, continuation_block_outputs[i]);
-    }
     {
       WithInsertPoint guard_in_loop(*new_lv.bodyBlock()->nodes().begin());
       // `one` will be replaced with new_lv.currentTripCount()
