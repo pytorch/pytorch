@@ -103,18 +103,29 @@ struct TORCH_API RecordFunction {
 
   void end();
 
+  // Saves the thread_id that this RecordFunction was created with. This is
+  // needed so that we can access Events created by the original thread in a
+  // different thread, since they are thread-local. An example use case is
+  // calling RecordFunction::end() in a different thread.
   inline void setThreadId(uint16_t threadId) const {
     threadId_ = threadId;
   }
 
+  // A flag controlling whether we should use the thread set by setThreadId() or
+  //  not in callback-specific logic.
   inline bool overrideThreadId() const {
     return overrideThreadId_;
   }
 
+  // Sets a flag indicating whether we should use the thread set by
+  // wsetThreadId() or not in callback-specific logic.
   inline void setOverrideThreadId(bool shouldOverride=true) const {
     overrideThreadId_ = shouldOverride;
   }
 
+  // Retrieves the thread_id that this RecordFunction was created with. Useful
+  // if we need to access Events created by the original thread in a different
+  // thread.
   inline uint16_t getThreadId() const {
     return threadId_;
   }
@@ -131,8 +142,10 @@ struct TORCH_API RecordFunction {
 
   bool initialized_ = false;
   bool run_sampled_ = false;
-  mutable bool overrideThreadId_ = false;
+  // The thread_id that this RecordFunction was created with and whether we
+  // should use this thread or not in callback-specific logic.
   mutable uint16_t threadId_;
+  mutable bool overrideThreadId_ = false;
 };
 
 TORCH_API bool hasCallbacks();
@@ -143,6 +156,8 @@ TORCH_API void setSamplingProbability(double);
 TORCH_API double getSamplingProbability();
 
 TORCH_API bool shouldRunSampledCallbacks();
+// Given a record function, run the (possibly sampled) start callbacks that have
+// been pushed via pushCallback().
 TORCH_API void runBeforeCallbacks(
     RecordFunction* rf,
     const std::string& funcName);

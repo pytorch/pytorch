@@ -209,6 +209,9 @@ void RecordFunction::end() {
       }
     }
 
+    // In the case that RecordFunction::end is called from a different thread,
+    // thread_local_func will not be this, so assert that we are overriding the
+    // thread id and thread_local_func is null.
     TORCH_INTERNAL_ASSERT(
         (thread_local_func_ == this) ||
             (thread_local_func_ == nullptr && overrideThreadId_),

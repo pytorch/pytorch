@@ -282,7 +282,8 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+        return pyRpcPythonUdf(
+            agent, dst, pickledPythonUDF, tensors, std::move(rf));
       },
       py::arg("agent"),
       py::arg("dst"),

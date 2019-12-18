@@ -545,6 +545,18 @@ class RpcTest(RpcAgentTestFixture):
                     time.sleep(3)
                     fut.wait()
             # for both sync and async, should show ~1 second time for the RPCs.
+            events = prof.function_events
+            rpc_event = [event for event in events if "rpc" in event.name][0]
+            print(rpc_event.name)
+            # assert that the function name, rpc_(a)sync, source, and dest worker are in the event name
+            self_worker_name = "worker{}".format(self.rank)
+            dst_worker_name = "worker{}".format(dst)
+            self.assertTrue(self_worker_name in rpc_event.name)
+            self.assertTrue(dst_worker_name in rpc_event.name)
+            self.assertTrue(str(my_sleep_func) in rpc_event.name)
+            self.assertEqual(rpc_event.count, 1)
+            # TODO: the below.
+#            self.assertTrue(("rpc_async" in rpc_event.name and use_async) or ("rpc_sync" in rpc_event.name and not use_async))
             print(prof.key_averages())
 
     @dist_init

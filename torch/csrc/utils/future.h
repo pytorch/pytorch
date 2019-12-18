@@ -128,8 +128,11 @@ class TORCH_API Future final {
     }
     callbacks_.push_back(callback);
   }
-
-  void attachRecFunction(
+  // Attach a RecordFunction shared_ptr to this Future, to
+  // persist the lifetime of the RecordFunction for the duration of the future.
+  // This allows the future to control when this RecordFunction's callbacks are
+  // run, ensuring that the future is profiled appropriately.
+  void attachRecordFunction(
       std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
     rf_ = rf;
   }

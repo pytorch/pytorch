@@ -193,13 +193,6 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
-  if (rf != nullptr) {
-    std::ostringstream ss;
-    ss << "pyRpcPythonUDF: " << RRefContext::getInstance().getWorkerName()
-       << " --> " << dst.name_;
-    rf->setOverrideThreadId(true);
-    torch::autograd::profiler::runBeforeCallbacks(rf.get(), ss.str());
-  }
   auto pythonCall = std::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
@@ -211,7 +204,8 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   // attach the recordFunction object to the future, so it can be set as
   // completed when the future finishes.
   if (rf != nullptr) {
-    fut->attachRecFunction(rf);
+    rf->setOverrideThreadId(true);
+    fut->attachRecordFunction(std::move(rf));
   }
   return fut;
 }

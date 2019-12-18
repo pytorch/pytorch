@@ -2521,13 +2521,11 @@ class TestAutograd(TestCase):
 
     def test_profiler(self):
         x = torch.randn(10, 10)
-
         with profile() as p:
             self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
 
         self.assertFalse(torch.autograd._profiler_enabled())
-
         last_end = 0
         names = ['mul', 'add']
         self.assertEqual(len(p.function_events), len(names))
@@ -2535,6 +2533,21 @@ class TestAutograd(TestCase):
             self.assertGreater(info.cpu_interval.start, last_end)
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
+
+    def test_record_function_callbacks(self):
+        x = torch.randn(10, 10)
+        with profile() as p:
+            rf = torch.autograd._RecordFunction()
+            torch.autograd._run_before_callbacks(rf, "foo")
+            y = x * 2 + 4
+            # ensure that we run destructor for RecordFunction, which invokes
+            # end callbacks
+            del rf
+            gc.collect()
+        function_events = p.function_events
+        foo_event = [event for event in function_events if "foo" in event.name][0]
+        self.assertEqual(foo_event.count, 1)
+        print(p.key_averages())
 
     def test_profiler_aggregation_fake(self):
         events = EventList()

@@ -54,6 +54,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   m.def("_push_range", [](std::string name) { pushRange(std::move(name)); });
   m.def("_pop_range", []() { popRange(); });
+  m.def(
+      "_run_before_callbacks",
+      [](RecordFunction* rf, const std::string& funcName) {
+        runBeforeCallbacks(rf, funcName);
+      });
 
   py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
     .def(py::init<>());

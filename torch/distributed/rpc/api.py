@@ -10,7 +10,7 @@ from . import (
     _start_rpc_agent,
     backend_registry,
 )
-from .internal import _internal_rpc_pickler, PythonUDF
+from .internal import _internal_rpc_pickler, PythonUDF, _start_record_function
 
 import contextlib
 import functools
@@ -274,12 +274,24 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
-    rf = torch.autograd._RecordFunction() if torch.autograd._profiler_enabled() else None
+    info = _to_worker_info(to)
+    current_worker = get_worker_info()
+    # TODO: separate this out into a func and add a test for the things.
+    # if the profiler is enabled, then create the RecordInfo object
+    # which creates the record function, and then calls ::runBeforeCallbacks() on it? hmm, maybe.
+    # rf = torch.autograd._RecordFunction() if torch.autograd._profiler_enabled() else None
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            "rpc_async",
+            str(qualified_name if qualified_name is not None else func),
+            current_worker.name,
+            info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(
             _agent, info, qualified_name, *args, **kwargs
