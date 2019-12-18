@@ -2023,17 +2023,23 @@ def _get_builtin_table():
         for name in dir(mod):
             v = getattr(mod, name)
             if callable(v):
-                _builtin_table[id(v)] = "aten::" + name
+                _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
 
+    if not PY2:
+        _builtin_ops.append((math.gcd, "aten::gcd"))
+        _builtin_ops.append((math.isfinite, "aten::isfinite"))
+    if PY37:
+        _builtin_ops.append((math.remainder, "aten::mathremainder"))
+
+    import torch.distributed.autograd as dist_autograd
+    if dist_autograd.is_available():
+        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
+
+    # populate the _builtin_table from _builtin_ops
     for builtin, aten_op in _builtin_ops:
         _builtin_table[id(builtin)] = aten_op
-    if not PY2:
-        _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.isfinite)] = "aten::isfinite"
-    if PY37:
-        _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
     return _builtin_table
 
