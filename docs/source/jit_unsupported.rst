@@ -31,6 +31,12 @@ TorchScript.
   * :func:`torch.tensordot`
   * :func:`torch.unique`
   * :func:`torch.unique_consecutive`
+  * :func:`torch.nn.init.calculate_gain`
+  * :func:`torch.nn.init.eye_`
+  * :func:`torch.nn.init.dirac_`
+  * :func:`torch.nn.init.kaiming_normal_`
+  * :func:`torch.nn.init.orthogonal_`
+  * :func:`torch.nn.init.sparse`
 
 
 Ops With Divergent Schemas Between Torch & Python

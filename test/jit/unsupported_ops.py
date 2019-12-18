@@ -109,3 +109,29 @@ class TestUnsupportedOps(JitTestCase):
         tensordot()
         with self.assertRaisesRegex(Exception, "Argument dims_self"):
             torch.jit.script(tensordot)
+
+
+    def test_init_ops(self):
+        def calculate_gain():
+            return torch.nn.init.calculate_gain('leaky_relu', 0.2)
+
+        def eye_():
+            return torch.nn.init.eye_(torch.zeros([2, 2]))
+
+        def dirac_():
+            return torch.nn.init.dirac_(torch.empty(3, 16, 5, 5))
+
+        def kaiming_uniform_():
+            return torch.nn.init.kaiming_normal_(torch.empty(3, 5))
+
+        def orthogonal_():
+            return torch.nn.init.orthogonal_(torch.empty(3, 5))
+
+        def sparse():
+            return torch.nn.init.sparse(torch.empty(3, 5), sparsity=.1)
+
+        for func in [calculate_gain, eye_, dirac_, kaiming_uniform_, orthogonal_, sparse]:
+            # doesn't error in eager
+            func()
+            with self.assertRaisesRegex(Exception, ""):
+                torch.jit.script(func)
