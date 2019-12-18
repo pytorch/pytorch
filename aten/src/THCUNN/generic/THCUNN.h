@@ -55,21 +55,6 @@ THC_API void THNN_(GatedLinear_updateGradInput)(
                   THCTensor *gradInput,
                   int dim);
 
-THC_API void THNN_(LeakyReLU_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal negval,
-                  bool inplace);
-
-THC_API void THNN_(LeakyReLU_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  accreal negval,
-                  bool inplace);
-
 THC_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,
