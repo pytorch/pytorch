@@ -84,7 +84,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
 
   auto values = value.toTuple()->elements();
   auto op = fromIValues(values);
-  return c10::guts::make_unique<ScriptCall>(op, std::move(values));
+  return std::make_unique<ScriptCall>(op, std::move(values));
 }
 
 std::shared_ptr<Operator> ScriptCall::matchOperator(

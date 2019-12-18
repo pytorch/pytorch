@@ -30,6 +30,9 @@ void initONNXBindings(PyObject* module) {
     .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
     .value("RAW", OperatorExportTypes::RAW);
 
+  onnx.attr("IR_VERSION") = IR_VERSION;
+  onnx.attr("PRODUCER_VERSION") = py::str(PRODUCER_VERSION);
+
 #ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = true;
 #else
