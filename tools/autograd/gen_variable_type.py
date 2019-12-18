@@ -852,7 +852,7 @@ def emit_body(declaration):
             if 'namespace' in declaration['method_of']:
                 api_name_prefix = ''
                 if TOUtils.check_if_factory_method(declaration['arguments']):
-                    api_name_prefix = TOUtils.API_NAME_PREFIX
+                    api_name_prefix = '_'
 
                 base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined, api_name_prefix=api_name_prefix)
             else:

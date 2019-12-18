@@ -1,11 +1,15 @@
-API_NAME_PREFIX = '_'
+# These are helper methods around TensorOptions object in codegen
+# While processing native_funtionc.yaml we heavily rely on the parameters types and orders
+# TensorOptions object consists of ScalarType, Layout, Device and Bool (pin_memory) types
 
+# List of tensor options
 tensor_options_args = ['dtype', 'layout', 'device', 'pin_memory']
 
 tensor_options_optional_types_and_var = ['c10::optional<ScalarType> dtype',
                                          'c10::optional<Layout> layout',
                                          'c10::optional<Device> device',
                                          'c10::optional<bool> pin_memory']
+
 tensor_options_types_and_var = ['ScalarType dtype', 'Layout layout', 'Device device', 'bool pin_memory']
 
 # Checks if passed list of arguments contains TensorOptions in it.

@@ -11,7 +11,8 @@ from tools.shared.module_loader import import_module
 TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
 
 # This is a hack.
-# issue #30405
+# Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+# In the tracking issue https://github.com/pytorch/pytorch/issues/30405
 FUNCTION_TEMPLATE_ARANGE = CodeTemplate("""\
 inline at::Tensor ${name}(${collapsed_formals}) {
   ${pre_record_trace}

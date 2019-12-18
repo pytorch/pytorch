@@ -251,8 +251,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
     idx = 0
 
-    # This is a hack around tril_indices/triu_indices as codegen doesn't handle default values well.
-    # issue https://github.com/pytorch/pytorch/issues/30405
+    # This is a hack
+    # Please see [Fix processing default values from native_functions.yaml] in the
+    # tracking issue https://github.com/pytorch/pytorch/issues/30405
     while idx < len(arguments):
         argument = arguments[idx]
         if declaration['name'] == 'tril_indices' or declaration['name'] == 'triu_indices':

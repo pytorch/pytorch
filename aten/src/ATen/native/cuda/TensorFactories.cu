@@ -52,7 +52,7 @@ Tensor empty_cuda(
   c10::optional<MemoryFormat> optional_memory_format) {
     AT_ASSERT(device.has_value() && device.value().type() == at::DeviceType::CUDA);
     TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-    TORCH_CHECK(!pin_memory.has_value() && pin_memory.value(), "Only dense CPU tensors can be pinned");
+    TORCH_CHECK(pin_memory.has_value() && !pin_memory.value(), "Only dense CPU tensors can be pinned");
     check_size_nonnegative(size);
 
     auto* allocator = at::cuda::getCUDADeviceAllocator();

@@ -408,8 +408,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 """.format(name=name, expr=unpack_expr, typ='DimnameList')
                 return [line.strip() for line in result.split('\n')]
 
-            # if name == 'layout':
-            #    return ['auto {} = {}.layout;'.format(name, unpack_expr)]
             return ['auto {} = {};'.format(name, unpack_expr)]
 
         def parse_arg(arg, arg_index, unpack_args=False):
@@ -472,8 +470,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             arg_idx += 1
 
         # This is a hack to insert 'requires_grad'.
-        # This should happen automatically based on native_functions.yaml schemas
-        # issue #30405
+        # Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+        # In the tracking issue https://github.com/pytorch/pytorch/issues/30405
         if has_tensor_options and check_is_factory_or_like_or_new_function(declaration):
             added = False
             i = 0
@@ -1016,10 +1014,8 @@ def get_python_signature(declaration, include_out):
             type_args.append(arg)
             continue
         # Skip `TensorOptions` in Python, as it is only used on the C++ side.
-        # This is a potential issue. If 2 scalar types are passed - we have an issue
-        # issue #30405
         if TOUtils.check_if_factory_method(declaration['arguments']):
-            if arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
+            if arg['name'] in TOUtils.tensor_options_args:
                 continue
 
         if arg.get('kwarg_only', False) and positional:
