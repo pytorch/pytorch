@@ -3565,7 +3565,8 @@ graph(%Ra, %Rb):
                 return x + a + b
         with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
             @torch.jit.script
-            def add_tensor_tensor(x : Dict[str, int] = None):
+            def bad_no_optional(x=None):
+                # type: (Dict[str, int]) -> Dict[str, int]
                 return x
 
 
