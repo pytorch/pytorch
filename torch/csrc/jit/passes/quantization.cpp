@@ -638,6 +638,7 @@ class InsertQuantDeQuantHelper {
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
+  void removeObservers(script::Module& module);
   void removeObservers(script::Module& module, Graph* g);
   void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
@@ -680,7 +681,17 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   values_to_quantize_[g].insert({v, original_value});
 }
 
+void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    removeObservers(module, method.graph().get());
+  }
+  for (script::Module m : module.children()) {
+    removeObservers(m);
+  }
+}
+
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
+  GRAPH_DUMP("Before Remove Observers:", g);
   if (nodes_to_destroy_.count(g)) {
     for (auto& n : nodes_to_destroy_.at(g)) {
       n->removeAllInputs();
@@ -703,6 +714,7 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
     }
     observer_modules_to_remove_.at(g).clear();
   }
+  GRAPH_DUMP("After remove observers :", g);
 }
 
 void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
@@ -904,9 +916,6 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  GRAPH_DUMP("Before Remove Observers:", graph);
-  removeObservers(module, graph.get());
-  GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
