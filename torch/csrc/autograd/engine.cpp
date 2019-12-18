@@ -159,7 +159,6 @@ int NodeTask::getReentrantDepth() const {
 }
 
 bool graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
-  std::unique_lock<std::mutex> lock(graph_task->mutex_);
   return graph_task->outstanding_tasks_.load() == 0 ||
       (graph_task->exit_on_error_ && graph_task->has_error_.load());
 }
@@ -718,6 +717,49 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
       std::move(task), /* incrementOutstandingTasks */ false);
 }
 
+std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
+    const std::shared_ptr<GraphTask>& graph_task,
+    std::shared_ptr<Node> graph_root) {
+  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  // Lock mutex for GraphTask.
+  std::unique_lock<std::mutex> lock(graph_task->mutex_);
+
+  ready_queue(at::kCPU).push(
+      NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
+
+  // Not a worker
+  if (worker_device == NO_DEVICE) {
+    // graph_task_exec_post_processing is done when the Future is marked as
+    // completed in mark_graph_task_completed.
+    return graph_task->future_result_;
+  } else {
+    graph_task->owner_ = worker_device;
+    ++total_depth;
+    if (current_depth >= max_recursion_depth_) {
+      // See Note [Reentrant backwards]
+      // If reached the max depth, switch to a different thread
+      add_thread_pool_task(graph_task);
+      // graph_task_exec_post_processing is done when the Future is marked as
+      // completed in mark_graph_task_completed.
+      return graph_task->future_result_;
+    } else {
+      // Get back to work while we wait for our new graph_task to
+      // complete!
+      ++current_depth;
+      lock.unlock();
+      thread_main(graph_task, /* reentrant_thread */ true);
+      --current_depth;
+    }
+    --total_depth;
+  }
+
+  // Check for errors, call callbacks and sync streams. We return a completed
+  // future here since 'thread_main' above is a call blocking an autograd engine
+  // thread and not the thread the user called 'execute_with_graph_task' from.
+  return std::make_shared<FutureVariableList>(
+      graph_task_exec_post_processing(graph_task));
+}
+
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
   if (graph_task->future_result_->completed()) {
@@ -768,48 +810,6 @@ variable_list Engine::graph_task_exec_post_processing(
   return graph_task->captured_vars_;
 }
 
-std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
-    const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root) {
-  std::call_once(start_threads_flag_, &Engine::start_threads, this);
-  // Lock mutex for GraphTask.
-  std::unique_lock<std::mutex> lock(graph_task->mutex_);
-
-  ready_queue(at::kCPU).push(
-      NodeTask(graph_task, std::move(graph_root), InputBuffer(0)));
-
-  // Not a worker
-  if (worker_device == NO_DEVICE) {
-    // graph_task_exec_post_processing is done when the Future is marked as
-    // completed in mark_graph_task_completed.
-    return graph_task->future_result_;
-  } else {
-    graph_task->owner_ = worker_device;
-    ++total_depth;
-    if (current_depth >= max_recursion_depth_) {
-      // See Note [Reentrant backwards]
-      // If reached the max depth, switch to a different thread
-      add_thread_pool_task(graph_task);
-      // graph_task_exec_post_processing is done when the Future is marked as
-      // completed in mark_graph_task_completed.
-      return graph_task->future_result_;
-    } else {
-      // Get back to work while we wait for our new graph_task to
-      // complete!
-      ++current_depth;
-      lock.unlock();
-      thread_main(graph_task, /* reentrant_thread */ true);
-      --current_depth;
-    }
-    --total_depth;
-  }
-
-  // Check for errors, call callbacks and sync streams. We return a completed
-  // future here since 'thread_main' above is a call blocking an autograd engine
-  // thread and not the thread the user called 'execute_with_graph_task' from.
-  return std::make_shared<FutureVariableList>(
-      graph_task_exec_post_processing(graph_task));
-}
 
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine
