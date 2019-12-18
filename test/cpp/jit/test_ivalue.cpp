@@ -76,6 +76,21 @@ void testIValue() {
   ASSERT_TRUE(cls->hasAttribute("attr1"));
   ASSERT_TRUE(cls->hasAttribute("attr2"));
   ASSERT_TRUE(obj->slots().size() == 1);
+
+  // Test tuple print
+  {
+    IValue tp = std::make_tuple(3);
+    std::stringstream ss;
+    ss << tp;
+    ASSERT_EQ(ss.str(), "(3,)");
+  }
+
+  {
+    IValue tp = std::make_tuple(3, 3);
+    std::stringstream ss;
+    ss << tp;
+    ASSERT_EQ(ss.str(), "(3, 3)");
+  }
 }
 
 } // namespace jit

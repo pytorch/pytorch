@@ -27,6 +27,7 @@ DECLARE_DISPATCH(binary_fn, eq_stub);
 DECLARE_DISPATCH(binary_fn, ne_stub);
 DECLARE_DISPATCH(binary_fn, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
+DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
 DECLARE_DISPATCH(binary_fn, mse_stub);
 
 }} // namespace at::native

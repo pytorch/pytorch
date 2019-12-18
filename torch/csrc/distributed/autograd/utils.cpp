@@ -21,21 +21,27 @@ using torch::distributed::rpc::WorkerInfo;
 void addSendRpcBackward(
     const ContextPtr& autogradContext,
     const AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors,
-    const rpc::worker_id_t dst) {
+    std::vector<torch::Tensor>& tensors) {
+  // Attach autograd information only for tensors requiring grad.
+  std::vector<torch::Tensor> tensors_with_grad;
+  std::copy_if(
+      tensors.begin(),
+      tensors.end(),
+      std::back_inserter(tensors_with_grad),
+      [](const torch::Tensor& t) { return t.requires_grad(); });
+
   // Attach the appropriate autograd edges.
   auto grad_fn = std::make_shared<SendRpcBackward>();
-  grad_fn->set_next_edges(torch::autograd::collect_next_edges(tensors));
+  grad_fn->set_next_edges(
+      torch::autograd::collect_next_edges(tensors_with_grad));
 
   // Add the appropriate input metadata for the grad_fn.
-  for (const auto& tensor : tensors) {
+  for (const auto& tensor : tensors_with_grad) {
     grad_fn->add_input_metadata(tensor);
   }
 
   // Record the send autograd function in our current context.
   autogradContext->addSendFunction(grad_fn, autogradMetadata.autogradMessageId);
-  // Record the workerID
-  autogradContext->addKnownWorkerId(dst);
 }
 
 ContextPtr addRecvRpcBackward(
@@ -52,7 +58,9 @@ ContextPtr addRecvRpcBackward(
     auto grad_fn = std::make_shared<RecvRpcBackward>(
         autogradMetadata, autogradContext, fromWorkerId);
     for (auto& tensor : tensors) {
-      torch::autograd::set_history(tensor, grad_fn);
+      if (tensor.requires_grad()) {
+        torch::autograd::set_history(tensor, grad_fn);
+      }
     }
 
     // Now update the autograd context with the necessary information.
@@ -86,7 +94,7 @@ Message getMessageWithAutograd(
   // Wrap the original rpc with autograd information.
   AutogradMetadata autogradMetadata(
       autogradContext->contextId(), autogradContainer.newAutogradMessageId());
-  auto rpcWithAutograd = c10::guts::make_unique<RpcWithAutograd>(
+  auto rpcWithAutograd = std::make_unique<RpcWithAutograd>(
       RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
       msgType,
       autogradMetadata,
@@ -95,8 +103,10 @@ Message getMessageWithAutograd(
   if (tensorsRequireGrad) {
     // Record autograd information for 'send'.
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
+        autogradContext, autogradMetadata, rpcWithAutograd->tensors());
   }
+  // Record the workerID
+  autogradContext->addKnownWorkerId(dstId);
 
   return std::move(*rpcWithAutograd).toMessage();
 }

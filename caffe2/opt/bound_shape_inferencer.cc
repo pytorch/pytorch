@@ -52,6 +52,13 @@ void BoundShapeInferencer::EnsureShapeNames(
   }
 }
 
+void BoundShapeInferencer::Initialize(
+    const ShapeInfoMap& info,
+    bool extract_feature_len) {
+  shape_info_ = info;
+  extract_feature_len_ = extract_feature_len;
+}
+
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
     caffe2::Workspace* /* ws */) {
@@ -85,12 +92,11 @@ void BoundShapeInferencer::InferOps(
 
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
-    const std::unordered_map<std::string, ShapeInfo>& info,
+    const ShapeInfoMap& info,
     caffe2::Workspace* ws,
     bool extract_feature_len) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
-  shape_info_ = info;
-  extract_feature_len_ = extract_feature_len;
+  Initialize(info, extract_feature_len);
 
   bool inferFinished = false;
 

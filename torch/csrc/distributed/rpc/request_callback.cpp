@@ -28,7 +28,8 @@ struct ClearAutogradContextGuard {
 
 } // anonymous namespace
 
-Message RequestCallback::operator()(Message& request) const {
+std::shared_ptr<FutureMessage> RequestCallback::operator()(
+    Message& request) const {
   // For a recv thread, current context id should be invalid outside
   // processMessage().
   ClearAutogradContextGuard guard;
@@ -37,7 +38,7 @@ Message RequestCallback::operator()(Message& request) const {
   } catch (std::exception& e) {
     LOG(ERROR) << "Received error while processing request type "
                << request.type() << ": " << e.what();
-    return createExceptionResponse(request, e);
+    return std::make_shared<FutureMessage>(createExceptionResponse(request, e));
   }
 }
 

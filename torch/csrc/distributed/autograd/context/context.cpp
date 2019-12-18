@@ -96,27 +96,48 @@ void DistAutogradContext::setGraphTask(
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::Message& message) {
-    if (message.type() == rpc::MessageType::EXCEPTION) {
-      // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err(
-          std::string(message.payload().begin(), message.payload().end()));
-      graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
-    }
-  });
+  futureMessage->addCallback(
+      [this](
+          const rpc::Message& /* unused */,
+          const c10::optional<utils::FutureError>& futErr) {
+        if (futErr) {
+          // If we have an error, let the local autograd engine know about it.
+          std::runtime_error err((*futErr).what());
+          graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
+        }
+      });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
-  // Copy futures under lock, but wait for them outside the lock.
+std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+    clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
   lock.unlock();
 
-  for (const auto& outStandingRpc : outStandingRpcs) {
-    outStandingRpc->wait();
+  struct State {
+    explicit State(int32_t count)
+        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
+    std::shared_ptr<rpc::FutureMessage> future;
+    std::atomic<int32_t> remaining;
+  };
+  auto state = std::make_shared<State>(outStandingRpcs.size());
+  if (outStandingRpcs.empty()) {
+    state->future->markCompleted(rpc::Message());
+  } else {
+    for (auto& rpc : outStandingRpcs) {
+      rpc->addCallback(
+          [state](
+              const rpc::Message& /* unused */,
+              const c10::optional<utils::FutureError>& /* unused */) {
+            if (--state->remaining == 0) {
+              state->future->markCompleted(rpc::Message());
+            }
+          });
+    }
   }
+  return state->future;
 }
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
