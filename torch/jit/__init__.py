@@ -102,20 +102,20 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         API with :func:`torch.jit.load <torch.jit.load>`.
 
         To be able to save a module, it must not make any calls to native Python functions.
-        This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
+        This means that all submodules must be subclasses of :class:`ScriptModule` as well.
 
         .. DANGER::
            All modules, no matter their device, are always loaded onto the CPU during loading.
-           This is different from :func:`load <torch.jit.load>`'s semantics and may change in the future.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
 
         Arguments:
-            m: A ScriptModule to save.
+            m: A :class:`ScriptModule` to save.
             f: A file-like object (has to implement write and flush) or a string
                containing a file name.
             _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
         .. warning::
-            If you are using Python 2, ``torch.jit.save`` does NOT support ``StringIO.StringIO``
+            If you are using Python 2, ``torch.jit.save`` does NOT support :any:`StringIO.StringIO`
             as a valid file-like object. This is because the write method should return
             the number of bytes written; ``StringIO.write()`` does not do this.
 
@@ -803,7 +803,7 @@ def trace(func,
                                  Tensor in which case it is automatically wrapped in a tuple.
 
     Keyword arguments:
-        check_trace (``bool``, optional): Check if the same inputs run through
+        check_trace (bool, optional): Check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
@@ -1126,10 +1126,21 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     :class:`ScriptFunction`. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
-    `TorchScript Language Reference`_.
+    :ref:`language-reference`.
 
     ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
-    ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
+    ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+
+    Arguments:
+        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
+                                                  compile.
+
+    Returns:
+        If ``obj`` is ``nn.Module``, ``script`` returns
+        a :class:`ScriptModule` object. The returned :class:`ScriptModule` will
+        have the same set of sub-modules and parameters as the
+        original ``nn.Module``. If ``obj`` is a standalone function,
+        a :class:`ScriptFunction` will be returned.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
@@ -1218,7 +1229,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
         the :func:`@torch.jit.export <torch.jit.export>` decorator to the method. To opt out of compilation
-        use :func:`@torch.jit.ignore <torch.jit.ignore>`.
+        use :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`.
 
         Example (an exported and ignored method in a module)::
 
@@ -1497,6 +1508,11 @@ if _enabled:
             return self.__getattr__('forward')
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
+        """
+        ``ScriptModule``\s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``\s
+        contain methods, attributes, parameters, and
+        constants. These can be accessed the same as on a normal ``nn.Module``.
+        """
         def __init__(self):
             super(ScriptModule, self).__init__()
 

@@ -40,21 +40,24 @@ For an end-to-end example of converting a PyTorch model to TorchScript and runni
 Creating TorchScript Code
 --------------------------
 
-.. autoclass:: ScriptModule()
-    :members:
-
-
-.. autoclass:: ScriptFunction()
-
 .. autofunction:: script(obj)
 
 .. autofunction:: trace(func, example_inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
 .. autofunction:: trace_module(mod, inputs, optimize=None, check_trace=True, check_inputs=None, check_tolerance=1e-5)
 
+.. autoclass:: ScriptModule()
+    :members:
+
+.. autoclass:: ScriptFunction()
+
 .. autofunction:: save
 
 .. autofunction:: load
+
+.. autofunction:: ignore
+
+.. autofunction:: unused
 
 
 Mixing Tracing and Scripting
@@ -160,7 +163,8 @@ Example (using a traced module):
 TorchScript Language
 --------------------
 
-Please see the full :ref:`language-reference` for details.
+TorchScript is a statically typed subset of Python, so many Python features apply
+directly to TorchScript. See the full :ref:`language-reference` for details.
 
 
 .. _Builtin functions:
@@ -168,6 +172,7 @@ Please see the full :ref:`language-reference` for details.
 Built-in Functions and Modules
 ------------------------------
 
+TorchScript supports the use of most PyTorch functions and many Python built-ins.
 See :ref:`builtin-functions` for a full reference of supported functions.
 
 PyTorch Functions and Modules
@@ -178,6 +183,8 @@ functions that PyTorch provides. Most methods on Tensor as well as functions in
 the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
 modules from ``torch.nn`` are supported in TorchScript, excluding those in the
 table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
+See :ref:`supported-pytorch-functions` and :ref:`supported-tensor-methods` for a full
+listing of available methods.
 
 Unsupported ``torch.nn`` Modules::
 
@@ -188,7 +195,7 @@ Unsupported ``torch.nn`` Modules::
 Python Functions and Modules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Many of Python's `built-in functions <https://docs.python.org/3/library/functions.html>`_ are supported in TorchScript.
-The :any:`math` module is also supported, but no other Python modules
+The :any:`math` module is also supported (see :ref:`math-module` for details), but no other Python modules
 (built-in or third party) are supported.
 
 
@@ -267,7 +274,7 @@ A :class:`ScriptModule` with a single ``forward`` method will have an attribute
 ``code``, which you can use to inspect the :class:`ScriptModule`'s code.
 If the :class:`ScriptModule` has more than one method, you will need to access
 ``.code`` on the method itself and not the module. We can inspect the
-code of a method named ``foo`` on a ScriptModule by accessing ``.foo.code``.
+code of a method named ``foo`` on a :class:`ScriptModule` by accessing ``.foo.code``.
 The example above produces this output: ::
 
     def foo(len: int) -> Tensor:

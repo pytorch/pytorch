@@ -298,6 +298,7 @@ Example (refining types on parameters and locals):
 
 .. _TorchScript Class:
 .. _TorchScript Classes:
+.. _torchscript-classes:
 
 TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
@@ -787,9 +788,6 @@ incrementally converting a model to TorchScript. The model can be moved function
 to TorchScript, leaving calls to Python functions in place. This way you can incrementally
 check the correctness of the model as you go.
 
-.. autofunction:: ignore
-
-.. autofunction:: unused
 
 .. autofunction:: is_scripting
 
