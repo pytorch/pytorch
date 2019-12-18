@@ -6,7 +6,7 @@ from itertools import product
 from ._overrides import torch_function_dispatch
 
 __all__ = [
-    'align_tensors',  # BUILD_NAMEDTENSOR only
+    'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
     'cdist',
@@ -160,7 +160,9 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     if unpack_pivots:
         LU_pivots_zero_idx = LU_pivots - 1
         if LU_data.dim() > 2:
-            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype).expand(shape[:-1] + (m,)).clone(memory_format=torch.contiguous_format)
+            P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype) \
+                     .expand(shape[:-1] + (m,)) \
+                     .clone(memory_format=torch.contiguous_format)
             for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
                 final_order = list(range(m))
                 for k, j in enumerate(LU_pivots_zero_idx[idx]):

@@ -74,6 +74,23 @@ Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
 }
 
+Tensor truncate(const Tensor& tensor) {
+  if (tensor.is_floating_point()) {
+    return tensor.trunc();
+  }
+  return tensor;
+}
+
+Tensor floor_divide(const Tensor& input, const Tensor& other) {
+  Tensor out = input / other;
+  return truncate(out);
+}
+
+Tensor floor_divide(const Tensor& input, Scalar other) {
+  Tensor out = input / other;
+  return truncate(out);
+}
+
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);

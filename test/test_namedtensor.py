@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -705,6 +702,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -730,6 +730,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
@@ -1044,6 +1045,11 @@ class TestNamedTensor(TestCase):
 
         # takes positional dim
         out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 
@@ -1944,11 +1950,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

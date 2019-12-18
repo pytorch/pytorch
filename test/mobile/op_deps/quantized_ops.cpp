@@ -48,10 +48,10 @@ Tensor QHelper(Tensor qa) {
   return qa;
 }
 
-static char helper1[] = "quantized::t_helper1";
-static char helper2[] = "quantized::t_helper2";
-static char helper3[] = "quantized::t_helper3";
-static char helper4[] = "quantized::t_helper4";
+constexpr char helper1[] = "quantized::t_helper1";
+constexpr char helper2[] = "quantized::t_helper2";
+constexpr char helper3[] = "quantized::t_helper3";
+constexpr char helper4[] = "quantized::t_helper4";
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::t_add(Tensor qa, Tensor qb, float scale, int zero_point)"

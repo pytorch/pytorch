@@ -31,7 +31,7 @@ enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };
 // behaviour of contiguous
 #define LEGACY_CONTIGUOUS_MEMORY_FORMAT c10::get_contiguous_memory_format()
 
-C10_DEPRECATED inline MemoryFormat get_contiguous_memory_format() {
+[[deprecated]] inline MemoryFormat get_contiguous_memory_format() {
   return MemoryFormat::Contiguous;
 }
 
