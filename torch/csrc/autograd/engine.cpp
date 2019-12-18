@@ -387,7 +387,7 @@ void GraphTask::set_exception(
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    future_->setError(e.what());
+    future_result_->setError(e.what());
   }
 }
 
@@ -720,16 +720,16 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
 
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
-  if (graph_task->future_->completed()) {
+  if (graph_task->future_result_->completed()) {
     // Future is already marked as completed.
     return;
   }
 
   try {
     auto val = graph_task_exec_post_processing(graph_task);
-    graph_task->future_->markCompleted(val);
+    graph_task->future_result_->markCompleted(val);
   } catch (std::exception& e) {
-    graph_task->future_->setError(e.what());
+    graph_task->future_result_->setError(e.what());
   }
 }
 
@@ -782,7 +782,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
   if (worker_device == NO_DEVICE) {
     // graph_task_exec_post_processing is done when the Future is marked as
     // completed in mark_graph_task_completed.
-    return graph_task->future_;
+    return graph_task->future_result_;
   } else {
     graph_task->owner_ = worker_device;
     ++total_depth;
@@ -792,7 +792,7 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       add_thread_pool_task(graph_task);
       // graph_task_exec_post_processing is done when the Future is marked as
       // completed in mark_graph_task_completed.
-      return graph_task->future_;
+      return graph_task->future_result_;
     } else {
       // Get back to work while we wait for our new graph_task to
       // complete!

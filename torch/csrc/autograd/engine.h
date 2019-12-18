@@ -48,7 +48,7 @@ struct GraphTask {
   bool grad_mode_;
 
   // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
-  // has_error_ and future_.
+  // has_error_ and future_result_.
   std::mutex mutex_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
@@ -104,7 +104,7 @@ struct GraphTask {
 
   // Future representing the completion of the graph task. Notified when all
   // tasks are done.
-  std::shared_ptr<FutureVariableList> future_;
+  std::shared_ptr<FutureVariableList> future_result_;
 
   GraphTask(
       bool keep_graph,
@@ -118,7 +118,7 @@ struct GraphTask {
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
-        future_(std::make_shared<FutureVariableList>()) {}
+        future_result_(std::make_shared<FutureVariableList>()) {}
 };
 
 struct NodeTask {
@@ -217,9 +217,6 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
-  variable_list graph_task_exec_post_processing(
-      const std::shared_ptr<GraphTask>& graph_task);
-  void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;
@@ -253,6 +250,11 @@ struct TORCH_API Engine {
  // when Engine shuts down, so there may be threads waiting on work_
  // for the graphtasks_queue_ to be nonempty.
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
+
+private:
+ variable_list graph_task_exec_post_processing(
+     const std::shared_ptr<GraphTask>& graph_task);
+ void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 };
 
 // allow python_engine to override the default engine when it loads
