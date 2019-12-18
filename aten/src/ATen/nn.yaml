@@ -40,10 +40,6 @@
   wrap_dim:
     dim: self
 
-- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope)
-  cname: LeakyReLU
-  has_inplace: True
-
 - name: _thnn_log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
