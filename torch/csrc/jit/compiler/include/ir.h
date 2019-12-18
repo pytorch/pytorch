@@ -1,10 +1,9 @@
-#ifndef NNC_INCLUDE_IR_H_INCLUDED_
-#define NNC_INCLUDE_IR_H_INCLUDED_
+#pragma once
 
 #include <string>
 #include <vector>
 
-#include "expr.h"
+#include "torch/csrc/jit/compiler/include/expr.h"
 
 namespace torch {
 namespace jit {
@@ -305,5 +304,3 @@ class Broadcast : public ExprNode<Broadcast> {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_IR_H_INCLUDED_

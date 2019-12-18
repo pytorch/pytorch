@@ -1,5 +1,5 @@
-#include "llvm_codegen.h"
-#include "ir.h"
+#include "torch/csrc/jit/compiler/include/llvm_codegen.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
 
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>

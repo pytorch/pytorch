@@ -1,10 +1,9 @@
-#ifndef NNC_INCLUDE_REFCOUNT_H_INCLUDED_
-#define NNC_INCLUDE_REFCOUNT_H_INCLUDED_
+#pragma once
 
 #include <stdio.h>
 #include <atomic>
 
-#include "logging.h"
+#include "torch/csrc/jit/compiler/include/logging.h"
 
 namespace torch {
 namespace jit {
@@ -102,5 +101,3 @@ class RefHandle {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_REFCOUNT_H_INCLUDED_

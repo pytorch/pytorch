@@ -5,10 +5,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "function.h"
-#include "ir.h"
-#include "tensor.h"
-#include "types.h"
+#include "torch/csrc/jit/compiler/include/function.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
+#include "torch/csrc/jit/compiler/include/tensor.h"
+#include "torch/csrc/jit/compiler/include/types.h"
 
 namespace torch {
 namespace jit {

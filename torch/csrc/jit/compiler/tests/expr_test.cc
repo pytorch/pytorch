@@ -1,10 +1,10 @@
 #include <stdexcept>
 
-#include "expr.h"
-#include "ir.h"
+#include "torch/csrc/jit/compiler/include/expr.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
 
 #include <gtest/gtest.h>
-#include "test_utils.h"
+#include "torch/csrc/jit/compiler/tests/test_utils.h"
 
 using namespace torch::jit::compiler;
 

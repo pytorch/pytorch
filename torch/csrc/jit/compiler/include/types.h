@@ -1,10 +1,9 @@
-#ifndef NNC_INCLUDE_DTYPES_H_INCLUDED__
-#define NNC_INCLUDE_DTYPES_H_INCLUDED__
+#pragma once
 
 #include <cstdint>
 #include <iostream>
 
-#include "logging.h"
+#include "torch/csrc/jit/compiler/include/logging.h"
 
 namespace torch {
 namespace jit {
@@ -73,5 +72,3 @@ inline Dtype BinaryOpDtype(Dtype op1_dtype, Dtype op2_dtype) {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  //  NNC_INCLUDE_DTYPES_H_INCLUDED__

@@ -1,4 +1,4 @@
-#include "ir.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
 
 namespace torch {
 namespace jit {

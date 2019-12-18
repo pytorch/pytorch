@@ -1,10 +1,8 @@
-#ifndef NNC_INCLUDE_EXPR_H_INCLUDED_
-#define NNC_INCLUDE_EXPR_H_INCLUDED_
+#pragma once
 
-#include "expr.h"
-#include "ir_visitor.h"
-#include "refcount.h"
-#include "types.h"
+#include "torch/csrc/jit/compiler/include/ir_visitor.h"
+#include "torch/csrc/jit/compiler/include/refcount.h"
+#include "torch/csrc/jit/compiler/include/types.h"
 
 namespace torch {
 namespace jit {
@@ -98,5 +96,3 @@ class Stmt : public RefHandle<BaseStmtNode> {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_EXPR_H_INCLUDED_

@@ -1,6 +1,6 @@
-#include "types.h"
+#include "torch/csrc/jit/compiler/include/types.h"
 
-#include "logging.h"
+#include "torch/csrc/jit/compiler/include/logging.h"
 
 namespace torch {
 namespace jit {

@@ -1,5 +1,5 @@
-#include "ir.h"
-#include "llvm_codegen.h"
+#include "torch/csrc/jit/compiler/include/ir.h"
+#include "torch/csrc/jit/compiler/include/llvm_codegen.h"
 
 #include <gtest/gtest.h>
 

@@ -1,8 +1,7 @@
-#ifndef NNC_INCLUDE_LLVM_CODEGEN_H_
-#define NNC_INCLUDE_LLVM_CODEGEN_H_
+#pragma once
 
-#include "ir_visitor.h"
-#include "llvm_jit.h"
+#include "torch/csrc/jit/compiler/include/ir_visitor.h"
+#include "torch/csrc/jit/compiler/include/llvm_jit.h"
 
 #include <llvm/IR/IRBuilder.h>
 
@@ -35,5 +34,3 @@ class LLVMCodeGen : public IRVisitor {
 } // namespace compiler
 } // namespace jit
 } // namespace torch
-
-#endif  // NNC_INCLUDE_LLVM_CODEGEN_H_
