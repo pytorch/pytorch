@@ -47,6 +47,11 @@ def save_to_s3(project, data):
         </script>
     </html>
     """
+
+    # for pytorch, file can be found at
+    # http://ossci-docker.s3-website.us-east-1.amazonaws.com/pytorch.html
+    # and later one we can config docker.pytorch.org to point to the location
+
     client.put_object(
         Bucket="ossci-docker",
         ACL="public-read",
