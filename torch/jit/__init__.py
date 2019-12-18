@@ -712,16 +712,19 @@ def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-        exported = []
-        for name in dir(mod):
-            item = getattr(mod, name, None)
-            if torch._jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
-                exported.append(name)
-        stubs = []
-        for method in exported:
-            stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
+        def make_stubs_from_exported_methods(mod):
+            exported = []
+            for name in dir(mod):
+                item = getattr(mod, name, None)
+                if torch._jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                    exported.append(name)
 
-        return torch.jit._recursive.create_script_module_for_tracing(mod, stubs)
+            stubs = []
+            for method in exported:
+                stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
+            return stubs
+
+        return torch.jit._recursive.create_script_module(mod, make_stubs_from_exported_methods, share_types=False)
     else:
         if _module_class is None:
             _module_class = TopLevelTracedModule
@@ -1251,9 +1254,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
+    if isinstance(obj, ScriptModule):
+        return obj
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.create_script_module(obj, torch.jit._recursive.infer_methods_to_compile)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1457,19 +1462,17 @@ class ScriptMeta(type):
         def init_then_script(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             if type(self) == cls:
-                stubs = [v for k, v in sorted(cls._methods.items())]
-                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, stubs)
+                def make_stubs(module):
+                    cls = type(module)
+                    return [v for k, v in sorted(cls._methods.items())]
+
+                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, make_stubs)
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find
                 # the scripted versions.
                 concrete_type = self._actual_script_module._concrete_type
                 for name in concrete_type.get_attributes():
-                    if hasattr(cls, name) and isinstance(getattr(cls, name), property):
-                        # TODO giant hack. Right now we are encoding properties
-                        # as attributes (this is what recursive script does
-                        # today, but it is wrong)
-                        continue
                     delattr(self, name)
                 for name, _ in concrete_type.get_modules():
                     delattr(self, name)
@@ -1842,7 +1845,7 @@ class TracedModule(ScriptModule):
 
         # TODO: this way of doing it means we lose name information on the class,
         # since the qualname is basically "nn.Module"
-        script_module = torch.jit._recursive.create_script_module_for_tracing(tmp_module, ())
+        script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
         self.__dict__['_actual_script_module'] = script_module
@@ -2023,17 +2026,23 @@ def _get_builtin_table():
         for name in dir(mod):
             v = getattr(mod, name)
             if callable(v):
-                _builtin_table[id(v)] = "aten::" + name
+                _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
 
+    if not PY2:
+        _builtin_ops.append((math.gcd, "aten::gcd"))
+        _builtin_ops.append((math.isfinite, "aten::isfinite"))
+    if PY37:
+        _builtin_ops.append((math.remainder, "aten::mathremainder"))
+
+    import torch.distributed.autograd as dist_autograd
+    if dist_autograd.is_available():
+        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
+
+    # populate the _builtin_table from _builtin_ops
     for builtin, aten_op in _builtin_ops:
         _builtin_table[id(builtin)] = aten_op
-    if not PY2:
-        _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.isfinite)] = "aten::isfinite"
-    if PY37:
-        _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
     return _builtin_table
 
