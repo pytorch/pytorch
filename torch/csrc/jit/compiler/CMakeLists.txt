@@ -27,10 +27,11 @@ add_library(nnc
   src/function.cc
   src/ir_visitor.cc
   src/llvm_codegen.cc
+  src/llvm_jit.cc
   src/types.cc
   )
 
-set_source_files_properties(src/llvm_codegen.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
+set_source_files_properties(src/llvm_jit.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
 
 target_include_directories(nnc PUBLIC "include")
 
