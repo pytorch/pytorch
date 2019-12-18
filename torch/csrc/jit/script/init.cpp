@@ -1187,6 +1187,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_function_attribute",
           &ConcreteModuleTypeBuilder::addFunctionAttribute)
+      .def(
+          "add_builtin_function",
+          &ConcreteModuleTypeBuilder::addBuiltinFunction)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
