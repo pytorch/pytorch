@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/functional/activation.h>
+#include <torch/nn/modules/linear.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -506,6 +507,43 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
 };
 
 TORCH_MODULE(Threshold);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the MultiheadAttention function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
+/// to learn about the exact behavior of this module.
+class TORCH_API MultiheadAttentionImpl
+  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
+ public:
+  MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
+    : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
+  explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
+
+  std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
+                 const Tensor& value, const Tensor& key_padding_mask = {},
+                 bool need_weights = true, const Tensor& attn_mask = {});
+
+  void reset() override;
+
+  void _reset_parameters();
+
+  /// The options with which this `Module` was constructed.
+  MultiheadAttentionOptions options;
+
+  bool _qkv_same_embed_dim;
+  Tensor in_proj_weight;
+  Tensor in_proj_bias;
+  Tensor bias_k;
+  Tensor bias_v;
+  Linear out_proj = nullptr;
+  Tensor q_proj_weight;
+  Tensor k_proj_weight;
+  Tensor v_proj_weight;
+  int64_t head_dim;
+};
+
+TORCH_MODULE(MultiheadAttention);
 
 } // namespace nn
 } // namespace torch
