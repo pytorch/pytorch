@@ -70,7 +70,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          c10::guts::make_unique<RequestCallbackImpl>(),
+          std::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
@@ -288,7 +288,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload = c10::guts::make_unique<std::string>(
+          auto payload = std::make_unique<std::string>(
               wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();

@@ -26,7 +26,7 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     : names_(std::move(names)) {}
 
   std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
-    return c10::guts::make_unique<NamedTensorMeta>(names_);
+    return std::make_unique<NamedTensorMeta>(names_);
   }
 
   bool has_names() const;
