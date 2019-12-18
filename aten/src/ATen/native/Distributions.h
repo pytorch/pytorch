@@ -222,9 +222,9 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
   if (count <= 0.0 || prob <= 0.0) {
     return 0;
   } else if (prob >= 1.0) {
-    return static_cast<scalar_t>(count);
+    return count;
   } else if (prob <= 0.5) {
-    if (count * prob >= 10) {
+    if (count * prob >= 10.0) {
       // btrs
       return btrs<scalar_t, accscalar_t, uniform_sampler_t>(count, prob, standard_uniform);
     } else {
@@ -232,13 +232,13 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
       return binomial_inversion<scalar_t, accscalar_t, uniform_sampler_t>(count, prob, standard_uniform);
     }
   } else if (prob > 0.5) {
-    double qprob = 1 - prob;
-    if (count * qprob >= 10) {
+    scalar_t qprob = 1.0 - prob;
+    if (count * qprob >= 10.0) {
       // btrs
-      return static_cast<scalar_t>(count) - btrs<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
+      return count - btrs<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
     } else {
       // count - binomial inversion
-      return static_cast<scalar_t>(count) - binomial_inversion<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
+      return count - binomial_inversion<scalar_t, accscalar_t, uniform_sampler_t>(count, qprob, standard_uniform);
     }
   } else {
     // prob is nan?
