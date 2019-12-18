@@ -277,8 +277,7 @@ def create_script_module_for_tracing(nn_module, stubs):
     concrete_type_builder.set_poisoned()
     concrete_type = concrete_type_builder.build()
 
-    cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
-    return create_script_module_impl(nn_module, concrete_type, cpp_module, stubs)
+    return create_script_module_impl(nn_module, concrete_type, stubs)
 
 
 def create_script_module(nn_module, stubs):
@@ -291,21 +290,19 @@ def create_script_module(nn_module, stubs):
     """
     check_module_initialized(nn_module)
     concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
-    cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
 
-    return create_script_module_impl(nn_module, concrete_type, cpp_module, stubs)
+    return create_script_module_impl(nn_module, concrete_type, stubs)
 
-def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
+def create_script_module_impl(nn_module, concrete_type, stubs):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
     Arguments:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
-        cpp_module:  A newly-constructed C++ script::Module to copy stuff into.
         stubs:  ScriptMethodStubs to compile as part of the conversion process.
     """
-    assert concrete_type.jit_type and concrete_type.jit_type == cpp_module._type()
+    cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
 
     def init_fn(script_module):
         # Initialize the ScriptModule:
