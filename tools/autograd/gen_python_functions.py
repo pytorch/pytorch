@@ -15,11 +15,8 @@ except ImportError:
     from tools.shared.module_loader import import_module
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
-try:
-    from src.ATen.tensor_options_utils import *
-except ImportError:
-    from tools.shared.module_loader import import_module
-    TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
@@ -344,7 +341,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
         'c10::optional<Device>': 'deviceOptional',
-        'c10::optional<Layout>': 'layout',
+        'c10::optional<Layout>': 'layoutOptional',
         'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
@@ -411,8 +408,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 """.format(name=name, expr=unpack_expr, typ='DimnameList')
                 return [line.strip() for line in result.split('\n')]
 
-            if name == 'layout':
-                return ['auto {} = {}.layout;'.format(name, unpack_expr)]
+            # if name == 'layout':
+            #    return ['auto {} = {}.layout;'.format(name, unpack_expr)]
             return ['auto {} = {};'.format(name, unpack_expr)]
 
         def parse_arg(arg, arg_index, unpack_args=False):
@@ -588,9 +585,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
             env['dispatch_args'] = TOUtils.collapse_actuals(env['dispatch_args'])
             if add_requires_grad:
-                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device).layout(layout).pinned_memory(pin_memory).requires_grad(requires_grad);"
+                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
+                    .layout(layout).pinned_memory(pin_memory).requires_grad(requires_grad);"
             else:
-                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device).layout(layout).pinned_memory(pin_memory);"
+                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
+                    .layout(layout).pinned_memory(pin_memory);"
         else:
             env['initialize_cuda'] = ''
             env['tensor_options'] = ''

@@ -155,6 +155,7 @@ inline ${return_type} Tensor::${api_name_prefix}${api_name}(${method_formals}) c
 """)
 
 # add a method declaration in Functions.h
+# collapsed means that tensor options were collapsed to a sinle TensorOptions object
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name_prefix}${api_name}(${formals_with_defaults});
 """)
@@ -251,14 +252,11 @@ inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
 }
 """)
 
-# This is a special case for '.to' operator. It should be cleaned up
-# issue #30405
+# This is a hack.
+# Please see [Remove special code template for .to from function_wrapper.py] in
+# the tracking issue: https://github.com/pytorch/pytorch/issues/30405
 COLLAPSED_METHOD_TO_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
-    TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
-         "to(options) expects unset requires_grad flag, but got "
-         "options.requires_grad set as ", options.requires_grad());
-
     c10::optional<ScalarType> dtype = c10::nullopt;
     c10::optional<Layout> layout = c10::nullopt;
     c10::optional<Device> device = c10::nullopt;
@@ -1203,22 +1201,23 @@ def create_generic(top_env, declarations):
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
                             native_arguments=option['method_actuals']))
-                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
+                static_dispatch_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
                     option,
                     type_set='type_set()',
                     static_dispatch_function_switches=static_dispatch_function_switches)
             else:
-                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
+                static_dispatch_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
             option['api_name_prefix'] = ''
             if TOUtils.check_if_factory_method(option['arguments']):
                 option['api_name_prefix'] = '_'
 
-            return FunctionCode(declaration=TENSOR_METHOD_DECLARATION.substitute(option,
-                                                                                 static_dispatch_method_body=static_dispatch_method_body),
-                                definition=C10_TENSOR_METHOD_DEFINITION.substitute(option,
-                                                                                   static_dispatch_method_body=static_dispatch_method_body))
+            return FunctionCode(
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option,
+                                                                 static_dispatch_method_body=static_dispatch_body),
+                definition=C10_TENSOR_METHOD_DEFINITION.substitute(option,
+                                                                   static_dispatch_method_body=static_dispatch_body))
 
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
@@ -1269,8 +1268,9 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.insert(index, 'options.pinned_memory()')
             expanded_native_actuals.insert(index, 'options.device()')
 
-            # special case for 'sparse_coo_tensor' and '_sparse_coo_tensor_unsafe'
-            # issue #30405
+            # This is a hack.
+            # Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+            # In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
             if (option['name'] == 'sparse_coo_tensor' or option['name'] == '_sparse_coo_tensor_unsafe'):
                 expanded_native_actuals.insert(index, 'options.layout_opt()')
             else:
@@ -1288,15 +1288,16 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.remove('const_cast<Tensor&>(*this)')
             index = expanded_native_actuals.index('options')
             expanded_native_actuals.remove('options')
-            expanded_native_actuals.insert(index, 'pin_memory')
-            expanded_native_actuals.insert(index, 'device')
-            expanded_native_actuals.insert(index, 'layout')
-            expanded_native_actuals.insert(index, 'dtype')
+            expanded_native_actuals[index:index] = TOUtils.tensor_options_args
 
             if option['name'] == 'to':
-                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option, collapsed_formals=TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option,
+                                                                          collapsed_formals=TOUtils.collapse_formals(option['method_formals']),
+                                                                          expanded_native_actuals=expanded_native_actuals)
             else:
-                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option, collapsed_formals=TOUtils.collapse_formals(option['method_formals']), expanded_native_actuals=expanded_native_actuals)
+                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option,
+                                                                       collapsed_formals=TOUtils.collapse_formals(option['method_formals']),
+                                                                       expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         assert find_formal('Type', formals) is None, \

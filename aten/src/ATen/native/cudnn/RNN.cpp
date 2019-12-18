@@ -1079,14 +1079,20 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 }
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
-// to initialize just the state tensor
+// to initialize just the state tensor.
+//
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
-  
-  // Ideally we dont want to costruct this.
-  // Issue #30405
+
+  // This is a hack.
+  // Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+  // In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
   const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)

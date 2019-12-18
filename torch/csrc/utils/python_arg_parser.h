@@ -44,6 +44,7 @@
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
@@ -144,6 +145,7 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
+  inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
@@ -399,6 +401,12 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);
+}
+
+inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return layout(i).layout;
 }
 
 inline at::Dimname PythonArgs::dimname(int i) {

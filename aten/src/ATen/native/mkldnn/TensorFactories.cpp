@@ -5,11 +5,11 @@ namespace at { namespace native {
 #if AT_MKLDNN_ENABLED()
 
 Tensor empty_mkldnn(
-  IntArrayRef sizes, 
-  c10::optional<ScalarType> dtype, 
-  c10::optional<Layout> layout, 
-  c10::optional<Device> device, 
-  c10::optional<bool> pin_memory, 
+  IntArrayRef sizes,
+  c10::optional<ScalarType> dtype,
+  c10::optional<Layout> layout,
+  c10::optional<Device> device,
+  c10::optional<bool> pin_memory,
   c10::optional<c10::MemoryFormat> optional_memory_format) {
     TORCH_CHECK(
       !optional_memory_format.has_value(),
@@ -19,9 +19,10 @@ Tensor empty_mkldnn(
     ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());
     ideep::tensor it;
     it.resize<AllocForMKLDNN>(dst_dims, ideep::tensor::data_type::f32);
-    
-    // Ideally we dont want to costruct this.
-    // Issue #30405
+
+    // This is a hack.
+    // Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+    // In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
     const auto options = TensorOptions()
       .dtype(dtype)
       .layout(layout)
@@ -33,11 +34,11 @@ Tensor empty_mkldnn(
 #else
 
 Tensor empty_mkldnn(
-  IntArrayRef sizes, 
-  c10::optional<ScalarType> dtype, 
-  c10::optional<Layout> layout, 
-  c10::optional<Device> device, 
-  c10::optional<bool> pin_memory, 
+  IntArrayRef sizes,
+  c10::optional<ScalarType> dtype,
+  c10::optional<Layout> layout,
+  c10::optional<Device> device,
+  c10::optional<bool> pin_memory,
   c10::optional<c10::MemoryFormat> optional_memory_format) {
     AT_ERROR("empty_mkldnn: MKL-DNN build is disabled");
 }

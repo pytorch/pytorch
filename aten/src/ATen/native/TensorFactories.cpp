@@ -77,9 +77,9 @@ Tensor arange(
     Scalar start,
     Scalar end,
     Scalar step,
-    c10::optional<c10::ScalarType> dtype, 
-    c10::optional<c10::Layout> layout, 
-    c10::optional<c10::Device> device, 
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout,
+    c10::optional<c10::Device> device,
     c10::optional<bool> pin_memory) {
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
   bool set_to_integral_dtype = !dtype.has_value() && allIntegral({start, end, step});
@@ -137,9 +137,9 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::op
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    c10::optional<c10::ScalarType> dtype, 
-    c10::optional<c10::Layout> layout, 
-    c10::optional<c10::Device> device, 
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout,
+    c10::optional<c10::Device> device,
     c10::optional<bool> pin_memory,
     optional<MemoryFormat> optional_memory_format) {
   if (!names.has_value()) {
@@ -201,9 +201,10 @@ Tensor empty_like(
   return native::empty_like(self, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
-// *_like functions should be consistent with the rest of ops and 
-// take optional dtype, layout, device and pin_memory
-// issue #30405 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor empty_like(
     const Tensor& self,
     ScalarType dtype, Layout layout, Device device, bool pin_memory,
@@ -352,12 +353,16 @@ Tensor full_like(
       self, fill_value, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor full_like(
     const Tensor& self,
     Scalar fill_value,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
@@ -368,12 +373,15 @@ Tensor new_full(
     const Tensor& self,
     IntArrayRef size,
     Scalar fill_value,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  
+
+  // This is a hack
+  // Please see [Overload TensorOptions merge_in() to accept uncollapsed TensorOptions]
+  // In the tracking issue https://github.com/pytorch/pytorch/issues/30405
   const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
@@ -389,9 +397,9 @@ Tensor linspace(
     Scalar start,
     Scalar end,
     int64_t steps,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   Tensor result = at::_empty({steps}, dtype, layout, device, pin_memory);
@@ -405,9 +413,9 @@ Tensor logspace(
     Scalar end,
     int64_t steps,
     double base,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   Tensor result = at::_empty({steps}, dtype, layout, device, pin_memory);
   return at::logspace_out(result, start, end, steps, base);
@@ -423,11 +431,15 @@ Tensor& ones_out(Tensor& result, IntArrayRef size) {
   return native::full_out(result, size, /*fill_value=*/1);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor ones_like(
     const Tensor& self,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
@@ -485,11 +497,15 @@ Tensor rand_like(
   return native::rand_like(self, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor rand_like(
     const Tensor& self,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
@@ -563,25 +579,33 @@ Tensor randint_like(const Tensor& self, int64_t low, int64_t high, c10::optional
   return native::randint_like(self, low, high, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
       auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
       return result.random_(0, high, nullptr);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
       auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
@@ -626,11 +650,15 @@ Tensor randn_like(
   return native::randn_like(self, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor randn_like(
     const Tensor& self,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::_empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
@@ -794,6 +822,9 @@ Tensor triu_indices_cpu(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor zeros(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  // This is a hack.
+  // Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+  // In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
   const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
@@ -819,6 +850,10 @@ Tensor zeros_like(
   return native::zeros_like(self, typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory(), optional_memory_format);
 }
 
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
 Tensor zeros_like(
     const Tensor& self,
     ScalarType dtype, Layout layout,Device device, bool pin_memory,
@@ -836,14 +871,15 @@ Tensor zeros_like(
 Tensor new_zeros(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
 
-  // We shouldn't need to construct TensorOptions object
-  // issue 30405
+  // This is a hack
+  // Please see [Overload TensorOptions merge_in() to accept uncollapsed TensorOptions]
+  // In the tracking issue https://github.com/pytorch/pytorch/issues/30405
   const auto options = TensorOptions()
         .dtype(dtype)
         .layout(layout)
@@ -975,13 +1011,12 @@ Tensor tensor_cpu(ArrayRef<T> values, c10::optional<ScalarType> dtype, c10::opti
 
 template <typename T>
 Tensor tensor_backend(ArrayRef<T> values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  const auto options = TensorOptions()
-        .dtype(dtype)
-        .layout(layout)
-        .device(device)
-        .pinned_memory(pin_memory);
   auto cpu_tensor = tensor_cpu(values, dtype, layout, at::Device(DeviceType::CPU), pin_memory);
-  return cpu_tensor.to(options.device());
+  if (device.has_value()) {
+    return cpu_tensor._to(c10::nullopt, c10::nullopt, device);
+  } else {
+    return cpu_tensor._to(c10::nullopt, c10::nullopt, at::Device(DeviceType::CPU));
+  }
 }
 
 #define TENSOR(T, _1)                                                                                                                      \
@@ -1051,9 +1086,9 @@ Tensor full(
     IntArrayRef size,
     Scalar fill_value,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   auto result = at::_empty(size, names, dtype, layout, device, pin_memory);
   return result.fill_(fill_value);
@@ -1062,9 +1097,9 @@ Tensor full(
 Tensor ones(
     IntArrayRef size,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::full(size, /*fill_value=*/1, names, dtype, layout, device, pin_memory);
 }
@@ -1072,9 +1107,9 @@ Tensor ones(
 Tensor zeros(
     IntArrayRef size,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::full(size, /*fill_value=*/0, names, dtype, layout, device, pin_memory);
 }
@@ -1082,9 +1117,9 @@ Tensor zeros(
 Tensor randn(
     IntArrayRef size,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::randn(size, nullptr, names, dtype, layout, device, pin_memory);
 }
@@ -1093,9 +1128,9 @@ Tensor randn(
     IntArrayRef size,
     Generator* generator,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   auto result = at::_empty(size, names, dtype, layout, device, pin_memory);
   return result.normal_(0, 1, generator);
@@ -1104,9 +1139,9 @@ Tensor randn(
 Tensor rand(
     IntArrayRef size,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   return native::rand(size, nullptr, names, dtype, layout, device, pin_memory);
 }
@@ -1115,9 +1150,9 @@ Tensor rand(
     IntArrayRef size,
     Generator* generator,
     optional<DimnameList> names,
-    c10::optional<ScalarType> dtype, 
-    c10::optional<Layout> layout, 
-    c10::optional<Device> device, 
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   auto result = at::_empty(size, names, dtype, layout, device, pin_memory);
   return result.uniform_(0, 1, generator);
