@@ -50,7 +50,6 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : Generator{Device(DeviceType::CPU)},
-    engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
     next_double_normal_sample_{c10::optional<double>()} { }
 
@@ -103,22 +102,6 @@ void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
  */
 void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
   next_double_normal_sample_ = randn;
-}
-
-/**
- * Get the engine of the CPUGenerator
- */
-at::mt19937 CPUGenerator::engine() {
-  return engine_;
-}
-
-/**
- * Set the engine of the CPUGenerator
- * 
- * See Note [Acquire lock when using random generators]
- */
-void CPUGenerator::set_engine(at::mt19937 engine) {
-  engine_ = engine;
 }
 
 /**

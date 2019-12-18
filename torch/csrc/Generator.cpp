@@ -70,7 +70,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
     TORCH_CHECK(device.type() == at::kCPU,
                 "Device type ", c10::DeviceTypeName(device.type()),
                 " is not supported for torch.Generator() api.");
-    self->cdata = new CPUGenerator();
+    self->cdata = new MT19937CPUGenerator();
 #endif
     self->owner = true;
     return (PyObject*)self.release();
