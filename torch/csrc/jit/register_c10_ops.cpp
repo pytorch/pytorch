@@ -13,7 +13,7 @@ namespace {
 
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
-Operator createOperatorFromC10(const c10::OperatorHandle& op) {
+Operator createOperatorFromC10_withTracingHandledHere(const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
       const auto input_size = op.schema().arguments().size();
@@ -143,16 +143,23 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   });
 }
 
+Operator createOperatorFromC10_withTracingNotHandledHere(const c10::OperatorHandle& op) {
+  return Operator(op, [op](Stack& stack) {
+      c10::Dispatcher::singleton().callBoxed(op, &stack);
+      return 0;
+  });
+}
+
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
     if(at::is_aten_op(op.schema().operator_name())) {
-      // Ignore ATen ops for now because they have their own code
-      // to expose them to JIT in register_aten_ops.cpp
-      // TODO Remove register_aten_ops.cpp and also use this registration here
-      return;
+      // ATen ops do tracing/autograd in VariableType, no need to handle it here
+      torch::jit::registerOperator(createOperatorFromC10_withTracingNotHandledHere(op));
+    } else {
+      // custom ops don't do tracing/autograd in VariableType yet, we need to handle tracing here.
+      torch::jit::registerOperator(createOperatorFromC10_withTracingHandledHere(op));
     }
-    torch::jit::registerOperator(createOperatorFromC10(op));
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {

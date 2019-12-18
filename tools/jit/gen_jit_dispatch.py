@@ -436,6 +436,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
                 arg['is_nullable'] = False
                 decl_copy['should_match_schema'] = False
+                decl_copy['overload_name'] = decl_copy['overload_name'] + "_copy"
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
