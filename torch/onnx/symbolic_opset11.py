@@ -93,25 +93,37 @@ def pixel_shuffle(g, self, upscale_factor):
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
             else "align_corners" if align_corners else "pytorch_half_pixel"
         empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-        output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-        output_size = g.op("Concat", input_size, output_size, axis_i=0)
 
-        return g.op("Resize",
-                    input,
-                    empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
-                    empty_tensor,  # scales is not needed since we are sending out_size
-                    output_size,
-                    coordinate_transformation_mode_s=coordinate_transformation_mode,
-                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                    mode_s=interpolate_mode,  # nearest, linear, or cubic
-                    nearest_mode_s="floor")  # only valid when mode="nearest"
+        if scales is None:
+            input_size = g.op("Shape", input)
+            input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+            output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
+            scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+            return g.op("Resize",
+                        input,
+                        empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                        scales,  # scales is not needed since we are sending out_size
+                        output_size,
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+        else:
+            return g.op("Resize",
+                        input,
+                        empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
+                        scales,  # scales is not needed since we are sending out_size
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
     return symbolic_fn
 
 
@@ -124,7 +136,7 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -159,6 +171,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
         size = g.op("Concat", input_size, size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         return g.op("Resize",
@@ -230,8 +243,42 @@ def masked_scatter(g, self, mask, source):
     return g.op('ScatterND', self, index, source)
 
 
+def _len(g, self):
+    return g.op("SequenceLength", self)
+
+
 def __getitem_(g, self, i):
     return g.op("SequenceAt", self, i)
+
+
+def append(g, self, tensor):
+    return g.op("SequenceInsert", self, tensor)
+
+
+def insert(g, self, pos, tensor):
+    return g.op("SequenceInsert", self, tensor, pos)
+
+
+def pop(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
+
+
+def cat(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import cat as cat_opset9
+        return cat_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim)
+
+
+def stack(g, tensor_list, dim):
+    if sym_help._is_packed_list(tensor_list):
+        from torch.onnx.symbolic_opset9 import stack as stack_opset9
+        return stack_opset9(g, tensor_list, dim)
+    else:
+        dim = sym_help._get_const(dim, 'i', 'dim')
+        return g.op("ConcatFromSequence", tensor_list, axis_i=dim, new_axis_i=1)
 
 
 @parse_args('v', 'i', 'i', 'i')
@@ -465,3 +512,34 @@ def __lshift_(g, self, other):
 
     lshift = g.op('Mul', self, two_pow)
     return lshift
+
+
+@parse_args('v', 'i', 'i')
+def flatten(g, input, start_dim, end_dim):
+    dim = input.type().dim()
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1:
+        if (end_dim == -1 or (end_dim is not None and end_dim == dim - 1)):
+            return g.op("Flatten", input, axis_i=start_dim)
+    elif start_dim == 0:
+        if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
+            return g.op("Flatten", input, axis_i=end_dim + 1)
+    # use Reshape for cases where the output shape is not 2D
+    if not input.isCompleteTensor():
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
+    # if end_dim is negative add dim
+    if end_dim < 0 :
+        end_dim = dim + end_dim
+    input_dims = input.type().sizes()
+    output_dims = []
+    for i in range(0, dim):
+        if start_dim < i and end_dim >= i:
+            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
+        else:
+            output_dims.append(input_dims[i])
+    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
+    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    p = _reshape_from_tensor(g, input, shape)
+    return p

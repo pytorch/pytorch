@@ -49,19 +49,6 @@ public class Module {
   }
 
   /**
-   * Globally sets the number of threads used on native side. Attention: Has global effect, all
-   * modules will use one thread pool with specified number of threads.
-   *
-   * @param numThreads number of threads, must be positive number.
-   */
-  public void setNumThreads(int numThreads) {
-    if (numThreads < 1) {
-      throw new IllegalArgumentException("Number of threads cannot be less than 1");
-    }
-    mNativePeer.setNumThreads(numThreads);
-  }
-
-  /**
    * Explicitly destroys the native torch::jit::script::Module. Calling this method is not required,
    * as the native object will be destroyed when this object is garbage-collected. However, the
    * timing of garbage collection is not guaranteed, so proactively calling {@code destroy} can free
