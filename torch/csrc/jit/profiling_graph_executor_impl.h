@@ -13,9 +13,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
 
  private:
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  std::shared_ptr<Graph> prepareGraph(
-      const std::shared_ptr<Graph>& graph,
-      Stack& stack);
+  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code

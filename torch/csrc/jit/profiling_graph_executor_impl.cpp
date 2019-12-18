@@ -2,14 +2,18 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -35,20 +39,6 @@ std::atomic<bool>& getExecutorMode() {
   return executor_mode;
 }
 
-void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
-    std::shared_ptr<Graph>& copy) {
-  if (!getGraphExecutorOptimize()) {
-    runRequiredPasses(copy);
-    return;
-  }
-
-  LowerGradOf(*copy);
-  runRequiredPasses(copy);
-  ConstantPropagation(copy);
-  runOptimization(copy, /*unroll=*/false);
-  EliminateDeadCode(copy);
-}
-
 static bool needsGradientInProfilingMode(Block* b) {
   for (auto n : b->nodes()) {
     if (n->kind() == prim::BailOut) {
@@ -67,54 +57,12 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
-std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
-    const std::shared_ptr<Graph>& graph,
-    Stack& stack) {
-  auto g = graph->copy();
-  GRAPH_DUMP("prepareGraph:", g);
-  runProfilingInsensitiveOptimizations(g);
-  return g;
-}
-
-ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
-    const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph) {}
-
-ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
-  std::lock_guard<std::mutex> lock(compile_mutex);
-  GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
-
-  if (optimized_plan_) {
-    return *optimized_plan_;
-  }
-
-  // simple executor
-  if (!getProfilingMode()) {
-    auto copy = prepareGraph(graph, stack);
-    GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
-    optimized_plan_ = ExecutionPlan(copy);
-    return *optimized_plan_;
-  }
-
-  // if a profiling graph hasn't been created yet
-  if (!pr_) {
-    pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
-    auto copy = pr_->graph()->copy();
-    GRAPH_DUMP("Profiled Graph: ", copy);
-    profiling_plan_ = ExecutionPlan(copy);
-    // fall-through
-  }
-
-  // profile until a graph is ready
-  if (!pr_->ready()) {
-    return *profiling_plan_;
-  }
-
-  auto copy = pr_->graph()->copy();
+void ProfilingGraphExecutorImpl::runProfilingOptimizations(
+    std::shared_ptr<Graph>& copy) {
   if (!getGraphExecutorOptimize()) {
+    LowerGradOf(*copy);
     runRequiredPasses(copy);
-    optimized_plan_ = ExecutionPlan(copy);
-    return *optimized_plan_;
+    return;
   }
 
   InsertGuards(copy);
@@ -149,11 +97,68 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   }
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
+}
+
+void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
+    std::shared_ptr<Graph>& copy) {
+  LowerGradOf(*copy);
+  runRequiredPasses(copy);
+  if (!getGraphExecutorOptimize()) {
+    return;
+  }
+
+  ConstantPropagation(copy);
+  EliminateDeadCode(copy);
+  EliminateCommonSubexpression(copy);
+  ConstantPooling(copy);
+  PeepholeOptimize(copy);
+  EliminateDeadCode(copy);
+  CheckInplace(copy);
+}
+
+ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
+    const std::shared_ptr<Graph>& graph)
+    : GraphExecutorImplBase(graph) {}
+
+ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+  std::lock_guard<std::mutex> lock(compile_mutex);
+  GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
+
+  if (optimized_plan_) {
+    return *optimized_plan_;
+  }
+
+  // simple executor
+  if (!getProfilingMode()) {
+    auto copy = graph->copy();
+    runProfilingInsensitiveOptimizations(copy);
+    GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
+    optimized_plan_ = ExecutionPlan(copy);
+    return *optimized_plan_;
+  }
+
+  // if a profiling graph hasn't been created yet
+  if (!pr_) {
+    auto copy = graph->copy();
+    runProfilingInsensitiveOptimizations(copy);
+    pr_ = ProfilingRecord::instrumentGraph(copy);
+    auto pr_copy = pr_->graph()->copy();
+    GRAPH_DUMP("Profiled Graph: ", pr_copy);
+    profiling_plan_ = ExecutionPlan(pr_copy);
+    // fall-through
+  }
+
+  // profile until a graph is ready
+  if (!pr_->ready()) {
+    return *profiling_plan_;
+  }
+
+  auto copy = pr_->graph()->copy();
+  runProfilingOptimizations(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
 }
-
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
