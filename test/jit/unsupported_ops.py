@@ -54,7 +54,6 @@ class TestUnsupportedOps(JitTestCase):
             foo(torch.tensor([2.]))
             print(torch.jit.script(foo).graph)
 
-
     def test_ops_bound_in_functional(self):
         ops_bound_in_functional = "lu_unpack", "unique", "lu"
 

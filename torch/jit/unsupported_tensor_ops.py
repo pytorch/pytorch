@@ -1,6 +1,4 @@
 import torch.jit
-import inspect
-import textwrap
 from textwrap import dedent
 from torch._six import PY2
 
@@ -23,7 +21,7 @@ def _gen_unsupported_methods_properties():
 
     properties = []
     methods = []
-    sorted_tensor_attrs = sorted(list(tensor_attrs), key= lambda x: x.lower())
+    sorted_tensor_attrs = sorted(list(tensor_attrs), key=lambda x: x.lower())
     for attr in sorted_tensor_attrs:
         funcs_str = funcs_template.format(op=attr)
         scope = {}
