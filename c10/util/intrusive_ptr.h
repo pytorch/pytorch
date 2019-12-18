@@ -453,6 +453,7 @@ class weak_intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_weakcount = ++target_->weakcount_;
+      (void) new_weakcount;
 #ifdef TORCH_INTRUSIVE_PTR_ASSERTS
       AT_ASSERTM(
           new_weakcount != 1,
