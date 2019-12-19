@@ -37,6 +37,26 @@ class SubProcess(mp.Process):
     def run(self):
         self.tensor.add_(3)
 
+def _test_cuda_ipc_deadlock_actor(queue):
+    steps = 0
+    while True:
+        if not queue.empty():
+            queue.get()
+            steps += 1
+            if steps > 100:
+                return
+        sleep(.01)
+
+def _test_cuda_ipc_deadlock_learner(queue):
+    steps = 0
+    net = nn.LSTM(1, 1).cuda()
+    while True:
+        if not queue.full():
+            queue.put(deepcopy(net.state_dict()))
+            steps += 1
+            if steps > 100:
+                return
+        sleep(.01)
 
 def simple_fill(queue, event):
     data = queue.get()
@@ -386,32 +406,13 @@ class TestMultiprocessing(TestCase):
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda_ipc_deadlock(self):
-        def actor(queue):
-            steps = 0
-            while True:
-                if not queue.empty():
-                    queue.get()
-                    steps += 1
-                    if steps > 100:
-                        return
-                sleep(.01)
 
-        def learner(queue):
-            steps = 0
-            net = nn.LSTM(1, 1).cuda()
-            while True:
-                if not queue.full():
-                    queue.put(deepcopy(net.state_dict()))
-                    steps += 1
-                    if steps > 100:
-                        return
-                sleep(.01)
 
         ctx = mp.get_context('spawn')
         queue = ctx.Queue(1)
         processes = dict(
-            a=ctx.Process(target=actor, args=(queue,)),
-            l=ctx.Process(target=learner, args=(queue,)))
+            a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue,)),
+            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue,)))
 
         for p in processes.values():
             p.start()
