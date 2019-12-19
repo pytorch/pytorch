@@ -36,6 +36,8 @@ class Conf(object):
         # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
         alt_docker_suffix = self.cuda_version or "100"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
+        if self.cuda_version == "101":
+            return "soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916"
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
     def get_name_prefix(self):
