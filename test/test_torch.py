@@ -12117,15 +12117,25 @@ class TestTorchDeviceType(TestCase):
                 dtype=dtype,
                 device=device
             )
-            expected_y_inverse = torch.tensor([0, 0, 0, 1, 1, 2, 3, 3, 4, 5], dtype=dtype, device=device)
-            expected_y_counts = torch.tensor([3, 2, 1, 2, 1, 1], dtype=dtype, device=device)
-            expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
-            expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
+            expected_y_inverse = torch.tensor([0, 0, 0, 1, 1, 2, 3, 3, 4, 5], device=device)
+            expected_y_counts = torch.tensor([3, 2, 1, 2, 1, 1], device=device)
+            expected_y_unique_bool = torch.tensor(
+                [[False,  True],
+                 [ True,  True],
+                 [False,  True],
+                 [ True,  True]],
+                device=device
+            )
+            expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], device=device)
+            expected_y_counts_bool = torch.tensor([3, 3, 2, 2], device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
+            
             if x.dtype == torch.bool:
+                self.assertEqual(expected_y_unique_bool, y_unique)
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:
+                self.assertEqual(expected_y_unique, y_unique)
                 self.assertEqual(expected_y_inverse, y_inverse)
                 self.assertEqual(expected_y_counts, y_counts)
 
