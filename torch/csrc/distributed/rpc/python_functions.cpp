@@ -247,7 +247,6 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue());
 
     if (rf != nullptr) {
-      std::cout << "ATTACHING RECORD FUNCTION \n";
       // attach the recordFunction object to the future, so it can be set as
       // completed when the future finishes.
       rf->setOverrideThreadId(true);

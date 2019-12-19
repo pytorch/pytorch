@@ -72,9 +72,7 @@ class TORCH_API Future final {
     cbs.swap(callbacks_);
     // if recording, run end callbacks.
     if (rf_) {
-      std::cout << "endign callback" << std::endl;
       rf_->end();
-      std::cout << "Done ending callback\n";
     }
     lock.unlock();
     // There is no need to protect callbacks_ with the lock.

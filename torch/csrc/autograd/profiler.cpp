@@ -159,16 +159,14 @@ void enableProfiler(ProfilerConfig config) {
       },
       [](const RecordFunction& fn) {
         if (fn.overrideThreadId()) {
-          std::cout << "running the override thing" << std::endl;
+          // If we've overridden the thread_id on the RecordFunction, then find
+          //  the eventList that was created for the original thread_id. Then,
+          // record the end event on this list so that the block is added to
+          // the correct list, instead of to a new list. This should only run
+          // when calling RecordFunction::end() in a different thread.
           if (state == ProfilerState::Disabled) {
-            std::cout << "early ret" << std::endl;
             return;
           } else {
-            // If we've overridden the thread_id on the RecordFunction, then find
-            //  the eventList that was created for the original thread_id. Then,
-            // record the end event on this list so that the block is added to
-            // the correct list, instead of to a new list. This should only run
-            // when calling RecordFunction::end() in a different thread.
             std::lock_guard<std::mutex> guard(all_event_lists_mutex);
             const auto& eventListIter =
                 all_event_lists_map.find(fn.getThreadId());
@@ -183,7 +181,6 @@ void enableProfiler(ProfilerConfig config) {
                       StringView(""),
                       fn.getThreadId(),
                       state == ProfilerState::CUDA);
-            std::cout << "finished recording from different thread\n";
           }
         } else {
           popRange();
@@ -219,7 +216,6 @@ thread_event_lists disableProfiler() {
   ProfilerState old_state = state;
   mark("__stop_profile");
 
-  std::cout << "in disableProfiler, calling popcallback" << std::endl;
   popCallback();
   state = ProfilerState::Disabled;
 

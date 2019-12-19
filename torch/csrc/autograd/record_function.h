@@ -130,8 +130,6 @@ struct TORCH_API RecordFunction {
     return threadId_;
   }
 
-  std::string n;
-
  private:
   void processCallbacks();
 
