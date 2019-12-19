@@ -81,6 +81,12 @@ c10::optional<Value*> tryInsertConstant(
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
+  } else if (val.isScalarType()) {
+    n->i_(attr::value, val.toInt());
+    n->output()->setType(ScalarTypeType::get());
+  } else if (val.isLayout()) {
+    n->i_(attr::value, val.toInt());
+    n->output()->setType(LayoutType::get());
   } else {
     n->destroy();
     return c10::nullopt;
@@ -159,6 +165,18 @@ RegisterOperators reg({
             auto d = c10::Device(node->s(attr::value));
             return [d](Stack& stack) {
               push(stack, d);
+              return 0;
+            };
+          } else if (type == ScalarTypeType::get()) {
+            auto i = node->i(attr::value);
+            return [i](Stack& stack) {
+              push(stack, i);
+              return 0;
+            };
+          } else if (type == LayoutType::get()) {
+            auto i = node->i(attr::value);
+            return [i](Stack& stack) {
+              push(stack, i);
               return 0;
             };
           } else if (node->mustBeNone()) {

@@ -706,6 +706,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &StringType::get);
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<LayoutType, Type, std::shared_ptr<LayoutType>>(m, "LayoutType")
+      .def_static("get", &LayoutType::get);
+  py::class_<ScalarTypeType, Type, std::shared_ptr<ScalarTypeType>>(m, "ScalarTypeType")
+      .def_static("get", &ScalarTypeType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
