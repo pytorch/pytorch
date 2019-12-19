@@ -11,27 +11,22 @@ struct CAFFE2_API CPUGenerator : public Generator {
   virtual ~CPUGenerator() = default;
 
   // CPUGenerator methods
-  std::shared_ptr<CPUGenerator> clone() const;
-  virtual void set_current_seed(uint64_t seed) = 0;
-  virtual uint64_t current_seed() const = 0;
-  virtual uint64_t seed() = 0;
   static DeviceType device_type();
-  /**
-   * Gets a random 32 bit unsigned integer from the engine
-   *
-   * See Note [Acquire lock when using random generators]
-   */
-  virtual uint32_t random() = 0;
-  virtual uint64_t random64();
+  std::shared_ptr<CPUGenerator> clone() const;
   c10::optional<float> next_float_normal_sample();
   c10::optional<double> next_double_normal_sample();
   void set_next_float_normal_sample(c10::optional<float> randn);
   void set_next_double_normal_sample(c10::optional<double> randn);
+
+  virtual void set_current_seed(uint64_t seed) = 0;
+  virtual uint64_t current_seed() const = 0;
+  virtual uint64_t seed() = 0;
+  virtual uint32_t random() = 0;
+  virtual uint64_t random64();
   virtual void getRNGState(void* target) = 0;
   virtual void setRNGState(void* target) = 0;
 
 protected:
-  // CPUGenerator* clone_impl() const override;
   c10::optional<float> next_float_normal_sample_;
   c10::optional<double> next_double_normal_sample_;
 };
