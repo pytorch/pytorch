@@ -30,7 +30,7 @@ const std::unordered_set<Symbol> fusibleNodes{
   aten::add
 };
 
-bool isFusibleOnCPU(const Node* const node) {
+bool CPUFusionBackend::isFusible(const Node* const node) {
   const auto it = fusibleNodes.find(node->kind());
   if (it == fusibleNodes.end()) {
     return false;
@@ -39,8 +39,8 @@ bool isFusibleOnCPU(const Node* const node) {
   return true;
 }
 
-int fuseOnCPU(const Node* const node) {
-  TORCH_CHECK(isFusibleOnCPU(node), "Trying to fuse nonfusible node!");
+int CPUFusionBackend::fuse(const Node* const node) {
+  TORCH_CHECK(isFusible(node), "Trying to fuse nonfusible node!");
 
   return getAndIncrementGlobalFusionCounter();
 }
@@ -49,7 +49,7 @@ void executeFusion(FusionFn fn) {
   const auto result = fn();
 }
 
-void compileFusionOnCPU(Node* fusion) {
+void CPUFusionBackend::compileFusion(Node* fusion) {
   CodeHolder code;
   code.init(rt.codeInfo());
   Compiler cc{&code};
@@ -74,7 +74,7 @@ void compileFusionOnCPU(Node* fusion) {
   fusion->v_(attr::value, static_cast<void*>(p));
 }
 
-void callFusionOnCPU(
+void CPUFusionBackend::callFusion(
   const Node* const fusion
 , std::vector<at::Tensor>& outputs
 , at::ArrayRef<IValue> inputs) {
@@ -82,5 +82,8 @@ void callFusionOnCPU(
   (*p)();
 }
 
+static CPUFusionBackend cpu_backend;
+
+RegisterFusionBackendEx reg_ex(at::DeviceType::CPU, &cpu_backend);
 
 }}}} // namespace torch::jit::fuser::cpu
