@@ -24,6 +24,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/Type.h>
+#include <c10/util/TypeTraits.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
@@ -48,10 +49,12 @@
 // later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
-namespace std {
+namespace c10 {
+namespace guts {
 template <>
 struct is_fundamental<at::Half> : std::true_type {};
-} // namespace std
+} // namespace guts
+} // namespace c10
 
 namespace caffe2 {
 
@@ -179,7 +182,7 @@ template <
     typename T,
     std::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_PlacementNew<T>;
 }
@@ -189,7 +192,7 @@ template <
     std::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   static_assert(
-      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
       "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
@@ -246,7 +249,7 @@ template <
     typename T,
     std::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_Copy<T>;
 }
@@ -256,7 +259,7 @@ template <
     std::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
   static_assert(
-      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      !c10::guts::is_fundamental<T>::value && !std::is_pointer<T>::value,
       "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
@@ -274,7 +277,7 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+  return (c10::guts::is_fundamental<T>::value || std::is_pointer<T>::value)
       ? nullptr
       : &_PlacementDelete<T>;
 }
