@@ -233,6 +233,12 @@ class profile(object):
         This context managers should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
 
+    .. warning:
+        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+        one cannot use the profiler with ``use_cuda = True`` to benchmark
+        DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
+        please use ``use_cuda = False`` or ``num_workers = 0``.
+
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
