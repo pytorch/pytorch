@@ -843,6 +843,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return named_tensor_meta_.get();
   }
 
+  bool has_named_tensor_meta() {
+    return named_tensor_meta_ != nullptr;
+  }
+
 
   // NOTE [ TensorImpl Shallow-Copying ]
   //
