@@ -20,6 +20,8 @@ DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
 DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
+DEFINE_DISPATCH(leaky_relu_stub);
+DEFINE_DISPATCH(leaky_relu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
   return at::clamp(self, min, max);
@@ -473,6 +475,50 @@ Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardKernel(kCPU, it);
   return dX;
+}
+
+Tensor& leaky_relu_out(
+    Tensor& result,
+    const Tensor& self,
+    Scalar negval) {
+  auto iter = TensorIterator::unary_op(result, self);
+  leaky_relu_stub(iter.device_type(), iter, negval);
+  return result;
+}
+
+Tensor leaky_relu(
+    const Tensor& self,
+    Scalar negval) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  leaky_relu_stub(iter.device_type(), iter, negval);
+  return iter.output();
+}
+
+Tensor & leaky_relu_(
+    Tensor & self,
+    Scalar neg_val) {
+  return at::leaky_relu_out(self, self, neg_val);
+}
+
+Tensor& leaky_relu_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& input,
+    Scalar negval) {
+  auto iter = TensorIterator::binary_op(grad_input, input, grad_output);
+  leaky_relu_backward_stub(iter.device_type(), iter, negval);
+  return grad_input;
+}
+
+Tensor leaky_relu_backward(
+    const Tensor& grad_output,
+    const Tensor& input,
+    Scalar negval) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, input, grad_output);
+  leaky_relu_backward_stub(iter.device_type(), iter, negval);
+  return iter.output();
 }
 
 DEFINE_DISPATCH(GeluKernel);
