@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
 from torch.testing._internal.common_utils import run_tests
-from common_quantization import QuantizationTestCase, \
+from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
     AnnotatedConvBnModel, ConvBnModel, \
@@ -35,12 +35,12 @@ from common_quantization import QuantizationTestCase, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
     ModelWithNoQconfigPropagation
 
-from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
+from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
 from hypothesis import given
 from hypothesis import strategies as st
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 import io
 import copy
@@ -694,6 +694,33 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                 torch.testing.assert_allclose(packed_val, ref_val)
             else:
                 self.assertEqual(packed_val, ref_val)
+
+        # Test default instantiation
+        seq_len = 128
+        batch = 16
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        bidirectional = False
+
+        x = torch.rand(seq_len, batch, input_size)
+        h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+        c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+
+        dtype = torch.qint8
+
+        cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                  hidden_size=hidden_size,
+                                                  num_layers=num_layers,
+                                                  bias=bias,
+                                                  batch_first=False,
+                                                  dropout=0.0,
+                                                  bidirectional=bidirectional,
+                                                  dtype=dtype)
+
+        y, (h, c) = cell_dq(x, (h, c))
+
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

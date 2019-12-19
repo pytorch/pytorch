@@ -403,6 +403,13 @@ def add_torch_libs():
         "-Icaffe2/torch/csrc",
         "-Icaffe2/torch/csrc/nn",
         "-Icaffe2/torch/lib",
+        # T59288529: Temporary hack to support building from xplat.
+        # Remove with a proper fix.
+        "-Ifbcode/caffe2",
+        "-Ifbcode/caffe2/torch/csrc/api/include",
+        "-Ifbcode/caffe2/torch/csrc",
+        "-Ifbcode/caffe2/torch/csrc/nn",
+        "-Ifbcode/caffe2/torch/lib",
     ]
 
     cpp_library(
