@@ -122,6 +122,7 @@ void pushCallback(
 }
 
 void popCallback() {
+  std::cout << "calling POP CALLBACK" << std::endl;
   manager().popCallback();
 }
 
@@ -162,6 +163,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
+  n = name;
   if (!hasCallbacks()) {
     return;
   }

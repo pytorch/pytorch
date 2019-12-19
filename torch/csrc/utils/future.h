@@ -65,10 +65,17 @@ class TORCH_API Future final {
     value_ = std::move(value);
     completed_ = true;
 
+
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
+    // if recording, run end callbacks.
+    if (rf_) {
+      std::cout << "endign callback" << std::endl;
+      rf_->end();
+      std::cout << "Done ending callback\n";
+    }
     lock.unlock();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
@@ -77,10 +84,6 @@ class TORCH_API Future final {
       callback(value_, error_);
     }
     finished_cv_.notify_all();
-    // if recording, run end callbacks.
-    if (rf_) {
-      rf_->end();
-    }
   }
 
   void setError(std::string errorMsg) {

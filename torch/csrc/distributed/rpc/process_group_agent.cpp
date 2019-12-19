@@ -447,7 +447,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             fm->setError(std::string(
                 message.payload().begin(), message.payload().end()));
           } else {
+            bool x = message.type() == MessageType::REMOTE_RET;
+            if (x)
+              std::cout << "about to mark fut as completed\n";
             fm->markCompleted(std::move(message));
+            if (x)
+              std::cout << "done marking remote ret as completed" << std::endl;
           }
         } else {
           // TODO: pass the error back to the caller instead of crashing here.

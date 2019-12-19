@@ -10,7 +10,12 @@ from . import (
     _start_rpc_agent,
     backend_registry,
 )
-from .internal import _internal_rpc_pickler, PythonUDF, _start_record_function
+from .internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    _start_record_function,
+)
 
 import contextlib
 import functools
@@ -259,32 +264,42 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     info = _to_worker_info(to)
+    current_worker = get_worker_info()
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            RPCExecMode.REMOTE,
+            str(qualified_name if qualified_name is not None else func.__name__),
+            current_worker.name,
+            info.name,
+        )
+        print("PROFILER ENABLED - created RF.")
     if qualified_name is not None:
         return _invoke_remote_builtin(
-            _agent, info, qualified_name, *args, **kwargs)
+            _agent, info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if not callable(func):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
     info = _to_worker_info(to)
     current_worker = get_worker_info()
-    # TODO: separate this out into a func and add a test for the things.
-    # if the profiler is enabled, then create the RecordInfo object
-    # which creates the record function, and then calls ::runBeforeCallbacks() on it? hmm, maybe.
-    # rf = torch.autograd._RecordFunction() if torch.autograd._profiler_enabled() else None
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
     rf = None
     if torch.autograd._profiler_enabled():
         rf = _start_record_function(
-            "rpc_async",
-            str(qualified_name if qualified_name is not None else func),
+            rpc_type,
+            str(qualified_name if qualified_name is not None else func.__name__),
             current_worker.name,
             info.name,
         )
@@ -294,7 +309,7 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
 
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, *args, **kwargs
+            _agent, info, qualified_name, rf, *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
@@ -344,7 +359,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
     return fut.wait()
 
 
@@ -393,5 +408,5 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
     return fut

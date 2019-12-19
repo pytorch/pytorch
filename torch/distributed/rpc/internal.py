@@ -1,5 +1,6 @@
 import collections
 import copyreg
+from enum import Enum
 import io
 import pickle
 import threading
@@ -12,6 +13,11 @@ import torch
 # objects
 _thread_local_tensor_tables = threading.local()
 
+
+class RPCExecMode(Enum):
+    SYNC = "sync"
+    ASYNC = "async"
+    REMOTE = "remote"
 
 class _InternalRPCPickler:
     r"""
@@ -146,7 +152,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     RecordFunction object for profiling.
 
     Arguments:
-        exec_type (str): Type of RPC/RRef call (one of sync, async, or remote)
+        exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.
         dest_worker_name (str): Name of the destination worker.
@@ -159,7 +165,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     """
     assert torch.autograd._profiler_enabled(), "Autograd profiler should be enabled."
     profile_key = "rpc_{}.{}({} -> {})".format(
-        exec_type, str(func_name), current_worker_name, dest_worker_name
+        exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
     rf = torch.autograd._RecordFunction()
     torch.autograd._run_before_callbacks(rf, profile_key)

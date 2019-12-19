@@ -159,7 +159,9 @@ void enableProfiler(ProfilerConfig config) {
       },
       [](const RecordFunction& fn) {
         if (fn.overrideThreadId()) {
+          std::cout << "running the override thing" << std::endl;
           if (state == ProfilerState::Disabled) {
+            std::cout << "early ret" << std::endl;
             return;
           } else {
             // If we've overridden the thread_id on the RecordFunction, then find
@@ -181,6 +183,7 @@ void enableProfiler(ProfilerConfig config) {
                       StringView(""),
                       fn.getThreadId(),
                       state == ProfilerState::CUDA);
+            std::cout << "finished recording from different thread\n";
           }
         } else {
           popRange();
@@ -216,6 +219,7 @@ thread_event_lists disableProfiler() {
   ProfilerState old_state = state;
   mark("__stop_profile");
 
+  std::cout << "in disableProfiler, calling popcallback" << std::endl;
   popCallback();
   state = ProfilerState::Disabled;
 
