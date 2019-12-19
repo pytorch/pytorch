@@ -1637,7 +1637,7 @@ template <typename T> int maxList(Stack &stack) {
 }
 
 template <typename T>
-int listPop(Stack& stack) {
+int listPopImpl(Stack& stack, const char* empty_message) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -1645,13 +1645,18 @@ int listPop(Stack& stack) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
-    AT_ERROR("pop index out of range");
+    AT_ERROR(empty_message);
   }
 
   push(stack, getItem(list, idx));
   list.erase(list.begin() + normalized_idx);
 
   return 0;
+}
+
+template <typename T>
+int listPop(Stack& stack) {
+  return listPopImpl<T>(stack, "pop from empty list");
 }
 
 template <typename T>
@@ -1664,7 +1669,7 @@ int listClear(Stack& stack) {
 
 template <typename T>
 int listDelete(Stack& stack) {
-  listPop<T>(stack);
+  listPopImpl<T>(stack, "pop index out of range");
   pop(stack);
   return 0;
 }

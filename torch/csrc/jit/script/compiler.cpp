@@ -898,9 +898,7 @@ struct to_ir {
     }
     Subscript subscript(stmt.expr());
     const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-    if (subscript_exprs[0].kind() != TK_IDENT &&
-        subscript_exprs[0].kind() != TK_CONST &&
-        subscript_exprs[0].kind() != TK_VAR) {
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
       throw ErrorReport(stmt.range())
           << "del statements only support deletion at a single index, "
              "slicing is not supported"
