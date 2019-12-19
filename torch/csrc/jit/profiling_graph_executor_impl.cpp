@@ -102,6 +102,10 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& copy) {
   LowerGradOf(*copy);
+  GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
+  if (getProfilingMode()) {
+    ClearUndefinedness(copy);
+  }
   runRequiredPasses(copy);
   if (!getGraphExecutorOptimize()) {
     return;
