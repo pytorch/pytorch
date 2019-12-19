@@ -108,7 +108,7 @@ C10_API std::ostream& operator<<(std::ostream&, TensorTypeSet);
 
 // Historically, every tensor only had a single TensorTypeId, and it was
 // always something like CPUTensorId and not something weird like VariableId.
-// For the forseeable future, it will still be possible to extract /that/
+// For the foreseeable future, it will still be possible to extract /that/
 // TensorTypeId, and that's what this function does.  It should be used
 // for legacy code that is still using TensorTypeId for things like instanceof
 // checks; if at all possible, refactor the code to stop using TensorTypeId

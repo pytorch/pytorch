@@ -67,7 +67,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     auto scaled = compare_scaling(grads);
     ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
   }
-  // Small gradients should be lefted unchanged
+  // Small gradients should be left unchanged
   grads = {
       torch::rand({10, 10}).div(10000),
       torch::ones(10).div(500),

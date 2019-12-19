@@ -50,7 +50,10 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
-    cpu_kernel(iter,
+    auto norm_val_vec = Vec256<scalar_t>(norm_val);
+    const auto neg_1_vec = Vec256<scalar_t>(-1);
+    const auto pos_1_vec = Vec256<scalar_t>(1);
+    cpu_kernel_vec(iter,
       [=](scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
         const auto x = input - target;
         if (x < -1.)
@@ -59,6 +62,12 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {
           return norm_val * grad_output;
         else
           return norm_val * x * grad_output;
+      },
+      [norm_val_vec, neg_1_vec, pos_1_vec](
+         Vec256<scalar_t> input, Vec256<scalar_t> target, Vec256<scalar_t> grad_output) -> Vec256<scalar_t> {
+        auto x = input - target;
+        x = clamp(x, neg_1_vec, pos_1_vec);
+        return norm_val_vec * x * grad_output;
       }
     );
   });
