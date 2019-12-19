@@ -43,8 +43,7 @@ class Adadelta(Optimizer):
                 state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, rho=0.9, eps=1e-6, **_):
-        grad = par.grad
+    def get_update(self, par, grad, rho=0.9, eps=1e-6, **_):
         state = self.state[par]
 
         state['step'] += 1

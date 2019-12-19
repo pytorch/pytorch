@@ -74,18 +74,16 @@ class SGD(Optimizer):
                 for p in group['params']:
                     self.state[p]['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, momentum=0, dampening=0, nesterov=False, **_):
-        update = par.grad
-
+    def get_update(self, par, grad, momentum=0, dampening=0, nesterov=False, **_):
         if momentum > 0:
             state = self.state[par]
             buf = state['momentum_buffer']
-            buf.mul_(momentum).add_(1 - dampening, update)
+            buf.mul_(momentum).add_(1 - dampening, grad)
             if nesterov:
-                update = update.add(momentum, buf)
+                grad = grad.add(momentum, buf)
             else:
-                update = buf
+                grad = buf
 
-        return update
+        return grad
 
     get_sparse_update = get_update

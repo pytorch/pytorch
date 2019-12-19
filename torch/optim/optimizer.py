@@ -190,35 +190,32 @@ class Optimizer(object):
             lr = group['lr']
             weight_decay = group['weight_decay']
             for p in group['params']:
-                if p.grad is None:
+                grad = p.grad
+                if grad is None:
                     continue
 
-                if p.grad.is_sparse:
+                if grad.is_sparse:
                     if weight_decay > 0:
                         raise RuntimeError("weight_decay option is not compatible with sparse gradients")
 
                     update = self.get_sparse_update(p, **group)
                 else:
                     if weight_decay > 0:
-                        l2_grad = weight_decay * p
-                        p.grad.add_(l2_grad)
+                        grad = grad.add_(weight_decay, p)
 
-                    update = self.get_update(p, **group)
-
-                    # since gradients are not allowed to change in optimisers
-                    if weight_decay > 0:
-                        p.grad.sub_(l2_grad)
+                    update = self.get_update(p, grad, **group)
 
                 p.add_(-lr, update)
 
         return loss
 
-    def get_update(self, par, **kwargs):
+    def get_update(self, par, grad, **kwargs):
         """
         Compute the update for a parameter from its gradients.
 
         Args:
             par (Parameter): the parameter to compute the update for.
+            grad (Tensor): the gradient of the parameter.
             **kwargs: arguments for the parameter group of the parameter
 
         Returns:

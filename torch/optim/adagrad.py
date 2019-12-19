@@ -52,8 +52,7 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
-    def get_update(self, par, lr_decay=0, eps=1e-10, **_):
-        grad = par.grad
+    def get_update(self, par, grad, lr_decay=0, eps=1e-10, **_):
         state = self.state[par]
 
         c = 1 + state['step'] * lr_decay
