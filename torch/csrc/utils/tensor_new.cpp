@@ -1,11 +1,11 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/tensor_new.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -20,7 +20,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <stdexcept>
 #include <vector>
@@ -87,25 +86,25 @@ void maybe_initialize_cuda(const Device device) {
 
 Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::zeros(sizes, options(type_id, scalar_type, device));
 }
 
 Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::ones(sizes, options(type_id, scalar_type, device));
 }
 
 Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::full(sizes, fill_value, options(type_id, scalar_type, device));
 }
 
 Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::empty(sizes, options(type_id, scalar_type, device));
 }
 
@@ -148,6 +147,15 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
 }
 
 ScalarType infer_scalar_type(PyObject *obj) {
+#ifdef USE_NUMPY
+  if (PyArray_Check(obj)) {
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+  }
+  if (PyArray_CheckScalar(obj)) {
+    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+  }
+#endif
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
@@ -163,15 +171,6 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
     return var.scalar_type();
   }
-#ifdef USE_NUMPY
-  if (PyArray_Check(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
-  }
-  if (PyArray_CheckScalar(obj)) {
-    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
-  }
-#endif
   if (THPUtils_checkString(obj)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
   }
@@ -247,7 +246,7 @@ Tensor internal_new_from_data(
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(computeDeviceType(type_id)));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
@@ -258,7 +257,7 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
@@ -268,7 +267,7 @@ Tensor internal_new_from_data(
     auto tensor = tensor_from_numpy(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-    AutoNoGIL no_gil;
+    pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
@@ -288,7 +287,7 @@ Tensor internal_new_from_data(
         inferred_scalar_type, tensor.dtype().itemsize(), data);
   }
   auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(type_id));
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
   // though the reason this is important is a hack).  Without *some* factory
@@ -573,18 +572,10 @@ Tensor sparse_coo_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_t
 
 Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-#ifdef BUILD_NAMEDTENSOR
     "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
-#else
-    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-#endif
   });
 
-#ifdef BUILD_NAMEDTENSOR
   constexpr int ctor_num_args = 6;
-#else
-  constexpr int ctor_num_args = 5;
-#endif
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -607,12 +598,10 @@ Tensor tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObje
                true,
                type_inference,
                pin_memory);
-#ifdef BUILD_NAMEDTENSOR
     auto names = r.toDimnameListOptional(5);
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
     }
-#endif
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;

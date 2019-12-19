@@ -8,6 +8,10 @@ repositories {
 }
 
 android {
+    compileOptions {
+        sourceCompatibility 1.8
+        targetCompatibility 1.8
+    }
     compileSdkVersion rootProject.compileSdkVersion
     buildToolsVersion rootProject.buildToolsVersion
     defaultConfig {
@@ -19,11 +23,10 @@ android {
         ndk {
             abiFilters ABI_FILTERS.split(",")
         }
-        buildConfigField ("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
-        buildConfigField ("String", "LOGCAT_TAG", "@string/app_name")
-        buildConfigField ("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 228, 228}")
-
-        addManifestPlaceholders([APP_NAME: "@string/app_name"])
+        buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
+        buildConfigField("String", "LOGCAT_TAG", "@string/app_name")
+        buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
+        addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
     buildTypes {
         debug {
@@ -32,19 +35,27 @@ android {
     }
     flavorDimensions "model", "build"
     productFlavors {
-        mobNet2Quant {
+        mbq {
             dimension "model"
-            applicationIdSuffix ".mobNet2Quant"
-            buildConfigField ("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
-            addManifestPlaceholders([APP_NAME: "PyMobNet2Quant"])
-            buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-mobnet2q\"")
+            applicationIdSuffix ".mbq"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
+            addManifestPlaceholders([APP_NAME: "MBQ"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbq\"")
+        }
+        mbqCamera {
+            dimension "model"
+            applicationIdSuffix ".mbqCamera"
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet2q.pt\"")
+            buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mbqCamera\"")
+            addManifestPlaceholders([APP_NAME: "MBQ_C", MAIN_ACTIVITY: "org.pytorch.testapp.CameraActivity"])
         }
         resnet18 {
             dimension "model"
             applicationIdSuffix ".resneti18"
-            buildConfigField ("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
-            addManifestPlaceholders([APP_NAME: "PyResNet18"])
-            buildConfigField ("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
+            addManifestPlaceholders([APP_NAME: "RN18"])
+            buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
         }
         local {
             dimension "build"
@@ -54,8 +65,21 @@ android {
         }
     }
     packagingOptions {
-        pickFirst '**/libfbjni.so'
         doNotStrip '**.so'
+        pickFirst '**/libfbjni.so'
+    }
+
+    // Filtering out nightly for CI(offline build)
+    if (!testAppNightlyVariantsEnabled.toBoolean()) {
+        logger.warn("testAppNightlyVariantsEnabled is false")
+        variantFilter { variant ->
+            def names = variant.flavors*.name
+            if (names.contains("nightly")) {
+                setIgnore(true)
+            }
+        }
+    } else {
+        logger.warn("testAppNightlyVariantsEnabled is true")
     }
 }
 
@@ -66,4 +90,9 @@ dependencies {
     localImplementation project(':pytorch_android_torchvision')
     nightlyImplementation 'org.pytorch:pytorch_android:1.4.0-SNAPSHOT'
     nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.4.0-SNAPSHOT'
+
+    def camerax_version = "1.0.0-alpha05"
+    implementation "androidx.camera:camera-core:$camerax_version"
+    implementation "androidx.camera:camera-camera2:$camerax_version"
+    implementation 'com.google.android.material:material:1.0.0-beta01'
 }

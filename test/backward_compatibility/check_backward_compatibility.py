@@ -28,6 +28,8 @@ white_list = [
     ('thnn_conv3d', datetime.date(9999, 1, 1)),
     ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
     ('grad', datetime.date(2020, 1, 1)),
+    ('logical_and', datetime.date(2019, 12, 12)),
+    ('logical_or', datetime.date(2019, 12, 12)),
 ]
 
 

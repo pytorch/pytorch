@@ -1022,7 +1022,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
 
 }
-
 // --------------------------------------------------------------------
 // NOTE [ sparse.sum() backward ]
 //
@@ -1173,6 +1172,26 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     }
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
   }
+}
+
+Tensor isnan_sparse(const Tensor & self){
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
+  SparseTensor out =  at::sparse_coo_tensor({0}, self.options().dtype(at::kBool));
+  out.resize_as_(self);
+  auto indices = out._indices();
+  indices.resize_as_(self._indices());
+  indices.copy_(self._indices());
+  Tensor out_values = out._values();
+  out_values.resize_as_(self._values());
+  Tensor nan_values = at::isnan(self._values());
+  out_values.copy_(nan_values);
+  return out;
+}
+
+Tensor any_sparse(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
+
+  return at::any(self._values());
 }
 
 }} // namespace at::native

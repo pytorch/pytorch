@@ -105,7 +105,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 
 #else  // AT_ROCM_ENABLED
 
-#include <THH/THH.h>
+#include <aten/src/THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>

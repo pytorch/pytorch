@@ -38,6 +38,22 @@ void bitwise_xor_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void logical_and_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_and_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return a && b;
+    });
+  });
+}
+
+void logical_or_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_or_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+      return a || b;
+    });
+  });
+}
+
 void logical_xor_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_xor_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
@@ -63,6 +79,14 @@ void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void tanh_backward_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a * (scalar_t(1.) - b * b);
+    });
+  });
+}
+
 void mse_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -74,9 +98,12 @@ void mse_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda);
+REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
+REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel_cuda);
+REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
 
 }} // namespace at::native

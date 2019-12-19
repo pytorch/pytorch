@@ -569,9 +569,19 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    def test_upsample_nearest(self):
+    def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest', use_scale_factor=True), x)
+
+    def test_upsample_nearest_scale_default_scale_factor(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest'), x)
+
+    def test_upsample_nearest_size(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -741,7 +751,7 @@ class TestOperators(TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs)
+        self.assertONNX(model, inputs, custom_opsets={'org.pytorch._caffe2': 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):

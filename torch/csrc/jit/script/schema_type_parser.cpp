@@ -22,6 +22,7 @@ using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
 using c10::Symbol;
+using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;
@@ -38,7 +39,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
-      {"QScheme", IntType::get()},
+      {"QScheme", QSchemeType::get()},
       {"ConstQuantizerPtr", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},

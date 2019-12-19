@@ -824,7 +824,7 @@ class AsyncErrorOp final : public Operator<CPUContext> {
       if (thread_) {
         thread_->join();
       }
-      thread_ = caffe2::make_unique<std::thread>([this]() {
+      thread_ = std::make_unique<std::thread>([this]() {
         try {
           std::this_thread::sleep_for(std::chrono::seconds(sleep_time_s_));
           if (throw_) {

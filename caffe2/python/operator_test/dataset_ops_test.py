@@ -239,7 +239,7 @@ class TestDatasetOps(TestCase):
         """
         This is what the flattened fields for this schema look like, along
         with its type. Each one of these fields will be stored, read and
-        writen as a tensor.
+        written as a tensor.
         """
         expected_fields = [
             ('dense', (np.float32, 3)),

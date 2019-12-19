@@ -76,6 +76,9 @@ class TORCH_API DistAutogradContainer {
   // Clear current context id
   void clearCurrentContext();
 
+  // Returns the number of autograd contexts in the container.
+  size_t numAutogradContexts() const;
+
  private:
   DistAutogradContainer();
   ~DistAutogradContainer() = default;

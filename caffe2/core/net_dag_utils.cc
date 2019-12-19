@@ -304,7 +304,7 @@ ExecutionChains computeGroups(std::vector<OperatorNode>& orig_nodes) {
     }
   }
 
-  // We check sync ops on the froniter first and then async ops. This gives us a
+  // We check sync ops on the frontier first and then async ops. This gives us a
   // head start to execute sync ops locally while waiting for async ops to
   // finish.
   std::queue<int> q;
