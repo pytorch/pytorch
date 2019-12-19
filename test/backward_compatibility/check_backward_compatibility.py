@@ -16,7 +16,25 @@ from torch._C import parse_schema
 #     believe you can land your diff before then.
 #
 # Whitelist entries can be removed after the date listed on them passes.
-white_list = []
+white_list = [
+    ("aten::append", datetime.date(9999, 1, 1)),
+    ("prim::AutogradAnyNonZero", datetime.date(9999, 1, 1)),
+    ("aten::grad", datetime.date(9999, 1, 1)),
+    ("_c10_experimental", datetime.date(9999, 1, 1)),
+    ("aten::thnn_conv3d", datetime.date(9999, 1, 1)),
+    ("aten::native_layer_norm_double_backward", datetime.date(9999, 1, 1)),
+    ("aten::cudnn_batch_norm", datetime.date(9999, 1, 1)),
+    ("aten::cudnn_batch_norm_backward", datetime.date(9999, 1, 1)),
+    ("aten::_batch_norm_impl_index_backward", datetime.date(9999, 1, 1)),
+    ("aten::empty_like", datetime.date(9999, 1, 1)),
+    ("aten::_batch_norm_impl_index", datetime.date(9999, 1, 1)),
+    ("aten::index_fill_", datetime.date(9999, 1, 1)),
+    ("aten::index_fill", datetime.date(9999, 1, 1)),
+    ("aten::log_softmax", datetime.date(9999, 1, 1)),
+    ("aten::softmax", datetime.date(9999, 1, 1)),
+    ("aten::thnn_conv3d_forward", datetime.date(9999, 1, 1)),
+    ("aten::thnn_conv3d_backward.output_mask", datetime.date(9999, 1, 1)),
+]
 
 
 def white_listed(schema, white_list):
