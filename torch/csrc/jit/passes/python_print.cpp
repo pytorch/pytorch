@@ -1191,12 +1191,8 @@ struct PythonPrintImpl {
       } else {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
       }
-      std::cout << "When Python printing " << arg_name << " default is "
-                << (arg.default_value().has_value() ? "present" : "not present")
-                << "\n";
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
-      } else {
       }
       assignValue(*param_it++, arg_name);
     }
@@ -1206,7 +1202,6 @@ struct PythonPrintImpl {
   }
 
   void printMethod(const Function& func) {
-    std::cout << "Printing function: " << func.getSchema() << "\n";
     printFunction(func, /*print_first_argument_type=*/false);
   }
 

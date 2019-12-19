@@ -116,15 +116,6 @@ void initTreeViewBindings(PyObject* module) {
           "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
-      // .def(py::init([](const Expr& type, const Ident& name, bool kwarg_only)
-      // {
-      //   return Param::create(
-      //       name.range(),
-      //       name,
-      //       Maybe<Expr>::create(type.range(), type),
-      //       Maybe<Expr>::create(name.range()),
-      //       kwarg_only);
-      // }))
       .def(
           py::init([](const Maybe<Expr>& type,
                       const Ident& name,
@@ -341,7 +332,6 @@ void initTreeViewBindings(PyObject* module) {
   py::class_<Maybe<Expr>, TreeView>(m, "Maybe")
       .def(py::init(
           [](const SourceRange& range) { return Maybe<Expr>::create(range); }))
-  // py::class_<Maybe<Expr>, TreeView>(m, "Maybe")
       .def(py::init(
           [](const SourceRange& range, const Expr& expr) { return Maybe<Expr>::create(range, expr); }));
 }
