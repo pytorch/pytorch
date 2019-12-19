@@ -9,7 +9,7 @@ from torch.nn.modules.utils import _pair
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
