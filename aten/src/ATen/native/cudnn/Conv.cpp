@@ -922,12 +922,12 @@ void raw_cudnn_convolution_forward_out(
   // TODO: we might need a more thorough test to find the best number here
   constexpr int64_t max_worksize = 1024 * 1024 * 512;
   int64_t n = output.size(0);
-  int64_t max_inner_size = std::max(ni, no) / n;
-  int64_t split_size = std::max(max_worksize / max_inner_size, 1L);
+  int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
+  int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
   if (split_size * max_inner_size < int_max) {
     for (int64_t i = 0; i < num_splits; i++) {
-      int64_t split_size_ = std::min(split_size, n - split_size * i);
+      int64_t split_size_ = std::min<int64_t>(split_size, n - split_size * i);
       Tensor output_ = output.narrow(0, split_size * i, split_size_);
       Tensor input_ = input.narrow(0, split_size * i, split_size_);
       raw_cudnn_convolution_forward_out_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic);
