@@ -45,7 +45,6 @@ enum MessageType {
   CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
 
   // Other internal message types
-  SHUTDOWN = 50,
   EXCEPTION = 55,
   UNKNOWN = 60
 };
