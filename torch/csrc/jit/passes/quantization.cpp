@@ -625,15 +625,6 @@ class InsertQuantDeQuantHelper {
   std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(
       script::Module& module,
       Node* n);
-  void checkQScheme(Graph* g, c10::QScheme qscheme) {
-    if (qscheme_for_graph_.count(g)) {
-      TORCH_CHECK(
-          qscheme_for_graph_.at(g) == qscheme,
-          "Quantizing same graph with different QSchemes is not supported");
-    } else {
-      qscheme_for_graph_[g] = qscheme;
-    }
-  }
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -649,9 +640,6 @@ class InsertQuantDeQuantHelper {
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
   // Map from Graph to observer node
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
-  // Record qscheme for every graph, this is for checking
-  // each graph is only quantized with one type of QScheme
-  std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -728,7 +716,6 @@ void InsertQuantDeQuantHelper::quantizeTensors(
   for (auto* n : observer_nodes_.at(g)) {
     auto* original_value = n->input(1);
     auto tp = getQSchemeAndQParamMap(module, n);
-    checkQScheme(g, std::get<0>(tp));
     auto qparam_map = std::get<1>(tp);
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
