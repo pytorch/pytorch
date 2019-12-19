@@ -19,6 +19,19 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 
+static llvm::SmallVector<std::string, 0> getAttrs() {
+  llvm::SmallVector<std::string, 0> res;
+  llvm::StringMap<bool> features;
+  if (llvm::sys::getHostCPUFeatures(features)) {
+    for (auto const &feature : features) {
+      if (feature.second) {
+        res.push_back(feature.first());
+      }
+    }
+  }
+  return res;
+}
+
 namespace llvm {
 namespace orc {
 
@@ -60,7 +73,7 @@ class PytorchLLVMJITImpl {
               return nullptr;
             },
             [](Error Err) { cantFail(std::move(Err), "lookupFlags failed"); })),
-        TM(EngineBuilder().selectTarget()),
+        TM(EngineBuilder().selectTarget(llvm::Triple(), "", llvm::sys::getHostCPUName(), getAttrs())),
         DL(TM->createDataLayout()),
         ObjectLayer(
             ES,

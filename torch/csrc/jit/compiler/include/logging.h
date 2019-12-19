@@ -15,6 +15,12 @@ const int ERROR = 2;
 const int WARNING = 1;
 const int INFO = 0;
 
+__attribute__((noreturn))
+inline void assert_unreachable(const char *msg) {
+  std::cerr << msg << "\n";
+  std::abort();
+}
+
 class MessageLogger {
  public:
   static std::string SeverityToString(int severity) {
@@ -28,6 +34,7 @@ class MessageLogger {
       case INFO:
         return "INFO";
     }
+    assert_unreachable("No such severity level");
   }
 
   MessageLogger(const char* file, int line, int severity)
