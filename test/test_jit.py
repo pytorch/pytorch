@@ -4017,6 +4017,57 @@ def foo(x):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             torch.jit.script(waytoobig)
 
+    def test_hex_literals(self):
+        def test1():
+            return 0xaaaaaa
+
+        def test2():
+            return 0xaaaaaa
+
+        def test3():
+            return -0xaaaaaa
+
+        self.checkScript(test1, [])
+        self.checkScript(test2, [])
+        self.checkScript(test3, [])
+
+        def ok():
+            a = 0x7FFFFFFFFFFFFFFF
+            return a
+
+        def toobig():
+            a = 0xFFFFFFFFFFFFFFFF
+            return a
+
+        def waytoobig():
+            a = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+            return a
+
+        self.checkScript(ok, [])
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(toobig)
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(waytoobig)
+
+    def test_big_float_literals(self):
+        def ok():
+            # Python interprets this as inf
+            a = 1.2E400
+            return a
+
+        def check(fn):
+            self.assertTrue(fn() == ok())
+
+        # checkScript doesn't work since assertEqual doesn't consider
+        # `inf` == `inf`
+        check(torch.jit.script(ok))
+
+        cu = torch.jit.CompilationUnit()
+        cu.define(dedent(inspect.getsource(ok)))
+        check(cu.ok)
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))

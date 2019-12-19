@@ -794,7 +794,8 @@ struct Const : public Expr {
     tree_->matchNumSubtrees(TK_CONST, 1);
   }
   bool isFloatingPoint() const {
-    return subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
+    bool is_inf = subtree(0)->stringValue() == "inf";
+    return is_inf || subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
     return !isFloatingPoint();
