@@ -2130,6 +2130,9 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
+    if pos_weight is not None and not (pos_weight.size(-1) == input.size(-1)):
+          raise ValueError("pos_weight length ({}) must be the same as the number of classes ({})".format(pos_weight.size(-1), input.size(-1)))
+
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
