@@ -13,8 +13,39 @@ struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
+  void propagateLoopHeaderLiveness() {
+    for (auto n : graph_->block()->nodes()) {
+      if (n->kind() == prim::Loop) {
+        auto loop_liveness = liveness_sets_[n];
+        loop_liveness -= toSparseBitVector(n->inputs());
+        extendLiveness(n->blocks()[0], loop_liveness);
+      }
+    }
+  }
+
   std::unordered_map<Node*, std::vector<Value*>> run() {
-    processBlock(graph_->block(), SparseBitVector{});
+    // In a special case, where IR is in a strict SSA form (i.e. all uses
+    // are dominated by a definition)
+    // and the control flow of programs is reducible, liveness can be computed
+    // in two passes (See https://hal.inria.fr/inria-00558509v2/document for
+    // the correctness proof) Our IR meets both criteria by construction.
+    // Namely, there is no way to express irreducible CF with `prim::Loop` and
+    // `prim::If` and every definition dominates their uses
+    //
+    // The first pass, `computePartialLivenessBackwards`, walks a graph backward
+    // and depth-first and compute liveness as usual using the following
+    // formula: LIVE_IN(B) = LIVE_OUT(SUCC(B)) + GEN(B) - KILL(B) Liveness isn't
+    // propagated along back edges and block inputs (phiDefs in the paper) in
+    // loop nodes are excluded from liveness propagation. Maximum and current
+    // trip count uses are added explicitly as `prim::Store`s at the end of
+    // every loop as they are required to build bail out graphs.
+    //
+    // The second pass, `propagateLoopHeaderLiveness`, propagates the liveness
+    // sets of the roots of all the loop forests (i.e. outermost `prim::Loop`s)
+    // to every node within their corresponding loop bodies
+    computePartialLivenessBackwards(graph_->block(), SparseBitVector{});
+    propagateLoopHeaderLiveness();
+
     std::unordered_map<Node*, std::vector<Value*>> result;
 
     for (const auto& e : liveness_sets_) {
@@ -81,7 +112,9 @@ struct LivenessAnalyzer {
     }
   }
 
-  SparseBitVector processBlock(Block* b, SparseBitVector liveness) {
+  SparseBitVector computePartialLivenessBackwards(
+      Block* b,
+      SparseBitVector liveness) {
     // block outputs are the uses
     auto block_outputs = toSparseBitVector(b->outputs());
     liveness |= block_outputs;
@@ -104,36 +137,18 @@ struct LivenessAnalyzer {
         graph_->insertNode(ctc);
         auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
         graph_->insertNode(mtc);
-        loop_block = processBlock(it->blocks()[0], loop_block);
+        loop_block =
+            computePartialLivenessBackwards(it->blocks()[0], loop_block);
         ctc->destroy();
         mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
-        // given that our IR uses both SSA and loop forests
-        // liveness can be computed in two passes
-        // the first pass propagates the liveness information backwards
-        // the second pass propagates the liveness information from
-        // loop headers forward to every node in a loop recursively
-        // the correctness proof of this version of liveness is given in
-        // https://hal.inria.fr/inria-00558509v2/document
-        // the gist of the proof is that after the backwards pass
-        // loop headers will contain exactly the fixed-point liveness of SSA
-        // variables + GEN/UpwardExposedUses (the latter trivially never change)
-        // if these loop headers' liveness sets are now
-        // propagated to all nodes contained in the loops
-        // we will receive the accurate liveness for every node in a graph
-        // A few notable differences in our implementation is that
-        // * in our IR loop edges are implicit and don't need to be
-        // explicitly excluded
-        // * two passes are interleaved
-        // * loop's block inputs are the same as PhiDefs in the algorithm
-        // modulo the trip count which we have to handle separately since
-        // it might not have explicit uses in a loop
-        extendLiveness(it->blocks()[0], loop_block);
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
-        auto true_liveness = processBlock(it->blocks()[0], liveness);
-        auto false_liveness = processBlock(it->blocks()[1], liveness);
+        auto true_liveness =
+            computePartialLivenessBackwards(it->blocks()[0], liveness);
+        auto false_liveness =
+            computePartialLivenessBackwards(it->blocks()[1], liveness);
         liveness |= true_liveness;
         liveness |= false_liveness;
       }
