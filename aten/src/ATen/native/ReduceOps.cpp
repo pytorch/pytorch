@@ -46,6 +46,7 @@ static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
     mask.flip();
   } else {
     for (int64_t dim : dims) {
+      TORCH_CHECK(dim < 64, "PyTorch doesn't support reduction operations for dim>=64");
       mask.set(maybe_wrap_dim(dim, ndim));
     }
   }
