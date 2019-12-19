@@ -637,7 +637,9 @@ class InsertQuantDeQuantHelper {
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  // Map from Graph to observer node
+  // Map from Graph to observer node, we can use observer node to
+  // get the information of original value that's been observed and
+  // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
 };
 
