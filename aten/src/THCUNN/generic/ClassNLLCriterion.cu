@@ -45,8 +45,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
 
   if (reduction == at::Reduction::None && n_dims == 2) {
+    THCTensor_(resize1d)(state, output, batch_size);
     if (batch_size != 0) {
-      THCTensor_(resize1d)(state, output, batch_size);
       if (weights) {
         weights = THCTensor_(newContiguous)(state, weights);
       }
