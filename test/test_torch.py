@@ -1326,15 +1326,17 @@ class _TestTorchMixin(object):
         self.assertEqual(x.int().type(torch.Tensor).dtype, torch.get_default_dtype())
         self.assertEqual(x.type(torch.int32).dtype, torch.int32)
 
+    @suppress_warnings
+    # Suppressing warnings as it is recommended to use sourceTensor.clone().detach() or
+    # sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).
     def test_tensor_factory(self):
-        expected = torch.Tensor([1, 1])
+        expected = torch.Tensor([1, 1]).to(torch.int64)
         # test data
         res1 = torch.tensor([1, 1])
         self.assertEqual(res1, expected)
 
-        res1 = torch.tensor([1, 1], dtype=torch.int)
+        res1 = torch.tensor([1, 1], dtype=torch.int64)
         self.assertEqual(res1, expected)
-        self.assertIs(torch.int, res1.dtype)
 
         # test copy
         res2 = torch.tensor(expected)
@@ -1342,9 +1344,8 @@ class _TestTorchMixin(object):
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
 
-        res2 = torch.tensor(expected, dtype=torch.int)
+        res2 = torch.tensor(expected, dtype=torch.int64)
         self.assertEqual(res1, expected)
-        self.assertIs(torch.int, res1.dtype)
 
         # test copy with numpy
         if TEST_NUMPY:
@@ -1360,8 +1361,10 @@ class _TestTorchMixin(object):
         b = torch.tensor([-1, -1.1, 0, 1, 1.1], dtype=torch.bool)
         self.assertEqual(a, b)
 
+    @suppress_warnings
+    # Suppressing warnings as it is recommended to use sourceTensor.clone().detach() or
+    # sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).
     def test_tensor_factory_copy_var(self):
-
         def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
             if data_ptr is None:
                 data_ptr = copy.data_ptr
@@ -1377,14 +1380,14 @@ class _TestTorchMixin(object):
         check_copy(torch.tensor(source, requires_grad=True), True, True)
 
         # test tensor.new_tensor()
-        copy = torch.randn(1)
+        copy = torch.randn(1).to(torch.float64)
         check_copy(copy.new_tensor(source), True, False)
         check_copy(copy.new_tensor(source, requires_grad=False), True, False)
         check_copy(copy.new_tensor(source, requires_grad=True), True, True)
 
         # test torch.as_tensor()
         check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad, source.data_ptr)  # not copy
-        check_copy(torch.as_tensor(source, dtype=torch.float), False, True)  # copy and keep the graph
+        check_copy(torch.as_tensor(source), True, True)  # copy and keep the graph
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
@@ -1423,23 +1426,26 @@ class _TestTorchMixin(object):
             assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
         torch.backends.quantized.engine = original_qe
 
+    @suppress_warnings
+    # Suppressing warnings as it is recommended to use sourceTensor.clone().detach() or
+    # sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
         res1 = expected.new_tensor([1, 1])
         self.assertEqual(res1, expected)
-        res1 = expected.new_tensor([1, 1], dtype=torch.int)
+        res1 = expected.new_tensor([1, 1], dtype=torch.uint8)
         self.assertEqual(res1, expected)
-        self.assertIs(torch.int, res1.dtype)
+        self.assertIs(torch.uint8, res1.dtype)
 
         # test copy
         res2 = expected.new_tensor(expected)
         self.assertEqual(res2, expected)
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
-        res2 = expected.new_tensor(expected, dtype=torch.int)
+        res2 = expected.new_tensor(expected, dtype=torch.uint8)
         self.assertEqual(res2, expected)
-        self.assertIs(torch.int, res2.dtype)
+        self.assertIs(torch.uint8, res2.dtype)
 
         # test copy with numpy
         if TEST_NUMPY:
@@ -2167,12 +2173,12 @@ class _TestTorchMixin(object):
         for generator in (None, torch.Generator()):
             generator = seed(generator)
             res1 = torch.randint(0, 6, (SIZE, SIZE), generator=generator)
-            res2 = torch.empty(())
+            res2 = torch.empty((), dtype=torch.int64)
             generator = seed(generator)
             torch.randint(0, 6, (SIZE, SIZE), generator=generator, out=res2)
             generator = seed(generator)
             res3 = torch.randint(6, (SIZE, SIZE), generator=generator)
-            res4 = torch.empty(())
+            res4 = torch.empty((), dtype=torch.int64)
             generator = seed(generator)
             torch.randint(6, (SIZE, SIZE), out=res4, generator=generator)
             self.assertEqual(res1, res2)
@@ -2485,7 +2491,7 @@ class _TestTorchMixin(object):
 
     def test_isnan(self):
         x = torch.Tensor([1, nan, 2])
-        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
+        self.assertEqual(torch.isnan(x), torch.tensor([False, True, False]))
 
     def test_dtype_is_signed(self):
         for dtype in torch.testing.get_all_dtypes():
