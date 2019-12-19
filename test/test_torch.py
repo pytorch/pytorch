@@ -1641,7 +1641,7 @@ class _TestTorchMixin(object):
 
     def test_arange(self):
         res1 = torch.arange(0, 1)
-        res2 = torch.Tensor()
+        res2 = torch.Tensor().to(res1.dtype)
         torch.arange(0, 1, out=res2)
         self.assertEqual(res1, res2, 0)
 
@@ -1706,13 +1706,13 @@ class _TestTorchMixin(object):
         self.assertEqual(r.numel(), 3)
 
         r1 = torch.arange(0, 5 + 1e-6)
-        r2 = torch.arange(0, 5)
+        r2 = torch.arange(0, 5).to(r1.dtype)
         r3 = torch.arange(0, 5 - 1e-6)
         self.assertEqual(r1[:-1], r2, 0)
         self.assertEqual(r2, r3, 0)
 
         r1 = torch.arange(10, -1 + 1e-6, -1)
-        r2 = torch.arange(10, -1, -1)
+        r2 = torch.arange(10, -1, -1).to(r1.dtype)
         r3 = torch.arange(10, -1 - 1e-6, -1)
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
