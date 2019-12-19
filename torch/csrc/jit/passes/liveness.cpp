@@ -13,12 +13,13 @@ struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
-  void propagateLoopHeaderLiveness() {
-    for (auto n : graph_->block()->nodes()) {
+  void propagateLoopHeaderLiveness(Block* b) {
+    for (auto n : b->nodes()) {
       if (n->kind() == prim::Loop) {
         auto loop_liveness = liveness_sets_[n];
         loop_liveness -= toSparseBitVector(n->inputs());
         extendLiveness(n->blocks()[0], loop_liveness);
+        propagateLoopHeaderLiveness(n->blocks()[0]);
       }
     }
   }
@@ -44,7 +45,7 @@ struct LivenessAnalyzer {
     // sets of the roots of all the loop forests (i.e. outermost `prim::Loop`s)
     // to every node within their corresponding loop bodies
     computePartialLivenessBackwards(graph_->block(), SparseBitVector{});
-    propagateLoopHeaderLiveness();
+    propagateLoopHeaderLiveness(graph_->block());
 
     std::unordered_map<Node*, std::vector<Value*>> result;
 
