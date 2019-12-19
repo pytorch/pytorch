@@ -142,3 +142,15 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
     num_send_recv_threads=16,
 )
+
+def wait_until_node_failure(rank):
+    '''
+    Loops until an RPC to the given rank fails. This is used to
+    indicate that the node has failed in unit tests.
+    '''
+    while True:
+        try:
+            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            time.sleep(0.1)
+        except Exception:
+            break

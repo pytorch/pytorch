@@ -117,6 +117,8 @@ class ProcessGroupAgent : public RpcAgent {
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
+  // handle a SendWork request.
+  void handleSend(SendWork work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
   // receiving messages

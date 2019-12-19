@@ -14,7 +14,7 @@ import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
 from common_utils import load_tests
 import dist_utils
-from dist_utils import dist_init
+from dist_utils import dist_init, wait_until_node_failure
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from rpc_agent_test_fixture import RpcAgentTestFixture
@@ -1332,12 +1332,13 @@ class RpcTest(RpcAgentTestFixture):
         )
 
         if self.rank == 0:
-            time.sleep(3)
-            # allow other workers to exit without joining
+            # allow destination worker to exit without joining
+            wait_until_node_failure(1)
             fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
             with self.assertRaisesRegex(RuntimeError, "Encountered exception in ProcessGroupAgent::enqueueSend"):
                 fut.wait()
-        sys.exit(0)  # workers exit without joining.
+        else:
+            pass  # exit all other nodes
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")

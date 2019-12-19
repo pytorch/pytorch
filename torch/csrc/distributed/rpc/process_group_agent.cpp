@@ -326,52 +326,53 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   return future;
 }
 
+void ProcessGroupAgent::handleSend(SendWork work) {
+  std::string serializedPayload =
+      wireSerialize(work.message_.payload(), work.message_.tensors());
+
+  std::vector<torch::Tensor> preamble = {torch::tensor(
+      {(int64_t)pg_->getRank(),
+       (int64_t)serializedPayload.length(),
+       (int64_t)work.message_.type(),
+       (int64_t)work.message_.id()},
+      {torch::kInt64})};
+
+  // ProcessGroup is not thread-safe when sending with the same tag,
+  // hence the lock
+  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
+  const auto dst = work.to_.id_;
+  if (work.message_.isShutdown()) {
+    pendingSends.reserve(1);
+    {
+      std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+      pendingSends.emplace_back(pg_->send(preamble, dst, dst /* channelTag */));
+    }
+  } else {
+    std::vector<torch::Tensor> payload = {torch::from_blob(
+        (void*)serializedPayload.c_str(),
+        serializedPayload.length(),
+        {torch::kChar})};
+    pendingSends.reserve(2);
+
+    sendCounts_.increment(dst);
+
+    {
+      std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+      pendingSends.emplace_back(pg_->send(preamble, dst, dst /* channelTag */));
+      pendingSends.emplace_back(pg_->send(payload, dst, dst /* channelTag */));
+    }
+  }
+  for (auto& pendingSend : pendingSends) {
+    pendingSend->wait();
+  }
+}
+
 void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
         try {
-          std::string serializedPayload =
-              wireSerialize(work.message_.payload(), work.message_.tensors());
-
-          std::vector<torch::Tensor> preamble = {torch::tensor(
-              {(int64_t)pg_->getRank(),
-               (int64_t)serializedPayload.length(),
-               (int64_t)work.message_.type(),
-               (int64_t)work.message_.id()},
-              {torch::kInt64})};
-
-          // ProcessGroup is not thread-safe when sending with the same tag,
-          // hence the lock
-          std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
-          const auto dst = work.to_.id_;
-          if (work.message_.isShutdown()) {
-            pendingSends.reserve(1);
-            {
-              std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-              pendingSends.emplace_back(
-                  pg_->send(preamble, dst, dst /* channelTag */));
-            }
-          } else {
-            std::vector<torch::Tensor> payload = {torch::from_blob(
-                (void*)serializedPayload.c_str(),
-                serializedPayload.length(),
-                {torch::kChar})};
-            pendingSends.reserve(2);
-
-            sendCounts_.increment(dst);
-
-            {
-              std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-              pendingSends.emplace_back(
-                  pg_->send(preamble, dst, dst /* channelTag */));
-              pendingSends.emplace_back(
-                  pg_->send(payload, dst, dst /* channelTag */));
-            }
-          }
-          for (auto& pendingSend : pendingSends) {
-            pendingSend->wait();
-          }
+          handleSend(work);
         } catch (std::exception& e) {
           if (work.message_.isRequest()) {
             std::ostringstream ss;
