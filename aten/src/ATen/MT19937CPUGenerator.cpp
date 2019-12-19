@@ -13,7 +13,6 @@ namespace at {
  */
 MT19937CPUGenerator::MT19937CPUGenerator(uint64_t seed_in)
   : CPUGenerator(seed_in), engine_{seed_in} {
-  std::cout << "MT19937CPUGenerator ctor()" << std::endl;
 }
 
 /**
@@ -53,7 +52,6 @@ uint64_t MT19937CPUGenerator::seed() {
  */
 uint32_t MT19937CPUGenerator::random() {
   const auto res = engine_();
-  std::cout << "MT19937CPUGenerator::random() generated " << res << std::endl;
   return res;
 }
 
