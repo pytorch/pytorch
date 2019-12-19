@@ -28,7 +28,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
   }
 
-  if (n_dims <= 0 || n_dims > 2) {
+  if (n_dims != 1 && n_dims != 2) {
     THError("input tensor should be 1D or 2D");
   }
 
