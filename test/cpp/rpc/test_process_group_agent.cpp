@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/lib/c10d/HashStore.hpp>
+#include <torch/lib/c10d/ProcessGroupGloo.hpp>
 #include <torch/torch.h>
-#include "caffe2/torch/csrc/distributed/autograd/context/container.h"
-#include "caffe2/torch/lib/c10d/HashStore.hpp"
-#include "caffe2/torch/lib/c10d/ProcessGroupGloo.hpp"
 
 #include <memory>
 #include <string>
