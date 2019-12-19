@@ -208,7 +208,7 @@ c10::optional<IValue> tryCalculateDefaultParam(
     } else {
       return toIValue(def_value, arg.type());
     }
-  } catch (py::cast_error& e) {
+  } catch (...) {
     return c10::nullopt;
   }
 }
