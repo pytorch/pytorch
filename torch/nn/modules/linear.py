@@ -77,7 +77,7 @@ class Linear(Module):
     def reset_parameters(self):
         init.kaiming_uniform_(self.weight, nonlinearity='linear')
         if self.bias is not None:
-            init.constant_(self.bias, 0)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -144,7 +144,7 @@ class Bilinear(Module):
         bound = std * 3 ** 0.5
         init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
-            init.constant_(self.bias, 0)
+            init.zeros_(self.bias)
 
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)
