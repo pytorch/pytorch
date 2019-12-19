@@ -860,6 +860,7 @@ void InsertQuantDeQuantHelper::run(
 
   // We only need to register new parameters if the graph has
   // been quantized before
+  // TODO: dedup this part with code in quantizeTensors
   if (observer_nodes_.count(graph.get())) {
     for (auto* n : observer_nodes_.at(g)) {
       auto* original_value = n->input(1);
