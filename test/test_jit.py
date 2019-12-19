@@ -305,26 +305,6 @@ class FooToPickle(torch.nn.Module):  # noqa T484
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
 
-class Observer(torch.nn.Module):
-    def __init__(self, dtype=torch.quint8):
-        super(Observer, self).__init__()
-        self.dtype = dtype
-
-    def forward(self, x):
-        return x
-
-    @torch.jit.export
-    def calculate_qparams(self):
-        return torch.tensor([2.0]), torch.tensor([3])
-
-    @torch.jit.export
-    def get_qparams(self):
-        return self.calculate_qparams()
-
-class WeightObserver(Observer):
-    def __init__(self):
-        super(WeightObserver, self).__init__(torch.qint8)
-
 class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
@@ -992,7 +972,7 @@ graph(%x : Tensor,
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -1054,7 +1034,7 @@ graph(%x : Tensor,
                        .run(str(s))
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
 
         torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig = QConfig(
@@ -1105,7 +1085,7 @@ graph(%x : Tensor,
             # When we change the implementation to clone the module before
             # inserting observers, we can remove this copy
             m = m.copy()
-            observer = torch.jit.script(Observer())
+            observer = torch.jit.script(default_observer())
             qconfig_dict = {
                 '':
                 QConfig(
@@ -1140,8 +1120,8 @@ graph(%x : Tensor,
                 return F.relu(self.conv(x))
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
-        weight_observer = torch.jit.script(WeightObserver())
+        observer = torch.jit.script(default_observer())
+        weight_observer = torch.jit.script(default_weight_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -1229,7 +1209,7 @@ graph(%x : Tensor,
                 return b + c
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -3564,6 +3544,12 @@ graph(%Ra, %Rb):
             def hints_bad_types(x, a=10, b=0.5):  # noqa: T484
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
+        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+            @torch.jit.script
+            def bad_no_optional(x=None):
+                # type: (Dict[str, int]) -> Dict[str, int]
+                return x
+
 
     def test_module_default_values(self):
         four = torch.tensor(4)
@@ -3787,6 +3773,27 @@ class TestScript(JitTestCase):
         out = fct_loop(x)
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
+
+    def test_bailout_loop_carried_deps_name_clash(self):
+        with enable_profiling_mode():
+            NUM_ITERATIONS = 10
+            @torch.jit.script
+            def fct_loop(z, size):
+                # type: (int, int) -> Tuple[Tensor, List[int]]
+                counters = torch.jit.annotate(List[int], [])
+                j = 0
+                y = torch.ones(2)
+                for i in range(size):
+                    counters.append(i + j)
+                    y = torch.cat((y, torch.ones(z)), 0)
+                    j = j + 1
+                return y, counters
+
+            inputs = [1, 2, 3, 4]
+            expected = [x * 2 for x in range(NUM_ITERATIONS)]
+            for inp in inputs:
+                results = fct_loop(inp, NUM_ITERATIONS)
+                self.assertEqual(results[1], expected)
 
     def test_bailout_loop_counter_transition(self):
         with enable_profiling_mode():
