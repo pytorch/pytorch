@@ -494,9 +494,9 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   int64_t sparse_dim = src.sparse_dim();
   auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
-  LongTensor t_indices_ = t._indices();
+  LongTensor t_indices_ = t._indices().contiguous();
   Tensor t_values_ = t._values().to(commonDtype);
-  LongTensor s_indices_ = src._indices();
+  LongTensor s_indices_ = src._indices().contiguous();
   Tensor s_values_ = src._values().to(commonDtype);
   LongTensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
   r_.resize_as_(src);
