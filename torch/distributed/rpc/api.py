@@ -275,7 +275,6 @@ def remote(to, func, args=None, kwargs=None):
             current_worker.name,
             info.name,
         )
-        print("PROFILER ENABLED - created RF.")
     if qualified_name is not None:
         return _invoke_remote_builtin(
             _agent, info, qualified_name, rf, *args, **kwargs)

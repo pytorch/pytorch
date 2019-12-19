@@ -554,7 +554,6 @@ class RpcTest(RpcAgentTestFixture):
                     time.sleep(1)
 
             events = prof.function_events
-            print([event.name for event in events])
             rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
             # the sender, dest worker, function run, and type of RPC should all be recorded.
             self_worker_name = "worker{}".format(self.rank)
@@ -564,7 +563,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
-            print(prof.key_averages())
 
     @dist_init
     def test_profiler_with_sync_rpc(self):
