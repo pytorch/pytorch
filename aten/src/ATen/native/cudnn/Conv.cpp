@@ -907,19 +907,20 @@ void raw_cudnn_convolution_forward_out(
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = output.numel();
-  // if N * C * H * W <= int_max, then no need to split at all
+  // Assume the shape of the tensor is (N, C, D1, D2, ...)
+  // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
     raw_cudnn_convolution_forward_out_32bit(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
     return;
   }
-  // else, if C * H * W <= int_max, then we just need to split across the N dimension
+  // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
   //
   // Here we use a simple heuristics to determine the size of each split
   // We don't max out the 2^31 address space because this number is super
   // large and very likely to get an OOM.
   //
   // TODO: we might need a more thorough test to find the best number here
-  constexpr int64_t max_worksize = 1024 * 1024 * 128;
+  constexpr int64_t max_worksize = 1024 * 1024 * 512;
   int64_t n = output.size(0);
   int64_t max_inner_size = std::max(ni, no) / n;
   int64_t split_size = std::max(max_worksize / max_inner_size, 1L);
@@ -934,6 +935,7 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
   // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
+  // For example, for conv2d, there following questions needs to be considered.
   // - Is the memory layout NCHW or NHWC ?
   // - If the conv is NCHW -> NC'H'W', then should we
   //   - split only NC?
