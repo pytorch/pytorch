@@ -152,6 +152,20 @@ class ProcessGroupHelper {
     q.cv.notify_all();
   }
 
+  void runSendWorkCase(
+      Message toSend,
+      const std::function<void(std::shared_ptr<FutureMessage>)>& func) {
+    Baton b;
+    queueWork(0, [&](RpcAgent& agent) -> bool {
+      std::shared_ptr<FutureMessage> m =
+          agent.send(agent.getWorkerInfo(1), std::move(toSend));
+      func(m);
+      b.post();
+      return true;
+    });
+    b.wait();
+  }
+
   int64_t nextId() {
     return nextId_++;
   }
@@ -173,17 +187,12 @@ TEST(ProcessGroupAgent, BasicEcho) {
   ProcessGroupHelper* helper = ProcessGroupHelper::getSingleton();
   auto tensor = torch::randn({5});
   Message toSend(toVec("hi"), {tensor}, SCRIPT_REMOTE_CALL, helper->nextId());
-  Baton b;
-  helper->queueWork(0, [&](RpcAgent& agent) -> bool {
-    std::shared_ptr<FutureMessage> m =
-        agent.send(agent.getWorkerInfo(1), std::move(toSend));
-    auto result = m->wait();
-    EXPECT_EQ(result.payload(), toVec("hi"));
-    EXPECT_TRUE(torch::equal(result.tensors()[0], tensor));
-    b.post();
-    return true;
-  });
-  b.wait();
+  helper->runSendWorkCase(
+      std::move(toSend), [&](std::shared_ptr<FutureMessage> responseFuture) {
+        auto result = responseFuture->wait();
+        EXPECT_EQ(result.payload(), toVec("hi"));
+        EXPECT_TRUE(torch::equal(result.tensors()[0], tensor));
+      });
 }
 
 TEST(ProcessGroupAgent, CompletedInFuture) {
@@ -194,17 +203,12 @@ TEST(ProcessGroupAgent, CompletedInFuture) {
       {tensor},
       SCRIPT_REMOTE_CALL,
       helper->nextId());
-  Baton b;
-  helper->queueWork(0, [&](RpcAgent& agent) -> bool {
-    std::shared_ptr<FutureMessage> m =
-        agent.send(agent.getWorkerInfo(1), std::move(toSend));
-    auto response = m->wait();
-    EXPECT_EQ(response.payload(), toVec("completedInFuture"));
-    EXPECT_TRUE(torch::equal(response.tensors()[0], tensor));
-    b.post();
-    return true;
-  });
-  b.wait();
+  helper->runSendWorkCase(
+      std::move(toSend), [&](std::shared_ptr<FutureMessage> responseFuture) {
+        auto response = responseFuture->wait();
+        EXPECT_EQ(response.payload(), toVec("completedInFuture"));
+        EXPECT_TRUE(torch::equal(response.tensors()[0], tensor));
+      });
 }
 
 TEST(ProcessGroupAgent, OperatorThrows) {
@@ -212,16 +216,11 @@ TEST(ProcessGroupAgent, OperatorThrows) {
   auto tensor = torch::randn({5});
   Message toSend(
       toVec("operatorThrows"), {tensor}, SCRIPT_REMOTE_CALL, helper->nextId());
-  Baton b;
-  helper->queueWork(0, [&](RpcAgent& agent) -> bool {
-    std::shared_ptr<FutureMessage> m =
-        agent.send(agent.getWorkerInfo(1), std::move(toSend));
-    m->waitNoThrow();
-    EXPECT_TRUE(m->hasError());
-    b.post();
-    return true;
-  });
-  b.wait();
+  helper->runSendWorkCase(
+      std::move(toSend), [&](std::shared_ptr<FutureMessage> responseFuture) {
+        responseFuture->waitNoThrow();
+        EXPECT_TRUE(responseFuture->hasError());
+      });
 }
 
 TEST(ProcessGroupAgent, FutureIsError) {
@@ -229,16 +228,11 @@ TEST(ProcessGroupAgent, FutureIsError) {
   auto tensor = torch::randn({5});
   Message toSend(
       toVec("futureIsError"), {tensor}, SCRIPT_REMOTE_CALL, helper->nextId());
-  Baton b;
-  helper->queueWork(0, [&](RpcAgent& agent) -> bool {
-    std::shared_ptr<FutureMessage> m =
-        agent.send(agent.getWorkerInfo(1), std::move(toSend));
-    m->waitNoThrow();
-    EXPECT_TRUE(m->hasError());
-    b.post();
-    return true;
-  });
-  b.wait();
+  helper->runSendWorkCase(
+      std::move(toSend), [&](std::shared_ptr<FutureMessage> responseFuture) {
+        responseFuture->waitNoThrow();
+        EXPECT_TRUE(responseFuture->hasError());
+      });
 }
 
 TEST(ProcessGroupAgent, Timeout) {
@@ -246,14 +240,9 @@ TEST(ProcessGroupAgent, Timeout) {
   auto tensor = torch::randn({5});
   Message toSend(
       toVec("sleep"), {tensor}, SCRIPT_REMOTE_CALL, helper->nextId());
-  Baton b;
-  helper->queueWork(0, [&](RpcAgent& agent) -> bool {
-    std::shared_ptr<FutureMessage> m =
-        agent.send(agent.getWorkerInfo(1), std::move(toSend));
-    m->waitNoThrow();
-    EXPECT_TRUE(m->hasError());
-    b.post();
-    return true;
-  });
-  b.wait();
+  helper->runSendWorkCase(
+      std::move(toSend), [&](std::shared_ptr<FutureMessage> responseFuture) {
+        responseFuture->waitNoThrow();
+        EXPECT_TRUE(responseFuture->hasError());
+      });
 }
