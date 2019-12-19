@@ -5672,7 +5672,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         a_copy = a.clone()
         b_copy = b.clone()
 
-        self.assertEqual(torch.tensor(6), a.float() * b)
+        self.assertEqual(torch.tensor(6), a * b)
 
         self.assertEqual(a.type(), a_copy.type())
         self.assertEqual(a.data.type(), a_copy.data.type())
