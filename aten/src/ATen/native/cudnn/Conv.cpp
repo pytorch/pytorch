@@ -201,9 +201,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 }
 
 bool support_channels_last(const Tensor& input, const Tensor& weight, int groups) {
+  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    return false;
+  }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-  return (groups == 1 || cudnn_version >= 7600) &&
-      input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  return (groups == 1 || cudnn_version >= 7603) &&
+      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 // ---------------------------------------------------------------------

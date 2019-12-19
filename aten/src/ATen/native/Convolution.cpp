@@ -355,9 +355,12 @@ auto ConvParams::use_cudnn_depthwise(
 
 auto ConvParams::cudnn_use_channels_last(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    return false;
+  }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
   // old cudnn version has sparse group convolution support for NHWC layout
-  return (groups == 1 || cudnn_version >= 7600) &&
+  return (groups == 1 || cudnn_version >= 7603) &&
       (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
