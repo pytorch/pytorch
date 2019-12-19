@@ -217,7 +217,8 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 
 def build_param_list(ctx, py_args, self_name):
-
+    num_positional_args = len(py_args.args)
+    num_defaults = len(py_args.defaults)
     def get_default(i):
         if self_name is not None:
             if i == 0:
@@ -225,7 +226,8 @@ def build_param_list(ctx, py_args, self_name):
                 return None
             # If self is present, shift down the defaults list by 1
             i -= 1
-        if i >= len(py_args.defaults):
+        i -= num_positional_args - num_defaults
+        if i < 0 or i >= len(py_args.defaults):
             return None
         return py_args.defaults[i]
 
