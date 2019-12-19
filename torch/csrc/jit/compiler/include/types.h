@@ -73,6 +73,7 @@ inline Dtype BinaryOpDtype(Dtype op1_dtype, Dtype op2_dtype) {
     return op1_dtype;
   }
   LOG(FATAL) << "Invalid dtypes: " << op1_dtype << ", " << op2_dtype;
+  assert_unreachable("Invalid dtypes");
 }
 
 } // namespace compiler
