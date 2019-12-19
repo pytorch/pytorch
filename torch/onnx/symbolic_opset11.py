@@ -56,10 +56,10 @@ def _interpolate(name, dim, interpolate_mode):
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
             else "align_corners" if align_corners else "pytorch_half_pixel"
         empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
+        input_size = g.op("Shape", input)
+        input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
         output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-        output_size = g.op("Concat", input_size, output_size, axis_i=0)
+        output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
         return g.op("Resize",
                     input,
@@ -115,6 +115,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]
             size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
         size = g.op("Concat", input_size, size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         return g.op("Resize",
