@@ -766,6 +766,7 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
     getQSchemeAndQParamMap(script::Module& module, Node* n) {
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
+  TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()), "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
@@ -911,8 +912,11 @@ void InsertQuantDeQuantHelper::run(
     collectObserverNodesAndValueToQuantize(module, v);
   }
   Value* self = graph->inputs()[0];
+  GRAPH_DUMP("Before Quantize Tensors:", graph);
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
+  removeObservers(module, graph.get());
+  GRAPH_DUMP("After Remove Observers:", graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
