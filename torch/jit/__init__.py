@@ -245,6 +245,14 @@ def export_opnames(m):
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """
+    .. warning::
+        This function is internal-only and should only be used by the ONNX
+        exporter. If you are trying to get a graph through tracing, please go
+        through the public API instead::
+
+            trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+            trace_graph = trace.graph
+
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
     also returns the trace inputs as part of the tuple
