@@ -41,6 +41,9 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 using DimMask = TensorIterator::DimMask;
 
 static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
+  for(size_t idx =0; idx=dims.size(); idx++) {
+    TORCH_CHECK(dims[idx]<64, "PyTorch doesn't support reduction operations for dim>=64");
+  }
   auto mask = DimMask();
   if (dims.empty()) {
     mask.flip();
