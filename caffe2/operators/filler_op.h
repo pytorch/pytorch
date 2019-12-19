@@ -77,7 +77,7 @@ class FillerOp : public Operator<Context> {
               "data type int64_t");
           CAFFE_ENFORCE(input.numel() > 0);
           auto* shape_data = input.template data<int64_t>();
-          std::unique_ptr<int64_t[]> shape_data_copy = caffe2::make_unique<int64_t[]>(input.dim32(0));
+          std::unique_ptr<int64_t[]> shape_data_copy = std::make_unique<int64_t[]>(input.dim32(0));
           context_.template CopyToCPU<int64_t>(input.dim32(0), shape_data, shape_data_copy.get());
           shape.insert(shape.end(), shape_data_copy.get(), shape_data_copy.get() + input.dim32(0));
         }
