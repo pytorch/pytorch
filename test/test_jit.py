@@ -8352,7 +8352,6 @@ a")
                 num_chunks = 4
             elif isinstance(cell, torch.nn.GRU):
                 num_chunks = 3
-            print(num_chunks)
             vals = vals[:d_hid * num_chunks]
             cell.weight_ih_l0 = torch.nn.Parameter(
                 torch.tensor(vals, dtype=torch.float),
