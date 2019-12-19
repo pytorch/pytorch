@@ -208,7 +208,7 @@ c10::optional<IValue> tryCalculateDefaultParam(
     } else {
       return toIValue(def_value, arg.type());
     }
-  } catch (py::cast_error& e) {
+  } catch (...) {
     return c10::nullopt;
   }
 }
@@ -693,7 +693,6 @@ void initJitScriptBindings(PyObject* module) {
           "setattr",
           [](Object& self, const std::string& name, py::object value) {
             TypePtr type = self.type()->getAttribute(name);
-            TORCH_CHECK(type, "Module has no attribute '", name, "'");
             auto ivalue = toIValue(std::move(value), type);
             self.setattr(name, ivalue);
           })
