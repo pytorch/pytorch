@@ -312,7 +312,12 @@ If the future completes with an error, an exception is thrown.
          std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
         return pyRemotePythonUdf(
             agent, dst, pickledPythonUDF, tensors, std::move(rf));
-      });
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
 
   module.def(
       "get_rpc_timeout",
