@@ -129,10 +129,12 @@ class Variable : public ExprNode<Variable> {
 // For example: Var x('x'); Expr x2 = x;
 class Var : public Expr {
  public:
-  Var(Dtype dtype) : Expr(std::move(Variable::make(dtype))) {}
+  Var(Dtype dtype) : Expr(Variable::make(dtype)) {}
   Var(const std::string& name_hint, Dtype dtype)
-      : Expr(std::move(Variable::make(name_hint, dtype))) {}
-  const Variable* node() const { return static_cast<const Variable*>(Expr::node()); }
+      : Expr(Variable::make(name_hint, dtype)) {}
+  const Variable* node() const {
+    return static_cast<const Variable*>(Expr::node());
+  }
   bool operator==(const Var& other) const {
     return this->node() == other.node();
   }
