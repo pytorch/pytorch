@@ -1319,23 +1319,30 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(autograd_info)
         self.assertEqual(expected, info)
 
-    @requires_process_group_agent("Testing exceptions thrown by ProcessGroupAgent::enqueueSend.")
+    @dist_init(clean_shutdown=False)
     def test_sender_exceptions(self):
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
+        # This barrier is needed to ensure that some workers do not exit before
+        # others have been brought up, for non ProcessGroupAgent backends.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        dist.barrier()
 
         if self.rank == 0:
             # allow destination worker to exit without joining
             wait_until_node_failure(1)
             fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
-            with self.assertRaisesRegex(RuntimeError, "Encountered exception in ProcessGroupAgent::enqueueSend"):
+            error_str = (
+                "Encountered exception in ProcessGroupAgent::enqueueSend"
+                if self.rpc_backend
+                == rpc.backend_registry.BackendType.PROCESS_GROUP
+                else "worker0: Error in response from worker1"
+            )
+            with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         else:
             pass  # exit all other nodes
