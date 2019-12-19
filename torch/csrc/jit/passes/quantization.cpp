@@ -40,9 +40,8 @@ struct PatternInfo {
   std::unordered_map<std::string, Value*> vmap;
 
   static PatternInfo parse_from_str(std::string pattern_string) {
-    PatternInfo rv{std::move(pattern_string),
-                   std::make_unique<Graph>(),
-                   decltype(vmap){}};
+    PatternInfo rv{
+        std::move(pattern_string), std::make_unique<Graph>(), decltype(vmap){}};
     script::parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }
@@ -157,8 +156,8 @@ class InsertObserversHelper {
 
  private:
   ModuleMethodVector getInvokedMethods(
-    script::Module& module,
-    const std::string& method_name);
+      script::Module& module,
+      const std::string& method_name);
 
   void insertObserverFor(
       Value* v,
@@ -369,7 +368,6 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
@@ -377,7 +375,6 @@ void InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const QConfig& qconfig) {
-
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
     TORCH_CHECK(
@@ -460,7 +457,7 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  for (auto& invoked_methods: getInvokedMethods(module, method_name)) {
+  for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
     insertObservers(invoked_module, invoked_method_name);
@@ -470,8 +467,8 @@ void InsertObserversHelper::insertObservers(
   // since qconfig can be None for parent module and valid for invoked modules
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
   if (!qconfig_opt) {
-    // qconfig is None because the module is added by us, e.g.: observer module or
-    // no qconfig is specified for the module
+    // qconfig is None because the module is added by us, e.g.: observer module
+    // or no qconfig is specified for the module
     return;
   }
   auto qconfig = *qconfig_opt;
@@ -546,10 +543,7 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-void insertQuantDeQuantCall(
-    Value* self,
-    Value* v,
-    bool is_per_channel) {
+void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
   Graph* g = v->node()->owningGraph();
 
   std::string quantize_func;
@@ -566,10 +560,13 @@ void insertQuantDeQuantCall(
     inputs.push_back(g->insertGetAttr(self, prefix + "_axis"));
   } else {
     quantize_func = "quantize_per_tensor";
-    inputs.push_back(g->insertGetAttr(self, prefix + "_scale")->setType(FloatType::get()));
-    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point")->setType(IntType::get()));
+    inputs.push_back(
+        g->insertGetAttr(self, prefix + "_scale")->setType(FloatType::get()));
+    inputs.push_back(g->insertGetAttr(self, prefix + "_zero_point")
+                         ->setType(IntType::get()));
   }
-  inputs.push_back(g->insertGetAttr(self, prefix + "_scalar_type")->setType(IntType::get()));
+  inputs.push_back(
+      g->insertGetAttr(self, prefix + "_scalar_type")->setType(IntType::get()));
 
   Node* quant = g->create(at::Symbol::aten(quantize_func), inputs);
   quant->output()->setDebugName(v->debugName() + ".quant");
@@ -580,15 +577,17 @@ void insertQuantDeQuantCall(
   std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
-    if(cur != quant) {
+    if (cur != quant) {
       use_nodes.push_back(cur);
     }
   }
 
   // in second pass, replace the input "v" with dequant output
   for (size_t i = 0; i < use_nodes.size(); ++i) {
-    Node* dequant = g->create(at::Symbol::aten("dequantize"), {quant->output()});
-    dequant->output()->setDebugName(v->debugName() + ".dequant." + c10::guts::to_string(i));
+    Node* dequant =
+        g->create(at::Symbol::aten("dequantize"), {quant->output()});
+    dequant->output()->setDebugName(
+        v->debugName() + ".dequant." + c10::guts::to_string(i));
     use_nodes[i]->replaceInputWith(v, dequant->output());
     g->insertNode(dequant);
   }
@@ -614,9 +613,7 @@ c10::optional<std::string> findObserverName(Value* v) {
 class InsertQuantDeQuantHelper {
  public:
   InsertQuantDeQuantHelper() {}
-  void run(
-    script::Module& module,
-    const std::string& method_name);
+  void run(script::Module& module, const std::string& method_name);
 
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
@@ -625,11 +622,14 @@ class InsertQuantDeQuantHelper {
   // Get quantization parameter map of the given Value in Graph
   // by searching for observer module of the value and extract the
   // quantization parameters from the observer module
-  std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(script::Module& module, Value* v);
+  std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(
+      script::Module& module,
+      Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
-      TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
-                  "Quantizing same graph with different QSchemes is not supported");
+      TORCH_CHECK(
+          qscheme_for_graph_.at(g) == qscheme,
+          "Quantizing same graph with different QSchemes is not supported");
     } else {
       qscheme_for_graph_[g] = qscheme;
     }
@@ -644,18 +644,19 @@ class InsertQuantDeQuantHelper {
 
  private:
   // TODO: we don't need to call this for each graph
-  std::unordered_map<Graph*, std::vector<std::string>> observer_modules_to_remove_;
+  std::unordered_map<Graph*, std::vector<std::string>>
+      observer_modules_to_remove_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
-  // Map from Graph to a map of output Value of forward call of observer to
-  // the original Value (input[1] of observer forward call)
-  std::unordered_map<Graph*, std::unordered_map<Value*, Value*>> values_to_quantize_;
+  // Map from Graph to observer node
+  std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
   // Record qscheme for every graph, this is for checking
   // each graph is only quantized with one type of QScheme
   std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
-    script::Module& module, Value* v) {
+    script::Module& module,
+    Value* v) {
   auto* g = v->owningGraph();
   auto observer_name = findObserverName(v);
   if (!observer_name) {
@@ -676,9 +677,7 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   nodes_to_destroy_[g].push_back(observer->inputs()[0]->node());
   Value* original_value = observer->input(1);
   v->replaceAllUsesWith(original_value);
-  // `v` is observer output, `original_value` is the value that's
-  // originally observed by observer
-  values_to_quantize_[g].insert({v, original_value});
+  observer_nodes_[g].push_back(observer);
 }
 
 void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
@@ -690,7 +689,9 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
   }
 }
 
-void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g) {
+void InsertQuantDeQuantHelper::removeObservers(
+    script::Module& module,
+    Graph* g) {
   GRAPH_DUMP("Before Remove Observers:", g);
   if (nodes_to_destroy_.count(g)) {
     for (auto& n : nodes_to_destroy_.at(g)) {
@@ -717,20 +718,23 @@ void InsertQuantDeQuantHelper::removeObservers(script::Module& module, Graph* g)
   GRAPH_DUMP("After remove observers :", g);
 }
 
-void InsertQuantDeQuantHelper::quantizeTensors(script::Module& module, Graph* g, Value* self) {
-  if (!values_to_quantize_.count(g)) {
+void InsertQuantDeQuantHelper::quantizeTensors(
+    script::Module& module,
+    Graph* g,
+    Value* self) {
+  if (!observer_nodes_.count(g)) {
     return;
   }
-  for (auto& vs : values_to_quantize_.at(g)) {
-    auto* observer_output = vs.first;
-    auto* original_value = vs.second;
-    auto tp = getQSchemeAndQParamMap(module, observer_output);
+  for (auto* n : observer_nodes_.at(g)) {
+    auto* original_value = n->input(1);
+    auto tp = getQSchemeAndQParamMap(module, n);
     checkQScheme(g, std::get<0>(tp));
     auto qparam_map = std::get<1>(tp);
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
       const auto& qparam = pr.second;
-      module.register_attribute(original_value->debugName() + name, qparam.type(), qparam);
+      module.register_attribute(
+          original_value->debugName() + name, qparam.type(), qparam);
     }
     bool is_per_channel = qparam_map.at("_scale").isTensor();
     insertQuantDeQuantCall(self, original_value, is_per_channel);
@@ -769,9 +773,10 @@ void checkGetQParamsResult(const IValue& qparams) {
   }
 }
 
-std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQParamMap(
-    script::Module& module, Value* v) {
-  TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()));
+std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
+    getQSchemeAndQParamMap(script::Module& module, Node* n) {
+  // TODO: refactor findObserverName to take Node* as input
+  Value* v = n->output();
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
@@ -783,16 +788,18 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQPara
   IValue result = get_qparams(std::vector<IValue>());
   checkGetQParamsResult(result);
   auto scalar_type = observer_module.attr("dtype");
-  TORCH_CHECK(scalar_type.toScalarType() != at::ScalarType::Undefined,
-              "dtype of observer can't be undefined");
+  TORCH_CHECK(
+      scalar_type.toScalarType() != at::ScalarType::Undefined,
+      "dtype of observer can't be undefined");
   auto tp = result.toTuple();
   at::Tensor scale = tp->elements()[0].toTensor().to(at::kFloat);
   at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
   std::unordered_map<std::string, IValue> qparams = {
-    {"_scalar_type", scalar_type},
+      {"_scalar_type", scalar_type},
   };
   auto qscheme = observer_module.attr("qscheme").toQScheme();
-  if (qscheme == c10::kPerChannelAffine || qscheme == c10::kPerChannelSymmetric) {
+  if (qscheme == c10::kPerChannelAffine ||
+      qscheme == c10::kPerChannelSymmetric) {
     qparams["_scale"] = scale;
     qparams["_zero_point"] = zero_point;
     qparams["_axis"] = tp->elements()[2].toInt();
@@ -803,9 +810,8 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::getQSchemeAndQPara
   return std::make_tuple(qscheme, qparams);
 }
 
-c10::optional<script::Module> InsertQuantDeQuantHelper::findChildModuleToQuantize(
-    script::Module& module,
-    Value* child_instance) {
+c10::optional<script::Module> InsertQuantDeQuantHelper::
+    findChildModuleToQuantize(script::Module& module, Value* child_instance) {
   TORCH_INTERNAL_ASSERT(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
@@ -851,11 +857,10 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-
 void InsertQuantDeQuantHelper::run(
     script::Module& module,
     const std::string& method_name) {
-  for (auto& invoked_methods: getInvokedMethods(module, method_name)) {
+  for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
     run(invoked_module, invoked_method_name);
@@ -866,12 +871,11 @@ void InsertQuantDeQuantHelper::run(
 
   // We only need to register new parameters if the graph has
   // been quantized before
-  if (values_to_quantize_.count(graph.get())) {
-    for (auto& vs : values_to_quantize_.at(graph.get())) {
-      auto* observer_output = vs.first;
-      auto* original_value = vs.second;
-      auto tp = getQSchemeAndQParamMap(module, observer_output);
-      checkQScheme(graph.get(), std::get<0>(tp));
+  if (observer_nodes_.count(graph.get())) {
+    for (auto* n : observer_nodes_.at(g)) {
+      auto* original_value = n->input(1);
+      auto tp = getQSchemeAndQParamMap(module, n);
+      checkQScheme(g, std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
       for (auto& pr : qparam_map) {
         const auto& name = pr.first;
