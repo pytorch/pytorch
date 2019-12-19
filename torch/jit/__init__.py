@@ -1513,7 +1513,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``\s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``\s
+        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
