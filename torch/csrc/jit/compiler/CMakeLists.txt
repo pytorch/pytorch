@@ -22,13 +22,24 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
+# asmjit dependency
+
+set(ASMJIT_EMBED TRUE)
+add_definitions(-DASMJIT_STATIC)
+
+set(ASMJIT_DIR "../../../../third_party/fbgemm/third_party/asmjit")
+include("${ASMJIT_DIR}/CMakeLists.txt")
+include_directories("${ASMJIT_DIR}/src")
+
 add_library(nnc
   src/expr.cc
   src/function.cc
   src/ir_visitor.cc
+  src/asmjit_codegen.cc
   src/llvm_codegen.cc
   src/llvm_jit.cc
   src/types.cc
+  ${ASMJIT_SRC}
   )
 
 set_source_files_properties(src/llvm_jit.cc PROPERTIES COMPILE_FLAGS -fno-rtti)
@@ -45,6 +56,7 @@ add_custom_target(cpptest)
 add_subdirectory(../../../../third_party/googletest/ googletest EXCLUDE_FROM_ALL)
 
 set(TEST_SRCS
+  tests/asmjit_test.cc
   tests/expr_test.cc
   tests/llvm_test.cc
   tests/type_test.cc
@@ -55,7 +67,7 @@ foreach(test_path ${TEST_SRCS})
   string(REPLACE ".cc" "" test_exec ${filename})
   add_executable(${test_exec} ${test_path})
   add_dependencies(cpptest ${test_exec})
-  target_link_libraries(${test_exec} nnc gtest_main gtest)
+  target_link_libraries(${test_exec} nnc gtest_main gtest ${ASMJIT_DEPS})
   set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_ALL 1)
   set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
 endforeach()
