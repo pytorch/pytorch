@@ -14,7 +14,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
 PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
