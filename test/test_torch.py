@@ -5158,20 +5158,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
         x = x[1]
-        expected = torch.arange(1, 126).view(5, 5, 5)[1]
+        expected = torch.arange(1, 126).view(5, 5, 5)[1].to(torch.float64)
         self.assertEqual(torch.from_numpy(x), expected)
 
         # check noncontiguous
         x = np.linspace(1, 25, 25)
         x.shape = (5, 5)
-        expected = torch.arange(1, 26).view(5, 5).t()
+        expected = torch.arange(1, 26).view(5, 5).t().to(torch.float64)
         self.assertEqual(torch.from_numpy(x.T), expected)
 
         # check noncontiguous with holes
         x = np.linspace(1, 125, 125)
         x.shape = (5, 5, 5)
         x = x[:, 1]
-        expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
+        expected = torch.arange(1, 126).view(5, 5, 5)[:, 1].to(torch.float64)
         self.assertEqual(torch.from_numpy(x), expected)
 
         # check zero dimensional
