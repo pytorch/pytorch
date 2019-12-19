@@ -891,12 +891,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     break
         else:
             # not found (i.e., didn't break)
-            if self._batch_size < available_workers:
-                available_workers = self._batch_size
-            start = 0
-            div = self._batch_size // available_workers
-            rem = self._batch_size % available_workers
             if self._block_policy:
+                if self._batch_size < available_workers:
+                    available_workers = self._batch_size
+                start = 0
+                div = self._batch_size // available_workers
+                rem = self._batch_size % available_workers
                 for _ in range(self._num_workers):  # find the next active worker, if any
                     if start == len(index):
                         break
