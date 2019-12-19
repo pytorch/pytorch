@@ -938,13 +938,12 @@ bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
 }
 
 // Correctness conditions:
-// no values in either set can have writers, and values in both set
-// cannot escape the current scope.
-// Values can escape scope by a graph output,
-// or by aliasing an input to prim::FunctionCall or MethodCall.
-// FunctionCall and MethodCall are marked as mutating ops, so we do not need
-// to check for them because they are covered by the writers condition.
-//
+// no values in either set can have writers, and values in both sets
+// cannot escape the current graph scope. Values can escape the current scope
+// by aliasing a graph output or input, or aliasing an input to
+// prim::FunctionCall or MethodCall. FunctionCall and MethodCall are marked as
+// mutating ops, so we do not need to check for them because they are covered
+// by the writers condition.
 bool AliasDb::safeToChangeAliasingRelationship(
     const at::ArrayRef<Value*>& a,
     const at::ArrayRef<Value*>& b) const {
