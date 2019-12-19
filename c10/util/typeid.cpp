@@ -17,23 +17,22 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   AT_ERROR(msg);
 }
 
-const TypeMetaData _typeMetaDataInstance_uninitialized_ = detail::TypeMetaData(
-    0,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    TypeIdentifier::uninitialized(),
-    "nullptr (uninitialized)");
 
 } // namespace detail
 
-// TODO Inlineable on non-MSVC like other preallocated ids?
 template <>
-C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
+EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
     detail::_Uninitialized>() noexcept {
-  return &detail::_typeMetaDataInstance_uninitialized_;
+  static constexpr detail::TypeMetaData singleton = detail::TypeMetaData(
+      0,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      TypeIdentifier::uninitialized(),
+      "nullptr (uninitialized)");
+  return &singleton;
 }
 
 CAFFE_KNOWN_TYPE(uint8_t)

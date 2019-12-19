@@ -201,6 +201,18 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
               currentTimepoint - workStartTime_) > opTimeout_) {
+        // When operation times out due to some errors that are not
+        // detected by nccl communicators, ncclCommWatchdog can not check this
+        // time out error and thus can not abort ncclComms accordingly.
+        // So explicitly abort ncclComms here before throwing this timed out
+        // exception to users, after this, ncclCommWatchdog can detect nccl
+        // communicators are aborted and clean up devNCCLCommMap_ accordingly.
+        // if throwing timed out excepiton without aborting nccl communicators
+        // here, it was observed that CUDA GPU will have 100% utilization and
+        // can not run new events successfully.
+        for (const auto& ncclComm : ncclComms_) {
+          ncclComm->ncclCommAbort();
+        }
         throw std::runtime_error("Operation timed out!");
       }
       // Check for errors and throw appropriate exception.

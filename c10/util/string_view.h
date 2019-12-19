@@ -111,7 +111,7 @@ class basic_string_view final {
     return C10_UNLIKELY(pos >= size_)
         ? (throw std::out_of_range(
                "string_view::operator[] or string_view::at() out of range. Index: " +
-               std::to_string(pos) + ", size: " + std::to_string(size())),
+               c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size())),
            at_(0))
         : at_(pos);
 #else
@@ -193,7 +193,7 @@ class basic_string_view final {
     return (pos > size_)
         ? (throw std::out_of_range(
                "basic_string_view::substr parameter out of bounds. Index: " +
-               std::to_string(pos) + ", size: " + std::to_string(size())),
+               c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size())),
            substr_())
         : substr_(pos, count);
 #else
@@ -578,10 +578,12 @@ class basic_string_view final {
   }
 
   constexpr bool equals_(basic_string_view rhs) const {
-// We don't use string_view::compare() here but implement it manually because
-// only looking at equality allows for more optimized code.
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
+    // We don't use string_view::compare() here but implement it manually because
+    // only looking at equality allows for more optimized code.
+#if defined(__GNUC__)
+    return size() == rhs.size() && 0 == __builtin_memcmp(data(), rhs.data(), size());
+#elif __cpp_constexpr >= 201304
+    // if we are in C++14, write it iteratively. This is faster than the recursive C++11 implementation below.
     if (size() != rhs.size()) {
       return false;
     }
@@ -638,6 +640,9 @@ class basic_string_view final {
   const_pointer begin_;
   size_type size_;
 };
+
+template <class CharT>
+const typename basic_string_view<CharT>::size_type basic_string_view<CharT>::npos;
 
 template <class CharT>
 inline std::basic_ostream<CharT>& operator<<(

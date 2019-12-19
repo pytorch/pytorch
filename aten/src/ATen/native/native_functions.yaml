@@ -651,6 +651,10 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
+  dispatch:
+    CPU: clamp
+    CUDA: clamp
+    QuantizedCPU: quantized_clamp
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   supports_named_tensor: True
@@ -2562,7 +2566,7 @@
 
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
-  variants: method
+  variants: function, method
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full

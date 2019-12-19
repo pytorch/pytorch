@@ -2,6 +2,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCAtomics.cuh>
 #include <THC/THCApply.cuh>
+#include <c10/macros/Macros.h>
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
@@ -97,7 +98,7 @@ __global__ void THCudaTensor_gatherKernel(
                                                           src, &srcOffset);
 
     int64_t indexValue = index.data[indexOffset];
-    assert(indexValue >= 0 && indexValue < src.sizes[dim]);
+    CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < src.sizes[dim]);
     srcOffset += indexValue * src.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
@@ -127,7 +128,7 @@ __global__ void THCudaTensor_scatterKernel(
                                                           tensor, &tensorOffset);
 
     int64_t indexValue = index.data[indexOffset];
-    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
+    CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = src.data[srcOffset];
@@ -157,7 +158,7 @@ __global__ void THCudaTensor_scatterAddKernel(
                                                           tensor, &tensorOffset);
 
     int64_t indexValue = index.data[indexOffset];
-    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
+    CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
     atomicAdd(&tensor.data[tensorOffset], src.data[srcOffset]);
@@ -185,7 +186,7 @@ __global__ void THCudaTensor_scatterFillKernel(
                                                           tensor, &tensorOffset);
 
     int64_t indexValue = index.data[indexOffset];
-    assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
+    CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
     tensor.data[tensorOffset] = value;
