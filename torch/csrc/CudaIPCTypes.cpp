@@ -61,23 +61,17 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
 
 bool CudaIPCSentDataLimbo::collect() {
   bool freed_memory = false;
-  std::vector<std::unique_ptr<CudaIPCSentData>> reset_blocks;
-  { // Begin critical section to modify shared blocks
-    std::lock_guard<std::mutex> lock(limbo_mutex_);
-    std::vector<std::unique_ptr<CudaIPCSentData>> kept_blocks;
-    for (auto& sd : shared_blocks_) {
-      if (sd->counter_value() > 0) {
-        kept_blocks.push_back(std::move(sd));
-      } else {
-        freed_memory = true;
-        reset_blocks.push_back(std::move(sd));
-      }
+  std::lock_guard<std::mutex> lock(limbo_mutex_);
+  std::vector<std::unique_ptr<CudaIPCSentData>> kept_blocks;
+  for (auto& sd : shared_blocks_) {
+    if (sd->counter_value() > 0) {
+      kept_blocks.push_back(std::move(sd));
+    } else {
+      freed_memory = true;
+      sd.reset();
     }
-    shared_blocks_ = std::move(kept_blocks);
   }
-  for (auto& sd : reset_blocks) {
-    sd.reset();
-  }
+  shared_blocks_ = std::move(kept_blocks);
   return freed_memory;
 }
 
