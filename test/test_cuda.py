@@ -808,7 +808,6 @@ class TestCuda(TestCase):
         fname = "tempfile.pt"
         try:
             with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-
                 torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
                            _use_new_zipfile_serialization=True)
                 torch.load(fname, 'cuda0')
