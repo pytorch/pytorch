@@ -249,7 +249,6 @@ struct Stmt : public TreeView {
       case TK_ASSERT:
       case TK_PASS:
       case TK_BREAK:
-      case TK_DELETE:
       case TK_CONTINUE:
       case TK_DEF:
         return;
@@ -1025,18 +1024,6 @@ struct Starred : public Expr {
   }
   static Starred create(const SourceRange& range, const Expr& expr) {
     return Starred(Compound::create(TK_STARRED, range, {expr}));
-  }
-};
-
-struct Delete : public Stmt {
-  explicit Delete(const TreeRef& tree) : Stmt(tree) {
-    tree_->match(TK_DELETE);
-  }
-  Expr expr() const {
-    return Expr(subtree(0));
-  }
-  static Delete create(const Expr& value) {
-    return Delete(Compound::create(TK_DELETE, value.range(), {value}));
   }
 };
 
