@@ -3153,6 +3153,20 @@ graph(%Ra, %Rb):
         self.run_pass('constant_propagation', graph)
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
+    def test_constant_insertion(self):
+        def foo():
+            a = [1.0, 2.0, 3.0]
+            b = ["ab", "cd", "ef"]
+            return a, b
+
+        scripted_foo = torch.jit.script(foo)
+        graph = scripted_foo.graph
+        FileCheck().check_count("ListConstruct", 2).run(graph)
+        self.run_pass('constant_propagation', graph)
+        FileCheck().check_not("ListConstruct").run(graph)
+        FileCheck().check_dag("float[] =").check_dag("str[] =").run(graph)
+        self.assertEqual(foo(), scripted_foo())
+
     def test_trace_detach(self):
         def foo(x, w):
             return torch.matmul(x, w).detach()
