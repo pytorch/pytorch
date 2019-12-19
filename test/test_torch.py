@@ -678,7 +678,7 @@ class _TestTorchMixin(object):
         self.assertEqual(x.sum(0, dtype=torch.uint8), y)
 
     def test_dim_reduction_less_than_64(self):
-        sizes = [1]*65
+        sizes = [1] * 65
         x = torch.randn(sizes)
         with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
             torch.sum(x, 64)
