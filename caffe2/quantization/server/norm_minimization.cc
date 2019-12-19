@@ -41,7 +41,6 @@ GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
   return density * norm;
 }
 
-
 // Filter out outliers in input distributions
 // Exploit the input distributions for the quick search
 TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
@@ -58,6 +57,11 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
+  if (bin_width == 0) {
+    QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
+    return qfactory->ChooseQuantizationParams(
+        min, max, precision, preserve_sparsity);
+  }
   int dst_nbins = 1 << precision;
 
   float org_max = max;
