@@ -78,6 +78,7 @@ libtorch_sources = [
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
     "torch/csrc/jit/argument_spec.cpp",
+    "torch/csrc/jit/compiler/src/asmjit_codegen.cc",
     "torch/csrc/jit/compiler/src/expr.cc",
     "torch/csrc/jit/compiler/src/function.cc",
     "torch/csrc/jit/compiler/src/ir_visitor.cc",
