@@ -603,7 +603,6 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-    std::cout << "SET SCHEMA\n";
     method.setSchema(emitDef(def, self, graph->block()));
 
     // NB ORDERING: SSA conversion has to occur before
@@ -681,8 +680,6 @@ struct to_ir {
 
   FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
     auto schema = typeParser_.parseSchemaFromDef(def, bool(self));
-    std::cout << "Parsed schema...\n";
-    // def.range().highlight(std::cout);
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
@@ -789,7 +786,6 @@ struct to_ir {
         const auto& inferredStateType = getTypeForSetStateArg(self);
         arg = arg.cloneWithType(inferredStateType);
       }
-      std::cout << arg.name() << " has defualt?? " << arg.default_value().has_value() << "\n";
 
       arguments.push_back(arg);
       new_input->setType(arguments.back().type());

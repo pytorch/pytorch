@@ -11,8 +11,6 @@ FunctionSchema defaultSchemaFor(const Function& function) {
   std::vector<Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
-  std::cout << g << "\n";
-  std::cout << "Making default schema...\n";
   for (size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
@@ -50,7 +48,6 @@ IValue Function::operator()(
 void Function::ensure_defined() {
   try {
     if (function_creator_) {
-      std::cout << "Defining...\n";
       auto creator = function_creator_;
       function_creator_ = placeholderCreator;
       creator(*this);

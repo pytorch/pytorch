@@ -266,37 +266,6 @@ void checkMutableFunctionDefault(
   }
 }
 
-FunctionSchema getSchemaWithNameAndDefaults(
-    const SourceRange& range,
-    const FunctionSchema& schema,
-    const at::optional<std::string>& new_name,
-    const FunctionDefaults& default_args) {
-  std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments()) {
-    auto it = default_args.find(arg.name());
-    if (it != default_args.end()) {
-      checkMutableFunctionDefault(range, arg, it->second);
-      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
-      if (!value) {
-        throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->python_str()
-            << " on parameter \"" << arg.name() << "\"";
-      }
-      new_args.emplace_back(
-          arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
-    } else {
-      new_args.push_back(arg);
-    }
-  }
-  return FunctionSchema(
-      new_name.value_or(schema.name()),
-      schema.overload_name(),
-      new_args,
-      schema.returns(),
-      schema.is_vararg(),
-      schema.is_varret());
-}
-
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
     const Decl& impl_decl,
@@ -374,11 +343,6 @@ static StrongFunctionPtr script_compile_overloaded_function(
   auto& defined = defined_functions[0];
   FunctionDefaults updated_defaults = calcOverloadedFunctionDefaults(
       defined->getSchema(), implementation_defaults);
-  defined->setSchema(getSchemaWithNameAndDefaults(
-      new_def.range(),
-      defined->getSchema(),
-      new_def.name().name(),
-      updated_defaults));
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -396,10 +360,6 @@ static StrongFunctionPtr script_compile_function(
       {pythonResolver(std::move(rcb))},
       nullptr,
       true);
-  // TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
-  // auto& defined = defined_functions[0];
-  // defined->setSchema(getSchemaWithNameAndDefaults(
-  //     def.range(), defined->getSchema(), def.name().name(), defaults));
   StrongFunctionPtr ret(std::move(cu), defined_functions.at(0));
   didFinishEmitFunction(ret);
   return ret;
@@ -1261,21 +1221,6 @@ void initJitScriptBindings(PyObject* module) {
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
             cu->define(prefix, defs, resolvers, &self);
-            // Stitch in default arguments for each Def if provided
-            auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
-              const auto method_name =
-                  QualifiedName(prefix, (*defs_it).name().name());
-              auto& method = cu->get_function(method_name);
-              method.setSchema(getSchemaWithNameAndDefaults(
-                  defs_it->range(),
-                  method.getSchema(),
-                  at::nullopt,
-                  *defaults_it));
-              ++defs_it;
-              ++defaults_it;
-            }
           });
 
   m.def(

@@ -243,7 +243,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     if (def.present()) {
       default_types.emplace_back(param.type().get());
       default_exprs.emplace_back(def.get());
-    } else {
     }
   }
 
@@ -275,7 +274,6 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     if (decl_arg.defaultValue().present()) {
       default_value = *defaults_it++;
     }
-    std::cout << "CREATING arg " << decl_arg.ident().name() << " default is " << default_value.has_value() << "\n";
     auto arg = Argument(
         decl_arg.ident().name(),
         type,
@@ -311,7 +309,6 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
 FunctionSchema ScriptTypeParser::parseSchemaFromDef(
     const Def& def,
     bool skip_self) {
-  std::cout << "parseSchemaFromDef\n";
   const auto name = def.name().name();
   std::vector<Argument> args = parseArgsFromDecl(def.decl(), skip_self);
   std::vector<Argument> returns = parseReturnFromDecl(def.decl());

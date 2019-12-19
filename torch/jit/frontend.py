@@ -219,6 +219,12 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 def build_param_list(ctx, py_args, self_name):
 
     def get_default(i):
+        if self_name is not None:
+            if i == 0:
+                # If we're on `self`, skip it
+                return None
+            # If self is present, shift down the defaults list by 1
+            i -= 1
         if i >= len(py_args.defaults):
             return None
         return py_args.defaults[i]
@@ -232,7 +238,12 @@ def build_param_list(ctx, py_args, self_name):
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     if not PY2 and py_args.kw_defaults:
-        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+        # If you have keyword only args, Python says there is a None default for it
+        # if there is no default argument present
+        if any(map(lambda x: x is not None, py_args.kw_defaults)):
+            expr = py_args.kw_defaults[0]
+            ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset)
+            raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     def call_build_param(index, arg, kwarg_only):
         default = None if kwarg_only else get_default(index)
