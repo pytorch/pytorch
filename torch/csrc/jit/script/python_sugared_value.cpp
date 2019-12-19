@@ -218,10 +218,6 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
-    if (!attrType) {
-      continue;
-    }
-
     if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
