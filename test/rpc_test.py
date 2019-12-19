@@ -1333,14 +1333,16 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
 
         if self.rank == 0:
+            dst_rank = (self.rank + 1) % self.world_size
+            self_worker = "worker{}".format(self.rank)
+            dst_worker = "worker{}".format(dst_rank)
             # allow destination worker to exit without joining
-            wait_until_node_failure(1)
-            fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
+            wait_until_node_failure(dst_rank)
+            fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
-                if self.rpc_backend
-                == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else "worker0: Error in response from worker1"
+                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                else "{}: Error in response from {}".format(self_worker, dst_worker)
             )
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
