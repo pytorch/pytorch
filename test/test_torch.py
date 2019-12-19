@@ -952,10 +952,10 @@ class _TestTorchMixin(object):
             out = torch.ones(reduced_shape, dtype=dtype)
             result = fn(x, out=out)
             self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.type(dtype)), result)
+            self.assertEqual(fn(x.type(dtype)), result, ignore_dtype=True)
             result = fn(x, out=out, dtype=dtype)
             self.assertIs(out.dtype, result.dtype)
-            self.assertEqual(fn(x.type(dtype)), result)
+            self.assertEqual(fn(x.type(dtype)), result, ignore_dtype=True)
             # 'out' is favored over dtype, check error
             self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
 
@@ -970,12 +970,12 @@ class _TestTorchMixin(object):
             else:
                 other_dtype = torch.int32 if dtype != torch.int32 else torch.int16
             self.assertIs(other_dtype, fn(x, dtype=other_dtype).dtype)
-            self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype))
+            self.assertEqual(fn(x.type(other_dtype)), fn(x, dtype=other_dtype), ignore_dtype=True)
 
             # test mixed int/float
             mixed_dtype = torch.int32 if dtype.is_floating_point else torch.float32
             self.assertIs(mixed_dtype, fn(x, dtype=mixed_dtype).dtype)
-            self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype))
+            self.assertEqual(fn(x.type(mixed_dtype)), fn(x, dtype=mixed_dtype), ignore_dtype=True)
 
             if has_out:
                 _test_out(dtype, other_dtype)
