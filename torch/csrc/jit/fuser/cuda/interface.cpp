@@ -73,7 +73,7 @@ std::vector<bool> canCollapseDimsDown(const std::shared_ptr<c10::TensorType> ten
 }
 
 // Returns true if the node is added to the fusion group, false o.w.
-bool isFusibleOnCUDA(const Node* const node) {
+bool CUDAFusionBackend::isFusible(const Node* const node) {
   int64_t ndims = *(node->inputs()[0]->type()->expect<TensorType>()->dim());
   std::vector< std::vector<bool> > collapse_vecs;
 
@@ -143,14 +143,14 @@ void saxpy(float *x, float *y, float *out, size_t n)            \n\
   }                                                             \n\
 }                                                               \n";
 
-int fuseOnCUDA (const Node* const node) {
-  TORCH_CHECK(isFusibleOnCUDA(node), "Trying to fuse nonfusible node!");
+int CUDAFusionBackend::fuse(const Node* const node) {
+  TORCH_CHECK(isFusible(node), "Trying to fuse nonfusible node!");
 
   // Copy cat from CPU fuser;
   return getAndIncrementGlobalFusionCounter();
 }
 
-void compileFusionOnCUDA(Node* fusion) {
+void CUDAFusionBackend::compileFusion(Node* fusion) {
   auto graph = normalizeGraphForCache(fusion->g(attr::Subgraph));
   auto repr = graph->toString(false);
   if (kernel_cache_.kernel_map_.count(repr) == 0) {
@@ -221,7 +221,7 @@ void compileFusionOnCUDA(Node* fusion) {
   }
 }
 
-TORCH_API void callFusionOnCUDA(
+void CUDAFusionBackend::callFusion(
     const Node* const fusion,
     std::vector<at::Tensor>& outputs,
     at::ArrayRef<IValue> inputs) {
@@ -260,5 +260,9 @@ TORCH_API void callFusionOnCUDA(
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
 }
+
+static CUDAFusionBackend cuda_backend;
+
+RegisterFusionBackendEx reg_ex(at::DeviceType::CUDA, &cuda_backend);
 
 }}}}

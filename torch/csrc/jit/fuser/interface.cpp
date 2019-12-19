@@ -8,8 +8,8 @@
 
 // New fuser includes
 #include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/cpu/interface.h>
-#include <torch/csrc/jit/fuser/cuda/interface.h>
+//#include <torch/csrc/jit/fuser/cpu/interface.h>
+//#include <torch/csrc/jit/fuser/cuda/interface.h>
 #include <torch/csrc/jit/fuser/common/utils.h>
 
 // Historic fuser includes
@@ -64,7 +64,36 @@ bool validateNode(const Node* const node) {
   return (lambda(inputs, true) && lambda(outputs, false));
 }
 
+std::mutex& fusionBackendLock() {
+  static std::mutex fusion_backends_lock_{};
+  return fusion_backends_lock_;
+}
+
+static std::unordered_map<at::Device::Type, FusionBackend*>&
+getFusionBackendsEx() {
+  static std::unordered_map<at::Device::Type, FusionBackend*> fusion_backends;
+  return fusion_backends;
+}
+
 } // namespace
+
+void registerFusionBackendEx(
+    at::Device::Type backend_type,
+    FusionBackend* backend) {
+  std::lock_guard<std::mutex> guard(fusionBackendLock());
+  getFusionBackendsEx()[backend_type] = backend;
+}
+
+bool hasFusionBackendEx(at::Device::Type backend_type) {
+  std::lock_guard<std::mutex> guard(fusionBackendLock());
+  getFusionBackendsEx().count(backend_type);
+}
+
+RegisterFusionBackendEx::RegisterFusionBackendEx(
+    at::Device::Type backend_type,
+    FusionBackend* backend) {
+  registerFusionBackendEx(backend_type, backend);
+}
 
 // Returns true iff the node is fusible
 bool isFusible(const Node* const node) {
@@ -76,10 +105,9 @@ bool isFusible(const Node* const node) {
 
   switch (device_type) {
     case c10::kCPU:
-      return cpu::isFusibleOnCPU(node);
     case c10::kCUDA:
-      return cuda::isFusibleOnCUDA(node);
-      //return false;
+      return (getFusionBackendsEx().count(device_type) > 0) &&
+        getFusionBackendsEx()[device_type]->isFusible(node);
     default:
       return false;
   }
@@ -95,9 +123,10 @@ int fuse(const Node* const node) {
 
   switch (device_type) {
     case c10::kCPU:
-      return cpu::fuseOnCPU(node);
     case c10::kCUDA:
-      return cuda::fuseOnCUDA(node);
+      TORCH_CHECK((getFusionBackendsEx().count(device_type) > 0),
+          "Trying to fuse on device type without register FusionBackend!");
+      return getFusionBackendsEx()[device_type]->fuse(node);
     default:
       TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
   }
@@ -110,11 +139,10 @@ void compileFusion(Node* fusion) {
 
   switch (device_type) {
     case c10::kCPU:
-      cpu::compileFusionOnCPU(fusion);
-      return;
     case c10::kCUDA:
-      cuda::compileFusionOnCUDA(fusion);
-      return;
+      TORCH_CHECK((getFusionBackendsEx().count(device_type) > 0),
+          "Trying to compile fusion on device type without register FusionBackend!");
+      return getFusionBackendsEx()[device_type]->compileFusion(fusion);
     default:
       TORCH_CHECK(false, "Trying to fuse on device type that doesn't support fusion!");
   }
@@ -167,11 +195,10 @@ void callFusion(const Node* const fusion, Stack& stack) {
   const auto device = *(graph.outputs()[0]->type()->expect<TensorType>()->device());
   switch(device.type()) {
     case c10::kCPU:
-      cpu::callFusionOnCPU(fusion, outputs, inputs);
-      return;
     case c10::kCUDA:
-      cuda::callFusionOnCUDA(fusion, outputs, inputs);
-      return;
+      TORCH_CHECK((getFusionBackendsEx().count(device.type()) > 0),
+          "Trying to run fusion on device type without register FusionBackend!");
+      return getFusionBackendsEx()[device.type()]->callFusion(fusion, outputs, inputs);
     default:
       TORCH_CHECK(false, "Acquired an unknown fusion device type!");
   }
