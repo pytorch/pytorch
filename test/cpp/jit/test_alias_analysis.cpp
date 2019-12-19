@@ -428,22 +428,17 @@ void testAliasAnalysis() {
       %14 : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
       return (%14)
     )IR",
-        &*graph,
-        vmap);
+        &*graph, vmap);
 
     AliasDb aliasDb(graph);
     // x, b, c escape scope, so we can't introduce an aliasing relationship
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
-    TORCH_INTERNAL_ASSERT(
-        !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
+    TORCH_INTERNAL_ASSERT(!aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
+    TORCH_INTERNAL_ASSERT(!aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
 
-    // d is a temporary with no writers, safe to change aliasing relationship
-    // here
-    TORCH_INTERNAL_ASSERT(
-        aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
+    // d is a temporary with no writers, safe to change aliasing relationship here
+    TORCH_INTERNAL_ASSERT(aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
   }
-  } // namespace torch
+}
 
 void testWriteTracking() {
   RegisterOperators reg({Operator(
