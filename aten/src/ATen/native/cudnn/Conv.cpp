@@ -920,7 +920,7 @@ void raw_cudnn_convolution_forward_out(
   // large and very likely to get an OOM.
   //
   // TODO: we might need a more thorough test to find the best number here
-  constexpr int64_t max_worksize = 1024 * 1024 * 512;
+  constexpr int64_t max_worksize = 1024 * 1024 * 256;
   int64_t n = output.size(0);
   int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
   int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
@@ -945,7 +945,7 @@ void raw_cudnn_convolution_forward_out(
   //   to make sure that the boundary is handled correctly.
   // - If we decide to make these splits, is the memory contiguous? Do we need to copy the memory?
   // Considering the complexity of this issue, it is better not to use cuDNN for this case
-  TORCH_CHECK(false, "cuDNN does not support tensors larger than 2^31");
+  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
 Tensor cudnn_convolution_forward(
