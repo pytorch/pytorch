@@ -14,9 +14,9 @@ Expr Expr::operator*(const Expr& other) const { return Mul::make(*this, other); 
 
 Expr Expr::operator/(const Expr& other) const { return Div::make(*this, other); }
 
-Expr::Expr(int v) : Expr(std::move(IntImm::make(v))) {}
+Expr::Expr(int v) : Expr(IntImm::make(v)) {}
 
-Expr::Expr(float v) : Expr(std::move(FloatImm::make(v))) {}
+Expr::Expr(float v) : Expr(FloatImm::make(v)) {}
 
 } // namespace compiler
 } // namespace jit
