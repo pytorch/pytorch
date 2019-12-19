@@ -509,9 +509,25 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
+
+  // Create a module with a forward method that is the function
   const auto name = QualifiedName(*module.type()->name(), "forward");
   auto method =
       module._ivalue()->compilation_unit()->create_function(name, graph);
+
+  // Set the method's schema to match the original function's (along with a
+  // fake self argument)
+  const auto& old_schema = func.function_->getSchema();
+  auto args = old_schema.arguments();
+  args.insert(args.begin(), Argument("self", unshapedType(v->type())));
+  FunctionSchema new_schema = FunctionSchema(
+      old_schema.name(),
+      old_schema.overload_name(),
+      args,
+      old_schema.returns());
+  method->setSchema(std::move(new_schema));
+
+  // Set the method on the module
   module.type()->addMethod(method);
 }
 

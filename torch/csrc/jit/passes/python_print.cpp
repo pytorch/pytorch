@@ -1206,6 +1206,7 @@ struct PythonPrintImpl {
   }
 
   void printMethod(const Function& func) {
+    std::cout << "Printing function: " << func.getSchema() << "\n";
     printFunction(func, /*print_first_argument_type=*/false);
   }
 
