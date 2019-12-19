@@ -261,37 +261,61 @@ void cpu_upsample_nearest_backward(
 }
 
 using scale_t = std::vector<double>;
-void upsample_nearest1d_kernel_impl(Tensor& output, const Tensor& input, double scales_1) {
+void upsample_nearest1d_kernel_impl(
+    Tensor& output,
+    const Tensor& input,
+    double scales_1) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest1d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1});
   });
 }
 
-void upsample_nearest2d_kernel_impl(Tensor& output, const Tensor& input, double scales_1, double scales_2) {
+void upsample_nearest2d_kernel_impl(
+    Tensor& output,
+    const Tensor& input,
+    double scales_1,
+    double scales_2) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1, scales_2});
   });
 }
 
-void upsample_nearest3d_kernel_impl(Tensor& output, const Tensor& input, double scales_1, double scales_2, double scales_3) {
+void upsample_nearest3d_kernel_impl(
+    Tensor& output,
+    const Tensor& input,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
     cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1, scales_2, scales_3});
   });
 }
 
-void upsample_nearest1d_backward_kernel_impl(Tensor& grad_input, const Tensor& grad_output, double scales_1) {
+void upsample_nearest1d_backward_kernel_impl(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    double scales_1) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1});
   });
 }
 
-void upsample_nearest2d_backward_kernel_impl(Tensor& grad_input, const Tensor& grad_output, double scales_1,  double scales_2) {
+void upsample_nearest2d_backward_kernel_impl(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    double scales_1,
+    double scales_2) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1, scales_2});
   });
 }
 
-void upsample_nearest3d_backward_kernel_impl(Tensor& grad_input, const Tensor& grad_output, double scales_1, double scales_2, double scales_3) {
+void upsample_nearest3d_backward_kernel_impl(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1, scales_2, scales_3});
   });
