@@ -491,6 +491,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/asmjit_codegen.cc
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/expr.cc
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/function.cc
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/ir_visitor.cc
