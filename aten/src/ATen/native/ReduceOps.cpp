@@ -225,25 +225,30 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
       " and ",
       toString(dtype.value()),
       ".");
-  if(self.dim() == 0) {
-    out = self;
-    indices = self;
-  }
-  else {
+   {
     NoNamesGuard guard;
-    //update out_ and indices_ for the first values along the dimension dim
-    auto out_ = self.narrow(dim, 0, 1);
-    auto indices_ = at::zeros(self.narrow(dim, 0, 1).sizes());
-    for(int64_t i=1; i<self.size(dim); i++) {
-      auto res_at_i = at::native::max(at::cat({out_.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
-      auto out_at_i = (std::get<0>(res_at_i)).unsqueeze(dim);
-      out_ = at::cat({out_, out_at_i}, dim);
-      auto max_indices_at_i = at::max(indices_.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)).toType(at::kDouble));
-      indices_ = at::cat({indices_, max_indices_at_i}, dim);
+    if(self.dim() == 0) {
+      out = self;
+      indices = self;
     }
+    else {
+      //update out_ and indices_ for the first values along the dimension dim
+      auto out_ = self.narrow(dim, 0, 1);
+      auto indices_ = at::zeros(out_.sizes());
+      for(int64_t i=1; i<self.size(dim); i++) {
+        auto res_at_i = at::native::max(at::cat({out_.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
+        auto out_at_i = (std::get<0>(res_at_i)).unsqueeze(dim);
+        out_ = at::cat({out_, out_at_i}, dim);
+        auto indices_at_i_minus_1 = indices_.narrow(dim, i-1, 1);
+        auto max_indices_at_i = indices_at_i_minus_1.scatter_(dim, (std::get<1>(res_at_i)).unsqueeze(dim), i*at::ones(indices_at_i_minus_1.sizes()));
+        //auto max_indices_at_i = at::max(indices_.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)).toType(at::kDouble));
+        indices_ = at::cat({indices_, max_indices_at_i}, dim);
+       }
     out=out_;
     indices=indices_;
+   }
   }
+  indices.toType(at::kLong);
   namedinference::propagate_names(out, self);
   namedinference::propagate_names(indices, self);
   return std::tuple<Tensor &,Tensor &>{out, indices};
