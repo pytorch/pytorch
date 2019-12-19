@@ -361,6 +361,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
+      // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
     case prim::Uninitialized:
       giveFreshAlias(node->output());
@@ -928,6 +929,37 @@ bool AliasDb::moveBeforeTopologicallyValid(Node* n, Node* movePoint) {
 
 bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
+}
+
+bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
+  return std::any_of(values.begin(), values.end(), [&](Value* value) {
+    return hasWriters(value);
+  });
+}
+
+// Correctness conditions:
+// no values in either set can have writers, and values in both set
+// cannot escape the current scope.
+// Values can escape scope by a graph output,
+// or by aliasing an input to prim::FunctionCall or MethodCall.
+// FunctionCall and MethodCall are marked as mutating ops, so we do not need
+// to check for them because they are covered by the writers condition.
+//
+bool AliasDb::safeToChangeAliasingRelationship(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  if (hasWriters(a) || hasWriters(b)) {
+    return false;
+  }
+  auto graph_outputs = graph_->outputs();
+  auto graph_inputs = graph_->inputs();
+
+  bool a_escapes_scope =
+      mayContainAlias(graph_inputs, a) || mayContainAlias(graph_outputs, b);
+  bool b_escapes_scope =
+      mayContainAlias(graph_inputs, a) || mayContainAlias(graph_outputs, b);
+
+  return !a_escapes_scope || !b_escapes_scope;
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.

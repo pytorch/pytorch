@@ -74,6 +74,11 @@ class AliasDb {
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
 
+  // Is it safe to change whether `a` and `b` alias each other ?
+  TORCH_API bool safeToChangeAliasingRelationship(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
+
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
@@ -186,7 +191,7 @@ class AliasDb {
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
   bool mayAliasWildcard(const Value* v) const;
-
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
   /**
    * State for tracking write info.
    */
