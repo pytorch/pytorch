@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Optional
 from .optimizer import _params_t, Optimizer
 
 class LBFGS(Optimizer):
