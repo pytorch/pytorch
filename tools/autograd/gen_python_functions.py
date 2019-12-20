@@ -144,9 +144,6 @@ else {
 
 """)
 
-PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
-${dispatch_callee}(${dispatch_args})""")
-
 # Unpack parsed args to locals, call the op, and wrap the result.
 # Lambda is so GIL is back on by wrap() time (wrap can allocate)
 PY_VARIABLE_WRAP = CodeTemplate("""\
@@ -491,7 +488,7 @@ CPP_DECL_TYPE_CONVERSION_HACKS = {
     'const Device &': 'c10::optional<int32_t>'
 }
 
-def get_cpp_decl_type(typename, ensure_temp_safe):
+def get_cpp_decl_type(typename, ensure_temp_safe=True):
     if ensure_temp_safe:
         typename = TEMP_SAFE_CPP_DECL_TYPE.get(typename, typename)
     return CPP_DECL_TYPE_CONVERSION_HACKS.get(typename, typename)
@@ -548,34 +545,11 @@ def get_simple_return_type(declaration):
 
 
 #
+# dispatch codegen
 #
-#
-
-def get_auto_no_gil(declaration):
-    if declaration['with_gil']:
-        return []
-    return ['AutoNoGIL no_gil;']
-
-
-def get_dispatch_args(declaration):
-    call_args_override = declaration.get('call_args')
-    if call_args_override:
-        # NOTE: declaration['call_args'] is added to deprecated declarations by
-        # load_deprecated_signatures() in gen_autograd.py, on its way from
-        # deprecated.yaml to Declarations.yaml.
-        # Typically deprecated.yaml provides shims from old signatures to new
-        # ones by passing constants.
-        dispatch_args = call_args_override
-    else:
-        dispatch_args = [arg['name'] for arg in declaration['arguments']]
-
-    if is_tensor_method(declaration):
-        dispatch_args = [arg for arg in dispatch_args if arg != 'self']
-
-    return dispatch_args
-
 
 def get_dispatch_callee(declaration):
+    # format the name of the receiving function or method
     if is_tensor_method(declaration):
         return 'self.{}'.format(declaration['name'])
     elif is_torch_function(declaration):
@@ -583,6 +557,31 @@ def get_dispatch_callee(declaration):
         return '{}::{}'.format(namespace, declaration['name'])
     else:
         raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
+
+
+def get_op_args(declaration, argmap):
+    # returns a list of argmap values in op call order, with two wrinkles:
+    # 1. 'self' is eliminated for methods, it's baked into the callee expression elsewhere
+    # 2. declaration['call_args'] shims legacy overrides and may contain constant values,
+    #    not just names (see load_deprecated_signatures() in gen_autograd.py)
+    call_args_override = declaration.get('call_args')
+    if call_args_override:
+        # names or constants
+        keys = call_args_override
+    else:
+        # only names
+        keys = [param['name'] for param in declaration['arguments']]
+
+    if is_tensor_method(declaration):
+        # exclude self for method calls
+        keys = [k for k in keys if k != 'self']
+
+    if call_args_override:
+        # assume missing keys are constants
+        return [argmap.get(k, k) for k in keys]
+    else:
+        # error on missing keys
+        return [argmap[k] for k in keys]
 
 
 # we use a lambda to nest op dispatch within a GIL drop
@@ -593,67 +592,56 @@ LAMBDA_DEF = CodeTemplate("""\
 };
 """)
 
-def emit_lambda_def(declaration, lambda_formals):
-    return LAMBDA_DEF.substitute(
-        lambda_formals=lambda_formals,
-        auto_no_gil=get_auto_no_gil(declaration),
-        dispatch_callee=get_dispatch_callee(declaration),
-        dispatch_args=get_dispatch_args(declaration),
-    )
-
 
 def emit_single_dispatch(declaration, out_idx, has_python_self):
     """
     Emit dispatch code for a single declared overload.
     """
 
-    pa = declaration['partitioned_arguments']
-    inputs = pa['input_args'] + pa['input_kwargs'] + pa['type_args']
-    outputs = pa['output_args'] if out_idx else []
-    type_args = pa['type_args']
-
     python_binding_arguments = declaration['python_binding_arguments']
     has_tensor_options = has_tensor_options_arg(declaration)
 
-    inits = []          # local initializers for complicated parsed-arg-to-op-arg situations
-    lambda_formals = []  # lambda param decls for our internal lambda
-    lambda_args = []    # argument expressions for the call to our internal lambda
+    inits = []          # initializer code for unpacking parsed args
+    argmap = {}
 
     # inputs
     if has_python_self:
+        argmap['self'] = {'value': 'self', 'formal': 'Tensor & self'}
         # self is passed directly to python binding, rather than parsed
-        lambda_formals.append('Tensor & self')
-        lambda_args.append('self')
         # redo formals filtering TODO merge
         arg_filter = lambda arg: not is_tensor_options(arg) and not is_tensor_self(arg)
     else:
         # redo formals filtering TODO merge
         arg_filter = lambda arg: not is_tensor_options(arg)
 
-    # redo formals filtering TODO merge
-    inputs = [arg for arg in inputs if arg_filter(arg)]
+    def is_input(arg):
+        return (not is_tensor_options(arg) and
+                not (has_python_self and is_tensor_self(arg)) and
+                not arg.get('output', False))
 
+    inputs = [arg for arg in declaration['arguments'] if is_input(arg)]
     for i, arg in enumerate(inputs):
-        lambda_formals.append(get_cpp_formal(arg))
         # make sure we have a local 'self' if we're dotting off it for tensor options
         unpack_to_local = has_tensor_options and is_tensor_self(arg)
         arg_expr, unpack = parse_arg(arg, i, unpack_to_local=unpack_to_local)
-        lambda_args.append(arg_expr)
         inits.extend(unpack)
+        argmap[arg['name']] = {'value': arg_expr, 'formal': get_cpp_formal(arg)}
 
     # outputs
+    outputs = [arg for arg in declaration['arguments'] if arg.get('output', False)]
     output_idx = len(inputs)
     if len(outputs) == 1:
-        lambda_formals.append(get_cpp_formal(outputs[0]))
-        arg_expr, _ = parse_arg(outputs[0], output_idx, unpack_to_local=False)
-        lambda_args.append(arg_expr)
+        arg = outputs[0]
+        arg_expr, _ = parse_arg(arg, output_idx, unpack_to_local=False)
+        argmap[arg['name']] = {'value': arg_expr, 'formal': get_cpp_formal(arg)}
     elif len(outputs) > 1:
         # take gathered output param from python call and scatter it to op call args
-        n = len(outputs)
-        inits.append('auto results = r.tensorlist_n<{}>({});'.format(n, output_idx))
+        inits.append('auto results = r.tensorlist_n<{}>({});'.format(len(outputs), output_idx))
         for i, arg in enumerate(outputs):
-            lambda_formals.append('Tensor & {}'.format(arg['name']))
-            lambda_args.append('results[{}]'.format(i))
+            argmap[arg['name']] = {
+                'value': 'results[{}]'.format(i),
+                'formal': 'Tensor & {}'.format(arg['name']),
+            }
 
     #
     # wrangle tensor attribute params. common case is that we gather python binding args
@@ -662,8 +650,8 @@ def emit_single_dispatch(declaration, out_idx, has_python_self):
     #
 
     # find at most one type arg to use, check error conditions
+    type_args = [arg for arg in declaration['arguments'] if arg['simple_type'] == 'Type']
     type_binding_args = [arg for arg in python_binding_arguments if arg['simple_type'] == 'Type']
-    assert len(type_args + type_binding_args) <= 1
     if len(type_binding_args) > 0 and len(outputs) == 0:
         # out(s) determines the dtype if it is present, so only use this if there are no outputs.
         type_arg = type_binding_args[0]
@@ -728,19 +716,26 @@ def emit_single_dispatch(declaration, out_idx, has_python_self):
             'requires_grad': requires_grad,
             'pin_memory': pin_memory,
         }))
-        lambda_formals.append('const TensorOptions & options')
-        lambda_args.append('options')
         inits.append('torch::utils::maybe_initialize_cuda(options);')
+        argmap['options'] = {
+            'value': 'options',
+            'formal': 'const TensorOptions & options',
+        }
+
+    #
+    # home stretch - set up misc template inputs and generate
+    #
+
+    dispatch_callee = get_dispatch_callee(declaration)
+
+    auto_no_gil = [] if declaration['with_gil'] else ['AutoNoGIL no_gil;']
 
     simple_return_type = get_simple_return_type(declaration)
+
     if simple_return_type == 'void':
-        # simpler codepath - no wrap(result) means no need for a lambda
-        auto_no_gil = get_auto_no_gil(declaration)
-        dispatch_callee = get_dispatch_callee(declaration)
-        if is_tensor_method(declaration):
-            dispatch_args = [arg for arg in lambda_args if arg != 'self']
-        else:
-            dispatch_args = lambda_args
+        # simpler generated codepath - no wrap(result), no lambda around GIL drop
+        # so we dispatch to the op directly
+        dispatch_args = get_op_args(declaration, {name: arg['value'] for name, arg in argmap.items()})
         return PY_VARIABLE_RETURN_VOID.substitute(
             auto_no_gil=auto_no_gil,
             inits=inits,
@@ -748,23 +743,35 @@ def emit_single_dispatch(declaration, out_idx, has_python_self):
             dispatch_args=dispatch_args,
             schema_string=declaration['schema_string'],
         )
+
+    # generate standard codepath
+    if requires_grad and not has_tensor_options:
+        set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
     else:
-        if requires_grad and not has_tensor_options:
-            set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
-        else:
-            set_requires_grad = ''
+        set_requires_grad = ''
 
-        lambda_def = emit_lambda_def(declaration, lambda_formals)
+    # lambda takes all op args
+    lambda_args = [argmap[arg['name']]['value'] for arg in declaration['arguments']]
+    lambda_formals = [argmap[arg['name']]['formal'] for arg in declaration['arguments']]
+    # and dispatches to the op
+    dispatch_args = get_op_args(declaration, {name: name for name, _ in argmap.items()})
 
-        return PY_VARIABLE_WRAP.substitute(
-            inits=inits,
-            simple_return_type=simple_return_type,
-            namedtuple_typeref=declaration['namedtuple_typeref'],
-            lambda_def=lambda_def,
-            lambda_args=lambda_args,
-            schema_string=declaration['schema_string'],
-            set_requires_grad=set_requires_grad,
-        )
+    lambda_def = LAMBDA_DEF.substitute(
+        lambda_formals=lambda_formals,
+        auto_no_gil=auto_no_gil,
+        dispatch_callee=dispatch_callee,
+        dispatch_args=dispatch_args,
+    )
+
+    return PY_VARIABLE_WRAP.substitute(
+        inits=inits,
+        simple_return_type=simple_return_type,
+        namedtuple_typeref=declaration['namedtuple_typeref'],
+        lambda_def=lambda_def,
+        lambda_args=lambda_args,
+        schema_string=declaration['schema_string'],
+        set_requires_grad=set_requires_grad,
+    )
 
 
 def emit_dispatch(i, dictionary, has_python_self):
@@ -803,6 +810,9 @@ def emit_dispatch(i, dictionary, has_python_self):
     else:
         return PY_VARIABLE_CASE.substitute(i=i, call_dispatch=body)
 
+#
+# named tuple codegen
+#
 
 def namedtuple_fieldnames(declaration):
     returns = declaration['returns']
@@ -873,6 +883,9 @@ def emit_namedtuple_typedefs(declarations):
 
     return flddefs + typedefs
 
+#
+# method codegen
+#
 
 def pycname(name):
     return 'THPVariable_{}'.format(name)
@@ -896,8 +909,6 @@ def method_impl(name, declarations, has_python_self):
     Generate a python binding for all overloads of an op.
     """
     for declaration in declarations:
-        # utility struct with arguments split into input, output, etc.
-        declaration['partitioned_arguments'] = partition_arguments(declaration['arguments'])
         # extra arguments used in python binding signature
         declaration['python_binding_arguments'] = get_python_binding_arguments(declaration)
         # formals for python binding signature
@@ -970,6 +981,9 @@ def method_def(name, declarations, has_python_self, is_module):
         flags=flags,
     )
 
+#
+#
+#
 
 def group_overloads(declarations):
     """Returns a list of dictionaries containing the optional keys:
@@ -1128,81 +1142,50 @@ def is_tensor_options(arg):
 #
 #
 
+SCHEMA_TYPE_CONVERSION_HACKS = {
+    'Type': 'ScalarType',
+}
+
+def get_schema_type(arg):
+    typename = arg['simple_type']
+    typename = SCHEMA_TYPE_CONVERSION_HACKS.get(typename, typename)
+
+    # TODO: remove this and make optional types in simple_type to be consistent across
+    # tensor and other types after make Tensor? be optional instead of undefined
+    if arg.get('is_nullable') and '?' not in typename:
+        typename = '{}?'.format(typename)
+
+    size = arg.get('size')
+    if size is not None:
+        typename = '{}[{}]'.format(typename, size)
+
+    return typename
+
+
+SCHEMA_DEFAULT_CONVERSION_HACKS = {
+    'nullptr': 'None',
+    'c10::nullopt': 'None',
+    '{}': 'None',
+}
+
+def get_schema_default(arg, fallback_default=None):
+    default = arg.get('default', fallback_default)
+    return SCHEMA_DEFAULT_CONVERSION_HACKS.get(default, default)
+
+
+def get_schema_formal(arg, fallback_default=None):
+    name = arg['name']
+    typename = get_schema_type(arg)
+    default = get_schema_default(arg, fallback_default)
+    if default is not None:
+        return '{} {}={}'.format(typename, name, default)
+    else:
+        return '{} {}'.format(typename, name)
+
+
 def get_python_formals(declaration, as_method):
 
-    def get_formal(arg, force_default=False):
-        typename = arg['simple_type']
-        typename = typename if typename != 'Type' else 'ScalarType'
-
-        # TODO: remove this and make optional types in simple_type to be consistent across
-        # tensor and other types after make Tensor? be optional instead of undefined
-        if arg.get('is_nullable') and '?' not in typename:
-            typename = '{}?'.format(typename)
-
-        size = arg.get('size')
-        if size is not None:
-            typename = '{}[{}]'.format(typename, size)
-
-        name = arg['name']
-        if is_tensor_self(arg) and not as_method:
-            # if we're generating a function (not method) binding, s/self/input/
-            name = 'input'
-
-        param = '{} {}'.format(typename, name)
-
-        default = arg.get('default')
-        if default == 'nullptr' or default == 'c10::nullopt' or default == '{}' or \
-            (default is None and force_default):
-            default = 'None'
-
-        if default is not None:
-            param += '=' + str(default)
-
-        return param
-
-    pa = declaration['partitioned_arguments']
-
-    # we omit some op-defined args from python:
-    # - self: for method bindings, this is a separate Python param, not a parsed arg
-    # - options: `python_binding_formals` are mapped into a TensorOptions struct
-    if as_method:
-        arg_filter = lambda arg: not is_tensor_options(arg) and not is_tensor_self(arg)
-    else:
-        arg_filter = lambda arg: not is_tensor_options(arg)
-
-    input_args = [a for a in pa['input_args'] if arg_filter(a)]
-    input_kwargs = [a for a in pa['input_kwargs'] if arg_filter(a)]
-    output_args = [a for a in pa['output_args'] if arg_filter(a)]
-    type_args = [a for a in pa['type_args'] if arg_filter(a)]
-
-    input_formals = [get_formal(a) for a in input_args]
-    input_kw_formals = [get_formal(a) for a in input_kwargs]
-
-    if len(output_args) <= 1:
-        output_formals = [get_formal(a, force_default=True) for a in output_args]
-    else:
-        # NB: For more than 1 output args the type name is a TensorList
-        # and as such we don't (yet) need to consider the naming.
-        assert all([a['simple_type'] == 'Tensor' for a in output_args])
-        typename = 'TensorList[{}]'.format(len(output_args))
-        output_formals = [typename + ' out=None']
-
-    assert len(type_args) <= 1, '{}: multiple type args'.format(declaration['name'])
-    type_formals = [get_formal(a) for a in type_args]
-
-    python_binding_arguments = declaration['python_binding_arguments']
-    python_binding_formals = [get_formal(a) for a in python_binding_arguments]
-
-    return {
-        'input_formals': input_formals,
-        'input_kw_formals': input_kw_formals,
-        'output_formals': output_formals,
-        'type_formals': type_formals,
-        'python_binding_formals': python_binding_formals,
-    }
-
-
-def partition_arguments(args):
+    args = declaration['arguments']
     input_args = []
     input_kwargs = []
     output_args = []
@@ -1217,21 +1200,139 @@ def partition_arguments(args):
         else:
             if arg.get('kwarg_only', False):
                 current_input_args = input_kwargs
+            if is_tensor_self(arg) and not as_method:
+                # if we're generating a function (not method) binding, s/self/input/
+                arg = arg.copy()
+                arg['name'] = 'input'
             current_input_args.append(arg)
 
+    # we omit some op-defined args from python:
+    # - self: for method bindings, this is a separate Python param, not a parsed arg
+    # - options: `python_binding_formals` are mapped into a TensorOptions struct
+    if as_method:
+        arg_filter = lambda arg: not is_tensor_options(arg) and not is_tensor_self(arg)
+    else:
+        arg_filter = lambda arg: not is_tensor_options(arg)
+
+    input_args = [a for a in input_args if arg_filter(a)]
+    input_kwargs = [a for a in input_kwargs if arg_filter(a)]
+    output_args = [a for a in output_args if arg_filter(a)]
+    type_args = [a for a in type_args if arg_filter(a)]
+
+    input_formals = [get_schema_formal(a) for a in input_args]
+    input_kw_formals = [get_schema_formal(a) for a in input_kwargs]
+
+    if len(output_args) <= 1:
+        output_formals = [get_schema_formal(a, fallback_default='None') for a in output_args]
+    else:
+        # NB: For more than 1 output args the type name is a TensorList
+        # and as such we don't (yet) need to consider the naming.
+        assert all([a['simple_type'] == 'Tensor' for a in output_args])
+        typename = 'TensorList[{}]'.format(len(output_args))
+        output_formals = [typename + ' out=None']
+
+    assert len(type_args) <= 1, '{}: multiple type args'.format(declaration['name'])
+    type_formals = [get_schema_formal(a) for a in type_args]
+
+    python_binding_arguments = declaration['python_binding_arguments']
+    python_binding_formals = [get_schema_formal(a) for a in python_binding_arguments]
+
     return {
-        'input_args': input_args,
-        'input_kwargs': input_kwargs,
-        'output_args': output_args,
-        'type_args': type_args,
+        'input_formals': input_formals,
+        'input_kw_formals': input_kw_formals,
+        'output_formals': output_formals,
+        'type_formals': type_formals,
+        'python_binding_formals': python_binding_formals,
     }
+
+
+# @@@
+# python arg has ptr to orig arg
+# has parse index
+# is flat list
+# could return other info as sig_info props, w arg list a prop
+# or could recompute, so e.g. kw_only insertion point, type arg, relationship w/TO
+# steps
+# 1. build args here instead of formals
+# 2. return flat list + sig OR return flat list + write functions
+# 3. remove last pa thing from emit_dispatch
+# 4. use parse_index props instead of out_idx bullshit
+# 5. use python args in emit_single_dispatch
+# 6. litmus test will be that big lump in the middle
+# 7. swap in p_b_a thing from stash
+# @@@
+
+
+def get_python_args_and_signature(declaration, as_method):
+
+    args = declaration['arguments']
+
+    input_args = []
+    input_kwargs = []
+    output_args = []
+    type_args = []
+
+    current_input_args = input_args
+    for arg in args:
+        if arg.get('output', False):
+            output_args.append(arg)
+        elif arg['simple_type'] == 'Type':
+            type_args.append(arg)
+        else:
+            if arg.get('kwarg_only', False):
+                current_input_args = input_kwargs
+            if is_tensor_self(arg) and not as_method:
+                # if we're generating a function (not method) binding, s/self/input/
+                arg = arg.copy()
+                arg['name'] = 'input'
+            current_input_args.append(arg)
+
+    # we omit some op-defined args from python:
+    # - self: for method bindings, this is a separate Python param, not a parsed arg
+    # - options: `python_binding_formals` are mapped into a TensorOptions struct
+    if as_method:
+        arg_filter = lambda arg: not is_tensor_options(arg) and not is_tensor_self(arg)
+    else:
+        arg_filter = lambda arg: not is_tensor_options(arg)
+
+    input_args = [a for a in input_args if arg_filter(a)]
+    input_kwargs = [a for a in input_kwargs if arg_filter(a)]
+    output_args = [a for a in output_args if arg_filter(a)]
+    type_args = [a for a in type_args if arg_filter(a)]
+
+    input_formals = [get_schema_formal(a) for a in input_args]
+    input_kw_formals = [get_schema_formal(a) for a in input_kwargs]
+
+    if len(output_args) <= 1:
+        output_formals = [get_schema_formal(a, fallback_default='None') for a in output_args]
+    else:
+        # NB: For more than 1 output args the type name is a TensorList
+        # and as such we don't (yet) need to consider the naming.
+        assert all([a['simple_type'] == 'Tensor' for a in output_args])
+        typename = 'TensorList[{}]'.format(len(output_args))
+        output_formals = [typename + ' out=None']
+
+    assert len(type_args) <= 1, '{}: multiple type args'.format(declaration['name'])
+    type_formals = [get_schema_formal(a) for a in type_args]
+
+    python_binding_arguments = declaration['python_binding_arguments']
+    python_binding_formals = [get_schema_formal(a) for a in python_binding_arguments]
+
+    return {
+        'input_formals': input_formals,
+        'input_kw_formals': input_kw_formals,
+        'output_formals': output_formals,
+        'type_formals': type_formals,
+        'python_binding_formals': python_binding_formals,
+    }
+
 
 
 # TODO blowtorch
 def dtype_default_type_hack(name):
-    if name.startswith('randperm') or \
-            name == 'tril_indices' or \
-            name == 'triu_indices':
+    if (name.startswith('randperm') or
+        name == 'tril_indices' or
+        name == 'triu_indices'):
         return 'torch.int64'
     else:
         return 'None'
@@ -1289,6 +1390,7 @@ def get_python_binding_arguments(declaration):
             'python_default_init': py_default_dtype,
         }
         python_binding_arguments.append(dtype_arg)
+
     if is_factory_function or is_like_or_new_function_with_options:
         py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
@@ -1321,6 +1423,7 @@ def get_python_binding_arguments(declaration):
             'simple_type': 'bool',
         }
         python_binding_arguments.append(pin_memory_arg)
+
     if is_factory_or_like_or_new_function:
         requires_grad_arg = {
             'default': False,
