@@ -3725,6 +3725,70 @@ graph(%Ra, %Rb):
         expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
         self.assertEqual(ops, expected)
 
+    def test_export_opnames_interface(self):
+        global OneTwoModule
+        @torch.jit.interface
+        class OneTwoModule(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        class FooMod(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x + y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 * x
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.one(self.two(x), x)
+
+        class BarMod(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x * y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 / x
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.two(self.one(x, x))
+
+        class M(nn.Module):
+            sub : OneTwoModule
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.sub = BarMod()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.sub.forward(x)
+
+        def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
+            return mod_list[0].forward(x) + mod_list[1].forward(x)
+
+        scripted_M_mod = torch.jit.script(M())
+        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
+                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal', 'prim::Constant'])
+
+        scripted_M_mod.sub = torch.jit.script(FooMod())
+        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
+                         ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant'])
+
     def test_pytorch_jit_env_off(self):
         import subprocess
         env = os.environ.copy()
