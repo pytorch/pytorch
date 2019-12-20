@@ -23,8 +23,8 @@ struct CAFFE2_API CPUGenerator : public Generator {
   virtual uint64_t seed() = 0;
   virtual uint32_t random() = 0;
   virtual uint64_t random64();
-  virtual void getRNGState(void* target) = 0;
-  virtual void setRNGState(void* target) = 0;
+  virtual void getRNGState(void* target, size_t size) = 0;
+  virtual void setRNGState(void* target, size_t size) = 0;
 
 protected:
   c10::optional<float> next_float_normal_sample_;

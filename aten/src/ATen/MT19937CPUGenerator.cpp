@@ -5,6 +5,7 @@
 #include <c10/util/C++17.h>
 #include <algorithm>
 #include <iostream>
+#include <TH/THGenerator.hpp>
 
 namespace at {
 
@@ -55,10 +56,14 @@ uint32_t MT19937CPUGenerator::random() {
   return res;
 }
 
-void MT19937CPUGenerator::getRNGState(void* target) {
+void MT19937CPUGenerator::getRNGState(void* target, size_t size) {
+  static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
+
+  static const size_t size1 = sizeof(THGeneratorStateNew);
+  THArgCheck(size == size1, 1, "RNG state is wrong size");
+
   // cast byte tensor to POD type
   THGeneratorStateNew* rng_state = (THGeneratorStateNew*)target;
-  static const size_t size = sizeof(THGeneratorStateNew);
 
   // accumulate generator data to be copied into byte tensor
   auto accum_state = std::make_unique<THGeneratorStateNew>();
@@ -83,11 +88,59 @@ void MT19937CPUGenerator::getRNGState(void* target) {
     accum_state->next_float_normal_sample = *next_float_normal_sample_;
   }
 
-  memcpy(rng_state, accum_state.get(), size);
+  memcpy(rng_state, accum_state.get(), size1);
 }
 
-void MT19937CPUGenerator::setRNGState(void* target) {
-  THGeneratorState* legacy_pod = (THGeneratorState*)target;
+void MT19937CPUGenerator::setRNGState(void* target, size_t size) {
+  static_assert(std::is_pod<THGeneratorState>::value, "THGeneratorState is not a PODType");
+  static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
+
+  static const size_t size_legacy = sizeof(THGeneratorState);
+  static const size_t size_current = sizeof(THGeneratorStateNew);
+  static_assert(size_legacy != size_current, "Legacy THGeneratorState and THGeneratorStateNew can't be of the same size");
+
+  auto float_normal_sample = c10::optional<float>();
+  auto double_normal_sample = c10::optional<double>();
+
+  // Construct the state of at::CPUGenerator based on input byte tensor size.
+  THGeneratorState* legacy_pod;
+  if (size == size_legacy) {
+    legacy_pod = (THGeneratorState*)target;
+    // Note that in legacy THGeneratorState, we didn't have float version
+    // of normal sample and hence we leave the c10::optional<float> as is
+
+    // Update next_double_normal_sample.
+    // Note that legacy THGeneratorState stores two uniform values (normal_x, normal_y)
+    // and a rho value (normal_rho). These three values were redundant and in the new
+    // DistributionsHelper.h, we store the actual extra normal sample, rather than three
+    // intermediate values.
+    if (legacy_pod->normal_is_valid) {
+      auto r = legacy_pod->normal_rho;
+      auto theta = 2.0 * M_PI * legacy_pod->normal_x;
+      // we return the sin version of the normal sample when in caching mode
+      double_normal_sample = c10::optional<double>(r * ::sin(theta));
+    }
+  } else if (size == size_current) {
+    auto rng_state = (THGeneratorStateNew*)target;
+    legacy_pod = &rng_state->legacy_pod;
+    // update next_float_normal_sample
+    if (rng_state->is_next_float_normal_sample_valid) {
+      float_normal_sample = c10::optional<float>(rng_state->next_float_normal_sample);
+    }
+
+    // Update next_double_normal_sample.
+    // Note that in getRNGState, we now return the actual normal sample in normal_y
+    // and if it's valid in normal_is_valid. The redundant normal_x and normal_rho
+    // are squashed to 0.0.
+    if (legacy_pod->normal_is_valid) {
+      double_normal_sample = c10::optional<double>(legacy_pod->normal_y);
+    }
+  } else {
+    AT_ERROR("Expected either a THGeneratorState of size ", size_legacy,
+             " or a THGeneratorStateNew of size ", size_current,
+             " but found the input RNG state size to be ", size);
+  }
+
   at::mt19937 engine;
   // construct engine_
   // Note that legacy THGeneratorState stored a state array of 64 bit uints, whereas in our
@@ -102,6 +155,9 @@ void MT19937CPUGenerator::setRNGState(void* target) {
   engine.set_data(rng_data);
   THArgCheck(engine.is_valid(), 1, "Invalid mt19937 state");
   engine_ = engine;
+
+  set_next_float_normal_sample(float_normal_sample);
+  set_next_double_normal_sample(double_normal_sample);
 }
 
 /**
