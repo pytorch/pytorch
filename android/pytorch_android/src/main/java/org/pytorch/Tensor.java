@@ -2,8 +2,6 @@ package org.pytorch;
 
 import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
-import com.facebook.soloader.nativeloader.NativeLoader;
-import com.facebook.soloader.nativeloader.SystemDelegate;
 
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
