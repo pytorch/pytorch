@@ -55,7 +55,7 @@ vector<TensorShape> TensorInferenceForSplit(
     // We cannot infer output shape until we see the value of split input
     return ret_invalid_shape();
   } else if (split.empty()) {
-    if (!input_channels % output_size) {
+    if (input_channels % output_size != 0) {
       LOG(WARNING) << "Input channels (" << input_channels
                    << ") should be divisible by number of outputs ("
                    << output_size << ")";
