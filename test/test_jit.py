@@ -3693,7 +3693,7 @@ graph(%Ra, %Rb):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
-    def test_export_opnames_(self):
+    def test_export_opnames(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
                 super(Foo, self).__init__()
