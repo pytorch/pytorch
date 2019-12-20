@@ -564,12 +564,6 @@ at::Tensor convolution_overrideable(
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
 }
 
-static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
-  std::vector<int64_t> shape(dim, 1);
-  shape[1] = -1;
-  return bias.reshape(shape);
-}
-
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
