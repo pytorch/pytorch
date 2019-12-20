@@ -34,7 +34,6 @@ public class Module {
    * @return return value from the 'forward' method.
    */
   public IValue forward(IValue... inputs) {
-    android.util.Log.i("XXX", "Module.forward mNativePeer:"+mNativePeer+ " inputs:" + inputs);
     return mNativePeer.forward(inputs);
   }
 
