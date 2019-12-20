@@ -944,9 +944,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.world_size,
                 num_inputs=num_inputs_per_rank)
             for (inputs, outputs) in tests:
-                work = pg.allreduce([fn(input) for input in inputs])
+                tensors = [fn(input) for input in inputs]
+                work = pg.allreduce(tensors)
                 work.wait()
-                self.assertEqual(work.result(), outputs)
+                self.assertEqual(tensors, outputs)
 
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
