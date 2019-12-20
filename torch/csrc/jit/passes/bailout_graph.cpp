@@ -220,8 +220,8 @@ struct BailOutGraphBuilderForNode {
 // resume execution of the unoptimized(deoptimized)
 // version of an original graph from a particular point
 struct BailOutInserter {
-  explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), bailout_index_(0) {}
+  explicit BailOutInserter(std::shared_ptr<Graph> graph, int64_t depth)
+      : graph_(std::move(graph)), bailout_index_(0), bailout_depth_(depth) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);
@@ -272,6 +272,7 @@ struct BailOutInserter {
   void replaceGuardsWithBailouts() {
     for (auto e : replacements_) {
       e.first->replaceAllUsesWith(e.second);
+      e.second->node()->i_(attr::depth, bailout_depth_);
       e.second->node()->insertAfter(e.first->node());
       e.first->node()->destroy();
     }
@@ -321,13 +322,14 @@ struct BailOutInserter {
   std::shared_ptr<Graph> graph_;
   std::map<Node*, Node*> subgraphs;
   std::size_t bailout_index_;
+  int64_t bailout_depth_;
   std::unordered_map<Node*, std::vector<Value*>> liveness_sets_;
   std::vector<Node*> bailouts_;
   std::map<Value*, Value*> replacements_;
 };
 
-void InsertBailOuts(std::shared_ptr<Graph> graph) {
-  BailOutInserter ibo(std::move(graph));
+void InsertBailOuts(std::shared_ptr<Graph> graph, int64_t depth) {
+  BailOutInserter ibo(std::move(graph), depth);
   ibo.run();
 }
 
@@ -348,21 +350,33 @@ static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   return nullptr;
 }
 
-// Removes prim::BailOuts and hooks the guarded input directly
-// to its users
-static void removeBailouts(Block* b) {
+static void getDepthAndRemoveBailOuts(Block* b, c10::optional<int64_t>& depth) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::BailOut || it->kind() == prim::Guard) {
       // clear profiling information
       it->inputs().at(0)->setType(TensorType::get());
+      if (it->kind() == prim::BailOut && it->hasAttribute(attr::depth)) {
+        TORCH_CHECK(!depth.has_value() || it->i(attr::depth) == *depth);
+        depth = it->i(attr::depth);
+      }
       it->output()->replaceAllUsesWith(it->inputs().at(0));
       it.destroyCurrent();
     } else {
       for (auto ib : it->blocks()) {
-        removeBailouts(ib);
+        getDepthAndRemoveBailOuts(ib, depth);
       }
     }
   }
+
+  return;
+}
+
+// Removes prim::BailOuts and hooks the guarded input directly
+// to its users
+TORCH_API int64_t GetDepthAndRemoveBailOuts(std::shared_ptr<Graph> graph) {
+  c10::optional<int64_t> depth;
+  getDepthAndRemoveBailOuts(graph->block(), depth);
+  return depth.value_or(0);
 }
 
 // see `bailout_graph.h`
@@ -386,7 +400,7 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
   GRAPH_DUMP("bailout_graph ", bailout_graph);
-  removeBailouts(bailout_graph->block());
+  // removeBailouts(bailout_graph->block());
   return bailout_graph;
 }
 

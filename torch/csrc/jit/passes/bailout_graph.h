@@ -16,8 +16,9 @@ namespace jit {
 // Replaces prim::Guard nodes with prim::BailOut nodes and
 // computes sets of inputs needed to resume execution at
 // bailout points
-TORCH_API void InsertBailOuts(std::shared_ptr<Graph> graph);
+TORCH_API void InsertBailOuts(std::shared_ptr<Graph> graph, int64_t depth);
 
+TORCH_API int64_t GetDepthAndRemoveBailOuts(std::shared_ptr<Graph> graph);
 // Builds a bailout graph into `target` (which is an empty graph)
 // for a given bailout point `bailout_index`
 // from the original graph `orig` (the original unoptimized graph)

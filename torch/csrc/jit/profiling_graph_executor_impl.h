@@ -4,6 +4,8 @@
 namespace torch {
 namespace jit {
 
+static const size_t MAX_BAILOUT_DEPTH = 1;
+
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(const std::shared_ptr<Graph>& graph);
 
@@ -18,6 +20,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  int64_t bailout_depth_;
 };
 
 } // namespace jit

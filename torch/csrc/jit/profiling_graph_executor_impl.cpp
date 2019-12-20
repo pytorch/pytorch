@@ -68,7 +68,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   InsertGuards(copy);
   LowerGradOf(*copy);
   EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
+  InsertBailOuts(copy, bailout_depth_ + 1);
   GRAPH_DUMP("After InsertBailOuts: ", copy);
   specializeAutogradZero(*copy);
 
@@ -122,7 +122,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph) {}
+    : GraphExecutorImplBase(graph), bailout_depth_(0) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   std::lock_guard<std::mutex> lock(compile_mutex);
@@ -132,8 +132,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     return *optimized_plan_;
   }
 
+  bailout_depth_ = GetDepthAndRemoveBailOuts(graph);
   // simple executor
-  if (!getProfilingMode()) {
+  if (!getProfilingMode() || bailout_depth_ >= MAX_BAILOUT_DEPTH) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
