@@ -86,7 +86,8 @@ class TORCH_API DistEngine {
   // Run the local autograd engine using the provided graphTask and graphRoot
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
-  void runEngineAndAccumulateGradients(
+  std::shared_ptr<torch::autograd::FutureVariableList>
+  runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);

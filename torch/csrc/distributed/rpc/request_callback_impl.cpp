@@ -240,10 +240,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       execFuture->addCallback(
           [responseFuture, messageId](
               const Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            Message m = std::move(PropagateGradientsResp()).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
+              const c10::optional<utils::FutureError>& error) {
+            if (!error) {
+              Message m = std::move(PropagateGradientsResp()).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(error->what());
+            }
           });
       return responseFuture;
     };
