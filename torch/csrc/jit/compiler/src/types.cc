@@ -54,6 +54,7 @@ std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
     stream << "x" << dtype.lanes();
     ;
   }
+  return stream;
 }
 
 } // namespace compiler

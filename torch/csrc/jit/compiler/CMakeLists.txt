@@ -39,6 +39,7 @@ add_library(nnc
   src/llvm_codegen.cc
   src/llvm_jit.cc
   src/types.cc
+  src/ir_printer.cc
   ${ASMJIT_SRC}
   )
 
@@ -60,6 +61,7 @@ set(TEST_SRCS
   tests/expr_test.cc
   tests/llvm_test.cc
   tests/type_test.cc
+  tests/ir_printer_test.cc
   )
 
 foreach(test_path ${TEST_SRCS})
