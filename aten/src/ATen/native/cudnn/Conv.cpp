@@ -707,7 +707,7 @@ Workspace chooseAlgorithm(
 
 // NOTE [ Convolution design ]
 //
-// cuDNN convolutions does not handle bias. bias is handled outside
+// cuDNN convolutions does not handle bias. Bias is handled outside.
 //
 // The general strategy:
 //
