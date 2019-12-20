@@ -312,6 +312,30 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_from_cuda_array_interface_inferred_strides(self):
+        """torch.as_tensor(numba_ary) should have correct inferred (contiguous) strides"""
+        # This could, in theory, be combined with test_from_cuda_array_interface but that test
+        # is overly strict: it checks that the exported protocols are exactly the same, which
+        # cannot handle differing exported protocol versions.
+        dtypes = [
+            numpy.float64,
+            numpy.float32,
+            numpy.int64,
+            numpy.int32,
+            numpy.int16,
+            numpy.int8,
+            numpy.uint8,
+        ]
+        for dtype in dtypes:
+            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype),
+            numba_ary = numba.cuda.to_device(numpy_ary)
+            self.assertTrue(numba_ary.is_c_contiguous())
+            torch_ary = torch.as_tensor(numba_ary, device="cuda")
+            self.assertTrue(torch_ary.is_contiguous())
+
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_from_cuda_array_interface_lifetime(self):
         """torch.as_tensor(obj) tensor grabs a reference to obj so that the lifetime of obj exceeds the tensor"""
         numba_ary = numba.cuda.to_device(numpy.arange(6))
