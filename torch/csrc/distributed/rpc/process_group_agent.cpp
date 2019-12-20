@@ -30,7 +30,7 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
 
 ProcessGroupAgent::AverageMetricsTracker::AverageMetricsTracker(
     std::string key,
-    double currentSum,
+    uint64_t currentSum,
     uint64_t currentCount)
     : key_(std::move(key)),
       currentSum_(currentSum),
@@ -42,7 +42,7 @@ void ProcessGroupAgent::AverageMetricsTracker::addData(uint64_t dataPoint) {
 }
 
 double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
-  return currentSum_ / (double)currentCount_;
+  return currentCount_ == 0 ? 0 : currentSum_ / (double)currentCount_;
 }
 
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
@@ -101,7 +101,10 @@ ProcessGroupAgent::ProcessGroupAgent(
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
+  // initialize metric info counters
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
+      std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -597,17 +600,18 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   {
     std::unique_lock<std::mutex> lock(futureMutex_);
-    metrics[kNumPendingRequests] = c10::to_string(futures_.size());
+    auto futuresSize = futures_.size();
+    lock.unlock();
+    metrics[kNumPendingRequests] = c10::to_string(futuresSize);
   }
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
   // Add time-series based metrics
   {
-    std::lock_guard<std::mutex> lock(metricsMutex_);
-    if (metrics_[GIL_WAIT_TIME]) {
-      metrics[kGilAverageWaitTime] =
-          c10::to_string(metrics_[GIL_WAIT_TIME]->computeAverage());
-    }
+    std::unique_lock<std::mutex> lock(metricsMutex_);
+    auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();
+    lock.unlock();
+    metrics[kGilAverageWaitTime] = c10::to_string(avgGilWaitTime);
   }
   return metrics;
 }
@@ -615,10 +619,6 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
 void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);
-  if (!metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]) {
-    metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
-        std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
-  }
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]->addData(
       gilWaitTime.count());
 }
