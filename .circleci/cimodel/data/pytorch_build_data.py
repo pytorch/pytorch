@@ -24,11 +24,11 @@ CONFIG_TREE_DATA = [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
             ]),
-            ("7", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                ]),
-            ]),
+            # ("7", [
+            #     ("3.6", [
+            #         ("xla", [XImportant(True)]),
+            #     ]),
+            # ]),
         ]),
         ("cuda", [
             ("9", [
