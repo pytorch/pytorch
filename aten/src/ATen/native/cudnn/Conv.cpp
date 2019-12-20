@@ -18,7 +18,7 @@ at::Tensor cudnn_convolution(
 
 // TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
 Tensor cudnn_convolution_transpose(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const Tensor& bias /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
