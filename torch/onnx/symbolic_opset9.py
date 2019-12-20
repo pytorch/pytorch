@@ -1795,7 +1795,9 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
     if not input.isCompleteTensor():
-        return _unimplemented("flatten", "input size not accessible")
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     input_dims = input.type().sizes()
     output_dims = []
     for i in range(0, dim):

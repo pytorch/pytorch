@@ -47,7 +47,7 @@ at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   std::unique_ptr<c10::AutogradMetaInterface> make() const override {
-    return c10::guts::make_unique<AutogradMeta>();
+    return std::make_unique<AutogradMeta>();
   }
   const at::Tensor& undefined_tensor() const override {
     return singleton_undefined_tensor;
@@ -66,7 +66,7 @@ namespace impl {
     TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
-      p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
+      p->set_autograd_meta(std::make_unique<AutogradMeta>());
     }
     return get_autograd_meta(self);
   }

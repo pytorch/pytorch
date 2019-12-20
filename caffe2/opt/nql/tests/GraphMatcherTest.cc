@@ -11,16 +11,16 @@ std::unordered_map<std::string, NNGraph::NodeRef> genTensors(
     std::vector<std::string> names) {
   std::unordered_map<std::string, NNGraph::NodeRef> result;
   for (auto& name : names) {
-    result[name] = graph.createNode(caffe2::make_unique<Tensor>(name));
+    result[name] = graph.createNode(std::make_unique<Tensor>(name));
   }
   return result;
 }
 
 TEST(Basic, MatchSingleNode) {
   NNGraph graph;
-  auto reluInput = graph.createNode(caffe2::make_unique<Tensor>("reluInput"));
-  auto relu = graph.createNode(caffe2::make_unique<Relu>());
-  auto reluOutput = graph.createNode(caffe2::make_unique<Tensor>("reluOutput"));
+  auto reluInput = graph.createNode(std::make_unique<Tensor>("reluInput"));
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto reluOutput = graph.createNode(std::make_unique<Tensor>("reluOutput"));
   graph.createEdge(reluInput, relu);
   graph.createEdge(relu, reluOutput);
 
@@ -41,9 +41,9 @@ TEST(Basic, MatchSingleNode) {
 
 TEST(Basic, SyntaxError) {
   NNGraph graph;
-  auto reluInput = graph.createNode(caffe2::make_unique<Tensor>("reluInput"));
-  auto relu = graph.createNode(caffe2::make_unique<Relu>());
-  auto reluOutput = graph.createNode(caffe2::make_unique<Tensor>("reluOutput"));
+  auto reluInput = graph.createNode(std::make_unique<Tensor>("reluInput"));
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto reluOutput = graph.createNode(std::make_unique<Tensor>("reluOutput"));
   graph.createEdge(reluInput, relu);
   graph.createEdge(relu, reluOutput);
 
@@ -75,10 +75,10 @@ TEST(Basic, Diamond) {
            x
    */
   auto tensors = genTensors(graph, {"a", "b", "c", "d", "e", "f", "x"});
-  auto relu1 = graph.createNode(caffe2::make_unique<Relu>());
-  auto relu2 = graph.createNode(caffe2::make_unique<Relu>());
-  auto concat = graph.createNode(caffe2::make_unique<Concat>());
-  auto sum = graph.createNode(caffe2::make_unique<Sum>());
+  auto relu1 = graph.createNode(std::make_unique<Relu>());
+  auto relu2 = graph.createNode(std::make_unique<Relu>());
+  auto concat = graph.createNode(std::make_unique<Concat>());
+  auto sum = graph.createNode(std::make_unique<Sum>());
 
   graph.createEdge(tensors["a"], concat);
   graph.createEdge(tensors["b"], concat);
@@ -146,11 +146,11 @@ TEST(Basic, BadDiamond) {
             x
    */
   auto tensors = genTensors(graph, {"a", "b", "c", "d", "e", "f", "x"});
-  auto relu1 = graph.createNode(caffe2::make_unique<Relu>());
-  auto relu2 = graph.createNode(caffe2::make_unique<Relu>());
-  auto concat1 = graph.createNode(caffe2::make_unique<Concat>());
-  auto concat2 = graph.createNode(caffe2::make_unique<Concat>());
-  auto sum = graph.createNode(caffe2::make_unique<Sum>());
+  auto relu1 = graph.createNode(std::make_unique<Relu>());
+  auto relu2 = graph.createNode(std::make_unique<Relu>());
+  auto concat1 = graph.createNode(std::make_unique<Concat>());
+  auto concat2 = graph.createNode(std::make_unique<Concat>());
+  auto sum = graph.createNode(std::make_unique<Sum>());
 
   graph.createEdge(tensors["a"], concat1);
   graph.createEdge(tensors["b"], concat2);
@@ -217,11 +217,11 @@ TEST(Basic, StarInputs) {
    */
   auto tensors =
       genTensors(graph, {"a", "b", "c", "d", "e", "f", "g", "h", "x"});
-  auto concat = graph.createNode(caffe2::make_unique<Concat>());
-  auto relu = graph.createNode(caffe2::make_unique<Relu>());
-  auto flat = graph.createNode(caffe2::make_unique<Flatten>());
-  auto fc = graph.createNode(caffe2::make_unique<FC>());
-  auto sum = graph.createNode(caffe2::make_unique<Sum>());
+  auto concat = graph.createNode(std::make_unique<Concat>());
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto flat = graph.createNode(std::make_unique<Flatten>());
+  auto fc = graph.createNode(std::make_unique<FC>());
+  auto sum = graph.createNode(std::make_unique<Sum>());
 
   graph.createEdge(tensors["a"], relu);
   graph.createEdge(relu, tensors["e"]);
@@ -307,7 +307,7 @@ TEST(Basic, StarOutputs) {
    */
 
   auto tensors = genTensors(graph, {"a", "b", "c", "d", "e", "f"});
-  auto concat = graph.createNode(caffe2::make_unique<Concat>());
+  auto concat = graph.createNode(std::make_unique<Concat>());
 
   graph.createEdge(tensors["a"], concat);
   graph.createEdge(tensors["b"], concat);
@@ -391,8 +391,8 @@ TEST(Caffe2ToNQL, Basic) {
        c
    */
   auto tensors = genTensors(graph, {"a", "b", "c"});
-  auto relu = graph.createNode(caffe2::make_unique<Relu>());
-  auto concat = graph.createNode(caffe2::make_unique<Concat>());
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto concat = graph.createNode(std::make_unique<Concat>());
 
   graph.createEdge(tensors["a"], concat);
   graph.createEdge(concat, tensors["b"]);
@@ -425,12 +425,12 @@ TEST(Caffe2ToNQL, TensorsNameDeduplication) {
   std::unordered_map<std::string, NNGraph::NodeRef> tensors;
   // Manually create tensors with the same names. NQL will have to disambiguate
   // the names by adding a suffix.
-  tensors["a"] = graph.createNode(caffe2::make_unique<Tensor>("tensor"));
-  tensors["b"] = graph.createNode(caffe2::make_unique<Tensor>("tensor"));
-  tensors["c"] = graph.createNode(caffe2::make_unique<Tensor>("tensor"));
+  tensors["a"] = graph.createNode(std::make_unique<Tensor>("tensor"));
+  tensors["b"] = graph.createNode(std::make_unique<Tensor>("tensor"));
+  tensors["c"] = graph.createNode(std::make_unique<Tensor>("tensor"));
 
-  auto relu = graph.createNode(caffe2::make_unique<Relu>());
-  auto concat = graph.createNode(caffe2::make_unique<Concat>());
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto concat = graph.createNode(std::make_unique<Concat>());
 
   graph.createEdge(tensors["a"], concat);
   graph.createEdge(concat, tensors["b"]);

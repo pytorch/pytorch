@@ -1,19 +1,17 @@
 import torch._C
 import torch._jit_internal as _jit_internal
-import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch.testing
 import torch.jit._recursive
 
 from torch.jit._recursive import ScriptMethodStub
+from torch.jit._builtins import _find_builtin, _get_builtin_table, _register_builtin  # noqa
 from torch._jit_internal import _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
-    _list_with_default
 from torch.utils import set_module
 
 import collections
@@ -21,7 +19,6 @@ import contextlib
 import copy
 import functools
 import inspect
-import math
 import os
 import pickle
 import re
@@ -30,7 +27,6 @@ import textwrap
 import warnings
 import weakref
 
-from collections import OrderedDict
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
@@ -102,20 +98,20 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         API with :func:`torch.jit.load <torch.jit.load>`.
 
         To be able to save a module, it must not make any calls to native Python functions.
-        This means that all submodules must be subclasses of ``torch.jit.ScriptModule`` as well.
+        This means that all submodules must be subclasses of :class:`ScriptModule` as well.
 
         .. DANGER::
            All modules, no matter their device, are always loaded onto the CPU during loading.
-           This is different from :func:`load <torch.jit.load>`'s semantics and may change in the future.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
 
         Arguments:
-            m: A ScriptModule to save.
+            m: A :class:`ScriptModule` to save.
             f: A file-like object (has to implement write and flush) or a string
                containing a file name.
             _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
         .. warning::
-            If you are using Python 2, ``torch.jit.save`` does NOT support ``StringIO.StringIO``
+            If you are using Python 2, ``torch.jit.save`` does NOT support :any:`StringIO.StringIO`
             as a valid file-like object. This is because the write method should return
             the number of bytes written; ``StringIO.write()`` does not do this.
 
@@ -249,6 +245,14 @@ def export_opnames(m):
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """
+    .. warning::
+        This function is internal-only and should only be used by the ONNX
+        exporter. If you are trying to get a graph through tracing, please go
+        through the public API instead::
+
+            trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+            trace_graph = trace.graph
+
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
     also returns the trace inputs as part of the tuple
@@ -712,16 +716,19 @@ def make_module(mod, _module_class, _compilation_unit):
     if isinstance(mod, ScriptModule):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
-        exported = []
-        for name in dir(mod):
-            item = getattr(mod, name, None)
-            if torch._jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
-                exported.append(name)
-        stubs = []
-        for method in exported:
-            stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
+        def make_stubs_from_exported_methods(mod):
+            exported = []
+            for name in dir(mod):
+                item = getattr(mod, name, None)
+                if torch._jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                    exported.append(name)
 
-        return torch.jit._recursive.create_script_module_for_tracing(mod, stubs)
+            stubs = []
+            for method in exported:
+                stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
+            return stubs
+
+        return torch.jit._recursive.create_script_module(mod, make_stubs_from_exported_methods, share_types=False)
     else:
         if _module_class is None:
             _module_class = TopLevelTracedModule
@@ -800,7 +807,7 @@ def trace(func,
                                  Tensor in which case it is automatically wrapped in a tuple.
 
     Keyword arguments:
-        check_trace (``bool``, optional): Check if the same inputs run through
+        check_trace (bool, optional): Check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
@@ -1123,10 +1130,21 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     :class:`ScriptFunction`. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
-    `TorchScript Language Reference`_.
+    :ref:`language-reference`.
 
     ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
-    ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
+    ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+
+    Arguments:
+        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
+                                                  compile.
+
+    Returns:
+        If ``obj`` is ``nn.Module``, ``script`` returns
+        a :class:`ScriptModule` object. The returned :class:`ScriptModule` will
+        have the same set of sub-modules and parameters as the
+        original ``nn.Module``. If ``obj`` is a standalone function,
+        a :class:`ScriptFunction` will be returned.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
@@ -1215,7 +1233,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         To compile a method other than ``forward`` (and recursively compile anything it calls), add
         the :func:`@torch.jit.export <torch.jit.export>` decorator to the method. To opt out of compilation
-        use :func:`@torch.jit.ignore <torch.jit.ignore>`.
+        use :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`.
 
         Example (an exported and ignored method in a module)::
 
@@ -1251,9 +1269,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
     if optimize is not None:
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
+    if isinstance(obj, ScriptModule):
+        return obj
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.create_script_module(obj, torch.jit._recursive.infer_methods_to_compile)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1457,19 +1477,17 @@ class ScriptMeta(type):
         def init_then_script(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             if type(self) == cls:
-                stubs = [v for k, v in sorted(cls._methods.items())]
-                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, stubs)
+                def make_stubs(module):
+                    cls = type(module)
+                    return [v for k, v in sorted(cls._methods.items())]
+
+                self.__dict__["_actual_script_module"] = torch.jit._recursive.create_script_module(self, make_stubs)
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find
                 # the scripted versions.
                 concrete_type = self._actual_script_module._concrete_type
                 for name in concrete_type.get_attributes():
-                    if hasattr(cls, name) and isinstance(getattr(cls, name), property):
-                        # TODO giant hack. Right now we are encoding properties
-                        # as attributes (this is what recursive script does
-                        # today, but it is wrong)
-                        continue
                     delattr(self, name)
                 for name, _ in concrete_type.get_modules():
                     delattr(self, name)
@@ -1494,6 +1512,11 @@ if _enabled:
             return self.__getattr__('forward')
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
+        """
+        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
+        contain methods, attributes, parameters, and
+        constants. These can be accessed the same as on a normal ``nn.Module``.
+        """
         def __init__(self):
             super(ScriptModule, self).__init__()
 
@@ -1842,7 +1865,7 @@ class TracedModule(ScriptModule):
 
         # TODO: this way of doing it means we lose name information on the class,
         # since the qualname is basically "nn.Module"
-        script_module = torch.jit._recursive.create_script_module_for_tracing(tmp_module, ())
+        script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__
         self.__dict__['_actual_script_module'] = script_module
@@ -1898,83 +1921,9 @@ def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
     return x
 
-_builtin_table = None
-
-_modules_containing_builtins = (torch, torch._C._nn)
-
-_builtin_ops = [
-    # Pairs of (function, op_name)
-    (_list_with_default, "aten::list_with_default"),
-    (_pair, "aten::_pair"),
-    (_quadruple, "aten::_quadruple"),
-    (_single, "aten::_single"),
-    (_triple, "aten::_triple"),
-    (_unwrap_optional, "aten::_unwrap_optional"),
-    (_wait, 'aten::wait'),
-    (is_scripting, "aten::is_scripting"),
-    (OrderedDict, "aten::dict"),
-    (dict, "aten::dict"),
-    (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
-    (math.ceil, "aten::ceil"),
-    (math.copysign, "aten::copysign"),
-    (math.erf, "aten::erf"),
-    (math.erfc, "aten::erfc"),
-    (math.exp, "aten::exp"),
-    (math.expm1, "aten::expm1"),
-    (math.fabs, "aten::fabs"),
-    (math.floor, "aten::floor"),
-    (math.gamma, "aten::gamma"),
-    (math.lgamma, "aten::lgamma"),
-    (math.log, "aten::log"),
-    (math.log10, "aten::log10"),
-    (math.log1p, "aten::log1p"),
-    (math.pow, "aten::pow"),
-    (math.sqrt, "aten::sqrt"),
-    (math.isnan, "aten::isnan"),
-    (math.asinh, "aten::asinh"),
-    (math.atanh, "aten::atanh"),
-    (math.cosh, "aten::cosh"),
-    (math.sinh, "aten::sinh"),
-    (math.tanh, "aten::tanh"),
-    (math.acos, "aten::acos"),
-    (math.asin, "aten::asin"),
-    (math.atan, "aten::atan"),
-    (math.atan2, "aten::atan2"),
-    (math.cos, "aten::cos"),
-    (math.sin, "aten::sin"),
-    (math.tan, "aten::tan"),
-    (math.asinh, "aten::asinh"),
-    (math.atanh, "aten::atanh"),
-    (math.acosh, "aten::acosh"),
-    (math.sinh, "aten::sinh"),
-    (math.cosh, "aten::cosh"),
-    (math.tanh, "aten::tanh"),
-    (math.fmod, "aten::fmod"),
-    (math.modf, "aten::modf"),
-    (math.factorial, "aten::factorial"),
-    (math.frexp, "aten::frexp"),
-    (math.isnan, "aten::isnan"),
-    (math.isinf, "aten::isinf"),
-    (math.degrees, "aten::degrees"),
-    (math.radians, "aten::radians"),
-    (math.ldexp, "aten::ldexp"),
-    (torch.autograd.grad, "aten::grad"),
-    (torch.autograd.backward, "aten::backward"),
-    (torch._C._infer_size, "aten::_infer_size"),
-    (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
-    (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
-    (torch.nn.functional.interpolate, "aten::__interpolate"),
-    (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
-    (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
-    (torch.nn.functional.upsample, "aten::__upsample"),
-    (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
-    (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
-    (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
-    (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
-    (torch._C._get_tracing_state, "aten::_get_tracing_state"),
-    (warnings.warn, "aten::warn"),
-]
-
+_register_builtin(_unwrap_optional, 'aten::_unwrap_optional')
+_register_builtin(_wait, 'aten::wait')
+_register_builtin(is_scripting, 'aten::is_scripting')
 
 
 # Caching: we currently cache compilation of free functions and overloaded functions.
@@ -2010,40 +1959,6 @@ def _set_jit_function_cache(key, value):
     assert isinstance(value, torch.jit.ScriptFunction)
     _jit_caching_layer[key] = value.qualified_name
 
-
-
-# lazily built to ensure the correct initialization order
-def _get_builtin_table():
-    global _builtin_table
-    if _builtin_table is not None:
-        return _builtin_table
-    _builtin_table = {}
-
-    def register_all(mod):
-        for name in dir(mod):
-            v = getattr(mod, name)
-            if callable(v):
-                _builtin_table[id(v)] = "aten::" + name
-    for mod in _modules_containing_builtins:
-        register_all(mod)
-
-    for builtin, aten_op in _builtin_ops:
-        _builtin_table[id(builtin)] = aten_op
-    if not PY2:
-        _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.isfinite)] = "aten::isfinite"
-    if PY37:
-        _builtin_table[id(math.remainder)] = "aten::mathremainder"
-
-    return _builtin_table
-
-
-def _register_builtin(fn, op):
-    _get_builtin_table()[id(fn)] = op
-
-
-def _find_builtin(fn):
-    return _get_builtin_table().get(id(fn))
 
 # qualified_name => ScriptClass mapping
 _script_classes = {}
