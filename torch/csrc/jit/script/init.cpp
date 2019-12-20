@@ -208,7 +208,7 @@ c10::optional<IValue> tryCalculateDefaultParam(
     } else {
       return toIValue(def_value, arg.type());
     }
-  } catch (py::cast_error& e) {
+  } catch (...) {
     return c10::nullopt;
   }
 }
@@ -693,7 +693,6 @@ void initJitScriptBindings(PyObject* module) {
           "setattr",
           [](Object& self, const std::string& name, py::object value) {
             TypePtr type = self.type()->getAttribute(name);
-            TORCH_CHECK(type, "Module has no attribute '", name, "'");
             auto ivalue = toIValue(std::move(value), type);
             self.setattr(name, ivalue);
           })
@@ -1187,6 +1186,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_function_attribute",
           &ConcreteModuleTypeBuilder::addFunctionAttribute)
+      .def(
+          "add_builtin_function",
+          &ConcreteModuleTypeBuilder::addBuiltinFunction)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
