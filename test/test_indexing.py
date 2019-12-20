@@ -1,5 +1,5 @@
 from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests
+from common_device_type import instantiate_device_type_tests, onlyCUDA
 import torch
 from torch import tensor
 import unittest
@@ -348,6 +348,15 @@ class TestIndexing(TestCase):
             return x[0]
 
         self.assertRaisesRegex(IndexError, 'invalid index', runner)
+
+    @onlyCUDA
+    def test_invalid_device(self, device):
+        idx = torch.tensor([0, 1])
+        b = torch.zeros(5, device=device)
+        c = torch.tensor([1., 2.], device="cpu")
+
+        for accumulate in [True, False]:
+            self.assertRaisesRegex(RuntimeError, 'expected device', lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to

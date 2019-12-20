@@ -359,14 +359,17 @@ inline IValue toIValue(
     case TypeKind::ScalarTypeType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        std::cout << "toIValue: dtype" << std::endl;
         return static_cast<int64_t>(dtype->scalar_type);
       }
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+        std::cout << "toIValue: qscheme" << std::endl;
         return static_cast<uint8_t>(qscheme->qscheme);
       }
       if (THPLayout_Check(obj.ptr())) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        std::cout << "toIValue: qscheme" << std::endl;
         return static_cast<int8_t>(layout->layout);
       }
       return py::cast<int64_t>(obj);
