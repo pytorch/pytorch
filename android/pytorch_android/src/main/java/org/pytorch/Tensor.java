@@ -2,6 +2,8 @@ package org.pytorch;
 
 import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.jni.HybridData;
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
 
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
@@ -31,6 +33,13 @@ import java.util.Locale;
  * is always copied.
  */
 public abstract class Tensor {
+  static {
+    if (!NativeLoader.isInitialized()) {
+      NativeLoader.init(new SystemDelegate());
+    }
+    NativeLoader.loadLibrary("pytorch_jni");
+  }
+
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
   private static final String ERROR_MSG_DATA_ARRAY_NOT_NULL = "Data array must be not null";
   private static final String ERROR_MSG_SHAPE_NOT_NULL = "Shape must be not null";
