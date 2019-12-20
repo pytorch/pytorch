@@ -22,12 +22,12 @@ void RRefContext::destroyInstance(bool ignoreRRefLeak) {
   ctx.checkRRefLeaks(ignoreRRefLeak);
 }
 
-void RRefContext::handleException(const Message& message) {
-  if (message.type() == MessageType::EXCEPTION) {
+void RRefContext::handleException(
+    const c10::optional<utils::FutureError>& futErr) {
+  if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    std::string err(message.payload().begin(), message.payload().end());
-    VLOG(1) << "Got exception: " << err << std::endl << std::flush;
-    throw std::runtime_error(err);
+    VLOG(1) << "Got exception: " << (*futErr).what();
+    throw std::runtime_error((*futErr).what());
   }
 }
 
@@ -136,8 +136,10 @@ void RRefContext::delUser(
         agent_->getWorkerInfo(owner),
         RRefUserDelete(rrefId, forkId).toMessage());
 
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      RRefContext::handleException(futErr);
+    });
   }
 }
 
@@ -285,15 +287,20 @@ void RRefContext::notifyOwnerAndParentOfFork(
     // this fork ID.
     auto fm = agent_->send(
         agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
-    fm->addCallback([](const Message& message) { handleException(message); });
+    fm->addCallback([](const Message& /* unused */,
+                       const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
+    });
   } else {
     auto fm = agent_->send(
         agent_->getWorkerInfo(rref->owner()),
         RRefForkRequest(rref->rrefId(), forkId).toMessage());
 
     addPendingUser(forkId, rref);
-    fm->addCallback([this, forkId, parent](const Message& message) {
-      handleException(message);
+    fm->addCallback([this, forkId, parent](
+                        const Message& /* unused */,
+                        const c10::optional<utils::FutureError>& futErr) {
+      handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });
   }
@@ -347,7 +354,10 @@ void RRefContext::finishForkRequest(const ForkId& forkId, worker_id_t parent) {
   auto fm = agent_->send(
       agent_->getWorkerInfo(parent), RRefChildAccept(forkId).toMessage());
 
-  fm->addCallback([](const Message& message) { handleException(message); });
+  fm->addCallback([](const Message& /* unused */,
+                     const c10::optional<utils::FutureError>& futErr) {
+    handleException(futErr);
+  });
 }
 
 template <typename T>

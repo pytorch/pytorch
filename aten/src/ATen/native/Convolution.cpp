@@ -1,7 +1,9 @@
+#include <limits>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/ConvUtils.h>
 
 #include <ATen/Config.h>
 #if AT_NNPACK_ENABLED()
@@ -34,7 +36,8 @@ struct ConvParams {
   bool is_stride_nonpos() const;
   void view1d_as_2d();
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_cudnn(const at::Tensor& input) const;
+  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
@@ -146,7 +149,38 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
 #endif
 }
 
-auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
+auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  int64_t numel_input = input.numel();
+  // empty input
+  if (numel_input == 0) {
+    return false;
+  }
+  // input size can not be reduced to the range of int by splitting the batch dim
+  int64_t n = input.size(0);
+  if (numel_input / n > int_max) {
+    return true;
+  }
+  // output size can not be reduced to the range of int by splitting the batch dim
+  int64_t outsize = 1;
+  if (transposed) {
+    std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
+    for (int64_t i = 1; i < o.size(); i++) {
+      outsize *= o[i];
+    }
+  } else {
+    std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
+    for (int64_t i = 1; i < o.size(); i++) {
+      outsize *= o[i];
+    }
+  }
+  return outsize > int_max;
+}
+
+auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (needs_64bit_indexing_no_split(input, weight)) {
+    return false;
+  }
   if (!detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }
@@ -333,7 +367,7 @@ auto ConvParams::use_cudnn_depthwise(
   if (detail::getCUDAHooks().supportsDepthwiseConvolutionWithCuDNN()) {
     long cudnn_version = detail::getCUDAHooks().versionCuDNN();
     bool kernel_cond =  (cudnn_version >= 7600 &&
-                         use_cudnn(input) &&
+                         use_cudnn(input, weight) &&
                          input.scalar_type() == kHalf && // only for FP16
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
@@ -593,7 +627,7 @@ at::Tensor _convolution(
       } else {
           output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
       }
-  } else if (params.use_cudnn(input)) {
+  } else if (params.use_cudnn(input, weight)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same");

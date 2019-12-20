@@ -1,6 +1,8 @@
 package org.pytorch;
 
 import com.facebook.jni.annotations.DoNotStrip;
+import com.facebook.jni.HybridData;
+
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -119,7 +121,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_uint8(byteBuffer, shape);
+    return initHybrid(new Tensor_uint8(byteBuffer, shape));
   }
 
   /**
@@ -136,7 +138,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final ByteBuffer byteBuffer = allocateByteBuffer((int) numel(shape));
     byteBuffer.put(data);
-    return new Tensor_int8(byteBuffer, shape);
+    return initHybrid(new Tensor_int8(byteBuffer, shape));
   }
 
   /**
@@ -153,7 +155,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final IntBuffer intBuffer = allocateIntBuffer((int) numel(shape));
     intBuffer.put(data);
-    return new Tensor_int32(intBuffer, shape);
+    return initHybrid(new Tensor_int32(intBuffer, shape));
   }
 
   /**
@@ -170,7 +172,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final FloatBuffer floatBuffer = allocateFloatBuffer((int) numel(shape));
     floatBuffer.put(data);
-    return new Tensor_float32(floatBuffer, shape);
+    return initHybrid(new Tensor_float32(floatBuffer, shape));
   }
 
   /**
@@ -187,7 +189,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final LongBuffer longBuffer = allocateLongBuffer((int) numel(shape));
     longBuffer.put(data);
-    return new Tensor_int64(longBuffer, shape);
+    return initHybrid(new Tensor_int64(longBuffer, shape));
   }
 
   /**
@@ -204,7 +206,7 @@ public abstract class Tensor {
     checkShapeAndDataCapacityConsistency(data.length, shape);
     final DoubleBuffer doubleBuffer = allocateDoubleBuffer((int) numel(shape));
     doubleBuffer.put(data);
-    return new Tensor_float64(doubleBuffer, shape);
+    return initHybrid(new Tensor_float64(doubleBuffer, shape));
   }
 
   /**
@@ -224,7 +226,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_uint8(data, shape);
+    return initHybrid(new Tensor_uint8(data, shape));
   }
 
   /**
@@ -244,7 +246,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int8(data, shape);
+    return initHybrid(new Tensor_int8(data, shape));
   }
 
   /**
@@ -264,7 +266,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int32(data, shape);
+    return initHybrid(new Tensor_int32(data, shape));
   }
 
   /**
@@ -284,7 +286,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float32(data, shape);
+    return initHybrid(new Tensor_float32(data, shape));
   }
 
   /**
@@ -304,7 +306,7 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_int64(data, shape);
+    return initHybrid(new Tensor_int64(data, shape));
   }
 
   /**
@@ -324,7 +326,16 @@ public abstract class Tensor {
     checkArgument(
         (data.order() == ByteOrder.nativeOrder()),
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
-    return new Tensor_float64(data, shape);
+    return initHybrid(new Tensor_float64(data, shape));
+  }
+
+  @DoNotStrip private HybridData mHybridData;
+
+  @DoNotStrip private native HybridData initHybrid();
+
+  private static Tensor initHybrid(Tensor tensor) {
+    tensor.mHybridData = tensor.initHybrid();
+    return tensor;
   }
 
   private Tensor(long[] shape) {
@@ -641,20 +652,24 @@ public abstract class Tensor {
 
   // Called from native
   @DoNotStrip
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype) {
+  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+    Tensor tensor = null;
     if (DType.FLOAT32.jniCode == dtype) {
-      return new Tensor_float32(data.asFloatBuffer(), shape);
+      tensor = new Tensor_float32(data.asFloatBuffer(), shape);
     } else if (DType.INT32.jniCode == dtype) {
-      return new Tensor_int32(data.asIntBuffer(), shape);
+      tensor = new Tensor_int32(data.asIntBuffer(), shape);
     } else if (DType.INT64.jniCode == dtype) {
-      return new Tensor_int64(data.asLongBuffer(), shape);
+      tensor = new Tensor_int64(data.asLongBuffer(), shape);
     } else if (DType.FLOAT64.jniCode == dtype) {
-      return new Tensor_float64(data.asDoubleBuffer(), shape);
+      tensor = new Tensor_float64(data.asDoubleBuffer(), shape);
     } else if (DType.UINT8.jniCode == dtype) {
-      return new Tensor_uint8(data, shape);
+      tensor = new Tensor_uint8(data, shape);
     } else if (DType.INT8.jniCode == dtype) {
-      return new Tensor_int8(data, shape);
+      tensor = new Tensor_int8(data, shape);
+    } else {
+      new IllegalArgumentException("Unknown Tensor dtype");
     }
-    throw new IllegalArgumentException("Unknown Tensor dtype");
+    tensor.mHybridData = hybridData;
+    return tensor;
   }
 }

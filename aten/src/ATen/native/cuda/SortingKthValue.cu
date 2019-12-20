@@ -10,15 +10,6 @@
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
 
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/extrema.h>
-#include <thrust/inner_product.h>
-#include <thrust/sequence.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/NamedTensorUtils.h>

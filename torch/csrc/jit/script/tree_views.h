@@ -249,6 +249,7 @@ struct Stmt : public TreeView {
       case TK_ASSERT:
       case TK_PASS:
       case TK_BREAK:
+      case TK_DELETE:
       case TK_CONTINUE:
       case TK_DEF:
         return;
@@ -800,12 +801,16 @@ struct Const : public Expr {
     return !isFloatingPoint();
   }
   int64_t asIntegral() const {
-    return c10::stoll(subtree(0)->stringValue());
+    try {
+      return c10::stoll(subtree(0)->stringValue(), /*pos=*/0, /*base=*/0);
+    } catch (const std::out_of_range& e) {
+      throw ErrorReport(range()) << "Integral constant out of range "
+                                    "(must fit in a signed 64 bit integer)";
+    }
   }
   double asFloatingPoint() const {
-    char* dummy;
     return torch::jit::script::strtod_c(
-        subtree(0)->stringValue().c_str(), &dummy);
+        subtree(0)->stringValue().c_str(), /*endptr=*/nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -1020,6 +1025,18 @@ struct Starred : public Expr {
   }
   static Starred create(const SourceRange& range, const Expr& expr) {
     return Starred(Compound::create(TK_STARRED, range, {expr}));
+  }
+};
+
+struct Delete : public Stmt {
+  explicit Delete(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_DELETE);
+  }
+  Expr expr() const {
+    return Expr(subtree(0));
+  }
+  static Delete create(const Expr& value) {
+    return Delete(Compound::create(TK_DELETE, value.range(), {value}));
   }
 };
 
