@@ -3165,7 +3165,15 @@ graph(%Ra, %Rb):
         self.run_pass('constant_propagation', graph)
         FileCheck().check_not("ListConstruct").run(graph)
         FileCheck().check_dag("float[] =").check_dag("str[] =").run(graph)
+        imported = self.getExportImportCopy(scripted_foo)
         self.assertEqual(foo(), scripted_foo())
+        self.assertEqual(imported(), scripted_foo())
+
+        @torch.jit.script
+        def test_empty():
+            return torch.jit.annotate(List[str], [])
+        imported = self.getExportImportCopy(test_empty)
+        FileCheck().check("str[]").run(imported.graph)
 
     def test_trace_detach(self):
         def foo(x, w):
