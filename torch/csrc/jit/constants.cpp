@@ -82,8 +82,7 @@ c10::optional<Value*> tryInsertConstant(
     std::vector<std::string> ss;
     auto generic_list = val.toGenericListRef();
     for (const IValue& ival : generic_list) {
-      std::string str = ival.toStringRef();
-      ss.push_back(str);
+      ss.push_back(ival.toStringRef());
     }
     n->ss_(attr::value, ss);
     n->output()->setType(ListType::create(StringType::get()));
