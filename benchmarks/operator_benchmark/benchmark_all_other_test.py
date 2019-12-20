@@ -8,7 +8,7 @@ from pt import ( # noqa
     add_test, batchnorm_test, cat_test, chunk_test, conv_test,  # noqa
     gather_test, linear_test, matmul_test, pool_test,  # noqa
     softmax_test, split_test, fill_test, as_strided_test,  # noqa
-    embeddingbag_test  # noqa
+    embeddingbag_test, binary_test  # noqa
 )
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ inline constexpr string_view extract(
 
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
   return extract(
       "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
@@ -108,7 +108,7 @@ inline constexpr type_index get_type_index() noexcept {
   // type index through std::integral_constant.
   return type_index{std::integral_constant<
       uint64_t,
-      detail::type_index_impl<guts::remove_cv_t<guts::decay_t<T>>>()>::value};
+      detail::type_index_impl<std::remove_cv_t<std::decay_t<T>>>()>::value};
 #else
   // There's nothing in theory preventing us from running this on device code
   // except for nvcc throwing a compiler error if we enable it.

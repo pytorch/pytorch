@@ -94,12 +94,12 @@ class ProcessGroupAgent : public RpcAgent {
   // TODO: this class should inherit from a MetricsTracker, and can be extended
   // to track num_sends, recvs, average size of messages, etc.
   struct AverageMetricsTracker {
-    const std::string key_;
+    std::string key_;
     uint64_t currentSum_;
     uint64_t currentCount_;
 
     explicit AverageMetricsTracker(
-        const std::string& key,
+        std::string key,
         double currentSum = 0,
         uint64_t currentCount = 0);
 
