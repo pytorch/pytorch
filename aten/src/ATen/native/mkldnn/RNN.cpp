@@ -137,12 +137,16 @@ std::vector<ideep::tensor> get_weight_itensors(const Tensor& flatten_weight,
 
 Tensor _mkldnn_rnn_flatten_weight(TensorList weight, bool has_bias,
     int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
+  TORCH_CHECK(mode == ideep::rnn_kind::RNN_RELU || mode == ideep::rnn_kind::RNN_TANH ||
+              mode == ideep::rnn_kind::LSTM || mode == ideep::rnn_kind::GRU,
+              "_mkldnn_rnn_flatten_weight: unsupposted mode value: ", mode);
+
   int64_t num_directions = bidirectional ? 2 : 1;
 
   int64_t weight_stride0 = has_bias ? 4 : 2;
   MatrixRef<Tensor> weights{weight, static_cast<size_t>(weight_stride0)};
 
-  int64_t flatten_weight_stride0 = has_bias ? 3 : 2;
+  int64_t flatten_weight_stride0 = 3;
   std::vector<Tensor> flatten_weight_arr;
   flatten_weight_arr.reserve(num_layers * num_directions * flatten_weight_stride0);
 
@@ -157,6 +161,7 @@ Tensor _mkldnn_rnn_flatten_weight(TensorList weight, bool has_bias,
         flatten_weight_arr.emplace_back(_shuffle_bias(layer_weights[2], layer_weights[3], mode));
       } else {
         auto bias = at::zeros({get_num_biases(mode) * hidden_size});
+        flatten_weight_arr.emplace_back(bias);
       }
     }
   }
@@ -169,6 +174,9 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_rnn(const Tensor& input,
     int64_t mode, int64_t input_size, int64_t hidden_size, int64_t num_layers,
     bool batch_first, bool bidirectional) {
   TORCH_CHECK(!batch_first, "_mkldnn_rnn: don't support batch first input");
+  TORCH_CHECK(mode == ideep::rnn_kind::RNN_RELU || mode == ideep::rnn_kind::RNN_TANH ||
+              mode == ideep::rnn_kind::LSTM || mode == ideep::rnn_kind::GRU,
+              "_mkldnn_rnn: unsupposted mode value: ", mode);
 
   int64_t seq_length = input.size(0);
   int64_t mini_batch = input.size(1);
