@@ -2809,6 +2809,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
+
         for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
@@ -2821,14 +2822,33 @@ struct to_ir {
           auto dict_type = type_hint->expect<DictType>();
           key_type = dict_type->getKeyType();
           value_type = dict_type->getValueType();
-        } else if (!keys.empty()) {
-          key_type = keys.at(0)->type();
-          value_type = values.at(0)->type();
-        } else {
+        } else if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
+        } else {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        auto checkTypeOfValues = [](const TypePtr& type,
+                                    const char* what,
+                                    const std::vector<Value*>& values,
+                                    TreeList trees) {
+          for (size_t i = 0, N = values.size(); i < N; ++i) {
+            std::stringstream ss;
+            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+              throw ErrorReport(trees[i])
+                  << "Dict " << what
+                  << " must contain only a single type, expected: "
+                  << type->python_str() << " but found "
+                  << values[i]->type()->python_str() << " instead.\n"
+                  << ss.str();
+            }
+          }
+        };
+        checkTypeOfValues(key_type, "keys", keys, key_trees);
+        checkTypeOfValues(value_type, "values", values, value_trees);
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))

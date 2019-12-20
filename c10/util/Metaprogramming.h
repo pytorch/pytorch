@@ -106,17 +106,7 @@ auto extract_arg_by_filtered_index(Args&&... args)
  * At runtime, it will just loop over the pre-filtered arguments to create an std::array.
  *
  * Example:
- *  // in C++14
  *  std::array<double, 2> result = filter_map<double, std::is_integral>([] (auto a) {return (double)a;}, 3, "bla", 4);
- *  // result == {3.0, 4.0}
- *
- *  // same example in C++11
- *  struct my_map {
- *    template<class T> constexpr double operator()(T a) {
- *      return (double)a;
- *    }
- *  };
- *  std::array<double, 2> result = filter_map<double, std::is_integral>(my_map(), 3, "bla", 4);
  *  // result == {3.0, 4.0}
  */
 namespace detail {
