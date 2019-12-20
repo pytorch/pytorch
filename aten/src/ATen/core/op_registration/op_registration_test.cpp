@@ -39,6 +39,29 @@ private:
   bool* called_;
 };
 
+TEST(OperatorRegistrationTest, whenRegisterOperatorWithArgToBeIntType_thenPass) {
+  const auto& functionSchema = torch::jit::parseSchema("_test::dummy(Tensor dummy, float arg0, int arg1) -> ()");
+  const auto& dispatchKeyExtractor = c10::DispatchKeyExtractor::make(functionSchema);
+  auto scalarTypeIndex = dispatchKeyExtractor.getScalarTypeIndex();
+  ASSERT_TRUE(scalarTypeIndex.has_value());
+  EXPECT_EQ(scalarTypeIndex.value(), 2);
+}
+
+TEST(OperatorRegistrationTest, whenRegisterOperatorWithMultipleArgToBeIntType_thenPassAndReturnFirstIndex) {
+  const auto& functionSchema = torch::jit::parseSchema("_test::dummy(int arg0, Tensor dummy, float arg1, int arg2) -> ()");
+  const auto& dispatchKeyExtractor = c10::DispatchKeyExtractor::make(functionSchema);
+  auto scalarTypeIndex = dispatchKeyExtractor.getScalarTypeIndex();
+  ASSERT_TRUE(scalarTypeIndex.has_value());
+  EXPECT_EQ(scalarTypeIndex.value(), 0);
+}
+
+TEST(OperatorRegistrationTest, whenRegisterOperatorWithArgToNotIntType_thenFailToGetIndex) {
+  const auto& functionSchema = torch::jit::parseSchema("_test::dummy(Tensor dummy, float arg) -> ()");
+  const auto& dispatchKeyExtractor = c10::DispatchKeyExtractor::make(functionSchema);
+  auto scalarTypeIndex = dispatchKeyExtractor.getScalarTypeIndex();
+  ASSERT_FALSE(scalarTypeIndex.has_value());
+}
+
 TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenCanBeCalled) {
   {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));

@@ -65,7 +65,11 @@ namespace detail {
 struct DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
-    return DispatchKeyExtractor(schema.arguments().size());
+    return DispatchKeyExtractor(
+      schema.arguments().size(),
+      // TODO: replacing intType with scalarType and LayoutType after
+      // both type are defined correctly in jit_type.
+      getOptionalIndexForArgType_(IntType::get(), schema.arguments()));
   }
 
   c10::optional<TensorTypeId> getDispatchKeyBoxed(const Stack* stack) const {
@@ -93,7 +97,23 @@ public:
     return typeSetToDispatchKey_(type_set);
   }
 
+  c10::optional<size_t> getScalarTypeIndex() const {
+    return scalar_type_index_;
+  }
+
 private:
+  static c10::optional<size_t> getOptionalIndexForArgType_(
+    TypePtr type,
+    const std::vector<Argument>& args) {
+    auto iter = std::find_if(args.begin(), args.end(), [&type](const Argument& arg) {
+      return arg.type()->kind() == type->kind();
+    });
+    if (iter == args.end()) {
+      return c10::nullopt;
+    }
+    return std::distance(args.begin(), iter);
+  }
+
   static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
     if (C10_UNLIKELY(typeSet.empty())) {
       return c10::nullopt;
@@ -102,8 +122,11 @@ private:
     return impl::dispatchTypeId(typeSet);
   }
 
-  explicit DispatchKeyExtractor(size_t num_args)
-  : num_args_(num_args) {}
+  explicit DispatchKeyExtractor(
+    size_t num_args,
+    c10::optional<size_t> scalar_type_index)
+  : num_args_(num_args),
+    scalar_type_index_(scalar_type_index) {}
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
@@ -111,6 +134,9 @@ private:
   // fallthrough
   // TODO: a potential optimization is to store a bitfield of arg locations,
   size_t num_args_;
+  // this is caching the index for ScalarType for args inside
+  // function schema.
+  c10::optional<size_t> scalar_type_index_;
 };
 
 }
