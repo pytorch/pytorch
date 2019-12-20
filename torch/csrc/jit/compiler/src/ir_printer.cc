@@ -17,7 +17,7 @@ void IRPrinter::print(Stmt stmt) {
 #define BINARY_ACCEPT(os, v, op_str) \
   os << "(";                         \
   v->lhs().accept(this);             \
-  os << " + ";                       \
+  os << " " << op_str << " ";        \
   v->rhs().accept(this);             \
   os << ")";
 
