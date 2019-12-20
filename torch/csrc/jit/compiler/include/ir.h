@@ -118,6 +118,11 @@ class Variable : public ExprNode<Variable> {
   }
   static Expr make(Dtype dtype) { return Expr(new Variable("", dtype)); }
 
+  // TODO: unique_name
+  const std::string& name_hint() const {
+    return name_hint_;
+  }
+
  private:
   Variable(const std::string& name_hint, Dtype dtype)
       : ExprNodeBase(dtype), name_hint_(name_hint) {}
