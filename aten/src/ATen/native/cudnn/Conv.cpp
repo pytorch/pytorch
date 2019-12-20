@@ -34,7 +34,7 @@ at::Tensor cudnn_convolution_backward_weight(
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
   AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
@@ -62,7 +62,7 @@ at::Tensor cudnn_convolution_transpose_backward_weight(
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
   AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
@@ -854,7 +854,7 @@ Tensor cudnn_convolution_transpose_backward_input(
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
@@ -977,7 +977,7 @@ Tensor cudnn_convolution_backward_input(
 std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
