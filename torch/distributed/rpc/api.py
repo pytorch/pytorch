@@ -299,7 +299,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
             rpc_type,
             str(qualified_name) if qualified_name is not None else func.__qualname__,
             get_worker_info().name,
-            _to_worker_info(to).name,
+            info.name,
         )
 
     args = args if args else ()

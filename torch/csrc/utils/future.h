@@ -34,8 +34,7 @@ class TORCH_API Future final {
 
   Future() = default;
 
-  Future(T value)
-  : completed_(true), value_(std::move(value)), rf_(nullptr) {}
+  Future(T value) : completed_(true), value_(std::move(value)), rf_(nullptr) {}
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -65,16 +64,15 @@ class TORCH_API Future final {
     value_ = std::move(value);
     completed_ = true;
 
-
     // Move callbacks to a vector on the stack so we can access it without
     // holding a lock
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
+    lock.unlock();
     // if recording, run end callbacks.
     if (rf_) {
       rf_->end();
     }
-    lock.unlock();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
