@@ -723,22 +723,46 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
   checkAllSameGPU(c, {output, bias});
   checkSize(c, bias, { output->size(output_channels_dim) });
 
-  if (output.tensor.numel() == 0) {
+  int64_t output_numel = output.tensor.numel();
+  if (output_numel == 0) {
     return;
   }
 
   // See Note [CuDNN broadcast padding].  Handle the left padding
   // ourselves, but use TensorDescriptor's padding argument to do the rest.
-  TensorDescriptor bdesc, odesc;
+  TensorDescriptor bdesc;
   bdesc.set(bias->expand({1, bias->size(0)}), output->dim());
-  odesc.set(*output);
 
   auto handle = getCudnnHandle();
   auto dataType = getCudnnDataType(*bias);
   Constant one(dataType, 1);
 
-  AT_CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
-                                     &one, odesc.desc(), output->data_ptr()));
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  if (output_numel <= int_max) {
+    TensorDescriptor odesc;
+    odesc.set(*output);
+    AT_CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
+                                  &one, odesc.desc(), output->data_ptr()));
+    return;
+  }
+
+  int64_t n = output.tensor.size(0);
+  int64_t inner_dim = output_numel / n;
+  TORCH_INTERNAL_ASSERT(inner_dim <= int_max, "This case should not be dispatched to cuDNN.");
+  constexpr int64_t max_worksize = 1024 * 1024 * 512;
+  int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
+  int64_t num_splits = (n + split_size - 1) / split_size;
+
+  for (int64_t i = 0; i < num_splits; i++) {
+    int64_t start = split_size * i;
+    int64_t split_size_ = std::min<int64_t>(split_size, n - start);
+    Tensor output_ = output.tensor.narrow(0, start, split_size_);
+    TensorDescriptor odesc;
+    odesc.set(output_);
+
+    AT_CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
+                                  &one, odesc.desc(), output_.data_ptr()));
+  }
 }
 
 // NOTE [ Convolution design ]
