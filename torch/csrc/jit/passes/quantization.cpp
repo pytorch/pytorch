@@ -615,6 +615,19 @@ c10::optional<std::string> findObserverName(Value* v) {
   return c10::nullopt;
 }
 
+c10::QScheme toAffine(c10::QScheme qscheme) {
+  switch (qscheme) {
+    case c10::kPerTensorAffine:
+    case c10::kPerTensorSymmetric:
+      return c10::kPerTensorAffine;
+    case c10::kPerChannelAffine:
+    case c10::kPerChannelSymmetric:
+      return c10::kPerChannelAffine;
+    default:
+      return qscheme;
+  }
+}
+
 class InsertQuantDeQuantHelper {
  public:
   InsertQuantDeQuantHelper() {}
@@ -632,8 +645,14 @@ class InsertQuantDeQuantHelper {
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
-      TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
-                  "Quantizing same graph with different QSchemes is not supported");
+      TORCH_CHECK(toAffine(qscheme_for_graph_.at(g)) == toAffine(qscheme) ||
+
+                  "Quantizing same graph with different types of "
+                  "QSchemes is not supported.\n",
+                  " Expecting:",
+                  c10::toString(qscheme_for_graph_.at(g)),
+                  " Got:",
+                  c10::toString(qscheme));
     } else {
       qscheme_for_graph_[g] = qscheme;
     }
@@ -928,8 +947,8 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  Value* self = graph->inputs()[0];
   GRAPH_DUMP("Before Quantize Tensors:", graph);
+  Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
 }
