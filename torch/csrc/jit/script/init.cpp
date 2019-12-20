@@ -1118,14 +1118,11 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
   m.def("_ivalue_debug_python_object", [](py::object py_obj) {
-    // convert to IValue first, IValue will steal/increase the refcount
+    // convert to IValue first, IValue will incref via py::object
     IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
     // convert back to PyObject by borrowing the reference, which also
-    // increase the refcount of the underlying PyObject, so ret should
-    // have original refcount + 2
-    // after the return of this function, the caller should expect the
-    // refcount of py_obj increased by 1 as IValue destructor decrease
-    // the refcount by 1, so only 1 additional borrowed refcount is visble
+    // incref, after the return of this function, IValue is out of scope
+    // which decref, so the return value is original refcount + 1
     py::object ret = toPyObject(pyobj_ivalue);
     return ret;
   });
@@ -1188,7 +1185,7 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
-  m.def("export_opnames",
+  m.def("_export_opnames",
           [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
