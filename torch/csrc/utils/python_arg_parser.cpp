@@ -396,9 +396,9 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
+  , index(index)
   , hidden(false)
   , deprecated(false)
-  , index(index)
 {
   auto open_paren = fmt.find('(');
   if (open_paren == std::string::npos) {
