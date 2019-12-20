@@ -564,6 +564,12 @@ at::Tensor convolution_overrideable(
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
 }
 
+static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
+  std::vector<int64_t> shape(dim, 1);
+  shape[1] = -1;
+  return bias.reshape(shape);
+}
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
@@ -617,8 +623,11 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(input.suggest_memory_format()), weight, bias,
+            input.contiguous(input.suggest_memory_format()), weight,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+        if (bias.defined()) {
+          output = output + reshape_bias(input.dim(), bias);
+        }
 
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
@@ -637,12 +646,18 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input.contiguous(input.suggest_memory_format()), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      if (bias.defined()) {
+        output = output + reshape_bias(input.dim(), bias);
+      }
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input.contiguous(input.suggest_memory_format()), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      if (bias.defined()) {
+        output = output + reshape_bias(input.dim(), bias);
+      }
     }
   } else if (params.use_miopen(input)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
