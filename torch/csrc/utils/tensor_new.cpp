@@ -389,8 +389,8 @@ Tensor legacy_sparse_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scala
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      throw TypeError("SparseTensor.new does not support interpreting Python data as tensor data. " \
-                      "Please use torch.sparse_coo_tensor() instead.");
+      throw TypeError("torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                      "or construct a strided tensor and convert it to sparse via to_sparse.");
     }
     return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
@@ -437,8 +437,8 @@ Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      throw TypeError("SparseTensor.new does not support interpreting Python data as tensor data. " \
-                      "Please use torch.sparse_coo_tensor() instead.");
+      throw TypeError("SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                      "or construct a strided tensor and convert it to sparse via to_sparse.");
     }
     return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
