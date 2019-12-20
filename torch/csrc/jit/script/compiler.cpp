@@ -890,6 +890,29 @@ struct to_ir {
     graph->insertNode(continue_node);
   }
 
+  void emitDelete(const Delete& stmt) {
+    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+      throw ErrorReport(stmt.range())
+          << "del statements are only supported for list"
+             " and dict item deletion";
+    }
+    Subscript subscript(stmt.expr());
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      throw ErrorReport(stmt.range())
+          << "del statements only support deletion at a single index, "
+             "slicing is not supported"
+             " (see https://github.com/pytorch/pytorch/issues/31430)";
+    }
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const SourceRange& val_range = subscript.value().range();
+    Value* idx = emitExpr(subscript_exprs[0]);
+    Value* val = sv->asValue(val_range, method);
+    auto node = graph->create(aten::Delete, {val, idx}, 0)
+                    ->setSourceRange(stmt.range());
+    graph->insertNode(node);
+  }
+
   void emitReturn(const Return& stmt) {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
@@ -981,6 +1004,9 @@ struct to_ir {
           break;
         case TK_DEF:
           emitClosure(Def(stmt));
+          break;
+        case TK_DELETE:
+          emitDelete(Delete(stmt));
           break;
         default:
           throw ErrorReport(stmt)

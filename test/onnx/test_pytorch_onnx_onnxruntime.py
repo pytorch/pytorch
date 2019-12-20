@@ -2296,7 +2296,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
 
-
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -2314,6 +2313,17 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_im2col(self):
+        class Unfold(torch.nn.Module):
+            def forward(self, input):
+                return torch.nn.functional.unfold(input, kernel_size=(10, 15), dilation=2, padding=5, stride=3), \
+                    torch.nn.functional.unfold(input, kernel_size=(2, 2), dilation=1, padding=0, stride=3), \
+                    torch.nn.functional.unfold(input, kernel_size=(1, 1), dilation=5, padding=2, stride=3)
+
+        x = torch.rand(1, 1, 200, 100)
+        self.run_test(Unfold(), x)
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -2582,7 +2592,7 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
-# opset 9 tests, with keep_initializers_as_inputs=False for 
+# opset 9 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
@@ -2590,7 +2600,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    keep_initializers_as_inputs=False))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for 
+# opset 10 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
@@ -2598,7 +2608,7 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     keep_initializers_as_inputs=False))
 
 
-# opset 11 tests, with keep_initializers_as_inputs=False for 
+# opset 11 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
