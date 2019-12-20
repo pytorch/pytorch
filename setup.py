@@ -245,7 +245,7 @@ if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
         distutils.sysconfig.get_config_var("prefix"),
         distutils.sysconfig.get_config_var("VERSION"))
-    # Fix virtualenv builds 
+    # Fix virtualenv builds
     # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
@@ -586,7 +586,7 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++11',
+            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -796,6 +796,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',

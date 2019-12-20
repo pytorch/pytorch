@@ -144,6 +144,8 @@ Tensor & embedding_renorm_cpu_(
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 
+  // Note that we cannot use at::parallel_for here because we perform operations on
+  // Tensor inside the loop. See github.com/pytorch/pytorch/issues/28370 for more details.
   for (auto i = 0; i < num_indices; i++) {
     if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
       continue;

@@ -259,7 +259,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
       pack_ptr.w.reset();
-      pack_ptr.w = guts::make_unique<qnnpack::PackBMatrix>(
+      pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
           cols_w /* input_channels */,
           rows_w /* output_channels */,
           kernel_zp,

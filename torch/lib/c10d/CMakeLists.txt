@@ -77,7 +77,7 @@ endif()
 
 add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
-set_property(TARGET c10d PROPERTY CXX_STANDARD 11)
+set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 target_compile_options(c10d PUBLIC
   -Wall
   -Wextra
