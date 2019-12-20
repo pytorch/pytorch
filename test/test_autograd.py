@@ -2720,6 +2720,21 @@ class TestAutograd(TestCase):
 
         self.assertTrue('my_func' in str(p))
 
+    def test_record_function_multithreaded(self):
+        rf = record_function("outer")
+        rf.__enter__()
+        with profile():
+            # test that exiting the record function after starting a profile
+            # doesn't throw.
+            rf.__exit__()
+
+        with profile():
+            rf.__enter__()
+        # test that exiting the record function after the profile has ended
+        # doesn't throw.
+        rf.__exit__()
+
+
     def test_dir(self):
         x = torch.randn(10, 10)
         keys = dir(x)

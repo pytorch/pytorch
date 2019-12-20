@@ -399,9 +399,8 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::vector<IValue> slots_;
 };
 
-// virtual ivalue PyObjectHolder that hold a PyObject*, we make this virtual
-// because we need to carefully maintain the refcounting of the PyObject* and
-// this could only happen in libtorch_python
+// virtual ivalue PyObjectHolder that hold a py::object, we make this virtual
+// because the py::object and refcounting logic should happen in libtorch_python
 // see concrete implementation in python_ivalue.h
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
@@ -490,7 +489,7 @@ struct _fake_type {};
 // based on the return type.
 template <class Elem>
 // TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
-//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
+//[[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")]]
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -538,7 +537,7 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
+[[deprecated("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
