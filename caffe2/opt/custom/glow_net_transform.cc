@@ -42,7 +42,7 @@ C10_DEFINE_string(
 C10_DEFINE_string(
     onnxifi_input_output_observe_list,
     "",
-    "A list of net positins whose corresponding op's inputs and outputs will be"
+    "A list of net positions whose corresponding op's inputs and outputs will be"
     " observed. ");
 
 namespace caffe2 {
