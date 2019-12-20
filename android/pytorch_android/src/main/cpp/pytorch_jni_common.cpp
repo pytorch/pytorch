@@ -194,12 +194,25 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
         cls, jTensorBuffer, jTensorShape, jdtype, makeCxxInstance(tensor));
   }
 
-  at::Tensor tensor() const {
-    return tensor_;
+  static at::Tensor newAtTensorFromJTensor(
+      facebook::jni::alias_ref<TensorHybrid::javaobject> jtensor) {
+    static auto cls = TensorHybrid::javaClassStatic();
+    static const auto dtypeMethod = cls->getMethod<jint()>("dtypeJniCode");
+    jint jdtype = dtypeMethod(jtensor);
+
+    static const auto shapeField = cls->getField<jlongArray>("shape");
+    auto jshape = jtensor->getFieldValue(shapeField);
+
+    static auto dataBufferMethod = cls->getMethod<
+        facebook::jni::local_ref<facebook::jni::JBuffer::javaobject>()>(
+        "getRawDataBuffer");
+    facebook::jni::local_ref<facebook::jni::JBuffer> jbuffer =
+        dataBufferMethod(jtensor);
+    return newAtTensor(jbuffer, jshape, jdtype);
   }
 
-  static void registerNatives() {
-    registerHybrid({makeNativeMethod("initHybrid", TensorHybrid::initHybrid)});
+  at::Tensor tensor() const {
+    return tensor_;
   }
 
  private:
@@ -410,7 +423,7 @@ at::IValue JIValue::JIValueToAtIValue(
         JIValue::javaClassStatic()
             ->getMethod<facebook::jni::alias_ref<TensorHybrid::javaobject>()>(
                 "toTensor");
-    return jMethodGetTensor(jivalue)->cthis()->tensor();
+    return TensorHybrid::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
   } else if (JIValue::kTypeCodeBool == typeCode) {
     static const auto jMethodGetBool =
         JIValue::javaClassStatic()->getMethod<jboolean()>("toBool");
@@ -493,7 +506,8 @@ at::IValue JIValue::JIValueToAtIValue(
     c10::List<at::Tensor> list{};
     list.reserve(n);
     for (size_t i = 0; i < n; ++i) {
-      list.push_back(jArray->getElement(i)->cthis()->tensor());
+      list.push_back(
+          TensorHybrid::newAtTensorFromJTensor(jArray->getElement(i)));
     }
     return at::IValue{std::move(list)};
   } else if (JIValue::kTypeCodeList == typeCode) {
@@ -593,7 +607,6 @@ class PyTorchAndroidJni : public facebook::jni::JavaClass<PyTorchAndroidJni> {
 
 void common_registerNatives() {
   static const int once = []() {
-    pytorch_jni::TensorHybrid::registerNatives();
 #if defined(__ANDROID__)
     pytorch_jni::PyTorchAndroidJni::registerNatives();
 #endif
