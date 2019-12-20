@@ -74,7 +74,8 @@ bool ConcreteModuleTypeBuilder::equals(
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
-      functionAttributes_ == other.functionAttributes_;
+      functionAttributes_ == other.functionAttributes_ &&
+      builtinFunctions_ == other.builtinFunctions_;
   // clang-format on
   if (!equal) {
     return false;
@@ -125,6 +126,15 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   const auto it = data_.functionAttributes_.find(name);
   if (it != data_.functionAttributes_.end()) {
     return it->second.function_->function();
+  }
+  return c10::nullopt;
+}
+
+c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
+    const std::string& name) const {
+  const auto it = data_.builtinFunctions_.find(name);
+  if (it != data_.builtinFunctions_.end()) {
+    return it->second;
   }
   return c10::nullopt;
 }
@@ -189,6 +199,13 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
       std::move(name),
       ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
                                                 std::move(pyFunction)});
+}
+
+void ConcreteModuleTypeBuilder::addBuiltinFunction(
+    std::string name,
+    std::string symbol_name) {
+  builtinFunctions_.emplace(
+      std::move(name), c10::Symbol::fromQualString(symbol_name));
 }
 
 void ConcreteModuleTypeBuilder::addModule(
@@ -270,12 +287,12 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
-    const {
-  std::vector<std::pair<std::string, TypePtr>> ret;
+std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
+ConcreteModuleType::getModulesPy() const {
+  std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_->getJitType()));
+    ret.emplace_back(std::make_pair(info.name_, info.meta_));
   }
   return ret;
 }
