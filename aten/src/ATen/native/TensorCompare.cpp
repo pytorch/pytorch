@@ -8,7 +8,6 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>
@@ -159,15 +158,11 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
     return std::forward_as_tuple(values, indices);
   } else {
     auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
       NoNamesGuard guard;
-#endif
       return at::_mode_out(values, indices, self, dim, keepdim);
     }();
-#ifdef BUILD_NAMEDTENSOR
     namedinference::propagate_names_for_reduction(std::get<0>(result), self, dim, keepdim);
     namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
-#endif
     return result;
   }
 }
@@ -221,15 +216,11 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
 std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return max_out_impl(max, max_indices, self, dim, keepdim);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(max, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(max_indices, self, dim, keepdim);
-#endif
   return result;
 }
 
@@ -281,20 +272,15 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
 std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
                                     const Tensor& self, int64_t dim, bool keepdim) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return min_out_impl(min, min_indices, self, dim, keepdim);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(min, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(min_indices, self, dim, keepdim);
-#endif
   return result;
 }
 
 
-#ifdef BUILD_NAMEDTENSOR
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
@@ -327,6 +313,5 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, Dimname dim, bool keepdim) {
   return at::mode_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
-#endif
 
 }} // namespace at::native

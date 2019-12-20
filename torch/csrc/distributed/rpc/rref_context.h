@@ -18,7 +18,7 @@ class RRefContext {
   static RRefContext& getInstance();
   static void destroyInstance(bool ignoreRRefLeak = true);
 
-  static void handleException(const Message& message);
+  static void handleException(const c10::optional<utils::FutureError>& futErr);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
@@ -64,6 +64,9 @@ class RRefContext {
   // Create an empty owner rref of type T.
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> getOwnerRRef(const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -138,6 +141,20 @@ class RRefContext {
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  // A conditional variable to block getOwnerRRef() calls until the
+  // corresponding OwnerRRef has been created and inserted into the owners_ map.
+  // The method getOwnerRRef() is triggered by rref.to_here() messages. The
+  // reason for having this CV is because rref.to_here() message and rpc.remote
+  // message may arrive in any order, and to_here() can only be served when the
+  // RRef value is ready. In the previous version, we used to block the
+  // to_here() call by waiting on the CV member variable in OwnerRRef. However,
+  // that means the to_here() call has to first create the OwnerRRef, which
+  // would require knowing the IValue type when if we want to make RRef an
+  // IValue. Instead of sending serialized TypePtr in every to_here() message,
+  // we decided to only create OwnerRRef when processing remote calls.
+  // TODO: As OwnerRRef::getValue() is always called after
+  // OwnerRRef::setValue(), we should be able to remove the CV from OwnerRRef.
+  std::condition_variable ownerCV_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,

@@ -4,7 +4,6 @@
 
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -77,9 +76,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 
 void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   ptrdiff_t numel = THByteTensor_sumall(mask);
   scalar_t *tensor_data;
 
@@ -104,9 +101,7 @@ void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask
 
 void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   ptrdiff_t numel = THBoolTensor_sumall(mask);
   scalar_t *tensor_data;
 
@@ -153,9 +148,7 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
@@ -182,9 +175,7 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 
 void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   int64_t tensor_size = THTensor_(nElement)(tensor);
   int tensor_contig = THTensor_(isContiguous)(tensor);
   int mask_contig = THTensor_(isContiguous)(mask);
@@ -393,11 +384,13 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   numel = THLongTensor_nElement(index);
 
-  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
+  std::vector<int64_t> newSize = src->sizes().vec();
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  newSize[dim] = numel;
+  if (src->dim() > 0) {
+    newSize[dim] = numel;
+  }
   THTensor_(resize)(tensor,newSize,{});
 
   index = THLongTensor_newContiguous(index);
@@ -442,10 +435,15 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
   }
-  else if (src->dim() <= 1)
+  else if (src->dim() == 0)
   {
-    for (i=0; i<numel; i++)
+    THTensor_(set0d)(tensor,THTensor_(get1d)(src,index_data[0]));
+  }
+  else if (src->dim() == 1)
+  {
+    for (i=0; i<numel; i++) {
       THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i]));
+    }
   }
   else
   {
@@ -598,9 +596,7 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
 
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
 
   ptrdiff_t i, numel;
   THTensor *tSlice;
@@ -725,9 +721,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
-#ifdef BUILD_NAMEDTENSOR
   at::NoNamesGuard guard;
-#endif
   if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
        THTensor_nDimension(tensor), THTensor_nDimension(src));
