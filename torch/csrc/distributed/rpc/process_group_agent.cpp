@@ -325,7 +325,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   return future;
 }
 
-void ProcessGroupAgent::handleSend(SendWork work) {
+void ProcessGroupAgent::handleSend(const SendWork& work) {
   std::string serializedPayload =
       wireSerialize(work.message_.payload(), work.message_.tensors());
 
