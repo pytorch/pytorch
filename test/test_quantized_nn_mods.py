@@ -421,7 +421,6 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertEqual(Z_ref, Z_q)
 
             # Test serialization of quantized Linear Module using state_dict
-
             model_dict = qlinear.state_dict()
             self.assertEqual(model_dict['_packed_params.weight'], W_q)
             if use_bias:
