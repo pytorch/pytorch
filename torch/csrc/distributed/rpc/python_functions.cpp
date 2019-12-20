@@ -86,7 +86,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
     IValue rrefId,
-    IValue forkId) {
+    IValue forkId,
+    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -96,8 +97,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       agent,
       dst,
       std::move(*pythonRemoteCall).toMessage(),
-      true /*forceGradRecording*/
-  );
+      true /*forceGradRecording*/,
+      std::move(rf));
 }
 
 } // namespace
@@ -157,14 +158,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
-  auto fm =
-      sendMessageWithAutograd(agent, dst, std::move(*scriptCall).toMessage());
-  if (rf != nullptr) {
-    // attach the recordFunction object to the future, so it can be set as
-    // completed when the future finishes.
-    rf->setOverrideThreadId(true);
-    fm->attachRecordFunction(std::move(rf));
-  }
+  auto fm = sendMessageWithAutograd(
+      agent, dst, std::move(*scriptCall).toMessage(), false, std::move(rf));
   return fm;
 }
 
@@ -189,14 +184,11 @@ PyRRef pyRemoteBuiltin(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
   auto fm = sendMessageWithAutograd(
-      agent, dst, std::move(*scriptRemoteCall).toMessage());
-
-  if (rf != nullptr) {
-    // attach the recordFunction object to the future, so it can be set as
-    // completed when the future finishes.
-    rf->setOverrideThreadId(true);
-    fm->attachRecordFunction(std::move(rf));
-  }
+      agent,
+      dst,
+      std::move(*scriptRemoteCall).toMessage(),
+      false,
+      std::move(rf));
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
@@ -216,14 +208,9 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       agent,
       dst,
       std::move(*pythonCall).toMessage(),
-      true /*forceGradRecording*/);
+      true /*forceGradRecording*/,
+      std::move(rf));
 
-  if (rf != nullptr) {
-    // attach the recordFunction object to the future, so it can be set as
-    // completed when the future finishes.
-    rf->setOverrideThreadId(true);
-    fut->attachRecordFunction(std::move(rf));
-  }
   return fut;
 }
 
@@ -244,14 +231,8 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
-        userRRef->forkId().toIValue());
-
-    if (rf != nullptr) {
-      // attach the recordFunction object to the future, so it can be set as
-      // completed when the future finishes.
-      rf->setOverrideThreadId(true);
-      fm->attachRecordFunction(std::move(rf));
-    }
+        userRRef->forkId().toIValue(),
+        std::move(rf));
 
     fm->addCallback(finishAcceptUserRRef);
     return PyRRef(userRRef);
@@ -264,14 +245,9 @@ PyRRef pyRemotePythonUdf(
         dst,
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
-        ownerRRef->rrefId().toIValue());
+        ownerRRef->rrefId().toIValue(),
+        std::move(rf));
 
-    if (rf != nullptr) {
-      // attach the recordFunction object to the future, so it can be set as
-      // completed when the future finishes.
-      rf->setOverrideThreadId(true);
-      fm->attachRecordFunction(std::move(rf));
-    }
     fm->addCallback(finishCreatingOwnerRRef);
     return PyRRef(ownerRRef);
   }

@@ -35,7 +35,7 @@ class TORCH_API Future final {
   Future() = default;
 
   Future(T value)
-  : completed_(true), value_(std::move(value)) {}
+  : completed_(true), value_(std::move(value)), rf_(nullptr) {}
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -135,7 +135,7 @@ class TORCH_API Future final {
   // run, ensuring that the future is profiled appropriately.
   void attachRecordFunction(
       std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
-    rf_ = rf;
+    rf_ = std::move(rf);
   }
 
  private:

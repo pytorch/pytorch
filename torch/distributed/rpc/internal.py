@@ -149,7 +149,9 @@ def _load_return_value(binary_data, tensor_table):
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
     """
     This function should be called from RPC/RRef functions to create a
-    RecordFunction object for profiling.
+    RecordFunction object for profiling. This function also runs the before
+    callbacks that start the profiling, though the user is responsible for
+    running the appropriate callbacks when the function to be profiled finishes.
 
     Arguments:
         exec_type (RPCExecMode): Type of RPC/RRef call
@@ -158,10 +160,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
         dest_worker_name (str): Name of the destination worker.
 
     Returns:
-        An instance of `torch.autograd._RecordFunction`. This function also has
-        the side effect of running the before callbacks that start the
-        profiling, though the user is responsible for running the appropriate
-        callbacks when the function to be profiled finishes.
+        An instance of `torch.autograd._RecordFunction`.
     """
     assert torch.autograd._profiler_enabled(), "Autograd profiler should be enabled."
     profile_key = "rpc_{}.{}({} -> {})".format(

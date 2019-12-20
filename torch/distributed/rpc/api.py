@@ -259,22 +259,22 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
-
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
-
     info = _to_worker_info(to)
-    current_worker = get_worker_info()
+
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
     rf = None
     if torch.autograd._profiler_enabled():
         rf = _start_record_function(
             RPCExecMode.REMOTE,
-            str(qualified_name if qualified_name is not None else func.__name__),
-            current_worker.name,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
             info.name,
         )
+
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+
     if qualified_name is not None:
         return _invoke_remote_builtin(
             _agent, info, qualified_name, rf, *args, **kwargs)
@@ -291,16 +291,15 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
 
     qualified_name = torch.jit._find_builtin(func)
     info = _to_worker_info(to)
-    current_worker = get_worker_info()
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
     rf = None
     if torch.autograd._profiler_enabled():
         rf = _start_record_function(
             rpc_type,
-            str(qualified_name if qualified_name is not None else func.__name__),
-            current_worker.name,
-            info.name,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            _to_worker_info(to).name,
         )
 
     args = args if args else ()

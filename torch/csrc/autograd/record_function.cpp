@@ -197,6 +197,13 @@ void RecordFunction::processCallbacks() {
   }
 }
 
+void RecordFunction::setThreadId() {
+  TORCH_INTERNAL_ASSERT(
+      torch::autograd::profiler::thread_id != 0,
+      "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
+  threadId_ = torch::autograd::profiler::thread_id;
+}
+
 RecordFunction::~RecordFunction() {
   end();
 }
@@ -210,11 +217,11 @@ void RecordFunction::end() {
     }
 
     // In the case that RecordFunction::end is called from a different thread,
-    // thread_local_func will not be this, so assert that we are overriding the
-    // thread id and thread_local_func is null.
+    // thread_local_func will not be this, so assert that we have overriden the
+    // thread id (by ensuring it is nonzero) and thread_local_func is null.
     TORCH_INTERNAL_ASSERT(
         (thread_local_func_ == this) ||
-            (thread_local_func_ == nullptr && overrideThreadId_),
+            (thread_local_func_ == nullptr && threadId_ != 0),
         name_,
         ": must be top of stack");
     thread_local_func_ = parent_;

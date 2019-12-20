@@ -34,7 +34,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
+    thread_id = ++next_thread_id;
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -155,10 +155,9 @@ void enableProfiler(ProfilerConfig config) {
         } else {
           pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
         }
-        fn.setThreadId(thread_id);
       },
       [](const RecordFunction& fn) {
-        if (fn.overrideThreadId()) {
+        if (fn.getThreadId() != 0) {
           // If we've overridden the thread_id on the RecordFunction, then find
           //  the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
@@ -225,7 +224,7 @@ thread_event_lists disableProfiler() {
     thread_event_lists result;
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
     for (auto it = all_event_lists_map.begin(); it != all_event_lists_map.end();) {
-      auto & list = (it->second);
+      auto & list = it->second;
       result.emplace_back(list->consolidate());
       // GC lists that are not held by any threads
       if (list.use_count() == 1) {

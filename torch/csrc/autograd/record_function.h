@@ -105,27 +105,14 @@ struct TORCH_API RecordFunction {
 
   // Saves the thread_id that this RecordFunction was created with. This is
   // needed so that we can access Events created by the original thread in a
-  // different thread, since they are thread-local. An example use case is
-  // calling RecordFunction::end() in a different thread.
-  inline void setThreadId(uint16_t threadId) const {
-    threadId_ = threadId;
-  }
-
-  // A flag controlling whether we should use the thread set by setThreadId() or
-  //  not in callback-specific logic.
-  inline bool overrideThreadId() const {
-    return overrideThreadId_;
-  }
-
-  // Sets a flag indicating whether we should use the thread set by
-  // wsetThreadId() or not in callback-specific logic.
-  inline void setOverrideThreadId(bool shouldOverride=true) const {
-    overrideThreadId_ = shouldOverride;
-  }
+  // different thread, since they are thread-local. This should be used to call
+  // RecordFunction::end() in a different thread.
+  void setThreadId();
 
   // Retrieves the thread_id that this RecordFunction was created with. Useful
   // if we need to access Events created by the original thread in a different
-  // thread.
+  // thread. The threadId_ should only be set in cases where RecordFunction::end
+  // is called in a different thread.
   inline uint16_t getThreadId() const {
     return threadId_;
   }
@@ -142,10 +129,9 @@ struct TORCH_API RecordFunction {
 
   bool initialized_ = false;
   bool run_sampled_ = false;
-  // The thread_id that this RecordFunction was created with and whether we
-  // should use this thread or not in callback-specific logic.
-  mutable uint16_t threadId_;
-  mutable bool overrideThreadId_ = false;
+  // The thread_id that this RecordFunction was created with. Invalid if it is
+  // 0.
+  uint16_t threadId_ = 0;
 };
 
 TORCH_API bool hasCallbacks();
