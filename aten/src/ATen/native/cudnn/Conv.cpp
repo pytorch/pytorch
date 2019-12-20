@@ -31,7 +31,7 @@ at::Tensor cudnn_convolution_backward_weight(
   AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
+std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
@@ -59,7 +59,7 @@ at::Tensor cudnn_convolution_transpose_backward_weight(
   AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
+std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
@@ -866,7 +866,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight};
+  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
 }
 
 // ---------------------------------------------------------------------
@@ -998,7 +998,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     }
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight};
+  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
 }
 
 Tensor cudnn_convolution_transpose(
