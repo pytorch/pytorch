@@ -1637,7 +1637,7 @@ template <typename T> int maxList(Stack &stack) {
 }
 
 template <typename T>
-int listPop(Stack& stack) {
+int listPopImpl(Stack& stack, const char* empty_message) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -1645,7 +1645,7 @@ int listPop(Stack& stack) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
-    AT_ERROR("pop from empty list");
+    AT_ERROR(empty_message);
   }
 
   push(stack, getItem(list, idx));
@@ -1655,12 +1655,25 @@ int listPop(Stack& stack) {
 }
 
 template <typename T>
+int listPop(Stack& stack) {
+  return listPopImpl<T>(stack, "pop from empty list");
+}
+
+template <typename T>
 int listClear(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   list.clear();
   return 0;
 }
+
+template <typename T>
+int listDelete(Stack& stack) {
+  listPopImpl<T>(stack, "pop index out of range");
+  pop(stack);
+  return 0;
+}
+
 
 template <typename T>
 int listInsert(Stack& stack) {
@@ -2256,6 +2269,13 @@ int dictPop(Stack& stack) {
   return 0;
 }
 
+int dictDelete(Stack& stack) {
+  dictPop<false>(stack);
+  // pop pushes an item on the stack but delete does not, so get rid of it
+  pop(stack);
+  return 0;
+}
+
 int dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.size() == 0) {
@@ -2414,12 +2434,12 @@ RegisterOperators reg2({
           listSelect<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type   \
           "(c -> *) el) -> " decl_type "[](a!)",                              \
           listAppend<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",                   \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                    \
           listReverse<value_type>,                                            \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -2441,6 +2461,10 @@ RegisterOperators reg2({
       Operator(                                                               \
           "aten::clear( " decl_type "[](a!) self) -> ()",                     \
           listClear<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",           \
+          listDelete<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::insert( " decl_type                                          \
@@ -2524,6 +2548,10 @@ RegisterOperators reg2({
       Operator(                                                                \
           "aten::clear( " decl_type "[](a!) self) -> ()",                      \
           listClear<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",            \
+          listDelete<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
           "aten::insert( " decl_type                                           \
@@ -3104,6 +3132,11 @@ RegisterOperators reg2({
           "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
           " key, t default_value) -> t(*)",                                   \
           dictSetDefault,                                                     \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::Delete(Dict(" key_type ", t)(a!) self, " key_type            \
+          " key) -> ()",                                                    \
+          dictDelete,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \

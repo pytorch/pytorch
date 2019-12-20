@@ -545,6 +545,12 @@ struct ParserImpl {
       case TK_DEF: {
         return parseFunction(/*is_method=*/in_class);
       }
+      case TK_DELETE: {
+        L.expect(TK_DELETE);
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Delete::create(expr);
+      }
       default: {
         auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {

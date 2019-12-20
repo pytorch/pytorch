@@ -170,6 +170,11 @@ void initTreeViewBindings(PyObject* module) {
             r, wrap_list(r, std::move(params)), wrap_maybe(r, return_type));
       }));
 
+  py::class_<Delete, Stmt>(m, "Delete")
+      .def(py::init([](Expr expr) {
+        return Delete::create(expr);
+      }));
+
   py::class_<Assign, Stmt>(m, "Assign")
       .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
         auto li = wrap_list(rhs.range(), std::move(lhs));
