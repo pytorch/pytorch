@@ -3693,6 +3693,38 @@ graph(%Ra, %Rb):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_export_opnames(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x + y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 * x
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.one(self.two(x), x)
+
+        class Bar(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.sub = Foo()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.sub.forward(x)
+
+        bar = Bar()
+        ops = torch.jit.export_opnames(bar)
+        expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
+        self.assertEqual(ops, expected)
+
     def test_pytorch_jit_env_off(self):
         import subprocess
         env = os.environ.copy()
@@ -3734,7 +3766,6 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             model_loaded = torch.jit.load(buffer)
             self.assertEqual(model_loaded(), model())
-
 
 class TestFrontend(JitTestCase):
 

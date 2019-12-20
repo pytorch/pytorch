@@ -240,7 +240,7 @@ def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules
     """
-    return torch._C.export_opnames(m._c)
+    return torch._C._export_opnames(m._c)
 
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
