@@ -68,7 +68,7 @@ TypePtr IValue::type() const {
       return toTuple()->type();
   }
   // switch above is complete but this silences compiler warnings
-  TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+  TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type() tag:" << tag);
 }
 namespace {
 
