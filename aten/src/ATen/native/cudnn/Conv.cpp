@@ -747,10 +747,10 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
   }
 
   int64_t n = output.tensor.size(0);
-  int64_t inner_dim = output_numel / n;
-  TORCH_INTERNAL_ASSERT(inner_dim <= int_max, "This case should not be dispatched to cuDNN.");
+  int64_t inner_size = output_numel / n;
+  TORCH_INTERNAL_ASSERT(inner_size <= int_max, "This case should not be dispatched to cuDNN.");
   constexpr int64_t max_worksize = 1024 * 1024 * 512;
-  int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
+  int64_t split_size = std::max<int64_t>(max_worksize / inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
 
   for (int64_t i = 0; i < num_splits; i++) {

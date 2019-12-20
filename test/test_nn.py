@@ -9314,19 +9314,14 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
-    def test_conv_transposed_large(self, device):
+    def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
-        conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=True).to(device).to(dtype)
-        input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
+        conv = nn.Conv2d(2, 2, 1, 1, bias=True).to(device).to(dtype)
+        input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
         ret = conv(input_large)
-        maxdiff0 = (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024))).abs_().max().item()
-        maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
-        maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
-        maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
-        self.assertEqual(maxdiff0, 0)
-        self.assertEqual(maxdiff1, 0)
-        self.assertEqual(maxdiff2, 0)
-        self.assertEqual(maxdiff3, 0)
+        print(ret.shape)
+        self.assertEqual(ret[:2048], conv(input_large[:2048]))
+        self.assertEqual(ret[2048:], conv(input_large[2048:]))
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
