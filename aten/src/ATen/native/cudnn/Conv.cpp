@@ -781,8 +781,6 @@ static inline void split_batch_dim_to_32bit_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic,
     int64_t max_worksize, func_t func_32bit) {
-  std::cout << "output.sizes() = " << output.sizes() << std::endl;
-  std::cout << "input.sizes() = " << input.sizes() << std::endl;
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = output.numel();
@@ -798,7 +796,6 @@ static inline void split_batch_dim_to_32bit_out(
   // We don't max out the 2^31 address space because this number is super
   // large and very likely to get an OOM.
   int64_t n = output.size(0);
-  std::cout << "n = " << n << std::endl;
   int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
   int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
   int64_t num_splits = (n + split_size - 1) / split_size;
@@ -808,9 +805,6 @@ static inline void split_batch_dim_to_32bit_out(
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor output_ = output.narrow(0, start, split_size_);
-      std::cout << "i = " << i << std::endl;
-      std::cout << "start = " << start << std::endl;
-      std::cout << "split_size_ = " << split_size_ << std::endl;
       func_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic);
     }
     return;
@@ -984,10 +978,6 @@ void raw_cudnn_convolution_backward_input_out_32bit(
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  std::cout << "grad_input.data_ptr() = " << grad_input.data_ptr() << std::endl;
-  std::cout << "grad_output.data_ptr() = " << grad_output.data_ptr() << std::endl;
-  std::cout << "weight.data_ptr() = " << weight.data_ptr() << std::endl;
-
   auto dataType = getCudnnDataType(grad_output);
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
