@@ -7,6 +7,7 @@ import warnings
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
+from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
@@ -155,7 +156,6 @@ def infer_concrete_type_builder(nn_module):
     for name, overloaded_names in overloads.items():
         concrete_type_builder.add_overload(name, overloaded_names)
 
-
     for name, value in nn_module.__dict__.items():
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
@@ -184,6 +184,13 @@ def infer_concrete_type_builder(nn_module):
                 concrete_type_builder.add_failed_attribute(name, hint)
                 pass
 
+            continue
+
+        # Handle calls to builtin functions (either bespoke builtins from torch.jit._builtins or
+        # a call to an aten function like torch.add)
+        builtin_symbol_name = _find_builtin(value)
+        if builtin_symbol_name:
+            concrete_type_builder.add_builtin_function(name, builtin_symbol_name)
             continue
 
         # Handle Script function attributes
