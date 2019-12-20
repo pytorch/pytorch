@@ -2671,11 +2671,11 @@ Example::
 
 add_docstr_all('sub',
                r"""
-sub(other, value) -> Tensor
+sub(other, *, alpha=1) -> Tensor
 
-Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`value` and
-:attr:`other` are specified, each element of :attr:`other` is scaled by
-:attr:`value` before being used.
+Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`alpha`
+and :attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`alpha` before being used.
 
 When :attr:`other` is a tensor, the shape of :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
@@ -2685,7 +2685,7 @@ tensor.
 
 add_docstr_all('sub_',
                r"""
-sub_(x) -> Tensor
+sub_(x, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)

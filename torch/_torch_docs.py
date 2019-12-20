@@ -325,7 +325,7 @@ Example::
 
 add_docstr(torch.addmm,
            r"""
-addmm(input, mat1, mat2, *, value=1, out=None) -> Tensor
+addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
