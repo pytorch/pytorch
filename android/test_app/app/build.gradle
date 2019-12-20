@@ -77,7 +77,7 @@ android {
     }
 
     // Filtering for CI
-    if (!testAppCIVariantFilterEnabled.toBoolean()) {
+    if (!testAppAllVariantsEnabled.toBoolean()) {
         variantFilter { variant ->
             def names = variant.flavors*.name
             if (names.contains("nightly") || names.contains("camera")) {
