@@ -12,7 +12,6 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -302,17 +301,13 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-#ifdef BUILD_NAMEDTENSOR
   {
   NoNamesGuard guard;
-#endif
   bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(
       result,
       namedinference::compute_bmm_outnames(result, batch1, batch2));
-#endif
   return result;
 }
 
@@ -346,9 +341,7 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -456,24 +449,16 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
   auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 

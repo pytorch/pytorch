@@ -218,10 +218,6 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
-    if (!attrType) {
-      continue;
-    }
-
     if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
@@ -322,6 +318,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 5. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
+  } else if (
+      const auto builtin = concreteType_->findBuiltinFunction(field)) {
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
 
   // 6. Check if it's an attribute of the original Python class that this
