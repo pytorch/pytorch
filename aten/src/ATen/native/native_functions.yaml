@@ -510,13 +510,16 @@
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   variants: function
+  dispatch:
+    CPU: binary_cross_entropy_cpu
+    CUDA: binary_cross_entropy_cuda
 
 - func: binary_cross_entropy.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   variants: function
   dispatch:
-    CPU: binary_cross_entropy_out
-    CUDA: binary_cross_entropy_out
+    CPU: binary_cross_entropy_out_cpu
+    CUDA: binary_cross_entropy_out_cuda
 
 - func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn

@@ -103,12 +103,12 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
-Tensor binary_cross_entropy(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor loss;
-    return at::binary_cross_entropy_out(loss, input, target, weight, reduction);
+    return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
 }
 
-Tensor& binary_cross_entropy_out(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     TORCH_CHECK(
         (input >= 0).mul_(input <= 1).all().item<bool>(),
         "all elements of input should be between 0 and 1"
