@@ -316,7 +316,7 @@ class TestNumbaIntegration(common.TestCase):
         """torch.as_tensor(numba_ary) should have correct inferred (contiguous) strides"""
         # This could, in theory, be combined with test_from_cuda_array_interface but that test
         # is overly strict: it checks that the exported protocols are exactly the same, which
-        # cannot handle differening exported protocol versions.
+        # cannot handle differing exported protocol versions.
         dtypes = [
             numpy.float64,
             numpy.float32,
