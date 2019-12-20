@@ -116,13 +116,6 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // here to hip and everyone is happy.
 namespace at { namespace cuda { using namespace c10::hip; }}
 
-// C10_NORETURN
-#if defined(_MSC_VER)
-#define C10_NORETURN __declspec(noreturn)
-#else
-#define C10_NORETURN __attribute__((noreturn))
-#endif
-
 // C10_LIKELY/C10_UNLIKELY
 //
 // These macros provide parentheses, so you can use these macros as:
