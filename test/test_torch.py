@@ -677,6 +677,12 @@ class _TestTorchMixin(object):
         torch.sum(x, 0, out=y)
         self.assertEqual(x.sum(0, dtype=torch.uint8), y)
 
+    def test_dim_reduction_less_than_64(self):
+        sizes = [1] * 65
+        x = torch.randn(sizes)
+        with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
+            torch.sum(x, 64)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
         from scipy.special import logsumexp
@@ -5324,7 +5330,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             tensor[0] = np_val
             self.assertEqual(tensor[0], np_val)
 
-            # Original reported issue, np integral type parses to the correct 
+            # Original reported issue, np integral type parses to the correct
             # PyTorch integral type when passed for a `Scalar` parameter in
             # arithmetic operations:
             t = torch.from_numpy(np_arr)

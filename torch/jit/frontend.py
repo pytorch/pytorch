@@ -298,6 +298,10 @@ class StmtBuilder(Builder):
         return Assign([lhs], rhs, the_type)
 
     @staticmethod
+    def build_Delete(ctx, stmt):
+        return Delete(build_expr(ctx, stmt.targets[0]))
+
+    @staticmethod
     def build_Return(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
         return Return(r, None if stmt.value is None else build_expr(ctx, stmt.value))
