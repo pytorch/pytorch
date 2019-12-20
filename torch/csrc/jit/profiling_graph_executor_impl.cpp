@@ -2,14 +2,18 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -53,11 +57,67 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
-std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
-    const std::shared_ptr<Graph>& graph,
-    Stack& stack) {
-  auto g = graph->copy();
-  return g;
+void ProfilingGraphExecutorImpl::runProfilingOptimizations(
+    std::shared_ptr<Graph>& copy) {
+  if (!getGraphExecutorOptimize()) {
+    LowerGradOf(*copy);
+    runRequiredPasses(copy);
+    return;
+  }
+
+  InsertGuards(copy);
+  LowerGradOf(*copy);
+  EliminateRedundantGuards(copy);
+  InsertBailOuts(copy);
+  GRAPH_DUMP("After InsertBailOuts: ", copy);
+  specializeAutogradZero(*copy);
+
+  runRequiredPasses(copy);
+  ConstantPropagation(copy);
+  runOptimization(copy);
+
+  if (needsGradientInProfilingMode(copy->block())) {
+    auto diff_nodes = CreateAutodiffSubgraphs(
+        copy,
+        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    for (Node* dnode : diff_nodes) {
+      auto diff_graph = std::move(dnode->g(attr::Subgraph));
+      Gradient gradient = differentiate(diff_graph);
+      runOptimization(gradient.f);
+      // run non diff optimization on the forward graph
+      runNondiffOptimization(gradient.f);
+      packGradient(gradient, dnode);
+    }
+    InlineAutodiffSubgraphs(
+        copy,
+        getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+
+  } else {
+    runNondiffOptimization(copy);
+  }
+  EliminateDeadCode(copy);
+  GRAPH_DUMP("Optimized Graph : ", copy);
+}
+
+void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
+    std::shared_ptr<Graph>& copy) {
+  LowerGradOf(*copy);
+  GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
+  if (getProfilingMode()) {
+    ClearUndefinedness(copy);
+  }
+  runRequiredPasses(copy);
+  if (!getGraphExecutorOptimize()) {
+    return;
+  }
+
+  ConstantPropagation(copy);
+  EliminateDeadCode(copy);
+  EliminateCommonSubexpression(copy);
+  ConstantPooling(copy);
+  PeepholeOptimize(copy);
+  EliminateDeadCode(copy);
+  CheckInplace(copy);
 }
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
@@ -67,88 +127,42 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
+
   if (optimized_plan_) {
     return *optimized_plan_;
   }
 
-  std::shared_ptr<Graph> copy;
-  if (getProfilingMode()) {
-    if (!pr_) {
-      pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
-      auto copy = pr_->graph()->copy();
-      LowerGradOf(*copy);
-      specializeAutogradZero(*copy);
-      runRequiredPasses(copy);
-      GRAPH_DUMP("Profiled Graph: ", copy);
-      profiling_plan_ = ExecutionPlan(copy);
-      // fall-through
-    }
-
-    if (!pr_->ready()) {
-      return *profiling_plan_;
-    }
-    copy = pr_->graph()->copy();
-
-  } else {
-    copy = graph->copy();
-  }
-
-  if (!getGraphExecutorOptimize()) {
-    runRequiredPasses(copy);
+  // simple executor
+  if (!getProfilingMode()) {
+    auto copy = graph->copy();
+    runProfilingInsensitiveOptimizations(copy);
+    GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
     optimized_plan_ = ExecutionPlan(copy);
     return *optimized_plan_;
   }
 
-  InsertGuards(copy);
-  LowerGradOf(*copy);
-  if (getProfilingMode()) {
-    EliminateRedundantGuards(copy);
-    InsertBailOuts(copy);
-    GRAPH_DUMP("After InsertBailOuts: ", copy);
+  // if a profiling graph hasn't been created yet
+  if (!pr_) {
+    auto copy = graph->copy();
+    runProfilingInsensitiveOptimizations(copy);
+    pr_ = ProfilingRecord::instrumentGraph(copy);
+    auto pr_copy = pr_->graph()->copy();
+    GRAPH_DUMP("Profiled Graph: ", pr_copy);
+    profiling_plan_ = ExecutionPlan(pr_copy);
+    // fall-through
   }
 
-  specializeAutogradZero(*copy);
-  if (!getProfilingMode()) {
-    ClearUndefinedness(copy);
+  // profile until a graph is ready
+  if (!pr_->ready()) {
+    return *profiling_plan_;
   }
 
-  runRequiredPasses(copy);
-  ConstantPropagation(copy);
-  runOptimization(copy);
-
-  // TODO: insert grad propagation
-  bool needs_gradient = getProfilingMode()
-      ? needsGradientInProfilingMode(copy->block())
-      : true;
-  if (needs_gradient) {
-    // for Simple Executor skip creating autodiff graphs
-    // and let autograd handle backward for us
-    if (getProfilingMode()) {
-      auto diff_nodes = CreateAutodiffSubgraphs(
-        copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-      for (Node *dnode : diff_nodes) {
-        auto diff_graph = std::move(dnode->g(attr::Subgraph));
-        Gradient gradient = differentiate(diff_graph);
-        runOptimization(gradient.f);
-        // run non diff optimization on the forward graph
-        runNondiffOptimization(gradient.f);
-        packGradient(gradient, dnode);
-      }
-      InlineAutodiffSubgraphs(copy, getAutodiffSubgraphInlining()
-                                        ? autodiffSubgraphInlineThreshold
-                                        : 1);
-    }
-  } else {
-    runNondiffOptimization(copy);
-  }
-  EliminateDeadCode(copy);
-  GRAPH_DUMP("Optimized Graph : ", copy);
+  auto copy = pr_->graph()->copy();
+  runProfilingOptimizations(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
 }
-
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
