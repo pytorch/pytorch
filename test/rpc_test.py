@@ -551,7 +551,7 @@ class RpcTest(RpcAgentTestFixture):
                     # the owner, and get back a positive confirmation.
                     # Calling to_here does not ensure that we have finished
                     # processing the Owner's confirmation of this RRef.
-                    time.sleep(1)
+                    # time.sleep(1)
 
             events = prof.function_events
             rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
@@ -578,7 +578,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_remote(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
-        self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
+        # self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
     def test_py_class_constructor(self):

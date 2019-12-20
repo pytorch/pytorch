@@ -447,6 +447,9 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             fm->setError(std::string(
                 message.payload().begin(), message.payload().end()));
           } else {
+            if (message.type() == MessageType::REMOTE_RET) {
+              std::cout << "marking REMOTE_RET as completed\n";
+            }
             fm->markCompleted(std::move(message));
           }
         } else {
