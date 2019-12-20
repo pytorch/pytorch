@@ -7329,7 +7329,8 @@ a")
 
     # FIXME: get rid of this once we have actual ops using optional floats
     def test_optional_float(self):
-        def _test_optional_float(x : torch.Tensor, scale : Optional[float]):
+        def _test_optional_float(x, scale):
+            # type: (Tensor, Optional[float]) -> torch.Tensor
             return torch._test_optional_float(x, scale=scale)
 
         self.assertEqual([0], torch.jit.script(_test_optional_float)(torch.randn(()), None).shape)
