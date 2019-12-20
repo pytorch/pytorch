@@ -9319,9 +9319,9 @@ class TestNNDeviceType(NNTestCase):
         conv = nn.Conv2d(2, 2, 1, 1, bias=True).to(device).to(dtype)
         input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
         ret = conv(input_large)
-        print(ret.shape)
-        self.assertEqual(ret[:2048], conv(input_large[:2048]))
-        self.assertEqual(ret[2048:], conv(input_large[2048:]))
+        for i in range(4096 // 128):
+            maxdiff = (ret.narrow(0, 128 * i, 128) - conv(input_large.narrow(0, 128 * i, 128))).abs_().max().item()
+            self.assertEqual(maxdiff, 0)
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
