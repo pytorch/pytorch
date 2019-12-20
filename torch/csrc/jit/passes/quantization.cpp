@@ -735,10 +735,13 @@ void InsertQuantDeQuantHelper::removeObservers(
     const auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
-      module._ivalue()->unsafeRemoveAttr(observer_name);
-      module.type()->unsafeRemoveAttribute(observer_name);
+      if (module.hasattr(observer_name)) {
+        module._ivalue()->unsafeRemoveAttr(observer_name);
+        module.type()->unsafeRemoveAttribute(observer_name);
+      }
     }
-    observer_modules_to_remove_.at(g).clear();
+    // We don't clear `observer_modules_to_remove_` since different
+    // class type could share the Graph as well
   }
   GRAPH_DUMP("After remove observers :", g);
 }
