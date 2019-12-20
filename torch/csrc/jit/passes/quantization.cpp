@@ -543,8 +543,10 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
-  Graph* g = v->node()->owningGraph();
+void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
+  Graph* g = observer->owningGraph();
+  // Original value that is observed
+  Value* v = observer->input(1);
 
   std::string quantize_func;
   std::vector<Value*> inputs = {v};
@@ -577,7 +579,10 @@ void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
   std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
-    if (cur != quant) {
+    // Skip quant node and observer node (we need to keep
+    // observer nodes around since we need them to
+    // find the quantization parameters)
+    if (cur != quant && cur != observer) {
       use_nodes.push_back(cur);
     }
   }
@@ -726,7 +731,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
           original_value->debugName() + name, qparam.type(), qparam);
     }
     bool is_per_channel = qparam_map.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, original_value, is_per_channel);
+    insertQuantDeQuantCall(self, n, is_per_channel);
   }
 }
 
@@ -897,8 +902,6 @@ void InsertQuantDeQuantHelper::run(
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
-  removeObservers(module, graph.get());
-  GRAPH_DUMP("After Remove Observers:", graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
@@ -1147,6 +1150,7 @@ script::Module InsertQuantDeQuant(
   script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
   h.run(module, method_name);
+  h.removeObservers(module);
   return module;
 }
 
