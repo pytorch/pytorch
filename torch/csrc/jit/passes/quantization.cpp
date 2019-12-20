@@ -543,8 +543,10 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
-  Graph* g = v->node()->owningGraph();
+void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
+  Graph* g = observer->owningGraph();
+  // Original value that is observed
+  Value* v = observer->input(1);
 
   std::string quantize_func;
   std::vector<Value*> inputs = {v};
@@ -577,7 +579,10 @@ void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
   std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
-    if (cur != quant) {
+    // Skip quant node and observer node (we need to keep
+    // observer nodes around since we need them to
+    // find the quantization parameters)
+    if (cur != quant && cur != observer) {
       use_nodes.push_back(cur);
     }
   }
@@ -625,6 +630,14 @@ class InsertQuantDeQuantHelper {
   std::tuple<c10::QScheme, QParamMap> getQSchemeAndQParamMap(
       script::Module& module,
       Node* n);
+  void checkQScheme(Graph* g, c10::QScheme qscheme) {
+    if (qscheme_for_graph_.count(g)) {
+      TORCH_CHECK(qscheme_for_graph_.at(g) == qscheme,
+                  "Quantizing same graph with different QSchemes is not supported");
+    } else {
+      qscheme_for_graph_[g] = qscheme;
+    }
+  }
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
@@ -642,6 +655,9 @@ class InsertQuantDeQuantHelper {
   // get the information of original value that's been observed and
   // the quantization parameters
   std::unordered_map<Graph*, std::vector<Node*>> observer_nodes_;
+  // Record qscheme for every graph, this is for checking
+  // each graph is only quantized with one type of QScheme
+  std::unordered_map<Graph*, c10::QScheme> qscheme_for_graph_;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -718,6 +734,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
   for (auto* n : observer_nodes_.at(g)) {
     auto* original_value = n->input(1);
     auto tp = getQSchemeAndQParamMap(module, n);
+    checkQScheme(g, std::get<0>(tp));
     auto qparam_map = std::get<1>(tp);
     for (auto& pr : qparam_map) {
       const auto& name = pr.first;
@@ -726,7 +743,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
           original_value->debugName() + name, qparam.type(), qparam);
     }
     bool is_per_channel = qparam_map.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, original_value, is_per_channel);
+    insertQuantDeQuantCall(self, n, is_per_channel);
   }
 }
 
@@ -863,10 +880,10 @@ void InsertQuantDeQuantHelper::run(
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
   if (observer_nodes_.count(graph.get())) {
-    for (auto* n : observer_nodes_.at(g)) {
+    for (auto* n : observer_nodes_.at(graph.get())) {
       auto* original_value = n->input(1);
       auto tp = getQSchemeAndQParamMap(module, n);
-      checkQScheme(g, std::get<0>(tp));
+      checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
       for (auto& pr : qparam_map) {
         const auto& name = pr.first;
@@ -915,8 +932,6 @@ void InsertQuantDeQuantHelper::run(
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
-  removeObservers(module, graph.get());
-  GRAPH_DUMP("After Remove Observers:", graph);
 }
 
 void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
@@ -1165,6 +1180,7 @@ script::Module InsertQuantDeQuant(
   script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
   h.run(module, method_name);
+  h.removeObservers(module);
   return module;
 }
 
