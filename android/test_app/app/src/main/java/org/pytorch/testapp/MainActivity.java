@@ -83,8 +83,6 @@ public class MainActivity extends AppCompatActivity {
   @Nullable
   protected Result doModuleForward() {
     if (mModule == null) {
-      PyTorchAndroid.setNumThreads(1);
-      mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
       final long[] shape = BuildConfig.INPUT_TENSOR_SHAPE;
       long numElements = 1;
       for (int i = 0; i < shape.length; i++) {
@@ -92,6 +90,8 @@ public class MainActivity extends AppCompatActivity {
       }
       mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
       mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
+      PyTorchAndroid.setNumThreads(1);
+      mModule = PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
     final long startTime = SystemClock.elapsedRealtime();
