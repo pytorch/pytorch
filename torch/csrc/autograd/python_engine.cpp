@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <pybind11/pybind11.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -150,7 +149,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = ((THPVariable*)grad)->cdata;
-#ifdef BUILD_NAMEDTENSOR
       if (grad_var.has_names()) {
         TORCH_WARN(
             "Autograd was passed a named grad tensor with dims ", grad_var.names(),
@@ -158,7 +156,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
             "will be ignored. In practice all computed gradients will still be correct "
             "according to regular tensor semantics.");
       }
-#endif
       grads.push_back(grad_var);
     } else {
       THPUtils_assert(grad == Py_None,
