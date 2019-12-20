@@ -110,7 +110,7 @@ analyze_torch_mobile() {
   call_analyzer
 
   if [ -n "${DEPLOY}" ]; then
-    DEST="${SRC_ROOT}/tools/code_analyzer/generated/torch_deps.${FORMAT}"
+    DEST="${BUILD_ROOT}/torch_deps.py"
     cat > ${DEST} <<- EOM
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
