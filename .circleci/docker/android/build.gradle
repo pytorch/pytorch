@@ -57,6 +57,11 @@ dependencies {
     implementation 'com.google.code.findbugs:jsr305:3.0.1'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
 
+    def camerax_version = "1.0.0-alpha05"
+    implementation "androidx.camera:camera-core:$camerax_version"
+    implementation "androidx.camera:camera-camera2:$camerax_version"
+    implementation 'com.google.android.material:material:1.0.0-beta01'
+
     implementation 'junit:junit:' + rootProject.junitVersion
     implementation 'androidx.test:core:' + rootProject.coreVersion
 
