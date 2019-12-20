@@ -400,7 +400,6 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
   GRAPH_DUMP("bailout_graph ", bailout_graph);
-  // removeBailouts(bailout_graph->block());
   return bailout_graph;
 }
 
