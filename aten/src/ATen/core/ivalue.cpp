@@ -56,8 +56,8 @@ TypePtr IValue::type() const {
       return ListType::create(toGenericList().elementType());
     case Tag::Future:
       return toFuture()->type();
-    // case Tag::RRef:
-    //   return toRRef()->type();
+    case Tag::RRef:
+      return toRRef()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
