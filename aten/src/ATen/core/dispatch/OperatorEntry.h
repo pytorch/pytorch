@@ -27,9 +27,8 @@ public:
     return schema_;
   }
 
-  template<class Functor>
-  typename guts::infer_function_traits_t<Functor>::return_type readDispatchTable(Functor&& functor) const {
-    return dispatchTable_.read(std::forward<Functor>(functor));
+  const DispatchTable& dispatch_table() const {
+    return dispatchTable_;
   }
 
   void prepareForDeregistration();
@@ -41,6 +40,10 @@ public:
     return options_;
   }
 
+  void updateOptionsAliasAnalysis(AliasAnalysisKind a) {
+    options_.setAliasAnalysis(a);
+  }
+
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
@@ -48,7 +51,7 @@ private:
   FunctionSchema schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
-  LeftRight<DispatchTable> dispatchTable_;
+  DispatchTable dispatchTable_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.

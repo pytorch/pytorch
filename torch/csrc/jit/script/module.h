@@ -222,8 +222,14 @@ struct TORCH_API Module : public Object {
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap()) const;
 
-  // Create a deep copy of this module.
+  // Clones both the underlying `ClassType` and the module instance(data), this function
+  // creates a new `ClassType` and returns a new instance that has the same data
+  // as the current instance but with the new type
   Module clone() const;
+
+  // Clones the module instance but shares the underlying type with the
+  // the current instance, it doesn't create new `ClassType`
+  Module clone_instance() const;
 
   void clone_method(const Module& orig, const std::string& name);
 
@@ -323,7 +329,7 @@ struct slot_iterator_impl {
   }
 
   // advance to the next slot in a depth first pre-order traversal of the
-  // modules slots. This function does not guarentee the next slot is a
+  // modules slots. This function does not guarantee the next slot is a
   // valid element of the iteration. That is done by valid().
   // invariant: !cursors_.empty()
   void next() {

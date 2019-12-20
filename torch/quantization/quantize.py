@@ -309,7 +309,8 @@ def convert(module, mapping=None, inplace=False):
     SWAPPABLE_MODULES = (nni.ConvBn2d,
                          nni.ConvBnReLU2d,
                          nni.LinearReLU,
-                         nni.ConvReLU2d)
+                         nni.ConvReLU2d,
+                         nni.ConvReLU3d)
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:

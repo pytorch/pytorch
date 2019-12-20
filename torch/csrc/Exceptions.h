@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include <c10/util/Exception.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -124,7 +125,7 @@ struct python_error : public std::exception {
         value(other.value),
         traceback(other.traceback),
         message(other.message) {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
     Py_XINCREF(traceback);
@@ -142,7 +143,7 @@ struct python_error : public std::exception {
 
   ~python_error() override {
     if (type || value || traceback) {
-      AutoGIL gil;
+      pybind11::gil_scoped_acquire gil;
       Py_XDECREF(type);
       Py_XDECREF(value);
       Py_XDECREF(traceback);
@@ -155,7 +156,7 @@ struct python_error : public std::exception {
 
   void build_message() {
     // Ensure we have the GIL.
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
 
     // No errors should be set when we enter the function since PyErr_Fetch
     // clears the error indicator.
@@ -194,7 +195,7 @@ struct python_error : public std::exception {
   inline void persist() {
     if (type) return; // Don't overwrite exceptions
     // PyErr_Fetch overwrites the pointers
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XDECREF(type);
     Py_XDECREF(value);
     Py_XDECREF(traceback);
@@ -206,7 +207,7 @@ struct python_error : public std::exception {
   inline void restore() {
     if (!type) return;
     // PyErr_Restore steals references
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
     Py_XINCREF(traceback);

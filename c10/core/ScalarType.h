@@ -253,7 +253,7 @@ static inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-C10_DEPRECATED_MESSAGE("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
+[[deprecated("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]]
 static inline bool isIntegralType(ScalarType t) {
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
@@ -312,11 +312,12 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
   #define CASE_SIGNED(ctype, name) \
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
 
-  switch (toUnderlying(t)) {
+  switch (t) {
     AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
       AT_ERROR("Unknown ScalarType");

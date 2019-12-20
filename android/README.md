@@ -103,8 +103,15 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     implementation(name:'pytorch_android_fbjni', ext:'aar')
+    ...
+    implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 }
 ```
+We also have to add all transitive dependencies of our aars.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'` and `'com.facebook.soloader:nativeloader:0.8.0'`, we need to add them.
+(In case of using maven dependencies they are added automatically from `pom.xml`).
+
 
 At the moment for the case of using aar files directly we need additional configuration due to packaging specific (`libfbjni.so` is packaged in both `pytorch_android_fbjni.aar` and `pytorch_android.aar`).
 ```

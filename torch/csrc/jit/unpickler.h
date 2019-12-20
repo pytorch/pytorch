@@ -66,6 +66,10 @@ class Unpickler {
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
+  void readGlobal(
+      const std::string& module_name,
+      const std::string& class_name);
+  void rebuildTensor(bool quantized);
   PickleOpCode readInstruction();
   PickleOpCode readOpCode() {
     return static_cast<PickleOpCode>(read<uint8_t>());

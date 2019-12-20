@@ -8,6 +8,8 @@
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_types.h>
 
+#include <torch/csrc/Exceptions.h>
+
 PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 {
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);
@@ -31,11 +33,13 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
 
 PyObject *THPDtype_is_signed(THPDtype *self, PyObject *noargs)
 {
+  HANDLE_TH_ERRORS
   if (at::isSignedType(self->scalar_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPDtype_reduce(THPDtype *self, PyObject *noargs)

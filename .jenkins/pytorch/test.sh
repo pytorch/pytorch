@@ -48,8 +48,9 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-  # TODO: move this to Docker
-  pip_install --user hypothesis
+  # TODO: Please move this to Docker
+  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)

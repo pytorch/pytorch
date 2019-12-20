@@ -30,7 +30,6 @@ struct TORCH_API Object {
   void setattr(const std::string& name, c10::IValue v) {
     size_t slot = _ivalue()->type()->getAttributeSlot(name);
     const c10::TypePtr& expected = _ivalue()->type()->getAttribute(slot);
-    TORCH_CHECK(expected, "Module has no attribute '", name, "'");
     TORCH_CHECK(
         v.type()->isSubtypeOf(expected),
         "Expected a value of type '",
@@ -59,7 +58,7 @@ struct TORCH_API Object {
   }
 
   // each object owns its methods. The reference returned here
-  // is guarenteed to stay valid until this module has been destroyed
+  // is guaranteed to stay valid until this module has been destroyed
   Method get_method(const std::string& name) const {
     if (auto method = find_method(name)) {
       return *method;

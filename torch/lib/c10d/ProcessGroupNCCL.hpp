@@ -68,7 +68,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
     // Let current stream wait on the completing of the NCCL work
     // Throws on exceptions. Blocking operation, which will wait for work
@@ -144,7 +146,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
-  C10_DEPRECATED ProcessGroupNCCL(
+  [[deprecated]] ProcessGroupNCCL(
       const std::shared_ptr<Store>& store,
       int rank,
       int size,

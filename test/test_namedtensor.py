@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -266,6 +263,14 @@ class TestNamedTensor(TestCase):
 
         none_named_tensor = torch.zeros(2, 3).rename_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
+
+    def test_diagonal(self):
+        named_tensor = torch.zeros(2, 3, 5, 7, names=list('ABCD'))
+        self.assertEqual(named_tensor.diagonal().names, ['C', 'D', None])
+        self.assertEqual(named_tensor.diagonal(1, 3).names, ['A', 'C', None])
+
+        self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
+                         ['A', 'C', 'E'])
 
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
@@ -697,6 +702,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -722,6 +730,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
@@ -730,26 +739,27 @@ class TestNamedTensor(TestCase):
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
-    def test_logical_xor(self):
+    def test_logical_ops(self):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
             return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
-        self._test_name_inference(
-            torch.logical_xor,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+        for op in ('logical_xor', 'logical_and', 'logical_or'):
+            self._test_name_inference(
+                getattr(torch, op),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            Tensor.logical_xor_,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                getattr(Tensor, op + '_'),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            lambda out, x, y: torch.logical_xor(x, y, out=out),
-            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                lambda out, x, y: getattr(torch, op)(x, y, out=out),
+                (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
@@ -1035,6 +1045,11 @@ class TestNamedTensor(TestCase):
 
         # takes positional dim
         out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 
@@ -1935,11 +1950,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()
