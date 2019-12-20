@@ -215,6 +215,24 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+    L.next();
+    L.expect('.');
+    auto torch_tok = L.expect(TK_IDENT);
+    if (torch_tok.text() != "torch") {
+      throw ErrorReport(torch_tok.range)
+          << "Expected classes namespace but got " << torch_tok.text();
+    }
+    L.expect('.');
+    auto classes_tok = L.expect(TK_IDENT);
+    if (classes_tok.text() != "classes") {
+      throw ErrorReport(classes_tok.range)
+          << "Expected classes namespace but got " << classes_tok.text();
+    }
+    L.expect('.');
+    auto class_tok = L.expect(TK_IDENT);
+    // This is dumb and is just to break a circular dependency
+    value = IntType::get();
   } else {
     auto value_alias = parseBaseType();
     value = value_alias.first;

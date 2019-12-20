@@ -299,12 +299,9 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
 
-  // cast byte tensor to POD type
-  THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
-
   // accumulate generator data to be copied into byte tensor
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
-  cast_generator->getRNGState(rng_state);
+  cast_generator->getRNGState(self->data());
 }
 
 void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
@@ -320,14 +317,13 @@ void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
   static const size_t size_current = sizeof(THGeneratorStateNew);
   static_assert(size_legacy != size_current, "Legacy THGeneratorState and THGeneratorStateNew can't be of the same size");
 
-  at::mt19937 engine;
   auto float_normal_sample = c10::optional<float>();
   auto double_normal_sample = c10::optional<double>();
 
   // Construct the state of at::CPUGenerator based on input byte tensor size.
   THGeneratorState* legacy_pod;
   if (THTensor_(nElement)(self) == size_legacy) {
-    legacy_pod = (THGeneratorState*)self->data<scalar_t>();
+    legacy_pod = (THGeneratorState*)self->data();
     // Note that in legacy THGeneratorState, we didn't have float version
     // of normal sample and hence we leave the c10::optional<float> as is
 
@@ -343,7 +339,7 @@ void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
       double_normal_sample = c10::optional<double>(r * ::sin(theta));
     }
   } else if (THTensor_(nElement)(self) == size_current) {
-    auto rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
+    auto rng_state = (THGeneratorStateNew*)self->data();
     legacy_pod = &rng_state->legacy_pod;
     // update next_float_normal_sample
     if (rng_state->is_next_float_normal_sample_valid) {
