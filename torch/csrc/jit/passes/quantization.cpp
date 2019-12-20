@@ -898,8 +898,8 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  Value* self = graph->inputs()[0];
   GRAPH_DUMP("Before Quantize Tensors:", graph);
+  Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
   GRAPH_DUMP("After Quantize Tensors:", graph);
 }
