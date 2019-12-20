@@ -347,3 +347,8 @@ import torch.quasirandom
 # the memory format could be preserved, and it was switched to old default
 # behaviour of contiguous
 legacy_contiguous_format = contiguous_format
+
+# Register fork handler to initialize OpenMP in child processes (see gh-28389)
+from torch.multiprocessing._atfork import register_after_fork
+register_after_fork(torch.get_num_threads)
+del register_after_fork

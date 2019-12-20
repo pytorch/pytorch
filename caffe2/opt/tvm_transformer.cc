@@ -148,7 +148,7 @@ void TvmTransformer::transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints,
+    const ShapeInfoMap& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
@@ -263,7 +263,7 @@ void tvmTransform(
     const std::vector<std::string>& input_names,
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& shape_hints,
+    const ShapeInfoMap& shape_hints,
     const std::unordered_set<int>& blacklisted_ops,
     size_t max_batch_size,
     size_t max_seq_size,

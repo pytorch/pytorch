@@ -6,7 +6,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -234,22 +233,16 @@ Tensor log_softmax_backward_cpu(
 
 Tensor softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return at::_softmax(input_, dim_, false);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, input_);
-#endif
   return result;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_softmax(input_, dim_, true);
     } else {
@@ -257,30 +250,22 @@ Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarTyp
         return at::_softmax(converted, dim_, false);
     }
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, input_);
-#endif
   return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return at::_log_softmax(input_, dim_, false);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, input_);
-#endif
   return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_log_softmax(input_, dim_, true);
     } else {
@@ -288,9 +273,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
         return at::_log_softmax(converted, dim_, false);
     }
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, input_);
-#endif
   return result;
 }
 
@@ -299,7 +282,6 @@ DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
 }
@@ -307,7 +289,6 @@ Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
 Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
-#endif
 
 }
 }

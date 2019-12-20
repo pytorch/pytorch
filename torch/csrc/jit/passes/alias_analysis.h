@@ -93,6 +93,9 @@ class AliasDb {
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
 
+  static bool mutableType(const Value* v);
+  static bool mutableType(const TypePtr& type);
+
  private:
   // Helper for topologically-safe node moves.
   class WorkingSet;
@@ -168,8 +171,6 @@ class AliasDb {
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
-  static bool shouldAnnotate(const Value* v);
-  static bool shouldAnnotate(const TypePtr& type);
   static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
 
   static bool isContainerType(const TypePtr& type);
