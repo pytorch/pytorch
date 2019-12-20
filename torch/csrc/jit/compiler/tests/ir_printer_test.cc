@@ -29,7 +29,7 @@ TEST(IRPrinterTest, BasicValueTest02) {
 
   std::stringstream ss;
   ss << f;
-  EXPECT_EQ(ss.str(), "((2 + 3) + (4 + 5))");
+  EXPECT_EQ(ss.str(), "((2 + 3) - (4 + 5))");
 }
 
 TEST(IRPrinterTest, LetTest01) {
@@ -40,7 +40,7 @@ TEST(IRPrinterTest, LetTest01) {
 
   std::stringstream ss;
   ss << result;
-  EXPECT_EQ(ss.str(), "(let x = 3 in (2 + ((x + 3) + 4)))");
+  EXPECT_EQ(ss.str(), "(let x = 3 in (2 + ((x * 3) + 4)))");
 }
 
 TEST(IRPrinterTest, LetTest02) {
@@ -54,7 +54,7 @@ TEST(IRPrinterTest, LetTest02) {
   std::stringstream ss;
   ss << e2;
   EXPECT_EQ(
-      ss.str(), "(let y = 6 in (let x = 3 in (2 + ((x + 3) + (4 + y)))))");
+      ss.str(), "(let y = 6 in (let x = 3 in (2 + ((x * 3) + (4 * y)))))");
 }
 
 TEST(IRPrinterTest, CastTest) {
@@ -69,5 +69,5 @@ TEST(IRPrinterTest, CastTest) {
   ss << e2;
   EXPECT_EQ(
       ss.str(),
-      "(let y = 6 in (let x = int32(3) in (2 + ((x + 3) + (4 + y)))))");
+      "(let y = 6 in (let x = int32(3) in (2 + ((x * 3) + (4 * y)))))");
 }
