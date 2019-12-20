@@ -21,6 +21,7 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins  # noqa: F401
+from jit.unsupported_ops import TestUnsupportedOps  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -303,26 +304,6 @@ class FooToPickle(torch.nn.Module):  # noqa T484
     def __init__(self):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
-
-class Observer(torch.nn.Module):
-    def __init__(self, dtype=torch.quint8):
-        super(Observer, self).__init__()
-        self.dtype = dtype
-
-    def forward(self, x):
-        return x
-
-    @torch.jit.export
-    def calculate_qparams(self):
-        return torch.tensor([2.0]), torch.tensor([3])
-
-    @torch.jit.export
-    def get_qparams(self):
-        return self.calculate_qparams()
-
-class WeightObserver(Observer):
-    def __init__(self):
-        super(WeightObserver, self).__init__(torch.qint8)
 
 class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -991,7 +972,7 @@ graph(%x : Tensor,
                 return self.conv(x)
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -1053,7 +1034,7 @@ graph(%x : Tensor,
                        .run(str(s))
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
 
         torch._C._jit_pass_constant_propagation(get_forward_graph(m._c))
         qconfig = QConfig(
@@ -1104,7 +1085,7 @@ graph(%x : Tensor,
             # When we change the implementation to clone the module before
             # inserting observers, we can remove this copy
             m = m.copy()
-            observer = torch.jit.script(Observer())
+            observer = torch.jit.script(default_observer())
             qconfig_dict = {
                 '':
                 QConfig(
@@ -1139,8 +1120,8 @@ graph(%x : Tensor,
                 return F.relu(self.conv(x))
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
-        weight_observer = torch.jit.script(WeightObserver())
+        observer = torch.jit.script(default_observer())
+        weight_observer = torch.jit.script(default_weight_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -1228,7 +1209,7 @@ graph(%x : Tensor,
                 return b + c
 
         m = torch.jit.script(M())
-        observer = torch.jit.script(Observer())
+        observer = torch.jit.script(default_observer())
         qconfig_dict = {
             '':
             QConfig(
@@ -3563,6 +3544,12 @@ graph(%Ra, %Rb):
             def hints_bad_types(x, a=10, b=0.5):  # noqa: T484
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
+        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+            @torch.jit.script
+            def bad_no_optional(x=None):
+                # type: (Dict[str, int]) -> Dict[str, int]
+                return x
+
 
     def test_module_default_values(self):
         four = torch.tensor(4)
@@ -3787,6 +3774,27 @@ class TestScript(JitTestCase):
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
 
+    def test_bailout_loop_carried_deps_name_clash(self):
+        with enable_profiling_mode():
+            NUM_ITERATIONS = 10
+            @torch.jit.script
+            def fct_loop(z, size):
+                # type: (int, int) -> Tuple[Tensor, List[int]]
+                counters = torch.jit.annotate(List[int], [])
+                j = 0
+                y = torch.ones(2)
+                for i in range(size):
+                    counters.append(i + j)
+                    y = torch.cat((y, torch.ones(z)), 0)
+                    j = j + 1
+                return y, counters
+
+            inputs = [1, 2, 3, 4]
+            expected = [x * 2 for x in range(NUM_ITERATIONS)]
+            for inp in inputs:
+                results = fct_loop(inp, NUM_ITERATIONS)
+                self.assertEqual(results[1], expected)
+
     def test_bailout_loop_counter_transition(self):
         with enable_profiling_mode():
             NUM_ITERATIONS = 10
@@ -3953,6 +3961,62 @@ def foo(x):
         # shouldn't throw a type error
         torch.jit.script(MyMod())
 
+    def test_big_int_literals(self):
+        def ok():
+            # signed 64 bit max
+            a = 9223372036854775807
+            return a
+
+        def toobig():
+            a = 9223372036854775808
+            return a
+
+        def waytoobig():
+            a = 99999999999999999999
+            return a
+
+        self.checkScript(ok, [])
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(toobig)
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(waytoobig)
+
+    def test_hex_literals(self):
+        def test1():
+            return 0xaaaaaa
+
+        def test2():
+            return 0xaaaaaa
+
+        def test3():
+            return -0xaaaaaa
+
+        self.checkScript(test1, [])
+        self.checkScript(test2, [])
+        self.checkScript(test3, [])
+
+        def ok():
+            a = 0x7FFFFFFFFFFFFFFF
+            return a
+
+        def toobig():
+            a = 0xFFFFFFFFFFFFFFFF
+            return a
+
+        def waytoobig():
+            a = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+            return a
+
+        self.checkScript(ok, [])
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(toobig)
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            torch.jit.script(waytoobig)
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))
@@ -4115,6 +4179,17 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_builtin_function_attributes(self):
+        class Add(nn.Module):
+            def __init__(self):
+                super(Add, self).__init__()
+                self.add = torch.add
+
+            def forward(self, input):
+                return self.add(input, input)
+
+        self.checkModule(Add(), [torch.randn(2, 2)])
 
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
@@ -8284,7 +8359,6 @@ a")
                 num_chunks = 4
             elif isinstance(cell, torch.nn.GRU):
                 num_chunks = 3
-            print(num_chunks)
             vals = vals[:d_hid * num_chunks]
             cell.weight_ih_l0 = torch.nn.Parameter(
                 torch.tensor(vals, dtype=torch.float),
@@ -16279,6 +16353,12 @@ a")
         self.checkScript(test_dict_tensor_key, (dict_a, torch.tensor(3)))
         self.checkScript(test_dict_tensor_key, (dict_a, inp1))
         self.checkScript(test_dict_tensor_key, (dict_a, inp2))
+
+    def test_dict_types(self):
+        with self.assertRaisesRegex(RuntimeError, "single type"):
+            @torch.jit.script
+            def foo():
+                new_item = {'score': [1.0], 'ys': [1, 2, 3]}
 
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):
