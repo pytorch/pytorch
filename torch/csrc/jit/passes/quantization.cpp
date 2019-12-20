@@ -543,8 +543,10 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
-  Graph* g = v->node()->owningGraph();
+void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
+  Graph* g = observer->owningGraph();
+  // Original value that is observed
+  Value* v = observer->input(1);
 
   std::string quantize_func;
   std::vector<Value*> inputs = {v};
@@ -577,7 +579,10 @@ void insertQuantDeQuantCall(Value* self, Value* v, bool is_per_channel) {
   std::vector<Node*> use_nodes;
   for (const auto& use : v->uses()) {
     auto cur = use.user;
-    if (cur != quant) {
+    // Skip quant node and observer node (we need to keep
+    // observer nodes around since we need them to
+    // find the quantization parameters)
+    if (cur != quant && cur != observer) {
       use_nodes.push_back(cur);
     }
   }
@@ -629,6 +634,7 @@ class InsertQuantDeQuantHelper {
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
+  void removeObservers(script::Module& module);
   void removeObservers(script::Module& module, Graph* g);
   void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
@@ -669,9 +675,19 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   observer_nodes_[g].push_back(observer);
 }
 
+void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    removeObservers(module, method.graph().get());
+  }
+  for (script::Module m : module.children()) {
+    removeObservers(m);
+  }
+}
+
 void InsertQuantDeQuantHelper::removeObservers(
     script::Module& module,
     Graph* g) {
+  GRAPH_DUMP("Before Remove Observers:", g);
   if (nodes_to_destroy_.count(g)) {
     for (auto& n : nodes_to_destroy_.at(g)) {
       n->removeAllInputs();
@@ -694,6 +710,7 @@ void InsertQuantDeQuantHelper::removeObservers(
     }
     observer_modules_to_remove_.at(g).clear();
   }
+  GRAPH_DUMP("After remove observers :", g);
 }
 
 void InsertQuantDeQuantHelper::quantizeTensors(
@@ -714,7 +731,7 @@ void InsertQuantDeQuantHelper::quantizeTensors(
           original_value->debugName() + name, qparam.type(), qparam);
     }
     bool is_per_channel = qparam_map.at("_scale").isTensor();
-    insertQuantDeQuantCall(self, original_value, is_per_channel);
+    insertQuantDeQuantCall(self, n, is_per_channel);
   }
 }
 
@@ -881,8 +898,6 @@ void InsertQuantDeQuantHelper::run(
   for (Value* v : input_values) {
     collectObserverNodesAndValueToQuantize(module, v);
   }
-  GRAPH_DUMP("Before Remove Observers:", graph);
-  removeObservers(module, graph.get());
   GRAPH_DUMP("Before Quantize Tensors:", graph);
   Value* self = graph->inputs()[0];
   quantizeTensors(module, graph.get(), self);
@@ -1135,6 +1150,7 @@ script::Module InsertQuantDeQuant(
   script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
   h.run(module, method_name);
+  h.removeObservers(module);
   return module;
 }
 
