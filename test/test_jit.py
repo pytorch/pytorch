@@ -7421,7 +7421,7 @@ a")
                 self.assertEqual(t1.device, t2.device)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't have any shapes to propagate")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
         def func():
@@ -7429,23 +7429,16 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
-        else:
-            expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
+        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
                 exec(code, globals(), scope)
-                if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-                    fn = self.checkScript(code, ())
-                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
-                else:
-                    cu = torch.jit.CompilationUnit(code)
-                    torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                cu = torch.jit.CompilationUnit(code)
+                torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype):
