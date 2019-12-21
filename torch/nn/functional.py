@@ -2843,7 +2843,7 @@ def affine_grid(theta, size, align_corners=None):
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def pad(input, pad, mode='constant', value=0):
+def pad(input, pad, mode='constant', value=0.):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
