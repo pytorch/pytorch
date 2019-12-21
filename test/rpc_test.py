@@ -547,15 +547,22 @@ class RpcTest(RpcAgentTestFixture):
                     self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
                     rref = rpc.remote("worker{}".format(dst), func, args=args)
                     rref.to_here()
-                    # Hack: We need to wait for the instance to be created on
+                    # We need to wait for the instance to be created on
                     # the owner, and get back a positive confirmation.
                     # Calling to_here does not ensure that we have finished
-                    # processing the Owner's confirmation of this RRef.
-                    # time.sleep(1)
+                    # processing the Owner's confirmation of this RRef. To do
+                    # this, we wait until the current RRef context doesn't have
+                    # any pending users, which indicates that the confirmation
+                    # was processed on this worker.
+                    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+                    while num_pending_users != 0:
+                        time.sleep(0.1)
+                        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
 
             events = prof.function_events
             rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
-            # the sender, dest worker, function run, and type of RPC should all be recorded.
+            # the sender, dest worker, function run, and type of RPC should all
+            # be recorded.
             self_worker_name = "worker{}".format(self.rank)
             dst_worker_name = "worker{}".format(dst)
             self.assertTrue(self_worker_name in rpc_event.name)
@@ -1188,7 +1195,7 @@ class RpcTest(RpcAgentTestFixture):
             )
 
         from torch.distributed.rpc import _rref_context_get_debug_info
-        # Check 1: local RRef does not update owners_ map
+        # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
         rref1 = RRef(self.rank)
@@ -1196,9 +1203,10 @@ class RpcTest(RpcAgentTestFixture):
         # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
+        self.assertIn("num_pending_users", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual(0, int(info["num_owner_rrefs"]))
-
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after the check 1
         dist.barrier()
 
@@ -1218,7 +1226,8 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
-
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after check 2
         dist.barrier()
 
@@ -1246,6 +1255,8 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
 
         # barrier after check 3
         dist.barrier()
