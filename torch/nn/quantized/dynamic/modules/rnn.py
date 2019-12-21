@@ -30,7 +30,8 @@ class PackedParameter(torch.nn.Module):
         self.training = state[1]
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PackedParameter, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super(PackedParameter, self)._save_to_state_dict(destination, prefix,
+                                                         keep_vars)
         p = self.unpack()
         destination[prefix + 'weight'] = p
 
@@ -40,8 +41,11 @@ class PackedParameter(torch.nn.Module):
         self.param = torch.ops.quantized.linear_prepack(weight)
         state_dict.pop(prefix + 'weight')
 
-        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                              missing_keys, unexpected_keys, error_msgs)
+        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix,
+                                                           local_metadata,
+                                                           False, missing_keys,
+                                                           unexpected_keys,
+                                                           error_msgs)
 
     def __repr__(self):
         return repr(self.unpack())
