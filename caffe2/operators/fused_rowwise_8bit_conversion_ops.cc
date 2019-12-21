@@ -4,10 +4,6 @@
 namespace caffe2 {
 
 namespace {
-void convertfp32fp32(float* dst, const float* src, size_t N) {
-  memcpy(dst, src, sizeof(float) * N);
-}
-
 void convertfp16fp32(float* dst, const at::Half* src, size_t N) {
   for (size_t i = 0; i < N; i++) {
     dst[i] = src[i];
@@ -23,7 +19,11 @@ void convertfp32fp16(at::Half* dst, const float* src, size_t N) {
 
 REGISTER_CPU_OPERATOR(
     FloatToFused8BitRowwiseQuantized,
-    FloatToFused8BitRowwiseQuantizedOp<float, convertfp32fp32, CPUContext>);
+    FloatToFused8BitRowwiseQuantizedOp<
+        float,
+        nullptr,
+        false, /* HAS_CONVERT */
+        CPUContext>);
 OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -52,7 +52,11 @@ NO_GRADIENT(FloatToFused8BitRowwiseQuantized);
 
 REGISTER_CPU_OPERATOR(
     HalfFloatToFused8BitRowwiseQuantized,
-    FloatToFused8BitRowwiseQuantizedOp<at::Half, convertfp16fp32, CPUContext>);
+    FloatToFused8BitRowwiseQuantizedOp<
+        at::Half,
+        convertfp16fp32,
+        true, /* HAS_CONVERT*/
+        CPUContext>);
 OPERATOR_SCHEMA(HalfFloatToFused8BitRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -81,7 +85,11 @@ NO_GRADIENT(HalfFloatToFused8BitRowwiseQuantized);
 
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedToFloat,
-    Fused8BitRowwiseQuantizedToFloatOp<float, convertfp32fp32, CPUContext>);
+    Fused8BitRowwiseQuantizedToFloatOp<
+        float,
+        nullptr,
+        false, /* HAS_CONVERT */
+        CPUContext>);
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -114,7 +122,11 @@ NO_GRADIENT(Fused8BitRowwiseQuantizedToFloat);
 
 REGISTER_CPU_OPERATOR(
     Fused8BitRowwiseQuantizedToHalfFloat,
-    Fused8BitRowwiseQuantizedToFloatOp<at::Half, convertfp32fp16, CPUContext>);
+    Fused8BitRowwiseQuantizedToFloatOp<
+        at::Half,
+        convertfp32fp16,
+        true, /* HAS_CONVERT */
+        CPUContext>);
 OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToHalfFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -152,7 +164,8 @@ NO_GRADIENT(Fused8BitRowwiseQuantizedToHalfFloat);
 using Fused8BitRowwiseQuantizedToFloatCPUOp =
     caffe2::Fused8BitRowwiseQuantizedToFloatOp<
         float,
-        caffe2::convertfp32fp32,
+        nullptr,
+        false, /* HAS_CONVERT */
         caffe2::CPUContext>;
 
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
