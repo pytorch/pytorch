@@ -1119,7 +1119,7 @@ Tensor cudnn_convolution_transpose_backward_weight(
 namespace at { namespace native {
 
 // TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-at::Tensor cudnn_convolution(
+Tensor cudnn_convolution_deprecated(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
@@ -1131,7 +1131,7 @@ at::Tensor cudnn_convolution(
 }
 
 // TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_transpose(
+Tensor cudnn_convolution_transpose_deprecated(
     const Tensor& input, const Tensor& weight, const Tensor& bias /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
