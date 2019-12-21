@@ -806,8 +806,10 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   static PythonArgParser parser({
     ${signatures}
   }, /*traceable=*/${traceable});
+
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
+
   switch (_r.idx) {
     ${dispatch}
   }
@@ -825,8 +827,10 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   static PythonArgParser parser({
     ${signatures}
   }, /*traceable=*/${traceable});
+
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
+
   ${dispatch}
   ${method_footer}
 }
@@ -875,6 +879,8 @@ def method_impl(name, declarations, is_python_method):
             method_footer=method_footer,
         )
 
+    method_footer = ['Py_RETURN_NONE;'] + method_footer
+
     grouped = group_overloads(declarations)
     is_singleton = len(grouped) == 1
 
@@ -890,7 +896,6 @@ def method_impl(name, declarations, is_python_method):
         impl_template = PY_VARIABLE_METHOD_VARARGS_SINGLETON
     else:
         impl_template = PY_VARIABLE_METHOD_VARARGS
-        method_footer = ['Py_RETURN_NONE;'] + method_footer
 
     return impl_template.substitute(
         name=name,
