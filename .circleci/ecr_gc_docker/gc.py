@@ -11,8 +11,10 @@ def save_to_s3(project, data):
     table_content = ""
     client = boto3.client("s3")
     for repo, tag, window, age, pushed in data:
-        table_content += f"<tr><td>{repo}</td><td>{tag}</td><td>{window}</td><td>{age}</td><td>{pushed}</td></tr>"
-    html_body = f"""
+        table_content += "<tr><td>{repo}</td><td>{tag}</td><td>{window}</td><td>{age}</td><td>{pushed}</td></tr>".format(
+            repo=repo, tag=tag, window=window, age=age, pushed=pushed
+        )
+    html_body = """
     <html>
         <head>
             <link rel="stylesheet"
@@ -46,7 +48,9 @@ def save_to_s3(project, data):
             }} );
         </script>
     </html>
-    """
+    """.format(
+        project=project, table_content=table_content
+    )
 
     # for pytorch, file can be found at
     # http://ossci-docker.s3-website.us-east-1.amazonaws.com/pytorch.html
@@ -55,7 +59,7 @@ def save_to_s3(project, data):
     client.put_object(
         Bucket="ossci-docker",
         ACL="public-read",
-        Key=f"{project}.html",
+        Key="{project}.html".format(project=project),
         Body=html_body,
         ContentType="text/html",
     )
@@ -170,10 +174,6 @@ for repo in repos(client):
                 stable_window_tags.append((repositoryName, tag, window, age, created))
         else:
             window = unstable_window
-
-        print(
-            f"Debug: for tag: {tag}, keep window is {window}, age is {age}, pushed at {image['imagePushedAt']}"
-        )
 
         if tag in ignore_tags:
             print("Ignoring tag {} (age: {})".format(tag, age))
