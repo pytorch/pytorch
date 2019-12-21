@@ -4,31 +4,6 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/Exceptions.h>
 
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-at::Tensor cudnn_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  auto output = at::cudnn_convolution(input, weight, padding, stride, dilation, groups, benchmark, deterministic);
-  if (bias.defined()) {
-    output = output + reshape_bias(input.dim(), bias);
-  }
-  return output;
-}
-
-// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
-Tensor cudnn_convolution_transpose(
-    const Tensor& input, const Tensor& weight, const Tensor& bias /* optional */,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic)
-{
-  auto output = at::cudnn_convolution_transpose(input, weight, padding, stride, dilation, groups, benchmark, deterministic);
-  if (bias.defined()) {
-    output = output + reshape_bias(input.dim(), bias);
-  }
-  return output;
-}
-
 #if !AT_CUDNN_ENABLED()
 
 namespace at { namespace native {
@@ -1136,6 +1111,36 @@ Tensor cudnn_convolution_transpose_backward_weight(
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-}}  // namespace
+}}  // namespace at::native
 
 #endif
+
+
+namespace at { namespace native {
+
+// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
+at::Tensor cudnn_convolution(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  auto output = at::cudnn_convolution(input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  if (bias.defined()) {
+    output = output + reshape_bias(input.dim(), bias);
+  }
+  return output;
+}
+
+// TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
+Tensor cudnn_convolution_transpose(
+    const Tensor& input, const Tensor& weight, const Tensor& bias /* optional */,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic)
+{
+  auto output = at::cudnn_convolution_transpose(input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
+  if (bias.defined()) {
+    output = output + reshape_bias(input.dim(), bias);
+  }
+  return output;
+}
+
+}}  // namespace at::native
