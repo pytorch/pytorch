@@ -4548,6 +4548,7 @@ def foo(x):
         self.assertEqual(7, w(3))
         self.assertFalse("training" in w.state_dict())
 
+    @skipIfRocm
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
