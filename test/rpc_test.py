@@ -11,7 +11,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import RRef
+from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from common_utils import load_tests
 import dist_utils
 from dist_utils import dist_init
@@ -1194,7 +1194,6 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
             )
 
-        from torch.distributed.rpc import _rref_context_get_debug_info
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
@@ -1358,10 +1357,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
-        from torch.distributed.rpc import (
-            _get_debug_info,
-            _rref_context_get_debug_info
-        )
         from torch.distributed.rpc.api import _agent
         import torch.distributed.autograd as dist_autograd
 
