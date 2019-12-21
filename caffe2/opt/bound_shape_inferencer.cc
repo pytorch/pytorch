@@ -160,7 +160,11 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
   }
   if (!rt.second) {
     // Check shape consistency
-    CAFFE_ENFORCE_EQ(shape.dims_size(), bound_dims.size());
+    CAFFE_ENFORCE_EQ(
+        shape.dims_size(),
+        bound_dims.size(),
+        "Dim size inconsistency found in tensor ",
+        name);
     // For shapes that was provided as a hint at the input of the net, fix the
     // batch size first.
     if ((!shape_info.dimTypeIsSet() ||
