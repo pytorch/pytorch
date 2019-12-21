@@ -488,6 +488,7 @@ namespace scattergather {
               self_data -= idxCounter[d] * ensure_nonempty_stride(self, d);
               index_data -= idxCounter[d] * ensure_nonempty_stride(index, d);
               src_data -= idxCounter[d] * ensure_nonempty_stride(src, d);
+              idxCounter[d] = 0;
             }
           }
           else {
