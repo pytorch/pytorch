@@ -47,6 +47,27 @@ void binary_cross_entropy_out_kernel(Tensor& loss, const Tensor& input, const Te
   );
 }
 
+template<typename scalar_t>
+void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
+  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
+    grad_input,
+    grad,
+    input,
+    target,
+    [] __device__(
+      scalar_t& grad_input_val,
+      const scalar_t& grad_val,
+      const scalar_t& input_val,
+      const scalar_t& target_val
+    ) {
+      grad_input_val = (input_val - target_val) / (
+        max((1 - input_val) * input_val, EPSILON)
+      );
+      grad_input_val *= grad_val;
+    }
+  );
+}
+
 } // namespace
 
 namespace at { namespace native {
@@ -69,7 +90,7 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 }
 
 Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-  loss = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  loss = at::zeros_like(input);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_out_cuda", [&]() {
     binary_cross_entropy_out_kernel<scalar_t>(loss, input, target);
   });
@@ -82,6 +103,33 @@ Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const T
     loss = loss.sum();
   }
   return loss;
+}
+
+Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+  Tensor grad_input;
+  return at::native::binary_cross_entropy_backward_out_cuda(grad_input, grad, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_backward_out_cuda(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+  grad_input = at::ones_like(input);
+  if (reduction == at::Reduction::Sum || reduction == at::Reduction::Mean) {
+    Tensor expanded_grad = at::ones_like(input) * grad;
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
+      binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, expanded_grad, input, target);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
+      binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, grad, input, target);
+    });
+  }
+
+  if (weight.defined()) {
+    grad_input.mul_(weight);
+  }
+  if (reduction == at::Reduction::Mean) {
+    grad_input.div_(input.numel());
+  }
+  return grad_input;
 }
 
 }}  // namespace at::native

@@ -132,12 +132,12 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
     return loss;
 }
 
-Tensor binary_cross_entropy_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     Tensor grad_input;
-    return at::binary_cross_entropy_backward_out(grad_input, grad, input, target, weight, reduction);
+    return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
 }
 
-Tensor& binary_cross_entropy_backward_out(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
     // The gradient is the partial derivative of BCELoss
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
