@@ -1,5 +1,6 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace at { namespace native {
 namespace {
