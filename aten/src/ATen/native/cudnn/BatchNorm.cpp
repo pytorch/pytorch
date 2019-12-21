@@ -60,7 +60,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
             running_mean{ running_mean_t, "running_mean", 4 },
             running_var{ running_var_t, "running_var", 5 };
   CheckedFrom c = "cudnn_batch_norm";
-  setCuDNNStreamToCurrent();
 
   checkAllDefined(c, {input, weight, bias});
   if (!training) {
@@ -233,7 +232,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
             save_var{ save_var_t, "save_var", 5 },
             reserve{ reserveSpace, "reserve_space", 6 };
   CheckedFrom c = "cudnn_batch_norm_backward";
-  setCuDNNStreamToCurrent();
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
