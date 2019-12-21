@@ -40,9 +40,7 @@ cudnnHandle_t getCudnnHandle()
   if (!myPoolWindow)
     myPoolWindow.reset(pool.newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
-  AT_CUDNN_CHECK(cudnnSetStream(handle, at::cuda::getCurrentCUDAStream()));
-  return handle;
+  return myPoolWindow->reserve(device);
 }
 
 }} // namespace at::native
