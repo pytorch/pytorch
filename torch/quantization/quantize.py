@@ -141,7 +141,7 @@ def prepare(model, qconfig_dict=None, inplace=False):
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_(model)
+    propagate_qconfig_(model, qconfig_dict)
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
         warnings.warn("None of the submodule got qconfig applied. Make sure you "
