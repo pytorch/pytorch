@@ -1,3 +1,4 @@
+#include <limits>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
@@ -102,20 +103,20 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 //     if(dataType == CUDNN_DATA_HALF)
 //       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
 //
-// When cudnnSetConvolutionMathType is called before cudnnGet/cudnnFind, it informs 
+// When cudnnSetConvolutionMathType is called before cudnnGet/cudnnFind, it informs
 // cudnnGet/cudnnFind to iterate/take into account both tensor core and non-tensor-core algos.
 // If you don't call cudnnSetConvolutionMathType before calling cudnnGet/cudnnFind,
 // cudnnGet/cudnnFind may not pick tensor core algos.
-// 
+//
 // Now after its run, cudnnGet/cudnnFind comes up with the best pair of algo+mathType
 // with all the initial knowledge its given. It then becomes the user's responsibility
 // to update mathType of the convolution descriptor and call the subsequent cudnn calls with
 // the best algo and the updated descriptor. If we don't update the descriptor but just run
-// with the best algo, under the hood, cudnn will run with the slower kernel 
+// with the best algo, under the hood, cudnn will run with the slower kernel
 // since it sees fastest algorithm combination with a sub optimal mathType.
 
 // Note [blacklist fft algorithms for strided dgrad]
-// This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution 
+// This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution
 // gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
 namespace at { namespace native {
@@ -415,7 +416,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_
     bool blacklist = std::any_of(std::begin(args.params.stride),
                                 std::begin(args.params.stride) + stride_dim,
                                 [=](int n){return n != 1;});
-    if (blacklist && (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
+    if (blacklist && (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING
                   || static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
       perfResults[best_algo_idx].algo = algorithm_search<perf_t>::DEFAULT_ALGO;
       if (args.params.dataType == CUDNN_DATA_HALF) {
@@ -652,14 +653,14 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, perf_t* algoPerf
       // re-check cache since another thread may have benchmarked the algorithm
       return;
     }
-  } 
+  }
 
   auto perfResults = search::findAlgorithm(args, benchmark);
   // for deterministic algo, look at all the perf results and return the best
   // deterministic algo
   if (perfResults.status == CUDNN_STATUS_SUCCESS &&
       !(args.params.deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
-      
+
       // if benchmarking, map the original params with the found algo+math type for re-use
       if (benchmark) {
         cache.insert(args.params, perfResults);
@@ -694,6 +695,7 @@ Workspace chooseAlgorithm(
   try {
     return Workspace(algoPerf->memory);
   } catch (const std::exception& e) {
+
     cudaGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -753,6 +755,10 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 //      convolution and transposed convolution.  Does NOT take bias.
 //
 //    - raw_cudnn_convolution_forward_out (Tensor)
+//      Functiont that handles tensors that are too large to use 32bit indexing.
+//      It just split the tensor and dispatches to `raw_cudnn_convolution_forward_out_32bit`.
+//
+//    - raw_cudnn_convolution_forward_out_32bit (Tensor)
 //      Low level function which invokes CuDNN, and takes an output
 //      tensor which is directly written to (thus _out).
 //
@@ -784,7 +790,7 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 //    - It doesn't do input checking
 //    - It doesn't resize output (it is assumed to be correctly sized)
 //
-void raw_cudnn_convolution_forward_out(
+void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
@@ -806,7 +812,7 @@ void raw_cudnn_convolution_forward_out(
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   cudnnConvolutionFwdAlgoPerf_t fwdAlgPerf;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlgPerf);
-  
+
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not
   // See Note [behavior of cudnnFind and cudnnGet]
@@ -821,6 +827,54 @@ void raw_cudnn_convolution_forward_out(
     args.wdesc.desc(), weight.data_ptr(),
     args.cdesc.desc(), fwdAlgPerf.algo, workspace.data, workspace.size,
     &zero, args.odesc.desc(), output.data_ptr()));
+}
+
+void raw_cudnn_convolution_forward_out(
+    const Tensor& output, const Tensor& input, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  const int64_t ni = input.numel();
+  const int64_t no = output.numel();
+  // Assume the shape of the tensor is (N, C, D1, D2, ...)
+  // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
+  if (ni <= int_max && no <= int_max) {
+    raw_cudnn_convolution_forward_out_32bit(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    return;
+  }
+  // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
+  //
+  // Here we use a simple heuristics to determine the size of each split
+  // We don't max out the 2^31 address space because this number is super
+  // large and very likely to get an OOM.
+  //
+  // TODO: we might need a more thorough test to find the best number here
+  constexpr int64_t max_worksize = 1024 * 1024 * 256;
+  int64_t n = output.size(0);
+  int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
+  int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
+  int64_t num_splits = (n + split_size - 1) / split_size;
+  if (split_size * max_inner_size < int_max) {
+    for (int64_t i = 0; i < num_splits; i++) {
+      int64_t split_size_ = std::min<int64_t>(split_size, n - split_size * i);
+      Tensor output_ = output.narrow(0, split_size * i, split_size_);
+      Tensor input_ = input.narrow(0, split_size * i, split_size_);
+      raw_cudnn_convolution_forward_out_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    }
+    return;
+  }
+  // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
+  // For example, for conv2d, there following questions needs to be considered.
+  // - Is the memory layout NCHW or NHWC ?
+  // - If the conv is NCHW -> NC'H'W', then should we
+  //   - split only NC?
+  //   - split only N'C'?
+  //   - split both?
+  // - If the conv is NHWC, then we need to split across H, we need to be very careful about the boundary condition
+  //   to make sure that the boundary is handled correctly.
+  // - If we decide to make these splits, is the memory contiguous? Do we need to copy the memory?
+  // Considering the complexity of this issue, it is better not to use cuDNN for this case
+  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
 Tensor cudnn_convolution_forward(

@@ -9313,6 +9313,15 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    def test_conv_large(self, device):
+        dtype = torch.half if self.device_type == 'cuda' else torch.float
+        conv1 = nn.Conv2d(2, 2, 8, 8).to(device).to(dtype)
+        input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
+        ret = conv1(input_large)
+        self.assertEqual(ret[:2048], conv1(input_large[:2048]))
+        self.assertEqual(ret[2048:], conv1(input_large[2048:]))
+
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
         logits = logits.to(dtype)
