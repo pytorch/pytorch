@@ -888,48 +888,7 @@ void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  constexpr int64_t int_max = std::numeric_limits<int>::max();
-  const int64_t ni = input.numel();
-  const int64_t no = output.numel();
-  // Assume the shape of the tensor is (N, C, D1, D2, ...)
-  // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
-  if (ni <= int_max && no <= int_max) {
-    raw_cudnn_convolution_forward_out_32bit(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
-    return;
-  }
-  // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
-  //
-  // Here we use a simple heuristics to determine the size of each split
-  // We don't max out the 2^31 address space because this number is super
-  // large and very likely to get an OOM.
-  //
-  // TODO: we might need a more thorough test to find the best number here
-  constexpr int64_t max_worksize = 1024 * 1024 * 256;
-  int64_t n = output.size(0);
-  int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
-  int64_t split_size = std::max<int64_t>(max_worksize / max_inner_size, 1L);
-  int64_t num_splits = (n + split_size - 1) / split_size;
-  if (split_size * max_inner_size < int_max) {
-    for (int64_t i = 0; i < num_splits; i++) {
-      int64_t split_size_ = std::min<int64_t>(split_size, n - split_size * i);
-      Tensor output_ = output.narrow(0, split_size * i, split_size_);
-      Tensor input_ = input.narrow(0, split_size * i, split_size_);
-      raw_cudnn_convolution_forward_out_32bit(output_, input_, weight, padding, stride, dilation, groups, benchmark, deterministic);
-    }
-    return;
-  }
-  // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
-  // For example, for conv2d, there following questions needs to be considered.
-  // - Is the memory layout NCHW or NHWC ?
-  // - If the conv is NCHW -> NC'H'W', then should we
-  //   - split only NC?
-  //   - split only N'C'?
-  //   - split both?
-  // - If the conv is NHWC, then we need to split across H, we need to be very careful about the boundary condition
-  //   to make sure that the boundary is handled correctly.
-  // - If we decide to make these splits, is the memory contiguous? Do we need to copy the memory?
-  // Considering the complexity of this issue, it is better not to use cuDNN for this case
-  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
+  split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
 
 Tensor cudnn_convolution_forward(
