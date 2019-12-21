@@ -209,7 +209,7 @@ static void checkCuda90Bug(int i_m, int i_n, int i_k)
 void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, float alpha, float *a, int64_t lda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   checkCuda90Bug((int)m, (int)n, (int)k);
-  at::cuda::blas::gemm<float>(atransa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  at::cuda::blas::gemm<float>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 // In CUDA 8.0, definition of data types for sgemmex changed
