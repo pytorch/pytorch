@@ -14,6 +14,7 @@ namespace compiler {
 // represent a range [start, stop)
 class Range {
  public:
+  Range() {}
   Range(const Expr& start, const Expr& stop) : start_(start), stop_(stop) {}
   const Expr& start() const { return start_; }
   const Expr& stop() const { return stop_; }
@@ -25,8 +26,9 @@ class Range {
 
 class FunctionNode : public RefCounted {
  public:
-  FunctionNode(const std::vector<Expr>& dims, const std::vector<Var>& args, const Expr& body)
-      : dims_(dims), args_(args), body_(body) {}
+  FunctionNode(const std::string& func_name, const std::vector<Expr>& dims,
+	       const std::vector<Var>& args, const Expr& body)
+    : func_var_(func_name, body.dtype().scalar_type()), dims_(dims), args_(args), body_(body) {}
 
   int ndim() const { return dims_.size(); }
   const Expr& dim(int index) const {
@@ -40,8 +42,10 @@ class FunctionNode : public RefCounted {
     return args_[index];
   }
   const Expr& body() const { return body_; }
+  const Var& func_var() const { return func_var_; }
 
  private:
+  Var func_var_;
   std::vector<Expr> dims_;
   std::vector<Var> args_;
   Expr body_;
@@ -50,12 +54,14 @@ class FunctionNode : public RefCounted {
 class Function : public RefHandle<FunctionNode> {
  public:
   using BaseClass = RefHandle<FunctionNode>;
-  Function(const std::vector<Expr>& dims, const std::vector<Var>& args, const Expr& body)
-      : BaseClass(new FunctionNode(dims, args, body)) {}
+  Function(const std::string& func_name, const std::vector<Expr>& dims,
+	   const std::vector<Var>& args, const Expr& body)
+    : BaseClass(new FunctionNode(func_name, dims, args, body)) {}
   int ndim() const { return node()->ndim(); }
   const Expr& dim(int index) const { return node()->dim(index); }
   const Var& arg(int index) const { return node()->arg(index); }
   const Expr& body() const { return node()->body(); }
+  const Var& func_var() const { return node()->func_var(); }
 };
 
 } // namespace compiler

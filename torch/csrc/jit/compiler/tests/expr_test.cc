@@ -1,9 +1,7 @@
 #include <stdexcept>
 
-#include "torch/csrc/jit/compiler/include/expr.h"
-#include "torch/csrc/jit/compiler/include/ir.h"
-
 #include <gtest/gtest.h>
+
 #include "torch/csrc/jit/compiler/tests/test_utils.h"
 
 using namespace torch::jit::compiler;
@@ -50,7 +48,7 @@ TEST(ExprTest, LetTest02) {
 }
 
 TEST(ExprTest, Tensor01) {
-  Tensor tensor = Compute({Expr(3), Expr(4)}, {"x", "y"},
+  Tensor tensor = Compute("f", {Expr(3), Expr(4)}, {"x", "y"},
                           [](const Var& x, const Var& y) {
                             return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
                           });
