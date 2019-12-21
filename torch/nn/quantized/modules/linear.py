@@ -81,6 +81,7 @@ class Linear(torch.nn.Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+    _version = 2
     _FLOAT_MODULE = nn.Linear
 
     def __init__(self, in_features, out_features, bias_=True):
@@ -135,6 +136,14 @@ class Linear(torch.nn.Module):
 
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
+
+        version = local_metadata.get('version', None)
+        if version is None or version == 1:
+            # We moved the parameters into a LinearPackedParameters submodule
+            weight = state_dict.pop(prefix + 'weight')
+            bias = state_dict.pop(prefix + 'bias')
+            state_dict.update({prefix + '_packed_params.weight': weight,
+                               prefix + '_packed_params.bias': bias})
 
         super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                   missing_keys, unexpected_keys, error_msgs)

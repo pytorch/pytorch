@@ -121,10 +121,15 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
-    conv, bn
-    conv, bn, relu
-    conv, relu
-    linear, relu
+
+    * conv, bn
+
+    * conv, bn, relu
+
+    * conv, relu
+
+    * linear, relu
+
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
     with the fused module, replacing the rest of the modules
