@@ -7283,7 +7283,7 @@ class TestNN(NNTestCase):
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-    def test_upsampling_use_scale_factor(self):
+    def test_upsampling_not_recompute_scales(self):
         # test output against known input: result must match opencv
         in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
