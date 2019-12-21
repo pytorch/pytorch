@@ -267,6 +267,12 @@ class TestQuantizedTensor(TestCase):
         qc = deepcopy(q)
         self.assertEqual(qc, q)
 
+        # can't copy from quantized tensor to non-quantized tensor
+        r = torch.empty([numel], dtype=torch.float)
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
+            r.copy_(q)
+
     def test_qtensor_clone(self):
         numel = 10
         scale = 0.5
