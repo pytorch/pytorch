@@ -760,7 +760,6 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 // responsibility:
 //  - Things that happen in at::Tensor
 //    - TensorArg allocation
-//    - setCuDNNStreamToCurrent
 //  - Things that happen in TensorArg
 //    - Check arguments (type, GPU, shape)
 //
@@ -864,7 +863,6 @@ Tensor cudnn_convolution(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  setCuDNNStreamToCurrent();
   CheckedFrom c = "cudnn_convolution";
   auto output_t = cudnn_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
@@ -883,7 +881,6 @@ Tensor cudnn_convolution_transpose_backward_input(
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
             weight      { weight_t, "weight", 2 };
-  setCuDNNStreamToCurrent();
   return cudnn_convolution_forward(
     "cudnn_convolution_transpose_backward_input",
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
@@ -1008,7 +1005,6 @@ Tensor cudnn_convolution_backward_input(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
-  setCuDNNStreamToCurrent();
   return cudnn_convolution_backward_input(
       "cudnn_convolution_backward_input",
       input_size, grad_output, weight,
@@ -1138,7 +1134,6 @@ Tensor cudnn_convolution_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  setCuDNNStreamToCurrent();
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, grad_output, input,
@@ -1154,7 +1149,6 @@ Tensor cudnn_convolution_transpose_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  setCuDNNStreamToCurrent();
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, input, grad_output,
@@ -1171,7 +1165,6 @@ Tensor cudnn_convolution_backward_bias(
     const Tensor& grad_output_t)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
-  setCuDNNStreamToCurrent();
 
   auto grad_bias_t = at::empty(
                         { grad_output->size(output_channels_dim) }, grad_output->options());
