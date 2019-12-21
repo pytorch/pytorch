@@ -41,7 +41,7 @@ cudnnHandle_t getCudnnHandle()
     myPoolWindow.reset(pool.newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
-  AT_CUDNN_CHECK(cudnnSetStream(handle, at::cuda::getCurrentCUDAStream()));
+  AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }
 
