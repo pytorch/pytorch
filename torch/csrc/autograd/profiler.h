@@ -25,7 +25,7 @@ struct Node;
 
 namespace profiler {
 
-extern thread_local uint16_t thread_id;
+TORCH_API const uint16_t getThreadId();
 
 struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {

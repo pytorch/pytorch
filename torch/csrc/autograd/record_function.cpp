@@ -199,10 +199,11 @@ void RecordFunction::processCallbacks() {
 }
 
 void RecordFunction::setThreadId() {
+  auto threadId = torch::autograd::profiler::getThreadId();
   TORCH_INTERNAL_ASSERT(
-      torch::autograd::profiler::thread_id != 0,
+      threadId != 0,
       "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
-  threadId_ = torch::autograd::profiler::thread_id;
+  threadId_ = threadId;
 }
 
 RecordFunction::~RecordFunction() {
