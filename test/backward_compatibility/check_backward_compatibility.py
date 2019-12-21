@@ -30,6 +30,12 @@ white_list = [
     ('grad', datetime.date(2020, 1, 1)),
     ('logical_and', datetime.date(2019, 12, 12)),
     ('logical_or', datetime.date(2019, 12, 12)),
+    ('cudnn_convolution', datetime.date(2020, 1, 1)),
+    ('cudnn_convolution_backward', datetime.date(2020, 1, 1)),
+    ('cudnn_convolution_backward_bias', datetime.date(2020, 1, 1)),
+    ('cudnn_convolution_transpose', datetime.date(2020, 1, 1)),
+    ('cudnn_convolution_transpose_backward', datetime.date(2020, 1, 1)),
+    ('cudnn_convolution_transpose_backward_bias', datetime.date(2020, 1, 1)),
 ]
 
 
