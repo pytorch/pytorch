@@ -19,6 +19,7 @@ from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
 
+
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
@@ -584,7 +585,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_remote(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
-        # self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
     def test_py_class_constructor(self):
