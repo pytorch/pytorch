@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/native/ConvUtils.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -79,7 +80,6 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
-#include <ATen/native/ConvUtils.h>
 
 #include <functional>
 #include <iterator>
