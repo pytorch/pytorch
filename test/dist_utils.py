@@ -154,3 +154,15 @@ def wait_until_node_failure(rank):
             time.sleep(0.1)
         except Exception:
             break
+
+def initialize_pg():
+    # This is for tests using `dist.barrier`.
+    # For `RpcAgent` other than `ProcessGroupAgent`,
+    # no `_default_pg` is initialized.
+    if not dist.is_initialized():
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
