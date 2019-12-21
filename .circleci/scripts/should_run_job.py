@@ -53,8 +53,10 @@ default_set = set([
     'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
+    'pytorch-linux-xenial-py3-clang5-android-ndk-r19',
     # PyTorch Android gradle
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
+
     # Pytorch iOS builds
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
