@@ -474,6 +474,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
 
           // Extract columns:
           im2col<scalar_t>(
+              at::cuda::getCurrentCUDAStream(),
               grad_output_n.data_ptr<scalar_t>(),
               n_output_plane,
               output_height,
@@ -682,6 +683,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 
             // Extract columns:
             im2col<scalar_t>(
+                at::cuda::getCurrentCUDAStream(),
                 grad_output_n.data_ptr<scalar_t>(),
                 n_output_plane,
                 output_height,
