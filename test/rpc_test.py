@@ -570,7 +570,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(func.__name__ in rpc_event.name)
             self.assertTrue(rpc_exec_mode.value in rpc_event.name)
             self.assertEqual(rpc_event.count, 1)
-            print(prof.key_averages())
 
     @dist_init
     def test_profiler_with_sync_rpc(self):
