@@ -1284,6 +1284,13 @@ new_module_tests = [
     ),
     dict(
         module_name='ConvTranspose1d',
+        constructor_args=(1, 1, 3),
+        input_size=(0, 1, 1),
+        cudnn=True,
+        desc='zero_batch',
+    ),
+    dict(
+        module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
         input_size=(1, 3, 6),
         cudnn=True,
