@@ -28,10 +28,29 @@ struct LivenessAnalyzer {
     // In a special case, where IR is in a strict SSA form (i.e. all uses
     // are dominated by a definition)
     // and the control flow of programs is reducible, liveness can be computed
-    // in two passes (See https://hal.inria.fr/inria-00558509v2/document for
-    // the correctness proof) Our IR meets both criteria by construction.
+    // in two passes.
+    // Our IR meets both criteria by construction.
     // Namely, there is no way to express irreducible CF with `prim::Loop` and
     // `prim::If` and every definition dominates their uses
+    //
+    // A variable is considered live at any point in a program after its
+    // definition and before its last use. The sets of live variables before and
+    // after an operation or a basic block are called live-in and live-out A use
+    // of a variable `v` will be live-in at the loop headers of any set of the
+    // loops that don't contain its definition `d` and contain the use.
+    // Alternatively, for a set of loops that contain both the definition
+    // `d` and uses of `v`, `v` will only be live at a point `p`
+    // if there's a path from `p` to the use of `v` not containing the
+    // definition `d`. These are two main cases due to the reducibility of CFGs
+    // and strict SSA form.
+    // Thus, propagating liveness backwards just once excluding back edges,
+    // the accurate liveness will be computed at the loop
+    // headers. Any surviving uses `v` at the loop header should be alive
+    // throughout as a) they defined elsewhere (e.g. in outer loops, outer ifs,
+    // outermost scope) and b) may be used in the next iteration effectively
+    // extending their live ranges to cover the entire loop(s). The second pass
+    // propagates live variables at the loop header to every node within the
+    // loop See https://hal.inria.fr/inria-00558509v2/document for more details
     //
     // The first pass, `computePartialLivenessBackwards`, walks a graph backward
     // and depth-first and compute liveness as usual using the following
