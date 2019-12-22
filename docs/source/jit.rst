@@ -180,17 +180,11 @@ PyTorch Functions and Modules
 
 TorchScript supports a subset of the tensor and neural network
 functions that PyTorch provides. Most methods on Tensor as well as functions in
-the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in TorchScript, excluding those in the
-table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
-See :ref:`supported-pytorch-functions` and :ref:`supported-tensor-methods` for a full
-listing of available methods.
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and
+most modules from ``torch.nn`` are supported in TorchScript.
 
-Unsupported ``torch.nn`` Modules::
+See :ref:`jit_unsupported` for a list of unsupported PyTorch functions and modules.
 
-    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
-    torch.nn.modules.normalization.CrossMapLRN2d
-    torch.nn.modules.rnn.RNN
 
 Python Functions and Modules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
