@@ -167,9 +167,19 @@ struct Registerer final {
   }
 };
 
-// global instance to run its constructor on startup
-Registerer registerer;
+Registerer& registerer() {
+  static Registerer registerer;
+  return registerer;
+}
 
+// global instance to run its constructor on startup
+Registerer& dummy = registerer();
+
+} // namespace
+
+void ensure_c10_registerer_defined() {
+  registerer();
 }
-}
+
+} // namespace jit
 }

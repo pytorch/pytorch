@@ -260,6 +260,15 @@ public:
         is_vararg(),
         is_varret());
   }
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        arguments(),
+        std::move(new_returns),
+        is_vararg(),
+        is_varret());
+  }
 
   std::string formatTypeMismatchMsg(
       const Argument& expected,
