@@ -577,7 +577,7 @@ at::Tensor _convolution(
   Tensor output;
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
-
+    std::cout << "if params.is_depthwise is true.\n";
       auto kernel_size = weight.sizes().slice(2);
       auto stride = params.stride;
       auto padding = params.padding;
@@ -641,18 +641,23 @@ at::Tensor _convolution(
                                       params.padding, params.stride, params.dilation, params.groups);
     } else {
       // do not call contiguous on mkldnn tensor
+      std::cout << "if mkldnn_convolution.\n";
       output = at::mkldnn_convolution(input, weight, bias,
                                       params.padding, params.stride, params.dilation, params.groups);
     }
 #endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+    std::cout << "if input dev: CPU\n";
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
+      std::cout << "\tif use cpu depth wise\n";
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (params.groups == 1) {
+      std::cout << "\telse if params groups\n";
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
+      std::cout << "if input device type CPU.\n";
       std::vector<Tensor> outputs(params.groups);
       input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {
@@ -665,6 +670,7 @@ at::Tensor _convolution(
       output = at::cat(outputs, 1);
     }
   } else {
+    std::cout << "else final case out of soruce.\n";
     // Only reach here when input is backend with out-of-source implementation.
     output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
@@ -699,6 +705,7 @@ at::Tensor _convolution_nogroup(
   auto kernel_size = weight.sizes().slice(2);
 
   if (params.transposed) {
+    std::cout << "params. transposed true. dim=" << dim << std::endl;
     if (dim == 4) {
       return at::slow_conv_transpose2d(
           input, weight, kernel_size, bias,
@@ -709,6 +716,7 @@ at::Tensor _convolution_nogroup(
         stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */
+    std::cout << "dim: " << dim << std::endl;
     if (dim == 4) {
       if (dilated) {
         return at::slow_conv_dilated2d(

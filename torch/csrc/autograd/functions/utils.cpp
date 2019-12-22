@@ -6,6 +6,7 @@
 
 #include <sstream>
 #include <vector>
+#include <iostream>
 
 namespace torch { namespace autograd {
 
@@ -13,6 +14,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                            const function_constructor& ctr) {
   variable_list result;
   result.reserve(outputs.size());
+  std::cout << "wrap_outputs.\n";
   if (!any_variable_requires_grad(inputs)) {
     for (auto& output : outputs) {
       if (output.defined()) {
