@@ -223,7 +223,7 @@ struct OperatorSet {
 // scenario if you're querying registered ops during static init.
 //
 // This fn is defined in register_c10_ops.cpp
-void ensure_c10_registerer_defined();
+TORCH_API void ensure_c10_registerer_defined();
 
 } // namespace jit
 } // namespace torch

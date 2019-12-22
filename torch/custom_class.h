@@ -110,6 +110,7 @@ class class_ {
   void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
+    ensure_c10_registerer_defined();
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
     auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
