@@ -628,8 +628,6 @@ typedef vector<int64_t> (*TensorInfoCall)(
     const void*,
     size_t* capacity,
     DeviceOption* device);
-TensorInfoCall GetTensorInfoFunction(TypeIdentifier id);
-void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c);
 
 // resize helper function
 void TensorVectorResize(

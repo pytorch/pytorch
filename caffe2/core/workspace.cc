@@ -26,16 +26,13 @@ void Workspace::PrintBlobSizes() {
   vector<std::pair<size_t, std::string>> blob_sizes;
   for (const auto& s : blobs) {
     Blob* b = this->GetBlob(s);
-    TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
-    if (shape_fun) {
-      size_t capacity;
-      DeviceOption _device;
-      auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
-      // NB: currently it overcounts capacity of shared storages
-      // TODO: fix it after the storage sharing is merged
-      cumtotal += capacity;
-      blob_sizes.push_back(make_pair(capacity, s));
-    }
+    size_t capacity;
+    DeviceOption _device;
+    auto shape = GetTensorInfo(b->GetRaw(), &capacity, &_device);
+    // NB: currently it overcounts capacity of shared storages
+    // TODO: fix it after the storage sharing is merged
+    cumtotal += capacity;
+    blob_sizes.push_back(make_pair(capacity, s));
   }
   std::sort(
       blob_sizes.begin(),
@@ -50,12 +47,10 @@ void Workspace::PrintBlobSizes() {
   LOG(INFO) << "name;current shape;capacity bytes;percentage";
   for (const auto& sb : blob_sizes) {
     Blob* b = this->GetBlob(sb.second);
-    TensorInfoCall shape_fun = GetTensorInfoFunction(b->meta().id());
-    CHECK(shape_fun != nullptr);
     size_t capacity;
     DeviceOption _device;
 
-    auto shape = shape_fun(b->GetRaw(), &capacity, &_device);
+    auto shape = GetTensorInfo(b->GetRaw(), &capacity, &_device);
     std::stringstream ss;
     ss << sb.second << ";";
     for (const auto d : shape) {

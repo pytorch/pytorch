@@ -644,19 +644,14 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
 #endif
 
   TypeCall type_fun = GetTypeCallFunction(b->meta().id());
-  TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
   if (type_fun) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
-  if (tensor_info_fun) {
-    size_t _capacity;
-    DeviceOption _device;
-    auto shape = tensor_info_fun(b->GetRaw(), &_capacity, &_device);
-    for (auto d : shape) {
-      tp.add_dims(d);
-    }
-  } else {
-    tp.set_unknown_shape(true);
+  size_t _capacity;
+  DeviceOption _device;
+  auto shape = GetTensorInfo(b->GetRaw(), &_capacity, &_device);
+  for (auto d : shape) {
+    tp.add_dims(d);
   }
   return tp;
 }
@@ -733,20 +728,17 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
   auto Check = [&](const Blob& blob, std::string blob_name) {
-    TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());
-    if (tensor_info_fun) {
-      size_t _capacity;
-      DeviceOption blob_device;
-      tensor_info_fun(
-          const_cast<Blob&>(blob).GetRaw(),
-          &_capacity,
-          &blob_device);
+    size_t _capacity;
+    DeviceOption blob_device;
+    GetTensorInfo(
+        const_cast<Blob&>(blob).GetRaw(),
+        &_capacity,
+        &blob_device);
 
-      if ((blob_device.device_type() == PROTO_CUDA ||
-           blob_device.device_type() == PROTO_HIP) &&
-          blob_device.device_id() != op_device.device_id()) {
-        mismatches[blob_name] = std::make_pair(op_device, blob_device);
-      }
+    if ((blob_device.device_type() == PROTO_CUDA ||
+          blob_device.device_type() == PROTO_HIP) &&
+        blob_device.device_id() != op_device.device_id()) {
+      mismatches[blob_name] = std::make_pair(op_device, blob_device);
     }
   };
 

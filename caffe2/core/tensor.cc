@@ -105,25 +105,6 @@ GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   return GetTensorInfo(&(int8_tensor->t), capacity, device);
 }
 
-// since we only have one tensor, probably need to remove this at some point?
-static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
-    {TypeMeta::Id<Tensor>(), GetTensorInfo},
-    {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorInfo},
-};
-
-// TODO: Remove this code in a separate diff, since we only have one
-// GetTensorInfo function now
-TensorInfoCall GetTensorInfoFunction(TypeIdentifier id) {
-  auto f = tensor_info_call_registry_.find(id);
-  if (f == tensor_info_call_registry_.end()) {
-    return nullptr;
-  }
-  return f->second;
-}
-
-void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c) {
-  tensor_info_call_registry_[id] = c;
-}
 
 void TensorVectorResize(
     std::vector<Tensor>& tensors,
