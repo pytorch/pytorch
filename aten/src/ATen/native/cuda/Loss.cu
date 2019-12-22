@@ -111,17 +111,11 @@ Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& inpu
 }
 
 Tensor& binary_cross_entropy_backward_out_cuda(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-  grad_input = at::ones_like(input);
-  if (reduction == at::Reduction::Sum || reduction == at::Reduction::Mean) {
-    Tensor expanded_grad = at::ones_like(input) * grad;
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
-      binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, expanded_grad, input, target);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
-      binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, grad, input, target);
-    });
-  }
+  grad_input = at::zeros_like(input);
+  Tensor grad_expand = grad.expand_as(input);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
+    binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, grad_expand, input, target);
+  });
 
   if (weight.defined()) {
     grad_input.mul_(weight);
