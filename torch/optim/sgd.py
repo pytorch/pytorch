@@ -86,4 +86,5 @@ class SGD(Optimizer):
 
         return grad
 
-    get_sparse_update = get_update
+    def get_sparse_update(self, par, momentum=0, dampening=0, nesterov=False, **_):
+        return self.get_update(par, par.grad, momentum, dampening, nesterov)
