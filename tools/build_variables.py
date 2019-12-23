@@ -81,6 +81,7 @@ libtorch_sources = [
     "torch/csrc/jit/compiler/src/asmjit_codegen.cc",
     "torch/csrc/jit/compiler/src/expr.cc",
     "torch/csrc/jit/compiler/src/function.cc",
+    "torch/csrc/jit/compiler/src/ir_printer.cc",
     "torch/csrc/jit/compiler/src/ir_visitor.cc",
     "torch/csrc/jit/compiler/src/types.cc",
     "torch/csrc/jit/constants.cpp",
