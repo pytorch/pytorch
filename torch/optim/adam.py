@@ -1,4 +1,5 @@
 import math
+import warnings
 import torch
 from .optimizer import Optimizer
 
@@ -40,6 +41,13 @@ class Adam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, amsgrad=amsgrad)
         super(Adam, self).__init__(params, defaults)
+
+        # https://github.com/pytorch/pytorch/pull/22628
+        warnings.warn(
+            "Please note that the bias correction term for the exponentially decaying "
+            "average of the square gradient has been corrected, and may lead to some "
+            "differences."
+        )
 
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
