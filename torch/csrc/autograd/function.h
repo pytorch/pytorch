@@ -136,9 +136,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   uint32_t add_input_metadata(
     const at::TensorOptions& options
   , at::IntArrayRef shape
-  , at::Device device) noexcept {
+  , at::Device device
+  , bool is_lazy) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(options, shape, device);
+    input_metadata_.emplace_back(options, shape, device, is_lazy);
     return input_nr;
   }
 

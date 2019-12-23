@@ -20,13 +20,13 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device)
-  : options_{options}, shape_{shape}, device_{device} {
+  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device, bool is_lazy)
+  : options_{options}, shape_{shape}, device_{device}, is_lazy_(is_lazy) {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.options(), t.sizes(), t.device()) { }
+  : InputMetadata(t.options(), t.sizes(), t.device(), t.is_lazy()) { }
 
   const at::TensorOptions options() const {
     return options_;
@@ -48,10 +48,15 @@ struct InputMetadata {
     return at::zeros(shape_, options_);
   }
 
+  bool is_lazy() const {
+    return is_lazy_;
+  }
+
 private:
   const at::TensorOptions options_;
   at::DimVector shape_;
   at::Device device_ = at::kCPU;
+  bool is_lazy_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);
 };
 

@@ -20,8 +20,10 @@ __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 def _make_grads(outputs, grads):
     new_grads = []
     for out, grad in zip(outputs, grads):
+        # See torch/csrc/LazyTensor.cpp for details.
+        skip_check = (out is not None and out.is_lazy()) or (grad is not None and grad.is_lazy())
         if isinstance(grad, torch.Tensor):
-            if not out.shape == grad.shape:
+            if not skip_check and not out.shape == grad.shape:
                 raise RuntimeError("Mismatch in shape: grad_output["
                                    + str(grads.index(grad)) + "] has a shape of "
                                    + str(grad.shape) + " and output["

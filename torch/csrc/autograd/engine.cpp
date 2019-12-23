@@ -434,11 +434,14 @@ void validate_outputs(
     ss << edges.size() << ", but got " << grads.size();
     AT_ERROR(format_error(ss.str()));
   }
+
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
     if (!edge.is_valid()) continue;
 
     const auto& metadata = edge.function->input_metadata(edge.input_nr);
+    // If any input grad is lazy, we don't check shape properties
+    auto skip_check = metadata.is_lazy() || grads[i].is_lazy();
     const auto& output = grads[i];
     if (!output.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.
@@ -448,7 +451,7 @@ void validate_outputs(
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
-      if (!at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
+      if (!skip_check && !at::is_expandable_to(metadata.shape(), grads[i].sizes())) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - got ";
         ss << grads[i].sizes() << " but expected shape compatible with ";
@@ -461,7 +464,8 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
       grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.options(), grads[i].options())) {
+    // HACK: See torch/csrc/LazyTensor.cpp for details.
+    if (!skip_check && !is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
        ss << metadata.options() << " but got " << grads[i].options();

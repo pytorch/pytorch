@@ -47,6 +47,7 @@ enum class TensorTypeId : uint8_t {
   // examples are tracing or profiling) here, you need to also adjust
   // legacyExtractTypeId in c10/core/TensorTypeSet.h to mask them out.
 
+  LazyTensorId,
   VariableTensorId,
 
   // TESTING: This is intended to be a generic testing tensor type id.
