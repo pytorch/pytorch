@@ -444,6 +444,15 @@ void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name /* unused */, const c10::optional<double>& value) {
+  if (value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {

@@ -139,6 +139,7 @@ struct PythonArgs {
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
+  inline c10::optional<double> toDoubleOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
@@ -485,6 +486,13 @@ inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
     return c10::nullopt;
   }
   return toBool(i);
+}
+
+inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
+  if (!args[i]) {
+    return c10::nullopt;
+  }
+  return toDouble(i);
 }
 
 inline double PythonArgs::toDouble(int i) {

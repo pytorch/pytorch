@@ -7387,6 +7387,15 @@ a")
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
 
+    # FIXME: get rid of this once we have actual ops using optional floats
+    def test_optional_float(self):
+        def _test_optional_float(x, scale):
+            # type: (Tensor, Optional[float]) -> torch.Tensor
+            return torch._test_optional_float(x, scale=scale)
+
+        self.assertEqual([0], torch.jit.script(_test_optional_float)(torch.randn(()), None).shape)
+        self.assertEqual((), torch.jit.script(_test_optional_float)(torch.randn(()), 2.5).shape)
+
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
         def func(t):
