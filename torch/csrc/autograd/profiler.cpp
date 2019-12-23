@@ -54,6 +54,10 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
+bool profilerEnabled() {
+  return state != ProfilerState::Disabled;
+}
+
 void pushRangeImpl(
     const StringView& name,
     const char* msg = "",

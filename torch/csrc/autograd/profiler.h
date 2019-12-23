@@ -230,6 +230,7 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerConfig);
 TORCH_API thread_event_lists disableProfiler();
+TORCH_API bool profilerEnabled();
 
 
 // Usage:
