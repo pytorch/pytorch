@@ -305,18 +305,18 @@ def tensor_conv(
 
     return X, W, b, groups
 
-
-if hypothesis.version.__version_info__ >= (3, 27, 0):
-    settings.register_profile("no_deadline", deadline=None)
-
-    # This is really just to get flake8 to not complain when this file
-    # is imported purely for the side-effectful stuff above
-    def assert_deadline_disabled():
-        assert settings().deadline is None
-else:
-    from warnining import warn
-    warn("Your hypothesis version is outdated and doesn't support `deadline`. "
-         "Some tests are likely to fail with `DeadlineExceeded` error. "
-         "Current hypothesis version: {}".format(hypothesis.__version__))
-    settings.register_profile("no_deadline")
-settings.load_profile("no_deadline")
+# We set the deadline in the currently loaded profile.
+# Creating (and loading) a separate profile overrides any settings the user
+# already specified.
+settings._profiles[settings._current_profile].__dict__['deadline'] = None
+settings._profiles[settings._current_profile].__dict__['timeout'] = hypothesis.unlimited
+def assert_deadline_disabled():
+    assert settings().deadline is None
+    if hypothesis.version.__version_info__ < (3, 27, 0):
+        from warnining import warn
+        warning_message = (
+            "Your version of hypothesis is outdated. "
+            "To avoid `DeadlineExceeded` errors, please update. "
+            "Current hypothesis version: {}".format(hypothesis.__version__)
+        )
+        warn(warning_message)

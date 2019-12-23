@@ -2523,7 +2523,10 @@ class TestAutograd(TestCase):
         x = torch.randn(10, 10)
 
         with profile() as p:
+            self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
+
+        self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
         names = ['mul', 'add']
@@ -2719,6 +2722,21 @@ class TestAutograd(TestCase):
             f(1, 2)
 
         self.assertTrue('my_func' in str(p))
+
+    def test_record_function_multithreaded(self):
+        rf = record_function("outer")
+        rf.__enter__()
+        with profile():
+            # test that exiting the record function after starting a profile
+            # doesn't throw.
+            rf.__exit__()
+
+        with profile():
+            rf.__enter__()
+        # test that exiting the record function after the profile has ended
+        # doesn't throw.
+        rf.__exit__()
+
 
     def test_dir(self):
         x = torch.randn(10, 10)

@@ -102,7 +102,7 @@ template<template <class> class Condition, class TypeList> struct filter final {
 template<template <class> class Condition, class Head, class... Tail>
 struct filter<Condition, typelist<Head, Tail...>> final {
   static_assert(is_type_condition<Condition>::value, "In typelist::filter<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
-  using type = guts::conditional_t<
+  using type = std::conditional_t<
     Condition<Head>::value,
     concat_t<typelist<Head>, typename filter<Condition, typelist<Tail...>>::type>,
     typename filter<Condition, typelist<Tail...>>::type
@@ -142,9 +142,9 @@ namespace detail {
 template<class TypeList, class Type, class Enable = void> struct contains {};
 template<class Type> struct contains<typelist<>, Type, void> : std::false_type {};
 template<class Type, class Head, class... Tail>
-struct contains<typelist<Head, Tail...>, Type, guts::enable_if_t<std::is_same<Head, Type>::value>> : std::true_type {};
+struct contains<typelist<Head, Tail...>, Type, std::enable_if_t<std::is_same<Head, Type>::value>> : std::true_type {};
 template<class Type, class Head, class... Tail>
-struct contains<typelist<Head, Tail...>, Type, guts::enable_if_t<!std::is_same<Head, Type>::value>> : contains<typelist<Tail...>, Type> {};
+struct contains<typelist<Head, Tail...>, Type, std::enable_if_t<!std::is_same<Head, Type>::value>> : contains<typelist<Tail...>, Type> {};
 }
 template<class TypeList, class Type>
 using contains = typename detail::contains<TypeList, Type>::type;
@@ -280,11 +280,11 @@ template<template<class> class Condition> struct find_if<typelist<>, Condition, 
   static_assert(false_higher_t<Condition>::value, "In typelist::find_if<Type/List, Condition>, didn't find any type fulfilling the Condition.");
 };
 template<class Head, class... Tail, template<class> class Condition>
-struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<Condition<Head>::value>> final {
+struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<Condition<Head>::value>> final {
   static constexpr size_t value = 0;
 };
 template<class Head, class... Tail, template<class> class Condition>
-struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<!Condition<Head>::value>> final {
+struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<!Condition<Head>::value>> final {
   static constexpr size_t value = 1 + find_if<typelist<Tail...>, Condition>::value;
 };
 
@@ -293,31 +293,19 @@ struct find_if<typelist<Head, Tail...>, Condition, enable_if_t<!Condition<Head>:
 /**
  * Maps a list of types into a list of values.
  * Examples:
- *   // C++14 example
+ *   // Example 1
  *   auto sizes =
  *     map_types_to_values<typelist<int64_t, bool, uint32_t>>(
  *       [] (auto t) { return sizeof(decltype(t)::type); }
  *     );
  *   //  sizes  ==  std::tuple<size_t, size_t, size_t>{8, 1, 4}
  *
- *   // C++14 example
+ *   // Example 2
  *   auto shared_ptrs =
  *     map_types_to_values<typelist<int, double>>(
  *       [] (auto t) { return make_shared<typename decltype(t)::type>(); }
  *     );
  *   // shared_ptrs == std::tuple<shared_ptr<int>, shared_ptr<double>>()
- *
- *   // C++11 example
- *   struct map_to_size {
- *     template<class T> constexpr size_t operator()(T) {
- *       return sizeof(typename T::type);
- *     }
- *   };
- *   auto sizes =
- *     map_types_to_values<typelist<int64_t, bool, uint32_t>>(
- *       map_to_size()
- *     );
- *   //  sizes  ==  std::tuple<size_t, size_t, size_t>{8, 1, 4}
  */
 namespace detail {
 template<class T> struct type_ final {
@@ -328,8 +316,8 @@ template<class TypeList> struct map_types_to_values final {
 };
 template<class... Types> struct map_types_to_values<typelist<Types...>> final {
   template<class Func>
-  static std::tuple<guts::result_of_t<Func(type_<Types>)>...> call(Func&& func) {
-    return std::tuple<guts::result_of_t<Func(type_<Types>)>...> { std::forward<Func>(func)(type_<Types>())... };
+  static std::tuple<std::result_of_t<Func(type_<Types>)>...> call(Func&& func) {
+    return std::tuple<std::result_of_t<Func(type_<Types>)>...> { std::forward<Func>(func)(type_<Types>())... };
   }
 };
 }
