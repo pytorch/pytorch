@@ -44,8 +44,7 @@ except ImportError:
 #
 
 def has_outputs(declaration):
-    args = declaration['arguments']
-    return any([a.get('output', False) for a in args])
+    return any([is_output(arg) for arg in declaration['arguments']])
 
 
 def has_tensor_options_arg(declaration):
@@ -149,9 +148,10 @@ def should_generate_python_binding(declaration):
 # top-level codegen functions, called from gen_autograd
 #
 
-def gen_py_variable_methods(out, declarations, template_path):
+def get_py_variable_methods(declarations):
     """
-    Generate Tensor methods.
+    Get declarations (grouped by name) which should be generated
+    as methods on Tensor.
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
@@ -159,11 +159,29 @@ def gen_py_variable_methods(out, declarations, template_path):
                 declaration.get('python_module') != 'nn' and
                 is_tensor_method(declaration))
 
-    py_variable_methods = group_declarations([d for d in declarations if should_bind(d)])
-    env = create_python_bindings(py_variable_methods, True)
+    return group_declarations([d for d in declarations if should_bind(d)])
 
+
+def gen_py_variable_methods(out, declarations, template_path):
+    """
+    Generate Tensor methods.
+    """
+    py_variable_methods = get_py_variable_methods(declarations)
     PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
+    env = create_python_bindings(py_variable_methods, True)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
+
+
+def get_py_nn_functions(declarations):
+    """
+    Get declarations (grouped by name) which should be generated
+    as functions in the "nn" module.
+    """
+    def should_bind(declaration):
+        return (should_generate_python_binding(declaration) and
+                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
+
+    return group_declarations([d for d in declarations if should_bind(d)])
 
 
 def gen_py_nn_functions(out, declarations, template_path):
@@ -174,20 +192,16 @@ def gen_py_nn_functions(out, declarations, template_path):
     PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
     write(out, 'python_nn_functions.h', PY_NN_FUNCTIONS_H, {})
 
-    def should_bind(declaration):
-        return (should_generate_python_binding(declaration) and
-                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
-
-    py_nn_functions = group_declarations([d for d in declarations if should_bind(d)])
-    env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
-
+    py_nn_functions = get_py_nn_functions(declarations)
     PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
+    env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
-def gen_py_torch_functions(out, declarations, template_path):
+def get_py_torch_functions(declarations):
     """
-    Generated functions in the "torch" module.
+    Get declarations (grouped by name) which should be generated
+    as functions in the "torch" module.
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
@@ -195,10 +209,16 @@ def gen_py_torch_functions(out, declarations, template_path):
                 declaration.get('python_module') != 'nn' and
                 is_torch_function(declaration))
 
-    py_torch_functions = group_declarations([d for d in declarations if should_bind(d)])
-    env = create_python_bindings(py_torch_functions, is_python_method=False)
+    return group_declarations([d for d in declarations if should_bind(d)])
 
+
+def gen_py_torch_functions(out, declarations, template_path):
+    """
+    Generate functions in the "torch" module.
+    """
+    py_torch_functions = get_py_torch_functions(declarations)
     PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
+    env = create_python_bindings(py_torch_functions, is_python_method=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 
 
@@ -230,6 +250,7 @@ UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
     'Generator *': 'generator',
+    'Storage': 'storage',
     'Storage &': 'storage',
     'const Type &': 'scalartype',
     'const THPLayout &': 'layout',
@@ -241,10 +262,21 @@ UNPACK_METHODS = {
     'c10::optional<int64_t>': 'toInt64Optional',
     'c10::optional<bool>': 'toBoolOptional',
     'IntArrayRef': 'intlist',
+    'Scalar': 'scalar',
+    'ScalarType': 'scalartype',
+    'Dimname': 'dimname',
+    'DimnameList': 'dimnamelist',
+    'TensorList': 'tensorlist',
     'int64_t': 'toInt64',
     'bool': 'toBool',
     'double': 'toDouble',
     'std::string': 'string',
+}
+
+UNPACK_WITH_SIZE_METHODS = {
+    'TensorList': 'tensorlist_n<{}>',
+    'DimnameList': 'dimnamelist',
+    'IntArrayRef': 'intlist',
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
@@ -262,15 +294,25 @@ UNPACK_WITH_DEFAULT_METHODS = {
 def parsed_arg_expr(arg, arg_index):
     # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
     typename = arg['type']
+
     default_init = arg.get('python_default_init')
-    if default_init:
+    if default_init is not None:
+        default_init = arg['python_default_init']
         assert typename in UNPACK_WITH_DEFAULT_METHODS, \
             '`{}` type is not supported in python_default_init'.format(typename)
-        unpack_with_default = UNPACK_WITH_DEFAULT_METHODS.get(typename)
+        unpack_with_default = UNPACK_WITH_DEFAULT_METHODS[typename]
         return '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_init)
-    else:
-        unpack = UNPACK_METHODS.get(typename, typename.lower())
-        return '_r.{}({})'.format(unpack, arg_index)
+
+    size = arg.get('size')
+    if size is not None:
+        assert typename in UNPACK_WITH_SIZE_METHODS, \
+            '`{}` type with definite size ({}) is not supported'.format(typename, size)
+        unpack_with_size = UNPACK_WITH_SIZE_METHODS[typename].format(size)
+        return '_r.{}({})'.format(unpack_with_size, arg_index)
+
+    assert typename in UNPACK_METHODS, '`{}` type is not supported'.format(typename)
+    unpack = UNPACK_METHODS[typename]
+    return '_r.{}({})'.format(unpack, arg_index)
 
 
 # TODO
@@ -447,91 +489,58 @@ Py_RETURN_NONE;
 """)
 
 
-def emit_single_dispatch(declaration, out_idx, is_python_method):
+def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     """
     Emit dispatch code for a single declared overload.
     """
 
-    tensor_options_args = declaration['python_arglists']['tensor_options_args']
-    has_tensor_options = has_tensor_options_arg(declaration)
-
-    # block header
-    deprecated = '[deprecated] ' if declaration.get('deprecated', False) else ''
-    schema_string = '// ' + deprecated + declaration['schema_string']
-
     # initializer statement list for unpacking parsed args
-    inits = [schema_string]
+    deprecated = '[deprecated] ' if declaration.get('deprecated', False) else ''
+    schema_comment = '// ' + deprecated + declaration['schema_string']
+    inits = [schema_comment]
 
     argmap = {}
 
-    # TODO use python args instead
-    # inputs
     if is_python_method:
-        argmap['self'] = {'value': 'self', 'formal': 'Tensor & self'}
         # self is passed directly to python binding, rather than parsed
-        # redo formals filtering TODO merge
-        arg_filter = lambda arg: not is_tensor_options(arg) and not is_tensor_self(arg)
-    else:
-        # redo formals filtering TODO merge
-        arg_filter = lambda arg: not is_tensor_options(arg)
+        argmap['self'] = {'value': 'self', 'formal': 'Tensor & self'}
 
-    def is_input(arg):
-        return (not is_tensor_options(arg) and
-                not (is_python_method and is_tensor_self(arg)) and
-                not arg.get('output', False))
-
-    inputs = [arg for arg in declaration['arguments'] if is_input(arg)]
-    for i, arg in enumerate(inputs):
-        # make sure we have a local 'self' if we're dotting off it for tensor options
-        unpack_to_local = has_tensor_options and is_tensor_self(arg)
-        arg_expr, unpack = parse_arg(arg, i, unpack_to_local=unpack_to_local)
-        inits.extend(unpack)
-        argmap[arg['name']] = {'value': arg_expr, 'formal': get_cpp_formal(arg)}
-        if 'index_copy' in declaration['name'] and arg['name'] == 'self':
-            print(f"HEY {declaration['name']} {arg['name']} {arg['type']} {get_cpp_formal(arg)}")
-
-    # outputs
-    outputs = [arg for arg in declaration['arguments'] if arg.get('output', False)]
-    output_idx = len(inputs)
-    if len(outputs) == 1:
-        arg = outputs[0]
-        arg_expr, _ = parse_arg(arg, output_idx, unpack_to_local=False)
-        argmap[arg['name']] = {'value': arg_expr, 'formal': get_cpp_formal(arg)}
-    elif len(outputs) > 1:
-        # take gathered output param from python call and scatter it to op call args
-        inits.append('auto results = _r.tensorlist_n<{}>({});'.format(len(outputs), output_idx))
-        for i, arg in enumerate(outputs):
-            argmap[arg['name']] = {
-                'value': 'results[{}]'.format(i),
-                'formal': 'Tensor & {}'.format(arg['name']),
-            }
+    # tensor options arg from original declaration
+    has_tensor_options = has_tensor_options_arg(declaration)
+    pa = declaration['python_arglists']
+    args = pa['input_args'] + pa['input_kwargs'] + pa['output_args']
+    for i, arg in enumerate(args):
+        unpack = is_scatter(arg) or (has_tensor_options and is_tensor_self(arg))
+        arg_expr, unpack_stmts = parse_arg(arg, i, unpack_to_local=unpack)
+        inits.extend(unpack_stmts)
+        if is_scatter(arg):
+            for j, elem in enumerate(arg['scatter_args']):
+                argmap[elem['name']] = {
+                    'value': '{}[{}]'.format(arg_expr, j),
+                    'formal': get_cpp_formal(elem, ensure_temp_safe=False),
+                }
+        else:
+            argmap[arg['name']] = {'value': arg_expr, 'formal': get_cpp_formal(arg)}
 
     #
-    # wrangle tensor attribute params. common case is that we gather python binding args
-    # into a tensor options param for the called op, but there are many variations.
-    # TODO finish cleaning this up once TensorOptions revamp is in (if it still exists)
+    # synthetic python binding args
     #
+
+    python_binding_args = pa['python_binding_args']
+    arg_idx = len(args) + output_gap
+    no_outputs = not has_outputs(declaration)
 
     # find at most one type arg to use, check error conditions
-    type_args = [arg for arg in declaration['arguments'] if arg['simple_type'] == 'Type']
-    type_binding_args = [arg for arg in tensor_options_args if arg['simple_type'] == 'Type']
-    if len(type_binding_args) > 0 and len(outputs) == 0:
+    type_binding_args = [arg for arg in python_binding_args if arg['simple_type'] == 'Type']
+    if len(type_binding_args) > 0 and no_outputs:
         # out(s) determines the dtype if it is present, so only use this if there are no outputs.
         type_arg = type_binding_args[0]
-    elif len(type_args) > 0:
-        type_arg = type_args[0]
     else:
         type_arg = None
-    if type_arg and len(outputs) > 1:
-        raise RuntimeError(declaration['name'] + ": type dispatched parameter with multiple outputs not supported")
 
-    layout = None
-    parsed_type_arg = None
-    # type args go after the outputs to match the signature generation.
-    # TODO use out_idx instead? or kill it?
-    arg_idx = len(inputs) if out_idx is None else len(inputs) + 1
+    type_arg_expr = None
     if type_arg is not None:
-        parsed_type_arg, unpack_type = parse_arg(type_arg, arg_idx, has_tensor_options)
+        type_arg_expr, unpack_type = parse_arg(type_arg, arg_idx, has_tensor_options)
         inits.extend(unpack_type)
         arg_idx += 1
 
@@ -540,23 +549,24 @@ def emit_single_dispatch(declaration, out_idx, is_python_method):
             # these are _out variants TODO clean up this logic
             arg_idx += 1
 
-    if 'layout' in (a['name'] for a in tensor_options_args):
+    if 'layout' in (a['name'] for a in python_binding_args):
         layout_idx, device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2, arg_idx + 3)
     else:
         device_idx, pin_memory_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
 
+    layout = None
     requires_grad = None
     device = None
-    for arg in tensor_options_args:
+    for arg in python_binding_args:
         if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
             pass  # already handled by type_dispatched_args
         elif arg['name'] == 'layout' and arg['simple_type'] == 'Layout':
             # out(s) determines the type and layout if it is present, so only use this if there are no outputs.
-            if len(outputs) == 0:
+            if no_outputs:
                 layout, _ = parse_arg(arg, layout_idx, unpack_to_local=False)
         elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
-            if len(outputs) == 0:
-                assert parsed_type_arg
+            if no_outputs:
+                assert type_arg_expr
                 assert layout
                 device, unpack_device = parse_arg(arg, device_idx, unpack_to_local=True)
                 inits.extend(unpack_device)
@@ -565,15 +575,14 @@ def emit_single_dispatch(declaration, out_idx, is_python_method):
         elif arg['name'] == 'pin_memory' and arg['simple_type'] == 'bool':
             pin_memory, _ = parse_arg(arg, pin_memory_idx, unpack_to_local=False)
         else:
-            raise RuntimeError(("found {} in tensor_options_args but only "
+            raise RuntimeError(("found {} in python_binding_args but only "
                                 "\"bool pin_memory\", \"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
                                 "\"Device device\" are supported".format(arg)))
 
-    dtype = parsed_type_arg
     if has_tensor_options:
-        assert all([dtype, device, layout, requires_grad]), "{}: incomplete tensor options".format(declaration['name'])
+        assert all([type_arg_expr, device, layout, requires_grad]), "{}: incomplete tensor options".format(declaration['name'])
         inits.append(TENSOR_OPTIONS_DECL.substitute({
-            'dtype': dtype,
+            'dtype': type_arg_expr,
             'layout': layout,
             'device': device,
             'requires_grad': requires_grad,
@@ -589,34 +598,36 @@ def emit_single_dispatch(declaration, out_idx, is_python_method):
     # home stretch - set up misc template inputs and generate
     #
 
+    lambda_formals = [argmap[arg['name']]['formal'] for arg in declaration['arguments']]
+    lambda_args = [argmap[arg['name']]['value'] for arg in declaration['arguments']]
+
+    dispatch_callee = get_dispatch_callee(declaration)
+    dispatch_args = get_op_args(declaration, {name: name for name, _ in argmap.items()})
+
+    auto_no_gil = [] if declaration['with_gil'] else ['AutoNoGIL no_gil;']
+
     if requires_grad and not has_tensor_options:
         set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
     else:
         set_requires_grad = ''
 
     simple_return_type = get_simple_return_type(declaration)
+
     if simple_return_type == 'void':
         template = PY_VARIABLE_RETURN_VOID
     else:
         template = PY_VARIABLE_WRAP
 
-    dispatch_callee = get_dispatch_callee(declaration)
-    auto_no_gil = [] if declaration['with_gil'] else ['AutoNoGIL no_gil;']
-    lambda_formals = [argmap[arg['name']]['formal'] for arg in declaration['arguments']]
-    lambda_args = [argmap[arg['name']]['value'] for arg in declaration['arguments']]
-    dispatch_args = get_op_args(declaration, {name: name for name, _ in argmap.items()})
-
     return template.substitute(
-        schema_string=schema_string,
         inits=inits,
-        simple_return_type=simple_return_type,
-        namedtuple_typeref=declaration['namedtuple_typeref'],
         lambda_formals=lambda_formals,
         lambda_args=lambda_args,
-        auto_no_gil=auto_no_gil,
         dispatch_callee=dispatch_callee,
         dispatch_args=dispatch_args,
+        auto_no_gil=auto_no_gil,
         set_requires_grad=set_requires_grad,
+        simple_return_type=simple_return_type,
+        namedtuple_typeref=declaration['namedtuple_typeref'],
     )
 
 
@@ -648,18 +659,17 @@ case ${i}: {
 }
 """)
 
-
 def emit_dispatch_case(i, dictionary, is_python_method):
     """
     Emit dispatch code for a single parsed signature. This may correspond to either one
     or two declared overloads: those that differ only in optional output params are paired
     up in the generated binding.
-
-    - i:            this signature's position in generated binding's signature list
-                    if number of signatures > 1, otherwise None
-
-    - dictionary:   contains a no-output overload declaration under 'base', and optionally
-                    a second overload with outputs under 'out'
+    - i: this signature's position in generated binding's signature list if number of
+      signatures > 1, otherwise None
+    - dictionary: contains a no-output overload declaration under 'base', and optionally
+      a second overload with outputs under 'out'
+    - true if we're generating a python method, in which case self is not parsed but
+      passed directly
     """
     base_decl = dictionary['base']
 
@@ -667,11 +677,12 @@ def emit_dispatch_case(i, dictionary, is_python_method):
         # dispatch to output or no-output variant based on arg test
         out_decl = dictionary['out']
         out_idx = get_python_output_index(out_decl)
+        output_gap = get_python_argc(out_decl) - get_python_argc(base_decl)
 
-        call_dispatch = emit_single_dispatch(base_decl, out_idx, is_python_method)
-        call_dispatch_out = emit_single_dispatch(out_decl, out_idx, is_python_method)
+        call_dispatch = emit_single_dispatch(base_decl, is_python_method, output_gap)
+        call_dispatch_out = emit_single_dispatch(out_decl, is_python_method)
 
-        has_dtype_bind = any([arg['name'] == 'dtype' for arg in out_decl['python_arglists']['tensor_options_args']])
+        has_dtype_bind = any([arg['name'] == 'dtype' for arg in out_decl['python_arglists']['python_binding_args']])
         if has_dtype_bind:
             check_type = PY_VARIABLE_CHECK_OUT_TYPE_HACK.substitute(
                 out_idx=out_idx,
@@ -687,8 +698,8 @@ def emit_dispatch_case(i, dictionary, is_python_method):
             call_dispatch_out=call_dispatch_out,
         )
     else:
-        # no-output version only, dispatch directly
-        body = emit_single_dispatch(base_decl, None, is_python_method)
+        # no-output version only
+        body = emit_single_dispatch(base_decl, is_python_method)
 
     if i is not None:
         # generate case for ith overload
@@ -854,7 +865,6 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 # rather than Tensor &)
 UNPACK_SELF = "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
 
-
 def method_impl(name, declarations, is_python_method):
     """
     Generate a python binding for all overloads of an op.
@@ -875,13 +885,13 @@ def method_impl(name, declarations, is_python_method):
             name=name,
             pycname=pycname(name),
             method_header=method_header,
-            dispatch=emit_single_dispatch(declaration, 0, is_python_method),
+            dispatch=emit_single_dispatch(declaration, is_python_method),
             method_footer=method_footer,
         )
 
     method_footer = ['Py_RETURN_NONE;'] + method_footer
 
-    grouped = group_overloads(declarations)
+    grouped = group_overloads(declarations, is_python_method)
     is_singleton = len(grouped) == 1
 
     signatures = []
@@ -971,10 +981,10 @@ def method_def(name, declarations, is_python_method, is_module):
     )
 
 #
-#
+# overload sorting and grouping
 #
 
-def group_overloads(declarations):
+def group_overloads(declarations, is_python_method):
     """Returns a list of dictionaries containing the optional keys:
 
        "base": the regular ATen declaration (e.g. conv2d)
@@ -990,12 +1000,12 @@ def group_overloads(declarations):
 
     # first group by signature ignoring out arguments
     for declaration in declarations:
-        signature = get_python_arg_parser_schema(declaration, include_outputs=False)
+        signature = get_python_arg_parser_schema(declaration, is_python_method, skip_outputs=True)
         v = grouped[signature]
         if declaration['name'].endswith('_out'):
             v['out'] = declaration
             # prefer the signature with optional out=... arguments
-            v['signature'] = get_python_arg_parser_schema(declaration, include_outputs=True)
+            v['signature'] = get_python_arg_parser_schema(declaration, is_python_method)
         else:
             v['base'] = declaration
             if 'signature' not in v:
@@ -1088,6 +1098,12 @@ def is_tensor_options(arg):
     return arg['simple_type'] == 'TensorOptions'
 
 
+def is_scatter(arg):
+    return arg.get('scatter_args') is not None
+
+def is_output(arg):
+    return arg.get('output', False)
+
 #
 # python signature codegen
 #
@@ -1102,7 +1118,10 @@ SCHEMA_DEFAULT_CONVERSION_HACKS = {
     '{}': 'None',
 }
 
-def get_schema_formal(arg, fallback_default=None):
+def get_schema_formal(arg, is_python_method):
+    # name
+    name = arg['name']
+
     # type
     typename = arg['simple_type']
     typename = SCHEMA_TYPE_CONVERSION_HACKS.get(typename, typename)
@@ -1112,25 +1131,28 @@ def get_schema_formal(arg, fallback_default=None):
     if arg.get('is_nullable') and '?' not in typename:
         typename = '{}?'.format(typename)
 
+    # s/self/input/ outside method bindings.
+    # TODO remove this? doesn't rename in codegen, it's just for the parse string
+    if name == 'self' and typename == 'Tensor' and not is_python_method:
+        name = 'input'
+
     size = arg.get('size')
     if size is not None:
         typename = '{}[{}]'.format(typename, size)
 
     # default
-    default = arg.get('default', fallback_default)
-    default = SCHEMA_DEFAULT_CONVERSION_HACKS.get(default, default)
-
+    default = arg.get('default')
     if default is not None:
-        return '{} {}={}'.format(typename, arg['name'], default)
+        default = SCHEMA_DEFAULT_CONVERSION_HACKS.get(default, default)
+        return '{} {}={}'.format(typename, name, default)
     else:
-        return '{} {}'.format(typename, arg['name'])
+        return '{} {}'.format(typename, name)
 
 
 PYTHON_ARG_PARSER_SCHEMA = CodeTemplate("""\
 ${name}(${schema_formals})${deprecated}""")
 
-
-def get_python_arg_parser_schema(declaration, include_outputs):
+def get_python_arg_parser_schema(declaration, is_python_method, skip_outputs=False):
     # Compute the Python function signature for argument parsing,
     # as specified in torch/csrc/utils/python_arg_parser.h.  WARNING:
     # this is NOT the same type signature as specified by PEP 484
@@ -1142,16 +1164,18 @@ def get_python_arg_parser_schema(declaration, include_outputs):
     # tools/gen_pyi.py.  If you change any logic here, please
     # check that file too.
 
-    python_args = get_python_args(declaration, include_outputs)
-    schema_formals = [get_schema_formal(arg) for arg in python_args]
+    python_args = get_python_args(declaration)
+    if skip_outputs:
+        python_args = [arg for arg in python_args if not is_output(arg)]
+
+    schema_formals = [get_schema_formal(arg, is_python_method) for arg in python_args]
     positional_argc = len(declaration['python_arglists']['input_args'])
     if len(python_args) > positional_argc:
         schema_formals.insert(positional_argc, '*')
 
     # Python function signature.
     # This is the string that we give to FunctionParameter, which is
-    # then parsed into the actual structure which we do parsing
-    # with.
+    # then parsed into the actual structure which we do parsing with.
     name = op_name(declaration)
     deprecated = '|deprecated' if declaration.get('deprecated', False) else ''
     return PYTHON_ARG_PARSER_SCHEMA.substitute(
@@ -1165,11 +1189,8 @@ def get_python_arg_parser_schema(declaration, include_outputs):
 # op args to python parsed args transform
 #
 
-def get_python_args(decl, include_outputs=True):
-    # flat list of python args
-    def include(k):
-        return include_outputs or k != 'output_args'
-    return [arg for k, args in decl['python_arglists'].items() if include(k) for arg in args]
+def get_python_args(decl):
+    return [arg for args in decl['python_arglists'].values() for arg in args]
 
 
 def get_python_argc(decl):
@@ -1178,7 +1199,7 @@ def get_python_argc(decl):
 
 def get_python_output_index(decl):
     arglists = decl['python_arglists']
-    return len(arglists['input_args'] + arglists['input_kwargs'] + arglists['type_args'])
+    return len(arglists['input_args'] + arglists['input_kwargs'])
 
 
 def make_python_arglists(declaration, is_python_method):
@@ -1194,14 +1215,11 @@ def make_python_arglists(declaration, is_python_method):
     input_args = []
     input_kwargs = []
     output_args = []
-    type_args = []
 
     current_input_args = input_args
     for arg in args:
-        if arg.get('output', False):
+        if is_output(arg):
             output_args.append(arg)
-        elif arg['simple_type'] == 'Type':
-            type_args.append(arg)
         else:
             if arg.get('kwarg_only', False):
                 current_input_args = input_kwargs
@@ -1212,16 +1230,9 @@ def make_python_arglists(declaration, is_python_method):
     # positional inputs:
     # - filter self when we're generating a method binding.else - there, it comes in as
     #   a separate Python param, not in args array
-    # - s/self/input/ outside method bindings.
-    #   TODO remove this? doesn't rename in codegen, it's just for the parse string
     def include(arg):
         return not (is_tensor_self(arg) and is_python_method)
-    def rename(arg):
-        if is_tensor_self(arg) and not is_python_method:
-            arg = arg.copy()
-            arg['name'] = 'input'
-        return arg
-    input_args = [rename(arg) for arg in input_args if include(arg)]
+    input_args = [arg for arg in input_args if include(arg)]
 
     # keyword inputs:
     # - filter options. after loading the yaml, an upstream step gethered dtype, layout et al
@@ -1234,39 +1245,38 @@ def make_python_arglists(declaration, is_python_method):
     num_outputs = len(output_args)
     if num_outputs > 1:
         assert all([a['simple_type'] == 'Tensor' for a in output_args])
-        typename = 'TensorList[{}]'.format(len(output_args))
+        typename = 'TensorList'
         output_args = [{
             'default': 'None',
             'kwarg_only': True,
             'name': 'out',
-            'type': typename,
+            'output': True,
+            'scatter_args': output_args,
             'simple_type': typename,
+            'size': num_outputs,
+            'type': typename,
         }]
     elif num_outputs == 1:
         output_arg = output_args[0].copy()
         output_arg['default'] = 'None'
         output_args = [output_arg]
 
-    # type arg(s)
-    assert len(type_args) <= 1, '{}: multiple type args'.format(declaration['name'])
-
-    # make tensor options args
+    # make python binding args
     # these are the (re)scattered versions of the options arg omitted above.
-    # TODO because these aren't guaranteed to be 100% faithful to the original scattered
+    # TODO because these aren't guaranteed to be 100% faithful to the original
     # versions in the yaml, this recreation is a potential source of drift between
     # eager and JIT. Pull this logic out to a shared place.
-    tensor_options_args = make_python_tensor_options_args(declaration)
+    python_binding_args = make_python_binding_arguments(declaration)
 
     return {
         'input_args': input_args,
         'input_kwargs': input_kwargs,
         'output_args': output_args,
-        'type_args': type_args,
-        'tensor_options_args': tensor_options_args,
+        'python_binding_args': python_binding_args,
     }
 
 #
-# tensor options args
+# python binding args
 #
 
 # TODO blowtorch
@@ -1279,25 +1289,22 @@ def dtype_default_type_hack(name):
         return 'None'
 
 
-def make_python_tensor_options_args(declaration):
+def make_python_binding_arguments(declaration):
     """
-    Given various properties of a declaration, build a set of scattered tensor options args.
+    Given various properties of a declaration, build a set of scattered python binding args.
     These are added to the python binding and gathered into a TensorOptions value for the op.
     """
     name = declaration['name']
-    tensor_options_args = []
+    python_binding_arguments = []
     has_tensor_input_arg = False
-    has_type_input_arg = False
     has_options_arg = False
     for arg in declaration['arguments']:
-        if arg.get('output', False):
+        if is_output(arg):
             continue
         typename = arg['simple_type']
         if typename in ['Tensor', 'TensorList']:
             has_tensor_input_arg = True
-        if arg['simple_type'] == 'Type':
-            has_type_input_arg = True
-        elif arg['simple_type'] == 'TensorOptions':
+        elif typename == 'TensorOptions':
             has_options_arg = True
         if arg['name'] == 'requires_grad':
             raise ValueError("argument named requires_grad not supported")
@@ -1318,7 +1325,7 @@ def make_python_tensor_options_args(declaration):
     is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
     is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
-    if (is_factory_function and not has_type_input_arg) or has_options_arg:
+    if is_factory_function or has_options_arg:
         default_type = dtype_default_type_hack(name)
         py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
         dtype_arg = {
@@ -1330,7 +1337,7 @@ def make_python_tensor_options_args(declaration):
             'simple_type': 'Type',
             'python_default_init': py_default_dtype,
         }
-        tensor_options_args.append(dtype_arg)
+        python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
         py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
@@ -1343,7 +1350,7 @@ def make_python_tensor_options_args(declaration):
             'simple_type': 'Layout',
             'python_default_init': py_default_layout,
         }
-        tensor_options_args.append(layout_arg)
+        python_binding_arguments.append(layout_arg)
         py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
         device_arg = {
             'default': 'None',
@@ -1354,7 +1361,7 @@ def make_python_tensor_options_args(declaration):
             'simple_type': 'Device',
             'python_default_init': py_default_device
         }
-        tensor_options_args.append(device_arg)
+        python_binding_arguments.append(device_arg)
         pin_memory_arg = {
             'default': False,
             'dynamic_type': 'bool',
@@ -1363,7 +1370,7 @@ def make_python_tensor_options_args(declaration):
             'type': 'bool',
             'simple_type': 'bool',
         }
-        tensor_options_args.append(pin_memory_arg)
+        python_binding_arguments.append(pin_memory_arg)
 
     if is_factory_or_like_or_new_function:
         requires_grad_arg = {
@@ -1374,6 +1381,6 @@ def make_python_tensor_options_args(declaration):
             'type': 'bool',
             'simple_type': 'bool',
         }
-        tensor_options_args.append(requires_grad_arg)
+        python_binding_arguments.append(requires_grad_arg)
 
-    return tensor_options_args
+    return python_binding_arguments
