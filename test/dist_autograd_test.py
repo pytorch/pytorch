@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import dist_utils
 from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from rpc_agent_test_fixture import RpcAgentTestFixture
 from torch.testing import FileCheck
@@ -1086,8 +1085,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
-                     "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1109,7 +1106,11 @@ class DistAutogradTest(RpcAgentTestFixture):
                     if rank % 2 != 0:
                         wait_until_node_failure(rank)
 
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
+                error_str = (
+                    "Encountered exception in ProcessGroupAgent::enqueueSend"
+                    if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                    else "Request aborted during client shutdown")
+                with self.assertRaisesRegex(RuntimeError, error_str):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
@@ -1262,9 +1263,6 @@ class DistAutogradTest(RpcAgentTestFixture):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
-                     "Skipping this test temporarily since ProcessGroupAgent " +
-                     "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure_python_udf(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1287,8 +1285,11 @@ class DistAutogradTest(RpcAgentTestFixture):
             if self.rank == 0:
                 # Wait for rank 2 to die.
                 wait_until_node_failure(2)
-
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
+                error_str = (
+                    "Encountered exception in ProcessGroupAgent::enqueueSend"
+                    if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                    else "Request aborted during client shutdown")
+                with self.assertRaisesRegex(RuntimeError, error_str):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
 
