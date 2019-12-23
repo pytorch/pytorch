@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <type_traits>
 #include <ATen/Utils.h>
-#include <TH/THGenerator.hpp>
 
 void THTensor_(random)(THTensor *self, at::Generator *_generator)
 {
@@ -294,13 +293,12 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
 
-  THTensor_(resize1d)(self, sizeof(THGeneratorStateNew));
-
   const size_t size = THTensor_(nElement)(self);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
 
   auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
-  cpu_generator->getRNGState(self->data(), size);
+  THTensor_(resize1d)(self, cpu_generator->get_rng_state_size());
+  cpu_generator->get_rng_state(self->data(), size);
 }
 
 void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
@@ -312,7 +310,7 @@ void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
 
   auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
-  cpu_generator->setRNGState(self->data(), size);
+  cpu_generator->set_rng_state(self->data(), size);
 }
 #endif
 #endif

@@ -56,7 +56,11 @@ uint32_t MT19937CPUGenerator::random() {
   return res;
 }
 
-void MT19937CPUGenerator::getRNGState(void* target, size_t size) {
+size_t MT19937CPUGenerator::get_rng_state_size() {
+  return sizeof(THGeneratorStateNew);
+}
+
+void MT19937CPUGenerator::get_rng_state(void* target, size_t size) {
   static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
 
   static const size_t size1 = sizeof(THGeneratorStateNew);
@@ -91,7 +95,7 @@ void MT19937CPUGenerator::getRNGState(void* target, size_t size) {
   memcpy(rng_state, accum_state.get(), size1);
 }
 
-void MT19937CPUGenerator::setRNGState(void* target, size_t size) {
+void MT19937CPUGenerator::set_rng_state(void* target, size_t size) {
   static_assert(std::is_pod<THGeneratorState>::value, "THGeneratorState is not a PODType");
   static_assert(std::is_pod<THGeneratorStateNew>::value, "THGeneratorStateNew is not a PODType");
 

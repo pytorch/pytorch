@@ -19,8 +19,9 @@ struct CAFFE2_API MT19937CPUGenerator : public CPUGenerator {
   uint64_t current_seed() const override;
   uint64_t seed() override;
   uint32_t random() override;
-  void getRNGState(void* target, size_t size) override;
-  void setRNGState(void* target, size_t size) override;
+  void get_rng_state(void* target, size_t size) override;
+  void set_rng_state(void* target, size_t size) override;
+  size_t get_rng_state_size() override;
 
 private:
   MT19937CPUGenerator* clone_impl() const override;
