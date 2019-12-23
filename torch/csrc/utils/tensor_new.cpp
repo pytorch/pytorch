@@ -324,16 +324,18 @@ Tensor legacy_new_from_sequence(
 // "base" here refers to the Tensor type on which the function was invoked, e.g.:
 // in x.new(y), 'x' is the base.
 void check_base_legacy_new(c10::TensorTypeId type_id, at::Layout expected_layout) {
-  auto backend = c10::tensorTypeIdToBackend(type_id);
   if (expected_layout == c10::kStrided) {
     TORCH_CHECK(type_id == c10::TensorTypeId::CPUTensorId
                 || type_id == c10::TensorTypeId::CUDATensorId
-                || type_id == c10::TensorTypeId::HIPTensorId,
+                || type_id == c10::TensorTypeId::HIPTensorId
+                || type_id == c10::XLATensorId(),
                 "new(): expected TensorTypeId: ", c10::TensorTypeId::CPUTensorId,
                 " or ", c10::TensorTypeId::CUDATensorId,
                 " or ", c10::TensorTypeId::HIPTensorId,
+                " or ", c10::TensorTypeId::XLATensorId,
                 " but got: ", type_id);
   } else if(expected_layout == c10::kSparse) {
+    // NOTE: no sparse XLA
     TORCH_CHECK(type_id == c10::TensorTypeId::SparseCPUTensorId
                 || type_id == c10::TensorTypeId::SparseCUDATensorId
                 || type_id == c10::TensorTypeId::SparseHIPTensorId,
