@@ -809,8 +809,11 @@ struct Const : public Expr {
     }
   }
   double asFloatingPoint() const {
+    // We can't pass in nullptr as the dummy pointer gets dereferenced for
+    // Android version of strtod_c().
+    char* dummy;
     return torch::jit::script::strtod_c(
-        subtree(0)->stringValue().c_str(), /*endptr=*/nullptr);
+        subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -906,7 +909,8 @@ struct SliceExpr : public Expr {
       const Maybe<Expr>& start,
       const Maybe<Expr>& end,
       const Maybe<Expr>& step) {
-    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
+    return SliceExpr(
+        Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
   }
 
  private:
