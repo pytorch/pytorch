@@ -1,5 +1,3 @@
-@echo off
-
 set VS_DOWNLOAD_LINK=https://aka.ms/vs/15/release/vs_buildtools.exe
 IF "%VS_LATEST%" == "1" (
    set VS_INSTALL_ARGS= --nocache --norestart --quiet --wait --add Microsoft.VisualStudio.Workload.VCTools
