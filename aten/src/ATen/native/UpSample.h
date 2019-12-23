@@ -12,17 +12,18 @@
  * depending on the value of recompute_scales:
  *
  * - With recompute_scales = True (current default behavior):
- * the scale_factors provided by the user, are used to calculate
+ * the scale_factors, when provided by the user, are used to calculate
  * the output size. The input size and the computed output_size
  * are then used to infer new values for the scales which are
- * used in the interpolation.
+ * used in the interpolation.  Because floating-point math is not exact,
+ * this may be a different value from the user-supplied scales.
  *
  * - With recompute_scales = False (which will be the default
  * behavior starting 1.5.0):
  * the behavior follows opencv logic, and the scales provided by
  * the user are the ones used in the interpolation calculations.
  *
- * If the scales are not available or if they are available but
+ * If the scales are not provided or if they are provided but
  * recompute_scales is set to True (default behavior), the scales
  * are computed from the input and the output size;
  *

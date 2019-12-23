@@ -2481,6 +2481,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
+    .. warning::
         When scale_factor is specified, if recompute_scales=True,
         scale_factor is used to compute the output_size which will then
         be used to infer new scales for the interpolation. This is the current
