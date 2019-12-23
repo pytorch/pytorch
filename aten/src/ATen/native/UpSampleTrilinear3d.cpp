@@ -22,9 +22,9 @@ static void upsample_trilinear3d_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -132,9 +132,9 @@ static void upsample_trilinear3d_backward_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: same-size matching grids
@@ -228,9 +228,9 @@ static void upsample_trilinear3d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -296,9 +296,9 @@ static void upsample_trilinear3d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -366,9 +366,9 @@ Tensor& upsample_trilinear3d_out_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_out_cpu_template(
       output, input, output_size, align_corners, scales_d, scales_h, scales_w);
   return output;
@@ -378,9 +378,9 @@ Tensor upsample_trilinear3d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_trilinear3d_out_cpu_template(
       output, input, output_size, align_corners, scales_d, scales_h, scales_w);
@@ -393,9 +393,9 @@ Tensor& upsample_trilinear3d_backward_out_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
   return grad_input;
@@ -406,9 +406,9 @@ Tensor upsample_trilinear3d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_d,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_trilinear3d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);

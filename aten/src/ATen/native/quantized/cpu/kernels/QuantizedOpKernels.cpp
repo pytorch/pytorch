@@ -690,8 +690,8 @@ void qupsample_bilinear2d_nhwc_kernel(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    float scales_h,
-    float scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(
       input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
         auto* idata = static_cast<scalar_t*>(input.data_ptr());

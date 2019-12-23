@@ -20,8 +20,8 @@ static void upsample_nearest2d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
@@ -65,8 +65,8 @@ static void upsample_nearest2d_out_frame_nhwc(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
   float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
@@ -98,8 +98,8 @@ static void upsample_nearest2d_out_frame_nhwc(
 Tensor quantized_upsample_nearest2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",

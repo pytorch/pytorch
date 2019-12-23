@@ -24,8 +24,8 @@ static void upsample_bilinear2d_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto* idata = static_cast<scalar_t*>(input.data_ptr());
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
@@ -94,8 +94,8 @@ Tensor quantized_upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",

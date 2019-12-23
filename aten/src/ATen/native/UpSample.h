@@ -151,12 +151,13 @@ static inline void upsample_3d_shape_check(
 
 template <typename scalar_t>
 static inline scalar_t compute_scales_value(
-    const double scale,
+    const c10::optional<double> scale,
     int64_t input_size,
     int64_t output_size) {
       // see Note [compute_scales_value]
-      return (scale > 0.)
-          ? static_cast<scalar_t>(1.0 / scale)
+      // FIXME: remove magic > 0 after we ensure no models were serialized with -1 defaults.
+      return (scale.has_value() && scale.value() > 0.)
+          ? static_cast<scalar_t>(1.0 / scale.value())
           : (static_cast<scalar_t>(input_size) / output_size);
 }
 
@@ -165,7 +166,7 @@ static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
     bool align_corners,
-    const double scale=-1.0) {
+    const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
   if (output_size > 1) {
     return align_corners

@@ -17,8 +17,8 @@ static void upsample_bicubic2d_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
     for (int64_t output_y = 0; output_y < output_height; output_y++) {
@@ -99,8 +99,8 @@ static void upsample_bicubic2d_backward_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // Special case: input/output same size, just copy
@@ -170,8 +170,8 @@ static void upsample_bicubic2d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -225,8 +225,8 @@ static void upsample_bicubic2d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -286,8 +286,8 @@ Tensor& upsample_bicubic2d_out_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bicubic2d_out_cpu_template(
       output, input, output_size, align_corners, scales_h, scales_w);
   return output;
@@ -297,8 +297,8 @@ Tensor upsample_bicubic2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_bicubic2d_out_cpu_template(
       output, input, output_size, align_corners, scales_h, scales_w);
@@ -311,8 +311,8 @@ Tensor& upsample_bicubic2d_backward_out_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bicubic2d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
@@ -323,8 +323,8 @@ Tensor upsample_bicubic2d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_bicubic2d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);

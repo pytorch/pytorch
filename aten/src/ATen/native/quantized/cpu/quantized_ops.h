@@ -71,8 +71,8 @@ using qupsample_bilinear2d_fn = void (*)(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    float scales_h,
-    float scales_w);
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w);
 
 using qcat_nhwc_fn = Tensor (*)(
     const c10::List<Tensor>& qxs,

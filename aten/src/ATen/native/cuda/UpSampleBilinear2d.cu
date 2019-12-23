@@ -156,8 +156,8 @@ static void upsample_bilinear2d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_bilinear2d_out_cuda", {input_arg, output_arg});
 
@@ -224,8 +224,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -314,8 +314,8 @@ Tensor& upsample_bilinear2d_out_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_out_cuda_template(
       output, input, output_size, align_corners, scales_h, scales_w);
   return output;
@@ -325,8 +325,8 @@ Tensor upsample_bilinear2d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bilinear2d_out_cuda_template(
       output, input, output_size, align_corners, scales_h, scales_w);
@@ -339,8 +339,8 @@ Tensor& upsample_bilinear2d_backward_out_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
@@ -351,8 +351,8 @@ Tensor upsample_bilinear2d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_h,
-    double scales_w) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
