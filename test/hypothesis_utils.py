@@ -313,10 +313,10 @@ settings._profiles[settings._current_profile].__dict__['timeout'] = hypothesis.u
 def assert_deadline_disabled():
     assert settings().deadline is None
     if hypothesis.version.__version_info__ < (3, 27, 0):
-        from warnining import warn
+        import warnings
         warning_message = (
             "Your version of hypothesis is outdated. "
             "To avoid `DeadlineExceeded` errors, please update. "
             "Current hypothesis version: {}".format(hypothesis.__version__)
         )
-        warn(warning_message)
+        warnings.warn(warning_message)
