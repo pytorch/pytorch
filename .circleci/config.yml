@@ -2477,7 +2477,7 @@ workflows:
           filters:
             branches:
               only: postnightly
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2490,7 +2490,7 @@ workflows:
           filters:
             branches:
               only: postnightly
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2503,7 +2503,7 @@ workflows:
           filters:
             branches:
               only: postnightly
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -2516,7 +2516,7 @@ workflows:
           filters:
             branches:
               only: postnightly
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -3238,25 +3238,25 @@ workflows:
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
             - setup
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
           name: binary_linux_conda_3_5_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.5 cu101 devtoolset7"
           requires:
             - setup
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
           name: binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.6 cu101 devtoolset7"
           requires:
             - setup
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu101 devtoolset7"
           requires:
             - setup
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_devtoolset7_nightly_shared-with-deps_build
           build_environment: "libtorch 2.7m cpu devtoolset7"
@@ -3867,7 +3867,7 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2_7_cu101_devtoolset7_nightly_build
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3876,7 +3876,7 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_5_cu101_devtoolset7_nightly_build
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3885,7 +3885,7 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3894,7 +3894,7 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
-          docker_image: soumith/manylinux-cuda101@sha256:5d62be90d5b7777121180e6137c7eed73d37aaf9f669c51b783611e37e0b4916
+          docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
