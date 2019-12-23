@@ -150,6 +150,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: install vs2017
+          command: |
+            .circleci/scripts/vs_install.bat
+      - run:
           name: Install Cuda
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
@@ -185,6 +189,10 @@ jobs:
       JOB_BASE_NAME: <<parameters.test_name>>
     steps:
       - checkout
+      - run:
+          name: install vs2017
+          command: |
+            .circleci/scripts/vs_install.bat
       - run:
           name: Test
           no_output_timeout: "30m"
