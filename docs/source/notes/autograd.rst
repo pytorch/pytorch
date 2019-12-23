@@ -20,9 +20,13 @@ What does the autograd package do?
 The autograd package allows us to perform automatic differentiation on top of tensors.
 Automatic differentiation computes the dot product between a given vector and the Jacobian of a user-defined function.
 Consider the function :math:`f: x \rightarrow y`, where :math:`x` is a vector of size :math:`I` and :math:`y` is a vector of size :math:`O`.
-For simplicity, we'll consider inputs and ouputs to be 1-D; in practice, they could have an arbitrary number of dimensions, but automatic differentiation is indifferent to the dimensionality of tensors.
+For simplicity, we'll consider inputs and ouputs to be 1-D; in practice however, they could have an arbitrary number of dimensions, but automatic differentiation is indifferent to the dimensionality of tensors.
 Then, the Jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`(O, I)` such that each entry is
-given by :math:`(J_f)_{ij} = \dfrac{\partial{x_j}}{\partial{y_i}}`. We will write :math:`J_f = \dfrac{\partial{y}}{\partial{x}}`.
+given by :math:`(J_f)_{ij} = \partial{x_j}/\partial{y_i}`. We will write
+
+.. math::
+
+     J_f = \dfrac{\partial{y}}{\partial{x}}.
 
 Currently, PyTorch only implements reverse mode automatic differentiation which, given
 an arbitrary vector :math:`v` of size :math:`O`, will compute :math:`v^T J_f` (the so-called vector-Jacobian product, or vjp, as opposed to the Jacobian-vector product, which is computed by forward mode automatic differentiation).
@@ -68,7 +72,11 @@ In particular, consider the following function:
     # v is a Tensor of the appropriate size
     f(w).backward(v)
 
-The backward pass will compute the following for a given vector :math:`v`: :math:`v^T J_f = v^T J_{op_2} J_{op_1} = v^T \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{y}}{\partial{w}}`.
+The backward pass will compute the following for a given vector :math:`v`:
+
+.. :math::
+
+    v^T J_f = v^T J_{op_2} J_{op_1} = v^T \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{y}}{\partial{w}}.
 
 Adding a new operation as follows:
 
@@ -83,7 +91,11 @@ Adding a new operation as follows:
     w.requires_grad_()
     f(w).backward(v)
 
-Will change the computation to: :math:`v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}`.
+Will change the computation to:
+
+.. math::
+
+    v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}.
 
 Using a Tensor in multiple places will simply accumulate the gradients from the different branches:
 
@@ -99,7 +111,11 @@ Using a Tensor in multiple places will simply accumulate the gradients from the 
     f(w).backward(v)
 
 We write the Jacobian of :code:`op_3` by concatenating the Jacobians for each input.
-The computation is then: :math:`v^T J_f = v^T J_{op_3} \begin{pmatrix} J_{op_1} \\ J_{op_2} \end{pmatrix} = v^T \begin{pmatrix} \dfrac{\partial{z}}{\partial{x}} & \dfrac{\partial{z}}{\partial{y}} \end{pmatrix} \begin{pmatrix} \dfrac{\partial{x}}{\partial{w}} \\ \dfrac{\partial{y}}{\partial{w}} \end{pmatrix} = v^T \dfrac{\partial{z}}{\partial{w}}`.
+The computation is then:
+
+.. math::
+
+    v^T J_f = v^T J_{op_3} \begin{pmatrix} J_{op_1} \\ J_{op_2} \end{pmatrix} = v^T \begin{pmatrix} \dfrac{\partial{z}}{\partial{x}} & \dfrac{\partial{z}}{\partial{y}} \end{pmatrix} \begin{pmatrix} \dfrac{\partial{x}}{\partial{w}} \\ \dfrac{\partial{y}}{\partial{w}} \end{pmatrix} = v^T \dfrac{\partial{z}}{\partial{w}}.
 
 Handling in-place operations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -108,7 +124,7 @@ The only special case that needs to be considered here are in-place operations.
 The main reason to use in-place operations is to preserve side effects and prevent additional memory requirements.
 
 - The first point means that if a tensor is referenced in different places, the in-place operation should modify all these references.
-- The second point means that no extra memory allocation should be done under the hood otherwise it would defeat the purpose of in-place operations.
+- The second point means that no extra memory allocation should indeed be used under the hood.
 
 To be able to fulfill these two needs, we make in-place operations actually be in-place during the forward pass giving exactly the same behavior
 as any other non-autograd library that provides in-place operations.
@@ -137,15 +153,21 @@ See the two functions below for examples where we use subscripts to specify each
         # y now points to z_1.select(0, 0)
         return y
 
-The corresponding autograd computations can simply be written using the implicit variables: :math:`v^T J_f = v^T J_{op_2\_} J_{op_1} = v^T \dfrac{\partial{z_1}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}} = v^T \dfrac{\partial{z_1}}{\partial{x}}`.
-And for g, it is harder to write as only part of :code:`op_2_()` is used when computing :code:`y`, but it can be written as :math:`v^T J_g = v^T \dfrac{\partial{y_1}}{\partial{y_0}} \dfrac{\partial{y_0}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}}`.
+The corresponding autograd computations can simply be written using the implicit variables: 
+
+.. :math: v^T J_f = v^T J_{op_2\_} J_{op_1} = v^T \dfrac{\partial{z_1}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}} = v^T \dfrac{\partial{z_1}}{\partial{x}}.
+
+As for :math:`g` defined in the code above, it is harder to write as only part of :code:`op_2_()` is used when computing :code:`y`, but it can be written as 
+
+.. math::
+
+    v^T J_g = v^T \dfrac{\partial{y_1}}{\partial{y_0}} \dfrac{\partial{y_0}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}}.
 
 Computing gradient of a subset of your whole program
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In some cases, the user might need to compute something that is not the "true gradient" of its function.
-We saw above how to start recording gradient only from a given Tensor using ``requires_grad`` but some cases require to disable them locally or stop tracking them.
-We identify few use cases here:
+We saw above how to start recording gradient only from a given Tensor using ``requires_grad`` but some cases require disabling the computation of the gradient either locally or completely.
+We identify the follwoing use cases:
 
 - Ignore the gradients for some part of the computation as they could render the computed gradients unstable, e.g. gradients of square root near :math:`0`.
 - Ignore the gradients in a set of computations where we know they will be :math:`0` and so don't need to be computed, e.g. a set of operations that compute values that are the used as integers to index a tensor.
@@ -175,17 +197,26 @@ This means that however :code:`y` is used, the contribution via :code:`y` to the
     # v is a Tensor of the appropriate size
     f(x).backward(v)
 
-The backward pass will compute the following for a given vector :math:`v`: :math:`v^T J_f = v^T J_{detach} J_{op_1} = v^T \bm{0} \dfrac{\partial{z}}{\partial{x}} = \bm{0}`.
+The backward pass will compute the following for a given vector :math:`v`:
 
-Note that the new Tensor shares the same data as the original one (it is a view).
+.. math::
+
+    v^T J_f = v^T J_{detach} J_{op_1} = v^T \bm{0} \dfrac{\partial{z}}{\partial{x}} = \bm{0}.
+
+Note that the new Tensor shares the same data as the original one (the new Tensor is a view).
 This means that in-place operations on :code:`y` will change values in :code:`x` .
 
 Disable gradient computation
 """"""""""""""""""""""""""""
 
-The second construct is the function decorator :code:`torch.no_grad()` (it can also be used as a context manager).
-When it decorates a function :code:`outputs = f(inputs)`, it is defined as enforcing :math:`\forall in \in inputs, \forall out \in outputs, \dfrac{\partial{out}}{\partial{in}} = 0`.
-Note that for the context manager version, outputs are all the variables that are assigned (on the left side of an :code:`=` in the block).
+The second construct is the function decorator :code:`torch.no_grad()` (which can also be used as a context manager).
+When it decorates a function :code:`outputs = f(inputs)`, it is defined as enforcing
+
+.. math::
+
+    \forall \text{in} \in \text{inputs}, \forall \text{out} \in \text{outputs}, \dfrac{\partial{out}}{\partial{in}} = 0.
+
+Note that, for the context manager version, outputs are all the variables that are assigned (variables on the left side of an :code:`=` in the block).
 
 .. code::
 
@@ -232,14 +263,17 @@ This hook function will be passes the computed gradient as input and can optiona
   # v is a Tensor of the appropriate size
   f(x).backward(v)
 
-The backward pass will compute the following for a given vector :math:`v`: :math:`\text{foo}(v^T J_{op_2}) J_{op_1}`.
+The backward pass will compute the following for a given vector :math:`v`:
 
+.. math::
+
+    \text{foo}(v^T J_{op_2}) J_{op_1}.
 
 
 Equivalence
 """""""""""
 
-detach and no_grad can be implemented using the others as follows:
+:code:`detach` and :code:`no_grad` can be implemented using the others as follows:
 
 .. code::
 
@@ -279,8 +313,9 @@ detach and no_grad can be implemented using the others as follows:
         # Some ops using x and y, producing z and w
         return z, w
 
-Autograd quirks
----------------
+
+Caveats
+-------
 
 Will in-place operations work?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -301,7 +336,7 @@ Because we do not want to hide memory allocation from the user, the backward pas
 In such a case, to be able to perform this backward pass we need to either replace :code:`op_2_` with an equivalent out-of-place operation or make sure :code:`op_2_` modifies in-place a copy of :code:`z` by adding a :code:`.clone()` for example.
 
 Gradient of zero vs independent of the input
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 As long as all gradients are finite values, these two can be seen as being the same.
 In practice, this is the case for most pytorch programs.
@@ -323,15 +358,15 @@ A gradient of :math:`0` (or independent) can be expressed in any of the followin
 
 Non-differentiable functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The chain rule can **only** be applied in the case where are considering each elementary operation
-at a point where it is differentiable. If any of them is evaluated at a point where it is not,
-the computed gradient can be arbitrarily incorrect. For example, consider the gradient at :math:`0` of the identity function
+
+The chain rule can **only** be applied at points where all elementary operations
+are differentiable. If any of them is evaluated at a point where it is not,
+the computed gradient can be incorrect. For example, consider the gradient at :math:`0` of the identity function
 when it is decomposed as :math:`id(x) = relu(x) - relu(-x)`.
 
-This means that the function that computes the :math:`2` norm and the one that square all the elements of a tensor, sum them and returns the square root
+This also means that the function that computes the :math:`2`-norm and the one that squares all the elements of a tensor, sums them and returns the square root
 of the result will not have the same behavior with respect to gradients all the time.
-In particular, if the sum is :math:`0`, the square root function is not differentiable at this point and so the returned gradient can be anything while the :math:`2`
-norm function has a well defined gradient at :math:`0` of :math:`0`.
+In particular, if the sum is :math:`0`, the square root function is not differentiable at this point and so the returned gradient is undefined while the :math:`2`-norm function has a well defined gradient at :math:`0` of :math:`0`.
 
 To try and reduce the impact of this limitation, we define the gradients of the elementary operations by applying the following rules in order:
 
@@ -342,7 +377,7 @@ To try and reduce the impact of this limitation, we define the gradients of the 
 
 .. note::
 
-    - Even though we try our best, unless all the used elementary operations used are in case 2, the returned gradient is not guaranteed to be correct.
+    - Even though we try our best, unless all elementary operations used are in case 2, the returned gradient is not guaranteed to be correct.
     - Both the ``detach()`` method and the ``torch.no_grad`` decorator are expected not to follow these rules.
     - This is work in progress, if you find a :code:`Function` that does not follow these rules, please open a new issue with the tag "module:autograd".
 
@@ -380,7 +415,7 @@ Not Gradients
 The operations that do not compute gradients that are presented above are implemented as follows to obtain the behavior described above.
 
 ``detach`` is returning a new Tensor object that shares the same Storage.
-The Tensor is the same except that it does not require gradient and its grad_fn is ``None``.
+The Tensor is the same except that it does not require gradient and its ``grad_fn`` is ``None``.
 
 ``torch.no_grad`` simply prevents any :code:`Node` from being added to the graph.
 
@@ -392,7 +427,7 @@ To get the required behavior for in-place operations, two things are needed.
 First, to be able to ensure correctness, we need to track the versions of the different Tensors to make sure that a :code:`Node` has access to the version it needs, not a modified one.
 Second, we need to build a graph that will perform the correct backward computation.
 
-From the Python api, the current version of a Tensor can be queried with :code:`._version` .
+From the Python API, the current version of a Tensor can be queried with :code:`._version` .
 The :code:`Function` wrapper takes care of managing this version by using the information provided by the :code:`.mark_dirty()` method available on the context.
 It also takes care of making sure that the Tensors given to the :code:`.backward()` function have not been modified in-place.
 
