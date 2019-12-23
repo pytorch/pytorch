@@ -293,11 +293,13 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
 
+  auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
+
+  THTensor_(resize1d)(self, cpu_generator->get_rng_state_size());
+
   const size_t size = THTensor_(nElement)(self);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
 
-  auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
-  THTensor_(resize1d)(self, cpu_generator->get_rng_state_size());
   cpu_generator->get_rng_state(self->data(), size);
 }
 
@@ -306,10 +308,11 @@ void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
 
+  auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
+
   const size_t size = THTensor_(nElement)(self);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
 
-  auto cpu_generator = at::check_generator<at::CPUGenerator>(_generator);
   cpu_generator->set_rng_state(self->data(), size);
 }
 #endif
