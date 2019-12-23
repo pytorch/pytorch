@@ -426,6 +426,10 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/expr.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir_printer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -499,6 +503,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/types.cc
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/asmjit_codegen.cpp
       ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
