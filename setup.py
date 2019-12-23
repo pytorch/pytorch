@@ -265,8 +265,12 @@ package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = open('version.txt', 'r').read().strip()
 sha = 'Unknown'
 
+
+def _get_git_sha(repo_dir):
+    return subprocess.check_output(['git', '-C', repo_dir, 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+
 try:
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+    sha = _get_git_sha('.')
 except Exception:
     pass
 
@@ -324,6 +328,10 @@ def build_deps():
         f.write("debug = {}\n".format(repr(build_type.is_debug())))
         cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
         f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
+        nccl_version = cmake_cache_vars['NCCL_VERSION_FROM_HEADER']
+        if nccl_version == 'external':
+            nccl_version = _get_git_sha('third_party/nccl/nccl')[:7]
+        f.write("nccl = {}\n".format(repr(nccl_version)))
         f.write("git_version = {}\n".format(repr(sha)))
         f.write("hip = {}\n".format(repr(cmake_cache_vars['HIP_VERSION'])))
 

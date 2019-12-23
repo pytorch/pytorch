@@ -38,6 +38,8 @@ if (NOT __NCCL_INCLUDED)
       )
 
     set(NCCL_FOUND TRUE)
+    set(NCCL_VERSION_FROM_HEADER external CACHE STRING "NCCL version")
+    mark_as_advanced(NCCL_VERSION_FROM_HEADER)
     add_library(__caffe2_nccl INTERFACE)
     # The following old-style variables are set so that other libs, such as Gloo,
     # can still use it.

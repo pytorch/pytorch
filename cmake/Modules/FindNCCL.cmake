@@ -55,24 +55,41 @@ if(NCCL_FOUND)  # obtaining NCCL version and some sanity checks
   set (OLD_CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
   list (APPEND CMAKE_REQUIRED_INCLUDES ${NCCL_INCLUDE_DIRS})
   include(CheckCXXSymbolExists)
+
+  set(file "${PROJECT_BINARY_DIR}/detect_nccl_version.cc")
+  file(WRITE ${file} "
+    #include <iostream>
+    #include <nccl.h>
+    int main()
+    {
+      std::cout << NCCL_MAJOR << '.' << NCCL_MINOR << '.' << NCCL_PATCH << std::endl;
+      return 0;
+    }
+")
+  try_run(NCCL_VERSION_RETRIEVED compile_result ${PROJECT_BINARY_DIR} ${file}
+        RUN_OUTPUT_VARIABLE NCCL_VERSION_FROM_HEADER
+        LINK_LIBRARIES ${NCCL_LIBRARIES})
+  if (NOT NCCL_VERSION_RETRIEVED)
+    message(FATAL_ERROR "NCCL version could not be retrieved")
+  endif()
+  set (NCCL_VERSION_FROM_HEADER ${NCCL_VERSION_FROM_HEADER} CACHE STRING "Version of NCCL retrieved from the header file.")
+  mark_as_advanced(NCCL_VERSION_FROM_HEADER)
+
   check_cxx_symbol_exists(NCCL_VERSION_CODE nccl.h NCCL_VERSION_DEFINED)
 
   if (NCCL_VERSION_DEFINED)
-    set(file "${PROJECT_BINARY_DIR}/detect_nccl_version.cc")
+    set(file "${PROJECT_BINARY_DIR}/check_nccl_version.cc")
     file(WRITE ${file} "
       #include <iostream>
       #include <nccl.h>
       int main()
       {
-        std::cout << NCCL_MAJOR << '.' << NCCL_MINOR << '.' << NCCL_PATCH << std::endl;
-
         int x;
         ncclGetVersion(&x);
         return x == NCCL_VERSION_CODE;
       }
 ")
     try_run(NCCL_VERSION_MATCHED compile_result ${PROJECT_BINARY_DIR} ${file}
-          RUN_OUTPUT_VARIABLE NCCL_VERSION_FROM_HEADER
           LINK_LIBRARIES ${NCCL_LIBRARIES})
     if (NOT NCCL_VERSION_MATCHED)
       message(FATAL_ERROR "Found NCCL header version and library version do not match! \
