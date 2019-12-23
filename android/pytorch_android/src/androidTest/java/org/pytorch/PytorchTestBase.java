@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -291,6 +292,16 @@ public abstract class PytorchTestBase {
     Tensor value = output.toTensor();
     assertArrayEquals(new long[]{}, value.shape());
     assertArrayEquals(new long[]{someNumber}, value.getDataAsLongArray());
+  }
+
+  @Test
+  public void testAliasWithOffset() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue output = module.runMethod("testAliasWithOffset");
+    assertTrue(output.isTensorList());
+    Tensor[] tensors = output.toTensorList();
+    assertEquals(100, tensors[0].getDataAsLongArray()[0]);
+    assertEquals(200, tensors[1].getDataAsLongArray()[0]);
   }
 
   protected abstract String assetFilePath(String assetName) throws IOException;
