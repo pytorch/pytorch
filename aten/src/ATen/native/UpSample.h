@@ -8,11 +8,11 @@
  * Note [compute_scales_value]
  * Note [area_pixel_compute_scale]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Interpolate with scale_factors can have different behaviors
+ * Interpolate with scale_factor can have different behaviors
  * depending on the value of recompute_scales:
  *
  * - With recompute_scales = True (current default behavior):
- * the scale_factors, when provided by the user, are used to calculate
+ * the scale_factor, when provided by the user, are used to calculate
  * the output size. The input size and the computed output_size
  * are then used to infer new values for the scales which are
  * used in the interpolation.  Because floating-point math is not exact,
