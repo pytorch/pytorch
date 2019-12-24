@@ -69,28 +69,30 @@ def _is_zipfile(f):
 
 
 def _get_zip_size(f):
+    print("getting size")
     start = f.tell()
-    curr_byte = f.read(1)
-    eocd_magic_number = [b'P', b'K', b'\x05', b'\x06']
-    pos = 0
-    while curr_byte:
-        if curr_byte == eocd_magic_number[pos]:
-            pos += 1
-            if pos == len(eocd_magic_number):
-                break
-        else:
-            pos = 0
-        curr_byte = f.read(1)
+    chunk_size = 100000000000000000
+    # eocd_magic_number = [b'P', b'K', b'\x05', b'\x06']
+    pos = -1
+    while pos == -1:
+        curr_chunk = f.read(chunk_size)
+        pos = curr_chunk.find(b'\x50\x4b\x05\x06')
+    print(start, pos)
+    f.seek(pos)
+    print(f.read(10))
 
     # read the rest of the EOCD, minus 4 for the magic number which we already read
-    eocd = b'abcd' + f.read(22 - 4)
-    EOCD_SIZE = 20
+    EOCD_SIZE = 22
+    eocd = f.read(EOCD_SIZE)
     eocd_comment_size = eocd[20:22]
     # < means little-endian
     # H means unsigned short
-    eocd_comment_size = struct.unpack('<H', eocd_comment_size)[0]
+    # eocd_comment_size = struct.unpack('<H', eocd_comment_size)[0]
+    # print(e)
+    eocd_comment_size = 0
     size = (f.tell() - start) + eocd_comment_size
     f.seek(start)
+    print("got size", size)
     return size
 
 
