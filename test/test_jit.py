@@ -1242,12 +1242,18 @@ graph(%x : Tensor,
             qconfig_dict = {
                 '': script_qconfig(qconfig)
             }
-            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            # TODO: Here we have a temporary workaround to use
+            # non-inplace insert_observers and insert_quant_dequant because
+            # interpreter instructions seem to be cached,
+            # we need to fix the caching before we can use inplace
+            # insert_observers and insert_quant_dequant
+            m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+            m = wrap_cpp_module(m._c)
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
-
-            get_forward(m._c)(data)
-            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
-            get_forward(m._c)(data)
+            m(data)
+            m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
+            m = wrap_cpp_module(m._c)
+            m(data)
             # Make sure inserted attributes are the same
             # This needs to be refactored after we know how to get
             # all attributes of a given ScriptModule
@@ -1256,6 +1262,10 @@ graph(%x : Tensor,
                     attr = v + postfix
                     assert m.conv1._c.hasattr(attr)
                     assert m.conv2._c.hasattr(attr)
+            for postfix in ['_0', '_1', '_2']:
+                obs = '_observer' + postfix
+                assert not m.conv1._c.hasattr(obs)
+                assert not m.conv2._c.hasattr(obs)
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
             FileCheck().check_not(quant_func) \
@@ -1269,7 +1279,7 @@ graph(%x : Tensor,
                        .check(quant_func) \
                        .check_next("aten::dequantize") \
                        .check("return") \
-                       .run(str(get_module_method(m, 'conv1', '_conv_forward').graph))
+                       .run(m.conv1._c._get_method('_conv_forward').graph)
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
@@ -3740,6 +3750,38 @@ graph(%Ra, %Rb):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_export_opnames(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x + y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 * x
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.one(self.two(x), x)
+
+        class Bar(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.sub = Foo()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.sub.forward(x)
+
+        bar = Bar()
+        ops = torch.jit.export_opnames(bar)
+        expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
+        self.assertEqual(ops, expected)
+
     def test_pytorch_jit_env_off(self):
         import subprocess
         env = os.environ.copy()
@@ -3781,7 +3823,6 @@ graph(%Ra, %Rb):
             buffer.seek(0)
             model_loaded = torch.jit.load(buffer)
             self.assertEqual(model_loaded(), model())
-
 
 class TestFrontend(JitTestCase):
 
@@ -4563,6 +4604,35 @@ def foo(x):
         w.train(False)
         self.assertEqual(7, w(3))
         self.assertFalse("training" in w.state_dict())
+
+    @skipIfRocm
+    def test_torchbind(self):
+        def test_equality(f, cmp_key):
+            obj1 = f()
+            obj2 = torch.jit.script(f)()
+            return (cmp_key(obj1), cmp_key(obj2))
+
+        def f():
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val.increment(1)
+            return val
+        test_equality(f, lambda x: x)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int'"):
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
+            val.increment('foo')
+
+        def f():
+            ss = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            return ss.pop()
+        test_equality(f, lambda x: x)
+
+        def f():
+            ss1 = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
+            ss1.push(ss2.pop())
+            return ss1.pop() + ss2.pop()
+        test_equality(f, lambda x: x)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -7468,7 +7538,7 @@ a")
                 self.assertEqual(t1.device, t2.device)
 
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't have any shapes to propagate")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
     def test_tensor_as_tensor_shape_prop(self):
         tensor_template = dedent('''
         def func():
@@ -7476,23 +7546,16 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-            expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
-        else:
-            expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
+        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
                 exec(code, globals(), scope)
-                if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
-                    fn = self.checkScript(code, ())
-                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
-                else:
-                    cu = torch.jit.CompilationUnit(code)
-                    torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                cu = torch.jit.CompilationUnit(code)
+                torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype):

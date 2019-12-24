@@ -661,14 +661,15 @@ class InsertQuantDeQuantHelper {
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
-  void removeObservers(script::Module& module);
-  void removeObservers(script::Module& module, Graph* g);
+  void cleanup(script::Module& module);
+  void cleanup(script::Module& module, Graph* g);
   void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
  private:
   // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
+  std::unordered_map<Graph*, std::vector<int>> removed_observer_slots_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
   // Map from Graph to observer node, we can use observer node to
   // get the information of original value that's been observed and
@@ -705,16 +706,16 @@ void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
   observer_nodes_[g].push_back(observer);
 }
 
-void InsertQuantDeQuantHelper::removeObservers(script::Module& module) {
+void InsertQuantDeQuantHelper::cleanup(script::Module& module) {
   for (auto& method : module.get_methods()) {
-    removeObservers(module, method.graph().get());
+    cleanup(module, method.graph().get());
   }
   for (script::Module m : module.children()) {
-    removeObservers(m);
+    cleanup(m);
   }
 }
 
-void InsertQuantDeQuantHelper::removeObservers(
+void InsertQuantDeQuantHelper::cleanup(
     script::Module& module,
     Graph* g) {
   GRAPH_DUMP("Before Remove Observers:", g);
@@ -727,21 +728,31 @@ void InsertQuantDeQuantHelper::removeObservers(
     }
     nodes_to_destroy_.at(g).clear();
   }
+
+  // If we have seen this graph before, we'll replay the observer
+  // slots removal in the same order
+  if (removed_observer_slots_.count(g)) {
+    for (auto slot: removed_observer_slots_.at(g)) {
+      module._ivalue()->unsafeRemoveSlot(slot);
+    }
+  }
+
   // Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer moduels with this optimization
   if (observer_modules_to_remove_.count(g)) {
-    const auto& observers = observer_modules_to_remove_.at(g);
+    auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
-      if (module.hasattr(observer_name)) {
+      GRAPH_DEBUG("Trying to remove: ", observer_name);
+      if (module.type()->hasAttribute(observer_name)) {
+        removed_observer_slots_[g].push_back(module.type()->getAttributeSlot(observer_name));
         module._ivalue()->unsafeRemoveAttr(observer_name);
         module.type()->unsafeRemoveAttribute(observer_name);
       }
     }
-    // We don't clear `observer_modules_to_remove_` since different
-    // class type could share the Graph as well
+    observers.clear();
   }
   GRAPH_DUMP("After remove observers :", g);
 }
@@ -1202,7 +1213,7 @@ script::Module InsertQuantDeQuant(
   script::Module module = inplace ? input_module : input_module.clone();
   InsertQuantDeQuantHelper h;
   h.run(module, method_name);
-  h.removeObservers(module);
+  h.cleanup(module);
   return module;
 }
 
