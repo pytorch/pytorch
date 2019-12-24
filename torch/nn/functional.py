@@ -2457,14 +2457,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
-        recompute_scale_factor (bool, optional): When scale_factor is passed as a parameter, it can be
-            directly used in the output computation, or can be used to compute the output size which
-            will later be used to infer new scales values. In the second case, the value of the scales
-            used in the interpolation can be different than the ones specified by the user for non integer
-            values of scale_factor (due to floating point precision).
-            If set to ``False``, scale_factor is used in the interpolation.
-            If set to ``True``, the output_size is computed and new scales are infered for the interpolation.
-            Default: ``True``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
+            to compute the output_size.  If `recompute_scale_factor` is ```True`` or not specified,
+            a new `scale_factor` will be computed based on the output and input sizes for use in the
+            interpolation computation.  Otherwise, the passed-in `scale_factor` will be used in the
+            interpolation computation.  Note that when scale_factor is floating-point, the recomputed
+            scale_factor may differ from the one passed in due to precision issues.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
