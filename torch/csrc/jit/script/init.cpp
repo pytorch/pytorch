@@ -1175,7 +1175,7 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
-  m.def("export_opnames",
+  m.def("_export_opnames",
           [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 
   py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
