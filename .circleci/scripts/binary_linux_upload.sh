@@ -9,8 +9,8 @@ cat >/home/circleci/project/login_to_anaconda.sh <<EOL
 set +x
 echo "Trying to login to Anaconda"
 yes | anaconda login \
-    --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
-    --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
+    --username "$TMP_CONDA_USERNAME" \
+    --password "$TMP_CONDA_PASSWORD"
 set -x
 EOL
 chmod +x /home/circleci/project/login_to_anaconda.sh
