@@ -30,7 +30,6 @@ namespace jit {
   _(IValueFuture)                      \
   _(PassManagement)                    \
   _(Proto)                             \
-  _(RegisterFusionCachesKernel)        \
   _(SchemaParser)                      \
   _(TopologicalIndex)                  \
   _(TopologicalMove)                   \
@@ -79,6 +78,7 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
+<<<<<<< HEAD
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
@@ -89,11 +89,15 @@ namespace jit {
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)
+=======
+  _(CommonAncestor)                    \
+  _(CPUFusion)
+>>>>>>> cpp test extensibility point
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
-  _(Fusion)                     \
+  _(GPUFusion)                  \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)
