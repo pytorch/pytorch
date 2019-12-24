@@ -417,11 +417,12 @@ namespace scattergather {
       SizeCheckFunc sizeCheckFunc,
       KernelOpFunc kernelOpFunc
     ) {
-      sizeCheckFunc(self, index, src, dim);
-
       if (index.numel() == 0) {
         return;
       }
+
+      sizeCheckFunc(self, index, src, dim);
+
 
       TSelf* self_data = self.data_ptr<TSelf>();
       int64_t self_dim_stride = ensure_nonempty_stride(self, dim);
