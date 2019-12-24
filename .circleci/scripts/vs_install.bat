@@ -21,8 +21,8 @@ curl -k -L %VS_DOWNLOAD_LINK% --output vs_installer.exe
 if errorlevel 1 exit /b 1
 
 start /wait .\vs_installer.exe %VS_INSTALL_ARGS%
-powershell -Command Start-Sleep 10
-powershell -Command Wait-Process -Name vs_installer
+powershell -Command Start-Sleep 600
+tasklist
 if not errorlevel 0 exit /b 1
 if errorlevel 1 if not errorlevel 3010 exit /b 1
 if errorlevel 3011 exit /b 1
