@@ -423,7 +423,6 @@ namespace scattergather {
 
       sizeCheckFunc(self, index, src, dim);
 
-
       TSelf* self_data = self.data_ptr<TSelf>();
       int64_t self_dim_stride = ensure_nonempty_stride(self, dim);
       int64_t self_dim_size = ensure_nonempty_size(self, dim);
