@@ -1263,11 +1263,11 @@ struct PythonPrintImpl {
       const auto& v = moduleType->getConstant(i);
 
       indent();
-      std::cout << "Saving constant:" << name << " ivalue type: " << v.type()->python_str() << std::endl;
       body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
       auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
       printConstant(*ss, v);
       body_ << ss->str() << "\n";
+      std::cout << "Saving constant:" << ss->str() << std::endl;
     }
   }
 
