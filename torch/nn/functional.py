@@ -2424,7 +2424,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scales=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2457,7 +2457,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
-        recompute_scales (bool, optional): When scale_factor is passed as a parameter, it can be
+        recompute_scale_factor (bool, optional): When scale_factor is passed as a parameter, it can be
             directly used in the output computation, or can be used to compute the output size which
             will later be used to infer new scales values. In the second case, the value of the scales
             used in the interpolation can be different than the ones specified by the user for non integer
@@ -2482,11 +2482,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         affects the outputs.
 
     .. warning::
-        When scale_factor is specified, if recompute_scales=True,
+        When scale_factor is specified, if recompute_scale_factor=True,
         scale_factor is used to compute the output_size which will then
         be used to infer new scales for the interpolation. This is the current
-        default behavior when recompute_scales is not specified.
-        The default behavior for recompute_scales will change to False
+        default behavior when recompute_scale_factor is not specified.
+        The default behavior for recompute_scale_factor will change to False
         in 1.5.0, and scale_factor will be used in the interpolation
         calculation.
 
@@ -2503,15 +2503,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 and len(scale_factor) != dim:
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-        if scale_factor is not None and recompute_scales is None:
+        if scale_factor is not None and recompute_scale_factor is None:
             # only warn when the scales have floating values since
-            # the result for ints is the same with/without recompute_scales
+            # the result for ints is the same with/without recompute_scale_factor
             is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
             if is_float_scale_factor:
                 warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
                               "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
                               "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set recompute_scales=True. "
+                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")
 
     def _output_size(dim):
@@ -2531,7 +2531,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     def _scale_factors(dim):
         scale_factor_len = dim - 2
         scale_factor_list = _ntuple(scale_factor_len)(-1)
-        if scale_factor is not None and recompute_scales is False:
+        if scale_factor is not None and recompute_scale_factor is False:
             scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
         return scale_factor_list
 
