@@ -20,6 +20,7 @@ std::unordered_set<Symbol> white_list = {
     prim::TupleSlice,
     prim::Param,
     prim::Return,
+    prim::PythonOp,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
