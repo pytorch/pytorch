@@ -105,7 +105,7 @@ __device__ static inline scalar_t reduce_agg(scalar_t agg) {
 template <typename scalar_t, typename F>
 __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t * self, const int64_t n, const int64_t m, const scalar_t p,
                                               const double n2, const double n2_squared_minus_1) {
-  const int k = blockIdx.x;
+  const int64_t k = blockIdx.x;
   const int stride = blockDim.x;
 
   // The -1 accounts for floating point truncation issues
