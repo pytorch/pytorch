@@ -417,22 +417,6 @@ namespace scattergather {
       SizeCheckFunc sizeCheckFunc,
       KernelOpFunc kernelOpFunc
     ) {
-      int64_t self_dim = ensure_nonempty_dim(self.dim());
-      int64_t index_dim = ensure_nonempty_dim(index.dim());
-      int64_t src_dim = ensure_nonempty_dim(src.dim());
-
-      TORCH_CHECK((dim >= 0) || (dim < index_dim),
-        "Invalid dimesion ", dim, " (expected to be 0 <= dim < ", index_dim, ")"
-      );
-
-      TORCH_CHECK((index_dim == self_dim) && (index_dim == self_dim),
-        "Inconsistent tensor sizes, expected ",
-        index, " ", index.sizes(), ", ",
-        self, " ", self.sizes(), " and ",
-        src, " ", src.sizes(),
-        " to have the same number of dimensions"
-      );
-
       sizeCheckFunc(self, index, src, dim);
 
       if (index.numel() == 0) {
@@ -452,6 +436,7 @@ namespace scattergather {
       int64_t src_dim_size = ensure_nonempty_size(src, dim);
 
       bool applyHasFinished = false;
+      int64_t index_dim = ensure_nonempty_dim(index.dim());
       std::vector<int64_t> idxCounter(index_dim, 0);
       while (!applyHasFinished) {
         kernelOpFunc(
