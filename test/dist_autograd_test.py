@@ -1136,7 +1136,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                         wait_until_node_failure(rank)
 
                 with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
-                                    "(worker.: Error in reponse from worker.: server shutting down)"):
+                                            "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
@@ -1316,7 +1316,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 wait_until_node_failure(2)
 
                 with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
-                                    "(worker.: Error in reponse from worker.: server shutting down)"):
+                                            "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
 
