@@ -6,8 +6,9 @@
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 
 namespace torch {
 namespace jit {
@@ -25,6 +26,13 @@ static int ceilDiv(const int a, const int b) {
 }
 
 } // namespace
+
+static std::shared_ptr<Graph> normalizeGraphForCache(
+    const std::shared_ptr<Graph>& graph) {
+  auto result = Canonicalize(graph, /*keep_unique_names=*/false);
+  EraseShapeInformation(result);
+  return result;
+}
 
 struct KernelCache {
 
@@ -175,10 +183,10 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       int major, minor;
       int nvrtc_major, nvrtc_minor;
       AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
- 
+
       // Short-circuits if NVRTC version too low
       AT_ASSERT(nvrtc_major >= 6);
- 
+
       // Major and minor is determined by device properties and
       // possibly "downcompiled" to a lower (compatible) compute architecture
       // based on the NVRTC version
@@ -210,7 +218,7 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       std::vector<char> ptx;
       ptx.resize(ptx_size);
       AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
- 
+
       AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(kernel_entry->module_), ptx.data()));
       AT_CUDA_DRIVER_CHECK(
           nvrtc().cuModuleGetFunction(&(kernel_entry->function_), kernel_entry->module_, "saxpy"));

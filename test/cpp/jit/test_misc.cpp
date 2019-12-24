@@ -370,12 +370,10 @@ void testCustomFusion() {
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
 
-  torch::jit::overrideCanFuseOnCPU(true);
   CustomFuseGraph(
       g,
       [](Node* n) { return n->kind() != prim::Param; },
       Symbol::fromQualString("prim::FusionGroup"));
-  torch::jit::overrideCanFuseOnCPU(false);
 
   const auto& nodes = g->nodes();
   auto fusion_group =

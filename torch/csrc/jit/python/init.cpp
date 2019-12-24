@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/pybind.h>
 
+<<<<<<< HEAD:torch/csrc/jit/python/init.cpp
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -9,6 +10,16 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/operator.h>
+=======
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/operator.h>
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/init.cpp
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -110,9 +121,6 @@ void initJITBindings(PyObject* module) {
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
-      .def(
-          "_jit_debug_fuser_num_cached_kernel_specs",
-          torch::jit::fuser::debugNumCachedKernelSpecs)
       .def("_jit_pass_onnx_remove_print", RemovePrintOps)
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
@@ -339,10 +347,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+<<<<<<< HEAD:torch/csrc/jit/python/init.cpp
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def("_jit_override_can_fuse_on_gpu", &overrideCanFuseOnGPU)
       .def("_jit_register_tensorexpr_fuser", &RegisterTensorExprFuser::registerPass)
       .def("_jit_clear_tensorexpr_fuser", &RegisterTensorExprFuser::clearPass)
+=======
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/init.cpp
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -405,6 +416,7 @@ void initJITBindings(PyObject* module) {
             }
             return nullptr;
           })
+<<<<<<< HEAD:torch/csrc/jit/python/init.cpp
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
@@ -412,6 +424,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
+=======
+      .def("_jit_pass_onnx_unpack_quantized_weights",
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/init.cpp
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, at::Tensor>& paramsDict) {
             UnpackQuantizedWeights(graph, paramsDict);

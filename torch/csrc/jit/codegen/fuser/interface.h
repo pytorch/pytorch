@@ -29,11 +29,14 @@ public:
       const Node* const fusion,
       std::vector<at::Tensor>&,
       at::ArrayRef<IValue>) = 0;
+
+  virtual ~FusionBackend() = 0;
 };
 
 TORCH_API void registerFusionBackendEx(
     at::Device::Type backend_type,
     FusionBackend* backend);
+
 TORCH_API bool hasFusionBackendEx(at::Device::Type backend_type);
 
 struct TORCH_API RegisterFusionBackendEx {
@@ -55,6 +58,7 @@ TORCH_API void compileFusion(Node* fusion);
 // TODO: remove key, it can be acquired from the node
 TORCH_API void callFusion(const Node* const node, Stack& stack);
 
+<<<<<<< HEAD:torch/csrc/jit/codegen/fuser/interface.h
 /*
  * OLD INTERFACE BELOW
 */
@@ -97,5 +101,7 @@ TORCH_API std::string debugGetFusedKernelCode(
 
 TORCH_API size_t nCompiledKernels();
 
+=======
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/fuser/interface.h
 } // namespace jit
 } // namespace torch

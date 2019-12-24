@@ -16,16 +16,17 @@
 
 // New fuser includes
 #include <torch/csrc/jit/fuser/interface.h>
-//#include <torch/csrc/jit/fuser/cpu/interface.h>
-//#include <torch/csrc/jit/fuser/cuda/interface.h>
 #include <torch/csrc/jit/fuser/common/utils.h>
 
+<<<<<<< HEAD:torch/csrc/jit/codegen/fuser/interface.cpp
 // Historic fuser includes
 #include <torch/csrc/jit/fuser/compiler.h>
 #include <torch/csrc/jit/fuser/executor.h>
 #include <torch/csrc/jit/fuser/fallback.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 >>>>>>> init:torch/csrc/jit/fuser/interface.cpp
+=======
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/fuser/interface.cpp
 
 #include <iterator>
 
@@ -33,6 +34,9 @@ namespace torch {
 namespace jit {
 
 using namespace torch::jit::fuser;
+
+// Defines pure virtual destructor
+FusionBackend::~FusionBackend() { }
 
 namespace {
 
@@ -95,12 +99,12 @@ void registerFusionBackendEx(
 
 bool hasFusionBackendEx(at::Device::Type backend_type) {
   std::lock_guard<std::mutex> guard(fusionBackendLock());
-  getFusionBackendsEx().count(backend_type);
+  return (getFusionBackendsEx().count(backend_type) > 0);
 }
 
 RegisterFusionBackendEx::RegisterFusionBackendEx(
-    at::Device::Type backend_type,
-    FusionBackend* backend) {
+  at::Device::Type backend_type
+, FusionBackend* backend) {
   registerFusionBackendEx(backend_type, backend);
 }
 
@@ -214,6 +218,7 @@ void callFusion(const Node* const fusion, Stack& stack) {
   drop(stack, nInputs);
 }
 
+<<<<<<< HEAD:torch/csrc/jit/codegen/fuser/interface.cpp
 
 
 
@@ -315,5 +320,7 @@ size_t nCompiledKernels() {
   return fuser::nCompiledKernels();
 }
 
+=======
+>>>>>>> Removes (most) old code, updates README:torch/csrc/jit/fuser/interface.cpp
 } // namespace jit
 } // namespace torch
