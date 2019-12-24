@@ -18,6 +18,130 @@
 namespace torch {
 namespace jit {
 
+// Replaces given Node n with a fusion group.
+// Notes:
+//  - The fusion node has the same inputs and outputs.
+//  - The fusion node contains a subgraph consisting of the original node.
+Node* makeFusionNode(
+  const int fusion_key
+, std::shared_ptr<Graph>& graph
+, Node* n) {
+  // Creates and inserts fusion node (with its key)
+  auto fusion = graph->createWithSubgraph(prim::FusionGroup);
+  fusion->insertBefore(n);
+  fusion->i_(attr::value, fusion_key);
+
+  // Grabs fusion node's subgraph (as a shorthand)
+  auto& subgraph = *(fusion->g(attr::Subgraph));
+
+  // Adds n's inputs to the fusion and its subgraph
+  for (auto input : n->inputs()) {
+    fusion->addInput(input);
+    subgraph.addInput()->setType(input->type());
+  }
+
+  // Creates the fusion group's output
+  auto new_output = fusion->addOutput();
+  new_output->copyMetadata(n->output());
+
+  // Copies n to the subgraph and adds creates the subgraph output
+  {
+    WithInsertPoint guard(*subgraph.nodes().begin());
+    auto* copy = subgraph.create(n->kind(), subgraph.inputs(), n->outputs().size());
+    auto* out = subgraph.insertNode(copy)->output();
+    out->copyMetadata(n->output());
+    subgraph.registerOutput(out);
+  }
+
+  // Replaces n with the fusion and destroys n
+  n->replaceAllUsesWith(fusion);
+  n->destroy();
+
+  return fusion;
+}
+
+std::unordered_set<Symbol> neverFusibleNodes{
+  prim::BailOut
+, prim::BailoutTemplate
+};
+
+bool FuseBlockHelper(std::shared_ptr<Graph>& graph, Block* block) {
+  bool has_changed = false;
+
+  // Enumerates nodes in reverse topological order
+  auto it = block->nodes().rbegin();
+  while (it != block->nodes().rend()) {
+    auto* node = *it;
+
+    // Skips nonfusible nodes
+    const auto nf_it = neverFusibleNodes.find(node->kind());
+    if (nf_it != neverFusibleNodes.end()) {
+      ++it;
+      continue;
+    }
+
+    // Skips nodes with (sub)blocks
+    if (node->blocks().size() > 0) {
+      ++it;
+      continue;
+    }
+
+    if (node->kind() == prim::FusionGroup) {
+      // TODO
+    } else if (isFusible(node)) {
+      const auto fusion_key = fuse(node);
+      auto* fusion = makeFusionNode(fusion_key, graph, node);
+      it = fusion->reverseIterator();
+      has_changed = true;
+    }
+
+    ++it;
+  }
+
+  return has_changed;
+}
+
+void FuseBlock(std::shared_ptr<Graph>& graph, Block* block) {
+  while (FuseBlockHelper(graph, block));
+
+  // Signals fusions to compile and fuses (sub)blocks
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::FusionGroup) {
+      compileFusion(node);
+    }
+
+    for (auto* block : node->blocks()) {
+      FuseBlock(graph, block);
+    }
+  }
+}
+
+// TODO: make fusions inplace operations (pre-allocate inputs)
+void FuseGraph(std::shared_ptr<Graph>& graph) {
+  #if FUSER_DEBUG
+    std::cout << "graph_fuser.cpp: FuseGraph() (reverse iteration)" << std::endl;
+    std::cout << "pre-fusion graph: " << std::endl;
+    std::cout << *graph << std::endl << std::endl;
+  #endif // FUSER_DEBUG
+
+  // Creates fusions
+  FuseBlock(graph, graph->block());
+
+  // Runs clean-up passes
+  EliminateCommonSubexpression(graph);
+  EliminateDeadCode(graph);
+  // TODO: review the following -- remove it?
+  // PeepholeOptimizeShapeExpressions(graph->block());
+
+  #if FUSER_DEBUG
+    std::cout << std::endl;
+    std::cout << "post-fusion graph: " << std::endl;
+    std::cout << *graph << std::endl;
+  #endif // FUSER_DEBUG
+}
+
+// OLD CODE BELOW
+
 namespace {
 
 // What is a simple mappable operator?  It:
@@ -174,19 +298,20 @@ struct GraphFuser {
   }
 
   bool isFusableDevice(Value *v) {
-    if (!v->type()->isSubtypeOf(TensorType::get())) {
-      return true;
-    }
-    auto device = v->type()->expect<TensorType>()->device();
-    if (!device) {
-      return true;
-    }
-    if ((*device).is_cpu()) {
-      return canFuseOnCPU();
-    } else if ((*device).is_cuda()) {
-      return canFuseOnGPU();
-    }
-    throw std::runtime_error("Unknown device");
+    return false;
+    // if (!v->type()->isSubtypeOf(TensorType::get())) {
+    //   return true;
+    // }
+    // auto device = v->type()->expect<TensorType>()->device();
+    // if (!device) {
+    //   return true;
+    // }
+    // if ((*device).is_cpu()) {
+    //   return canFuseOnCPU();
+    // } else if ((*device).is_cuda()) {
+    //   return canFuseOnGPU();
+    // }
+    // throw std::runtime_error("Unknown device");
   }
 
 
@@ -1204,138 +1329,6 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 }
 
 } // anonymous namespace
-
-
-
-
-// OLD CODE ABOVE
-
-// Replaces given Node n with a fusion group.
-// Notes:
-//  - The fusion node has the same inputs and outputs.
-//  - The fusion node contains a subgraph consisting of the original node.
-Node* makeFusionNode(
-  const int fusion_key
-, std::shared_ptr<Graph>& graph
-, Node* n) {
-  // Creates and inserts fusion node (with its key)
-  auto fusion = graph->createWithSubgraph(prim::FusionGroup);
-  fusion->insertBefore(n);
-  fusion->i_(attr::value, fusion_key);
-
-  // Grabs fusion node's subgraph (as a shorthand)
-  auto& subgraph = *(fusion->g(attr::Subgraph));
-
-  // Adds n's inputs to the fusion and its subgraph
-  for (auto input : n->inputs()) {
-    fusion->addInput(input);
-    subgraph.addInput()->setType(input->type());
-  }
-
-  // Creates the fusion group's output
-  auto new_output = fusion->addOutput();
-  new_output->copyMetadata(n->output());
-
-  // Copies n to the subgraph and adds creates the subgraph output
-  {
-    WithInsertPoint guard(*subgraph.nodes().begin());
-    auto* copy = subgraph.create(n->kind(), subgraph.inputs(), n->outputs().size());
-    auto* out = subgraph.insertNode(copy)->output();
-    out->copyMetadata(n->output());
-    subgraph.registerOutput(out);
-  }
-
-  // Replaces n with the fusion and destroys n
-  n->replaceAllUsesWith(fusion);
-  n->destroy();
-
-  return fusion;
-}
-
-std::unordered_set<Symbol> neverFusibleNodes{
-  prim::BailOut
-, prim::BailoutTemplate
-};
-
-bool FuseBlockHelper(std::shared_ptr<Graph>& graph, Block* block) {
-  bool has_changed = false;
-
-  // Enumerates nodes in reverse topological order
-  auto it = block->nodes().rbegin();
-  while (it != block->nodes().rend()) {
-    auto* node = *it;
-
-    // Skips nonfusible nodes
-    const auto nf_it = neverFusibleNodes.find(node->kind());
-    if (nf_it != neverFusibleNodes.end()) {
-      ++it;
-      continue;
-    }
-
-    // Skips nodes with (sub)blocks
-    if (node->blocks().size() > 0) {
-      ++it;
-      continue;
-    }
-
-    if (node->kind() == prim::FusionGroup) {
-      // TODO
-    } else if (isFusible(node)) {
-      const auto fusion_key = fuse(node);
-      auto* fusion = makeFusionNode(fusion_key, graph, node);
-      it = fusion->reverseIterator();
-      has_changed = true;
-    }
-
-    ++it;
-  }
-
-  return has_changed;
-}
-
-void FuseBlock(std::shared_ptr<Graph>& graph, Block* block) {
-  while (FuseBlockHelper(graph, block));
-
-  // Signals fusions to compile and fuses (sub)blocks
-  for (auto* node : block->nodes()) {
-    if (node->kind() == prim::FusionGroup) {
-      compileFusion(node);
-    }
-
-    for (auto* block : node->blocks()) {
-      FuseBlock(graph, block);
-    }
-  }
-}
-
-// TODO: make fusions inplace operations (pre-allocate inputs)
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  #if FUSER_DEBUG
-    std::cout << "graph_fuser.cpp: FuseGraph() (reverse iteration)" << std::endl;
-    std::cout << "pre-fusion graph: " << std::endl;
-    std::cout << *graph << std::endl << std::endl;
-  #endif // FUSER_DEBUG
-
-  // Creates fusions
-  FuseBlock(graph, graph->block());
-
-  // Runs clean-up passes
-  EliminateCommonSubexpression(graph);
-  EliminateDeadCode(graph);
-  // TODO: review the following -- remove it?
-  // PeepholeOptimizeShapeExpressions(graph->block());
-
-  #if FUSER_DEBUG
-    std::cout << std::endl;
-    std::cout << "post-fusion graph: " << std::endl;
-    std::cout << *graph << std::endl;
-  #endif // FUSER_DEBUG
-}
-
-
-
-
-// OLD CODE BELOW
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,

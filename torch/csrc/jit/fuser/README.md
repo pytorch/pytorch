@@ -1,5 +1,24 @@
 # Fusion in PyTorch (In Progress)
 
+## Simple Python script for e2e validation
+
+```
+import torch
+
+def add(x, y):
+    return x + y
+
+scripted_add = torch.jit.script(add)
+
+x = torch.zeros(5, 2)
+y = torch.ones(5, 2)
+
+# Second iteration runs the optimizations
+scripted_add(x, y)
+z = scripted_add(x, y)
+
+print(z)
+```
 
 ## Testing
 
@@ -18,22 +37,36 @@ are generated.
 
 Python tests are not available yet. test_jit_fuser.py will be repurposed shortly.
 
+## Adding and removing files
+
+All cpp (.cpp) files must be added to or removed from Caffe2/CmakeLists.txt and
+tools/build_variables.py.
+
+Header files (.h) are processed automatically.
+
+Do not use non-standard suffixes like .cc or .hpp.
 
 
+## Fusion Pass
+
+Currently contains considerable legacy code and only supports singleton
+fusion. Vertical fusion coming soon.
 
 
-<!--
-The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them by just-in-time (JIT) compiling kernels that run all the graph operations.
+## TODO
 
-## Code Organization
-
-The fuser is designed hierarchically with device-independent logic eventually deferring to device-specific logic and implementation. The device-specific code is (mostly) found in each devices' subdirectory. The device-independent logic has six components:
-
-* The Interface (interface.h/cpp) has functions to register and run fusions, interrogate fusion functionality, and perform debugging.
-* The Compiler (compiler.h/cpp) performs "upfront" and "runtime" compilation. When fusions are registered, upfront compilation produces fallback code and and performs some shape inference. When a fusion is run, runtime compilation invokes code generation and the device-specific compilation logic.
-* The Code Generator (codegen.h/cpp) produces the string to be compiled on the device.
-* The Executor (executor.h/cpp) runs requested fusions. It performs shape inference, expands tensors as necessary, determines the device to run on, acquires a cached compiled kernel or requests the Compiler produce a new one, invokes device-specific code to launch the kernel and updates the stack.
-* The Fallback (fallback.h/cpp) runs subgraphs that can't be fused because shape inference didn't determine a common tensor size or the device the tensors are on doesn't support fusion.
-* The Kernel Specification Cache (kernel_cache.h/cpp) is a thread-safe cache holding the device-independent specifications produced during upfront compilation. These specifications each have their own thread-safe stores of compiled kernels that the Executor checks before requesting runtime compilation.
-
-The device-specific components have logic for compiling and running code in FusedKernelCPU (cpu/fused_kernel.h/cpp) and FusedKernelCUDA (cuda/fused_kernel.h/cpp).  -->
+- Prototype TorchScript -> LoopIR
+- Add vertical fusion
+- Restore removed debug functionality (see torch/csrc/jit/init.cpp)
+- Repair custom fusion pass (see test/cpp/jit/test_misc.cpp)
+- Replace test_fuser.cpp
+- Change "fuser" name(space) to "fusion"
+- Update Python tests
+- Create cpp tests
+- Benchmark speedups on CPU and GPU with benchmark networks / snippets
+- Remove remaining unused "fuser" files
+- Update fusion README to reflect new requirements, capabilities, and design
+- CPU: LoopIR -> CPUIR
+- CPU: CPUIR -> callable
+- Benchmark kernel caching
+- move branch to pytorch/pytorch (once tests are ready)

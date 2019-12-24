@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/irparser.h>
@@ -102,9 +101,6 @@ void initJITBindings(PyObject* module) {
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
-      .def(
-          "_jit_debug_fuser_num_cached_kernel_specs",
-          torch::jit::fuser::debugNumCachedKernelSpecs)
       .def("_jit_pass_onnx_remove_print", RemovePrintOps)
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
@@ -304,7 +300,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
-      .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
           [](Graph& g) {
@@ -350,11 +345,6 @@ void initJITBindings(PyObject* module) {
               return match.type();
             }
             return nullptr;
-          })
-      .def(
-          "_jit_fuser_get_fused_kernel_code",
-          [](Graph& g, std::vector<at::Tensor> inps) {
-            return debugGetFusedKernelCode(g, inps);
           })
       .def("_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,

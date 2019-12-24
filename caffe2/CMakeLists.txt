@@ -456,11 +456,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
@@ -501,7 +496,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/ir_printer.cc
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/ir_visitor.cc
       ${TORCH_SRC_DIR}/csrc/jit/compiler/src/types.cc
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/asmjit_codegen.cpp
       ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
@@ -540,7 +534,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
@@ -554,7 +547,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (USE_ROCM)
     list(APPEND Caffe2_HIP_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp

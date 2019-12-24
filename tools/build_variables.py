@@ -173,12 +173,6 @@ libtorch_sources = [
     "torch/csrc/jit/script/module_save.cpp",
     "torch/csrc/jit/script/object.cpp",
     "torch/csrc/jit/tracer.cpp",
-    "torch/csrc/jit/fuser/kernel_cache.cpp",
-    "torch/csrc/jit/fuser/compiler.cpp",
-    "torch/csrc/jit/fuser/executor.cpp",
-    "torch/csrc/jit/fuser/codegen.cpp",
-    "torch/csrc/jit/fuser/fallback.cpp",
-    "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/fuser/cpu/asmjit_codegen.cpp",
     "torch/csrc/jit/fuser/common/expr.cpp",
@@ -201,7 +195,7 @@ libtorch_sources = [
 libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
-    "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cuda/interface.cpp"
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp"
 ]
