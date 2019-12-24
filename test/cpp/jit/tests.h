@@ -29,7 +29,6 @@ namespace jit {
   _(IValue)                            \
   _(PassManagement)                    \
   _(Proto)                             \
-  _(RegisterFusionCachesKernel)        \
   _(SchemaParser)                      \
   _(TopologicalIndex)                  \
   _(TopologicalMove)                   \
@@ -74,12 +73,13 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
-  _(CommonAncestor)
+  _(CommonAncestor)                    \
+  _(CPUFusion)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
-  _(Fusion)                     \
+  _(GPUFusion)                  \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)
