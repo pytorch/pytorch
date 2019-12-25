@@ -452,9 +452,9 @@ jobs:
     steps:
       - checkout
       - run:
-          name: install vs2017
+          name: Install VS2017
           command: |
-            .circleci/scripts/vs_install.bat
+            .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           command: |
@@ -492,9 +492,9 @@ jobs:
     steps:
       - checkout
       - run:
-          name: install vs2017
+          name: Install VS2017
           command: |
-            .circleci/scripts/vs_install.bat
+            .circleci/scripts/vs_install.ps1
       - run:
           name: Test
           no_output_timeout: "30m"
