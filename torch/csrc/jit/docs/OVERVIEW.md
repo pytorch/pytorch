@@ -807,7 +807,7 @@ The ArgumentSpec object is used as a key into a cache that holds pre-optimized C
 *Pre-derivative Optimization* On a code cache miss, we generate a new optimized Graph on the fly (`compileSpec`). It starts by creating a copy of the initial Graph and setting the input types to the specialized Tensor types observed in this specialization. TensorType inputs to the Graph will get refined with types that know the device, number of dimensions, and requires grad state.
 
 ```
-# post specialization, inputs are now specialized types
+# post compileSpec, inputs are now specialized types
 graph(%x : Float(*, *),
       %hx : Float(*, *),
       %cx : Float(*, *),
