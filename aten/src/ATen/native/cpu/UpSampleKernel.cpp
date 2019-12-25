@@ -5,6 +5,8 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
+#include <ATen/Parallel.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -68,10 +70,10 @@ void cpu_upsample_nearest(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 0;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 0;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 0;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 0;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
@@ -166,94 +168,44 @@ void cpu_upsample_nearest_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data_base = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
   auto ndim = input_sizes.size();
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 0;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 0;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 0;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 0;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
-  auto loop1d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto grad_input_data = (scalar_t*)data[0];
-    auto grad_output_data = (scalar_t*)data[1];
+  int64_t output_slice_size = output_depth * output_height * output_width;
+  int64_t input_slice_size = input_depth * input_height * input_width;
 
-    int64_t c = 0;
-    int64_t ow = 0;
-    int64_t offset = grad_output_data - grad_output_data_base;
-    data_index_init(offset, c, channels, ow, output_width);
-
-    for (int64_t i = 0; i < n; i++) {
-      int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
-      grad_input_data[c * input_width + iw] += grad_output_data[i];
-      data_index_step(c, channels, ow, output_width);
+  auto loop = [&](int64_t begin, int64_t end) {
+    for (int64_t c = begin; c < end; c++) {
+      for (int64_t od = 0; od < output_depth; od++) {
+        int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
+        for (int64_t oh = 0; oh < output_height; oh++) {
+          int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
+          for (int64_t ow = 0; ow < output_width; ow++) {
+            int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
+            int64_t output_offset = c * output_slice_size +
+                od *  output_height * output_width + oh * output_width + ow;
+            int64_t input_offset = c * input_slice_size +
+                id * input_height * input_width + ih * input_width + iw;
+            grad_input_data[input_offset] += grad_output_data[output_offset];
+          }
+        }
+      }
     }
   };
 
-  auto loop2d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto grad_input_data = (scalar_t*)data[0];
-    auto grad_output_data = (scalar_t*)data[1];
-
-    int64_t c = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    int64_t offset = grad_output_data - grad_output_data_base;
-    data_index_init(offset, c, channels, oh, output_height, ow, output_width);
-
-    for (int64_t i = 0; i < n; i++) {
-      int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
-      int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
-      grad_input_data[c * input_height * input_width + ih * input_width + iw] += grad_output_data[i];
-      data_index_step(c, channels, oh, output_height, ow, output_width);
-    }
-  };
-
-  auto loop3d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto grad_input_data = (scalar_t*)data[0];
-    auto grad_output_data = (scalar_t*)data[1];
-
-    int64_t c = 0;
-    int64_t od = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
-    int64_t offset = grad_output_data - grad_output_data_base;
-    data_index_init(offset, c, channels, od, output_depth, oh, output_height, ow, output_width);
-
-    for (int64_t i = 0; i < n; i++) {
-      int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
-      int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
-      int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
-      int64_t j = c * input_depth * input_height * input_width +
-                  id * input_height * input_width + ih * input_width + iw;
-      grad_input_data[j] += grad_output_data[i];
-      data_index_step(c, channels, od, output_depth, oh, output_height, ow, output_width);
-    }
-  };
-
-  std::vector<int64_t> strides(input_sizes.size(), 0);
-  auto grad_input_expand = grad_input.as_strided(output_sizes, strides);
-
-  auto iter = TensorIterator();
-  iter.add_output(grad_input_expand);
-  iter.add_input(grad_output);
-  iter.build();
-
-  if (ndim == 3) {
-    // upsample nearest 1d
-    iter.for_each(loop1d);
-  } else if (ndim == 4) {
-    // upsample nearest 2d
-    iter.for_each(loop2d);
-  } else {
-    // upsample nearest 3d
-    iter.for_each(loop3d);
-  }
+  at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop);
 
   if (!grad_input_.is_contiguous()) {
     grad_input_.copy_(grad_input);
