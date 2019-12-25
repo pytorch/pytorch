@@ -11,13 +11,16 @@ $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStud
                                                      "--add Microsoft.VisualStudio.Component.VC.Tools.14.11",
                                                      "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Win81")
 
-curl.exe -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
+curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
+    echo "Download of the VS 2017 installer failed"
     exit 1
 }
 
-$exitCode = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
+$process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
 Remove-Item -Path vs_installer.exe -Force
+$exitCode = $process.ExitCode
 if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
+    echo "VS 2017 installer exited with code $exitCode, which should be one of [0, 3010]."
     exit 1
 }
