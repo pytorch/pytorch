@@ -23,7 +23,7 @@ if errorlevel 1 exit /b 1
 start /wait .\vs_installer.exe %VS_INSTALL_ARGS%
 powershell -Command Start-Sleep 300
 powershell -Command Start-Sleep 300
-tasklist
+del vs_installer.exe
 if not errorlevel 0 exit /b 1
 if errorlevel 1 if not errorlevel 3010 exit /b 1
 if errorlevel 3011 exit /b 1
