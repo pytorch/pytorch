@@ -73,7 +73,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
     });
   } else {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return ::pow(base, exp);
+      return std::pow(base, exp);
     });
   }
 }
