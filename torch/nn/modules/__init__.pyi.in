@@ -44,4 +44,6 @@ from .rnn import GRU as GRU, GRUCell as GRUCell, LSTM as LSTM, LSTMCell as LSTMC
 from .sparse import Embedding as Embedding, EmbeddingBag as EmbeddingBag
 from .upsampling import Upsample as Upsample, UpsamplingBilinear2d as UpsamplingBilinear2d, \
     UpsamplingNearest2d as UpsamplingNearest2d
-from .transformer import Transformer as Transformer, TransformerEncoder as TransformerEncoder, TransformerDecoder as TransformerDecoder, TransformerEncoderLayer as TransformerEncoderLayer, TransformerDecoderLayer as TransformerDecoderLayer
+from .transformer import Transformer as Transformer, TransformerEncoder as TransformerEncoder, \
+    TransformerDecoder as TransformerDecoder, TransformerEncoderLayer as TransformerEncoderLayer, \
+    TransformerDecoderLayer as TransformerDecoderLayer
