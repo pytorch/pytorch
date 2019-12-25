@@ -461,6 +461,97 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    def test_cat(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        for dim in [0, 1]:
+            self.assertEqual(
+                torch.cat((x, x, x), dim=dim),
+                torch.cat((mkldnn_x, mkldnn_x, mkldnn_x), dim=dim).to_dense(),
+            )
+        #cat_out
+        y = torch.randn(12, 5, dtype=torch.float32)*10
+        mkldnn_y = y.to_mkldnn()
+        torch.cat((x, x, x), dim=0, out=y),
+        torch.cat((mkldnn_x, mkldnn_x, mkldnn_x), dim=0, out=mkldnn_y)
+        self.assertEqual(y, mkldnn_y.to_dense())
+        y = torch.randn(4, 15, dtype=torch.float32)*10
+        mkldnn_y = y.to_mkldnn()
+        torch.cat((x, x, x), dim=1, out=y),
+        torch.cat((mkldnn_x, mkldnn_x, mkldnn_x), dim=1, out=mkldnn_y)
+        self.assertEqual(y, mkldnn_y.to_dense())
+
+    def test_cat_backward(self):
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = torch.cat((x1, x1, x1)).sum()
+        y2 = torch.cat((x2, x2, x2)).to_dense().sum()
+        y1.backward()
+        y2.backward()
+        self.assertEqual(x1.grad, x2.grad.to_dense())
+
+    def test_split(self):
+        x = torch.randn(5, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        for dim in [0, 1]:
+            self.assertEqual(
+                torch.split(x, (2,3), dim=dim)[0],
+                torch.split(mkldnn_x, (2,3), dim=dim)[0].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, (2,3), dim=dim)[1],
+                torch.split(mkldnn_x, (2,3), dim=dim)[1].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, 3, dim=dim)[0],
+                torch.split(mkldnn_x, 3, dim=dim)[0].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, 3, dim=dim)[1],
+                torch.split(mkldnn_x, 3, dim=dim)[1].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, 2, dim=dim)[0],
+                torch.split(mkldnn_x, 2, dim=dim)[0].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, 2, dim=dim)[1],
+                torch.split(mkldnn_x, 2, dim=dim)[1].to_dense(),
+            )
+            self.assertEqual(
+                torch.split(x, 2, dim=dim)[2],
+                torch.split(mkldnn_x, 2, dim=dim)[2].to_dense(),
+            )
+
+    def test_split_backward(self):
+        x = torch.randn(5, 5, dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        for dim in [0, 1]:
+            y1 = torch.split(x1, (2,3), dim=dim)[0].sum() \
+                    + torch.split(x1, (2,3), dim=dim)[1].sum()
+            y2 = torch.split(x2, (2,3), dim=dim)[0].to_dense().sum() \
+                    + torch.split(x2, (2,3), dim=dim)[1].to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            y1 = torch.split(x1, 3, dim=dim)[0].sum() \
+                    + torch.split(x1, 3, dim=dim)[1].sum()
+            y2 = torch.split(x2, 3, dim=dim)[0].to_dense().sum() \
+                    + torch.split(x2, 3, dim=dim)[1].to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            y1 = torch.split(x1, 2, dim=dim)[0].sum() \
+                    + torch.split(x1, 2, dim=dim)[1].sum() \
+                    + torch.split(x1, 2, dim=dim)[2].sum()
+            y2 = torch.split(x2, 2, dim=dim)[0].to_dense().sum() \
+                    + torch.split(x2, 2, dim=dim)[1].to_dense().sum() \
+                    + torch.split(x2, 2, dim=dim)[2].to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
 
 if __name__ == '__main__':
     run_tests()

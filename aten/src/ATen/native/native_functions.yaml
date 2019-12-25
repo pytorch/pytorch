@@ -667,6 +667,12 @@
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: mkldnn_cat(Tensor[] tensors, int dim=0) -> Tensor
+  requires_tensor: True
+
+- func: mkldnn_cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  requires_tensor: True
+
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
@@ -2573,6 +2579,12 @@
   variants: function, method
   device_guard: False
   supports_named_tensor: True
+
+- func: mkldnn_split(Tensor self, int split_size, int dim=0) -> Tensor[]
+  requires_tensor: True
+
+- func: mkldnn_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+  requires_tensor: True
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   supports_named_tensor: True

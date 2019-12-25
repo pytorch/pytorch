@@ -508,6 +508,13 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
+  if (grad.is_mkldnn()) {
+    std::vector<int64_t> split_sizes;
+    for (size_t i = 0;  i< sizes.size(); i++) {
+      split_sizes.push_back(sizes[i][dim]);
+    }
+    return at::mkldnn_split_with_sizes(grad, split_sizes, dim);
+  }
   int64_t accumulate = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {
     auto& shape = sizes[i];
