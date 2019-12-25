@@ -2,9 +2,6 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
-
 #include <ATen/Parallel.h>
 
 namespace at {
@@ -63,10 +60,12 @@ void cpu_upsample_nearest(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto output_data_base = output.data_ptr<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
   auto input_sizes = input.sizes().vec();
   auto output_sizes = output.sizes().vec();
   auto ndim = input_sizes.size();
+  auto numel = output.numel();
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
@@ -77,33 +76,24 @@ void cpu_upsample_nearest(
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
-  auto loop1d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto output_data = (scalar_t*)data[0];
-    auto input_data = (scalar_t*)data[1];
-
+  auto loop1d = [&](int64_t start, int64_t end) {
     int64_t c = 0;
     int64_t ow = 0;
-    int64_t offset = output_data - output_data_base;
-    data_index_init(offset, c, channels, ow, output_width);
-
-    for (int64_t i = 0; i < n; i++) {
+    data_index_init(start, c, channels, ow, output_width);
+    for (int64_t i = start; i < end; i++) {
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
       output_data[i] = input_data[c * input_width + iw];
       data_index_step(c, channels, ow, output_width);
     }
   };
 
-  auto loop2d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto output_data = (scalar_t*)data[0];
-    auto input_data = (scalar_t*)data[1];
-
+  auto loop2d = [&](int64_t start, int64_t end) {
     int64_t c = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    int64_t offset = output_data - output_data_base;
-    data_index_init(offset, c, channels, oh, output_height, ow, output_width);
+    data_index_init(start, c, channels, oh, output_height, ow, output_width);
 
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = start; i < end; i++) {
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
       output_data[i] = input_data[c * input_height * input_width + ih * input_width + iw];
@@ -111,18 +101,14 @@ void cpu_upsample_nearest(
     }
   };
 
-  auto loop3d = [&](char** data, const int64_t* strides, int64_t n) {
-    auto output_data = (scalar_t*)data[0];
-    auto input_data = (scalar_t*)data[1];
-
+  auto loop3d = [&](int64_t start, int64_t end) {
     int64_t c = 0;
     int64_t od = 0;
     int64_t oh = 0;
     int64_t ow = 0;
-    int64_t offset = output_data - output_data_base;
-    data_index_init(offset, c, channels, od, output_depth, oh, output_height, ow, output_width);
+    data_index_init(start, c, channels, od, output_depth, oh, output_height, ow, output_width);
 
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = start; i < end; i++) {
       int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
       int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
       int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
@@ -133,24 +119,15 @@ void cpu_upsample_nearest(
     }
   };
 
-  std::vector<int64_t> strides(input_sizes.size(), 0);
-  auto input_expand = input.as_strided(output_sizes, strides);
-
-  auto iter = TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(output);
-  iter.add_input(input_expand);
-  iter.build();
-
   if (ndim == 3) {
     // upsample nearest 1d
-    iter.for_each(loop1d);
+    at::parallel_for(0, numel, at::internal::GRAIN_SIZE, loop1d);
   } else if (ndim == 4) {
     // upsample nearest 2d
-    iter.for_each(loop2d);
+    at::parallel_for(0, numel, at::internal::GRAIN_SIZE, loop2d);
   } else {
     // upsample nearest 3d
-    iter.for_each(loop3d);
+    at::parallel_for(0, numel, at::internal::GRAIN_SIZE, loop3d);
   }
 
   if (!output_.is_contiguous()) {
