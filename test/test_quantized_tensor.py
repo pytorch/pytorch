@@ -70,6 +70,18 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
+    # legacy constructor/new doesn't support qtensors
+    def test_qtensor_legacy_new_failure(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
+        scale = 0.02
+        zero_point = 2
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
+        self.assertRaises(RuntimeError, lambda: qr.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: qr.new(r.storage()))
+        self.assertRaises(RuntimeError, lambda: qr.new(r))
+        self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
+        self.assertRaises(RuntimeError, lambda: qr.new([6]))
+
     def test_per_channel_qtensor_creation(self):
         numel = 10
         ch_axis = 0
