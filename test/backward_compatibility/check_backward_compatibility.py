@@ -23,8 +23,13 @@ white_list = [
     ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
     ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
     ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
+    ('_aten', datetime.date(2019, 12, 22)),
+    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
     ('thnn_conv3d', datetime.date(9999, 1, 1)),
     ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
+    ('grad', datetime.date(2020, 1, 1)),
+    ('logical_and', datetime.date(2019, 12, 12)),
+    ('logical_or', datetime.date(2019, 12, 12)),
 ]
 
 
@@ -76,10 +81,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     new_schema_dict = dict()
     with open(args.new_schemas, 'r') as f:
-        line = f.readline()
-        while line:
-            s = parse_schema(line.strip())
+        while True:
             line = f.readline()
+            if not line:
+                break
+            if "__torch__.torch.classes" in line:
+                # TODO Fix type __torch__.torch.classes.xxx
+                continue
+            s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)
             new_schema_dict[s.name] = slist

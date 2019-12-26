@@ -150,7 +150,7 @@ class FeatureSparseToDense(ModelLayer):
         self.output_schema = schema.Struct(*outputs)
 
         # TODO(amalevich): Consider moving this data to schema, instead
-        # Structs doens't support attaching metadata to them and clonning
+        # Structs doesn't support attaching metadata to them and clonning
         # will break things badly, but this is the most elegant way to pass
         # this info around. Should we change it or it'll be too much work and
         # not worse it?

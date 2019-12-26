@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import threading
 from functools import partial, wraps
-from os import getenv
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -14,7 +13,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ["rpc_backend_name"]
+    __slots__ = ["rpc_backend_name", "build_rpc_backend_options"]
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -22,7 +21,7 @@ class TestConfig:
             setattr(self, k, v)
 
 
-TEST_CONFIG = TestConfig(rpc_backend_name=getenv("RPC_BACKEND_NAME", "PROCESS_GROUP"))
+TEST_CONFIG = TestConfig()
 INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
@@ -50,7 +49,7 @@ def set_termination_signal():
     _TERMINATION_SIGNAL.set()
 
 
-def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=True):
+def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -67,34 +66,36 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
     if old_test_method is None:
         return partial(
             dist_init,
-            setup_model_parallel=setup_model_parallel,
+            setup_rpc=setup_rpc,
             clean_shutdown=clean_shutdown,
         )
 
     @wraps(old_test_method)
     def new_test_method(self, *arg, **kwargs):
+        # Setting _ignore_rref_leak to make sure OwnerRRefs are properly deleted
+        # in tests.
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = False
+
         self.worker_id = self.rank
-        self.worker_name_to_id = {
-            "worker{}".format(rank): rank for rank in range(self.world_size)
-        }
 
-        if setup_model_parallel:
+        if setup_rpc:
             global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = self.worker_name_to_id.keys()
+            _ALL_NODE_NAMES = {
+                "worker{}".format(rank) for rank in range(self.world_size)
+            }
 
-            # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
-            rpc.init_model_parallel(
-                self_name="worker%d" % self.rank,
-                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
-                init_method=self.init_method,
-                self_rank=self.rank,
-                worker_name_to_id=self.worker_name_to_id,
-                num_send_recv_threads=16,
+            rpc.init_rpc(
+                name="worker%d" % self.rank,
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
             )
 
         return_value = old_test_method(self, *arg, **kwargs)
 
-        if setup_model_parallel:
+        if setup_rpc:
             if clean_shutdown:
                 # Follower reports done.
                 if self.rank == MASTER_RANK:
@@ -126,8 +127,18 @@ def dist_init(old_test_method=None, setup_model_parallel=True, clean_shutdown=Tr
             # since we need to shutdown the RPC agent. If we don't shutdown the
             # RPC agent, tests would fail since RPC agent threads, locks and
             # condition variables are not properly terminated.
-            rpc.join_rpc()
+            rpc.shutdown()
 
         return return_value
 
     return new_test_method
+
+
+# Set PROCESS_GROUP as the default RPC backend.
+TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
+TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
+    test_object.rpc_backend,
+    init_method=test_object.init_method,
+    # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
+    num_send_recv_threads=16,
+)

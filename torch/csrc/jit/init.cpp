@@ -1,4 +1,3 @@
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
@@ -33,6 +32,8 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -44,6 +45,7 @@
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -52,7 +54,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -133,6 +134,7 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -196,6 +198,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -267,7 +270,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const script::Module& self) {
-            return LowerGraph(*graph, self.module_object());
+            return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -284,7 +287,7 @@ void initJITBindings(PyObject* module) {
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
-            AutoNoGIL _no_gil;
+            pybind11::gil_scoped_release _no_gil;
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
@@ -356,7 +359,21 @@ void initJITBindings(PyObject* module) {
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
-          });
+          })
+      .def("_jit_pass_onnx_unpack_quantized_weights",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                UnpackQuantizedWeights(graph, paramsDict);
+                return paramsDict;
+             },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
+                return paramsDict;
+             },
+             pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -412,7 +429,7 @@ void initJITBindings(PyObject* module) {
           buffer.attr("write")(std::move(bytes));
           return size;
         };
-        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void *, size_t)> &>())
       .def("write_record",
@@ -464,14 +481,17 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
-        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
-        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_all_records", [](PyTorchStreamReader& self) {
+        return self.getAllRecords();
       });
 
   m.def(
@@ -643,6 +663,7 @@ void initJITBindings(PyObject* module) {
     toIValue(obj, type);
   });
 
+  initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

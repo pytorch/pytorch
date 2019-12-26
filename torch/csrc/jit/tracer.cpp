@@ -2,7 +2,6 @@
 
 #include <ATen/Backtrace.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
@@ -290,7 +289,7 @@ static void gatherParametersAndBuffers(
     const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
 
-  state->setValue(self.module_object(), self_value);
+  state->setValue(self._ivalue(), self_value);
 
   auto self_ty = self.type();
   for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
@@ -328,8 +327,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // if we are a module, then make sure the modules parameters are in the map
     // and mapped to accesses to the self object
     if (self) {
-      Value* self_value =
-          state->graph->insertInput(0, "self")->setType(self->module_object()->type());
+      Value* self_value = state->graph->insertInput(0, "self")->setType(
+          self->_ivalue()->type());
       gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 
@@ -445,6 +444,15 @@ void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name /* unused */, const c10::optional<double>& value) {
+  if (value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
@@ -504,14 +512,36 @@ void addInputs(
     n->addInput(none);
   }
 }
-#ifdef BUILD_NAMEDTENSOR
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
 void addInputs(
     Node* n,
     const char* name,
     c10::optional<at::DimnameList> value) {
   TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
-#endif
 void addInputs(
     Node* n,
     const char* name,

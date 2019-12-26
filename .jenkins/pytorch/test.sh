@@ -12,6 +12,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
+  # TODO move this to docker
+  pip_install unittest-xml-reporting
+
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
@@ -45,8 +48,9 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-  # TODO: move this to Docker
-  pip_install --user hypothesis
+  # TODO: Please move this to Docker
+  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
@@ -177,7 +181,6 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
-    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt

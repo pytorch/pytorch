@@ -90,7 +90,7 @@ Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& wei
   TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(b_self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_cuda", [&]{
     lerp_cuda<scalar_t>(result, b_self, b_end, b_weight);
   });
@@ -100,7 +100,7 @@ Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& wei
 Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
-  Tensor result = at::empty_like(b_self, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(b_self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_cuda", [&]{
     lerp_cuda<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
   });

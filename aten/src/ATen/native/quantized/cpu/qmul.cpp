@@ -140,7 +140,7 @@ class QMulScalar final : public c10::OperatorKernel {
     TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is suuported in Mul.");
-    auto qc = at::empty_like(qa, at::MemoryFormat::Contiguous);
+    auto qc = at::empty_like(qa, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
 };

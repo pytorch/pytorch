@@ -1,11 +1,9 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
 #include <sstream>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
@@ -229,6 +227,25 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
       outnames.push_back(tensor_names[d]);
     }
   }
+  return outnames;
+}
+
+std::vector<Dimname> compute_diagonal_outnames(
+    const Tensor& tensor,
+    int64_t dim1,
+    int64_t dim2) {
+  if (!tensor.has_names()) {
+    return {};
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (d == dim1 || d == dim2) {
+      continue;
+    }
+    outnames.push_back(tensor_names[d]);
+  }
+  outnames.push_back(Dimname::wildcard());
   return outnames;
 }
 
@@ -522,4 +539,3 @@ bool are_names_equal(TensorImpl* self, TensorImpl* other) {
 
 } // namespace namedinference
 } // namespace at
-#endif

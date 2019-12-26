@@ -12,10 +12,10 @@ using torch::autograd::variable_list;
 
 RecvRpcBackward::RecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
-    DistAutogradContext& autogradContext,
+    ContextPtr autogradContext,
     rpc::worker_id_t fromWorkerId)
     : autogradMetadata_(autogradMetadata),
-      autogradContext_(autogradContext),
+      autogradContext_(std::move(autogradContext)),
       fromWorkerId_(fromWorkerId) {}
 
 variable_list RecvRpcBackward::apply(variable_list&& grads) {
@@ -40,7 +40,11 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
       rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());
 
   // Record the future in the context.
-  autogradContext_.addOutstandingRpc(futureMessage);
+  if (auto sharedContext = autogradContext_.lock()) {
+    sharedContext->addOutstandingRpc(futureMessage);
+  } else {
+    C10_THROW_ERROR(Error, "Autograd context no longer valid");
+  }
 
   // 'recv' function sends the gradients over the wire using RPC, it doesn't
   // need to return anything for any downstream autograd function.

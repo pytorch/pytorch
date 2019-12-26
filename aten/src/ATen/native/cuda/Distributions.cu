@@ -287,22 +287,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            assert(0 <= p4 && p4 <= 1);
+            CUDA_KERNEL_ASSERT(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            assert(0 <= p3 && p3 <= 1);
+            CUDA_KERNEL_ASSERT(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            assert(0 <= p2 && p2 <= 1);
+            CUDA_KERNEL_ASSERT(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            assert(0 <= p1 && p1 <= 1);
+            CUDA_KERNEL_ASSERT(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
@@ -393,9 +393,7 @@ Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& 
 }
 
 Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen_) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -714,7 +712,7 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  auto mean_tensor = at::full({1}, mean, output.options());
+  auto mean_tensor = at::full({}, mean, output.options());
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
@@ -736,19 +734,19 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(std, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(std, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }

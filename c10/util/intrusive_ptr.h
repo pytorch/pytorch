@@ -11,6 +11,9 @@ namespace raw {
   namespace weak_intrusive_ptr {
     inline void incref(intrusive_ptr_target* self);
   }
+  namespace intrusive_ptr {
+    inline void incref(intrusive_ptr_target * self);
+  }
 }
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
@@ -65,6 +68,8 @@ class C10_API intrusive_ptr_target {
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
+  friend inline void raw::intrusive_ptr::incref(intrusive_ptr_target* self);
+
   template <typename T, typename NullType>
   friend class weak_intrusive_ptr;
   friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
@@ -88,10 +93,10 @@ class C10_API intrusive_ptr_target {
 #  pragma GCC diagnostic ignored "-Wterminate"
 #  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
-    AT_ASSERTM(
+    TORCH_DCHECK(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    AT_ASSERTM(
+    TORCH_DCHECK(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -180,7 +185,7 @@ class intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_refcount = ++target_->refcount_;
-      AT_ASSERTM(
+      TORCH_DCHECK(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
     }
@@ -190,7 +195,7 @@ class intrusive_ptr final {
     if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
-      const_cast<c10::guts::remove_const_t<TTarget>*>(target_)->release_resources();
+      const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
       // See comment above about weakcount. As long as refcount>0,
       // weakcount is one larger than the actual number of weak references.
@@ -342,10 +347,6 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
-        owning_ptr == NullType::singleton() || owning_ptr->refcount_.load() > 0,
-        "intrusive_ptr: Can only intrusive_ptr::reclaim() owning pointers that were created using intrusive_ptr::release().");
     return intrusive_ptr(owning_ptr);
   }
 
@@ -368,7 +369,7 @@ class intrusive_ptr final {
    */
   static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
+    TORCH_DCHECK(
         raw_ptr == NullType::singleton() || raw_ptr->refcount_.load() > 0,
         "intrusive_ptr: Can only reclaim pointers that are owned by someone");
     auto ptr = reclaim(raw_ptr); // doesn't increase refcount
@@ -441,7 +442,7 @@ class weak_intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_weakcount = ++target_->weakcount_;
-      AT_ASSERTM(
+      TORCH_DCHECK(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
     }
@@ -619,7 +620,7 @@ class weak_intrusive_ptr final {
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
     // if refcount == 0, weakcount only must be >0.
-    AT_ASSERTM(
+    TORCH_DCHECK(
         owning_weak_ptr == NullType::singleton() ||
         owning_weak_ptr->weakcount_.load() > 1 ||
             (owning_weak_ptr->refcount_.load() == 0 &&
@@ -690,10 +691,9 @@ namespace intrusive_ptr {
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass
   // NullType::singleton to this function
   inline void incref(intrusive_ptr_target* self) {
-    auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
-    auto ptr_copy = ptr;
-    ptr_copy.release();
-    ptr.release();
+    if (self) {
+      ++self->refcount_;
+    }
   }
 
   // WARNING: Unlike the reclaim() API, it is NOT valid to pass

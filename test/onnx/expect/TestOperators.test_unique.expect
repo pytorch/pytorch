@@ -1,13 +1,14 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
-    input: "x"
+    input: "0"
     output: "1"
     output: "2"
     output: "3"
     output: "4"
+    name: "Unique_0"
     op_type: "Unique"
     attribute {
       name: "axis"
@@ -22,7 +23,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1

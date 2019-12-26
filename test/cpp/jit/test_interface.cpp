@@ -64,7 +64,7 @@ void testModuleInterfaceSerialization() {
   parentMod.register_attribute(
       "subMod",
       cu->get_interface("__torch__.OneForward"),
-      subMod.module_object(),
+      subMod._ivalue(),
       /*is_parameter=*/false);
   parentMod.define(parentForward, nativeResolver());
   ASSERT_TRUE(parentMod.hasattr("subMod"));

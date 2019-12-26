@@ -408,7 +408,7 @@ const std::vector<std::string> functions = {
                     tensor1,
                     tensor2,
                     *,
-                    value: number = 1.0):
+                    value: number):
             result = torch.addcmul(self, tensor1, tensor2, value=value)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             tensor1_size = torch._size_if_not_equal(tensor1.size(), result.size())
@@ -473,7 +473,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None, None
 
-            return torch.full_like(self, fill_value), backward
+            return torch.full_like(self, fill_value, memory_format=1), backward
 
         def lerp_0(self,
                    end,
@@ -521,7 +521,7 @@ const std::vector<std::string> functions = {
 
         def split_with_sizes(self,
                              split_sizes: List[int],
-                             dim: int=0):
+                             dim: int):
             def backward(grad_outputs: List[Tensor]):
                 size = len(grad_outputs)
                 grad_self = torch.cat(grad_outputs, dim)
@@ -538,7 +538,7 @@ const std::vector<std::string> functions = {
             return torch.stack(tensors, dim), backward
 
         def unbind(self,
-                   dim: int=0):
+                   dim: int):
             def backward(grad_outputs: List[Tensor]):
                 grad_self = torch.stack(grad_outputs, dim)
                 return grad_self, None
@@ -546,7 +546,7 @@ const std::vector<std::string> functions = {
             return torch.unbind(self, dim), backward
 
         def cat(tensors: List[Tensor],
-                dim: int=0):
+                dim: int):
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
@@ -562,7 +562,7 @@ const std::vector<std::string> functions = {
         def index(self,
                   indices: List[Tensor]):
             def backward(grad_output):
-                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                grad_self = torch.zeros_like(self, memory_format=1).index_put_(indices, grad_output, True)
                 return grad_self, None
 
             return torch.index(self, indices), backward
@@ -602,13 +602,13 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 return None
 
-            return torch.ones_like(self), backward
+            return torch.ones_like(self, memory_format=1), backward
 
         def pow_0(self,
                   exponent: number):
             def backward(grad_output):
                 if float(exponent) == 0.0:
-                    grad_self = torch.zeros_like(self)
+                    grad_self = torch.zeros_like(self, memory_format=1)
                 else:
                     grad_self = grad_output * exponent * torch.pow(self, float(exponent) - 1)
                 return grad_self, None
@@ -621,7 +621,7 @@ const std::vector<std::string> functions = {
             exponent_size = torch._size_if_not_equal(exponent.size(), result.size())
 
             def backward(grad_output):
-                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
+                grad_self = torch.where(exponent == 0.0, torch.zeros_like(self, memory_format=1), grad_output * exponent * torch.pow(self, exponent - 1))._grad_sum_to_size(self_size)
                 grad_exponent = (grad_output * torch.pow(self, exponent) * torch.log(self))._grad_sum_to_size(exponent_size)
                 return grad_self, grad_exponent
 
@@ -637,7 +637,7 @@ const std::vector<std::string> functions = {
 
         def rsub_0(self,
                    other,
-                   alpha: number = 1.0):
+                   alpha: number):
             result = torch.rsub(self, other, alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             other_size = torch._size_if_not_equal(other.size(), result.size())
@@ -650,7 +650,7 @@ const std::vector<std::string> functions = {
 
         def rsub_1(self,
                    other: number,
-                   alpha: number = 1.0):
+                   alpha: number):
             def backward(grad_output):
                 grad_self = (- grad_output * alpha)
                 return grad_self, None, None
@@ -673,8 +673,8 @@ const std::vector<std::string> functions = {
         def to_0(self,
                  device: Optional[Device],
                  dtype: Optional[int],
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_device = self.device
             self_dtype = self.dtype
             if device is not None:
@@ -690,8 +690,8 @@ const std::vector<std::string> functions = {
 
         def to_1(self,
                  dtype: int,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             self_dtype = self.dtype
             def backward(grad_output):
                 grad_self = grad_output.to(self_dtype, non_blocking, copy)
@@ -701,8 +701,8 @@ const std::vector<std::string> functions = {
 
         def to_2(self,
                  other,
-                 non_blocking: bool=False,
-                 copy: bool=False):
+                 non_blocking: bool,
+                 copy: bool):
             def backward(grad_output):
                 grad_self = grad_output.to(self, non_blocking, copy)
                 return grad_self, None, None, None
@@ -864,7 +864,7 @@ const std::vector<std::string> functions = {
 
         def ceil(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.ceil(self), backward
 
@@ -889,7 +889,7 @@ const std::vector<std::string> functions = {
 
         def floor(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.floor(self), backward
 
@@ -938,7 +938,7 @@ const std::vector<std::string> functions = {
 
         def round(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.round(self), backward
 
@@ -970,7 +970,7 @@ const std::vector<std::string> functions = {
 
         def trunc(self):
             def backward(grad_output):
-                return torch.zeros_like(grad_output)
+                return torch.zeros_like(grad_output, memory_format=1)
 
             return torch.trunc(self), backward
 
@@ -989,85 +989,6 @@ const std::vector<std::string> functions = {
             return result, backward
     )",
     R"(
-        def AD_adaptive_avg_pool2d_backward(grad,
-                                            self,
-                                            output_size: List[int]):
-            if output_size[0] == 1 and output_size[1] == 1:
-                self_size = self.size()
-                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2])
-            else:
-                grad_self = torch._adaptive_avg_pool2d_backward(grad, self)
-
-            return grad_self
-
-        def AD_adaptive_avg_pool1d_backward(grad,
-                                            input,
-                                            output_size: List[int]):
-            output_size_2d = [1, output_size[0]]
-            grad_input = AD_adaptive_avg_pool2d_backward(grad.unsqueeze(2), input.unsqueeze(2), output_size_2d).squeeze(2)
-            return grad_input
-
-        def adaptive_avg_pool1d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                grad_self = AD_adaptive_avg_pool1d_backward(grad_output, self, output_size)
-                return grad_self, None
-
-            return torch.adaptive_avg_pool1d(self, output_size), backward
-
-        def adaptive_avg_pool2d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                # self is used in backward, no need to pass in its size explicitly
-                grad_self = AD_adaptive_avg_pool2d_backward(grad_output, self, output_size)
-                return grad_self, None
-            return torch.adaptive_avg_pool2d(self, output_size), backward
-
-        def adaptive_avg_pool3d(self,
-                                output_size: List[int]):
-            def backward(grad_output):
-                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
-                return grad_self, None
-
-            return torch.adaptive_avg_pool3d(self, output_size), backward
-
-        def avg_pool2d(self,
-                       kernel_size: List[int],
-                       stride: List[int],
-                       padding: List[int],
-                       ceil_mode: bool,
-                       count_include_pad: bool,
-                       divisor_override: Optional[int]):
-            def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
-                return grad_self, None, None, None, None, None, None
-
-            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
-
-        def max_pool2d(self,
-                       kernel_size: List[int],
-                       stride: List[int],
-                       padding: List[int],
-                       dilation: List[int],
-                       ceil_mode: bool):
-            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
-                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
-                return grad_self, None, None, None, None, None
-            return output, backward
-
-        def max_pool2d_with_indices(self,
-                                    kernel_size: List[int],
-                                    stride: List[int],
-                                    padding: List[int],
-                                    dilation: List[int],
-                                    ceil_mode: bool):
-            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
-                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
-                return grad_self, None, None, None, None, None
-            return output, indices, backward
-
         def batch_norm_disabled(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -1169,16 +1090,16 @@ const std::vector<std::string> functions = {
             p1m = 1. - p
             if train:
                 if use_cuda:
-                    mask = torch.rand_like(input) < p1m
+                    mask = torch.rand_like(input, memory_format=1) < p1m
                     res = mask.type_as(input) * input * (1./p1m)
                 else:
-                    mask = torch.empty_like(input)
+                    mask = torch.empty_like(input, memory_format=1)
                     mask.bernoulli_(p1m)
                     res = mask * input / p1m
             else:
                 p1m = 1.
                 res = input
-                mask = torch.empty_like(input)
+                mask = torch.empty_like(input, memory_format=1)
 
             def backward(grad_output):
                 use_cuda = grad_output.is_cuda
@@ -1222,28 +1143,136 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return result, backward
+    )",
+    R"(
+        def AD_adaptive_avg_pool2d_backward(grad,
+                                            self,
+                                            output_size: List[int]):
+            if output_size[0] == 1 and output_size[1] == 1:
+                self_size = self.size()
+                grad_self = grad.expand(self.size()) / (self_size[-1] * self_size[-2])
+            else:
+                grad_self = torch._adaptive_avg_pool2d_backward(grad, self)
+
+            return grad_self
+
+        def AD_adaptive_avg_pool1d_backward(grad,
+                                            input,
+                                            output_size: List[int]):
+            output_size_2d = [1, output_size[0]]
+            grad_input = AD_adaptive_avg_pool2d_backward(grad.unsqueeze(2), input.unsqueeze(2), output_size_2d).squeeze(2)
+            return grad_input
+
+        def adaptive_avg_pool1d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = AD_adaptive_avg_pool1d_backward(grad_output, self, output_size)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool1d(self, output_size), backward
+
+        def adaptive_avg_pool2d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                # self is used in backward, no need to pass in its size explicitly
+                grad_self = AD_adaptive_avg_pool2d_backward(grad_output, self, output_size)
+                return grad_self, None
+            return torch.adaptive_avg_pool2d(self, output_size), backward
+
+        def adaptive_avg_pool3d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = torch.adaptive_avg_pool3d_backward(grad_output, self)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool3d(self, output_size), backward
+
+        def avg_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       ceil_mode: bool,
+                       count_include_pad: bool,
+                       divisor_override: Optional[int]):
+            def backward(grad_output):
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
+                return grad_self, None, None, None, None, None, None
+
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override), backward
+
+        def max_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       dilation: List[int],
+                       ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, backward
+
+        def max_pool2d_with_indices(self,
+                                    kernel_size: List[int],
+                                    stride: List[int],
+                                    padding: List[int],
+                                    dilation: List[int],
+                                    ceil_mode: bool):
+            output, indices = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
+                return grad_self, None, None, None, None, None
+            return output, indices, backward
+
+        def AD_interpolate_scales_list(input,
+                                       scale_factor: Optional[List[float]],
+                                       use_scale_factor: bool):
+            input_dim = len(input.size())
+            if scale_factor is None or not use_scale_factor:
+                scales = [-1.0 for i in range(input_dim-2)]
+            else:
+                scales = [scale_factor[i] for i in range(input_dim-2)]
+            return scales
+
+        def AD_interpolate_scales_float(input,
+                                        scale_factor: Optional[float],
+                                        use_scale_factor: bool):
+            input_dim = len(input.size())
+            if scale_factor is None or not use_scale_factor:
+                scales = [-1.0 for i in range(input_dim-2)]
+            else:
+                scales = [scale_factor for i in range(input_dim-2)]
+            return scales
 
         def AD_interpolate_backward(grad,
                                     input,
                                     mode: str,
-                                    align_corners: bool):
+                                    align_corners: bool,
+                                    scale_factor: List[float]):
             output_size = grad.size()[2:]
             input_size = input.size()
             input_dim = len(input_size)
             if input_dim == 3 and mode == 'nearest':
-                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size,
+                                                               scale_factor[0])
             elif input_dim == 4 and mode == 'nearest':
-                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size,
+                                                               scale_factor[0], scale_factor[1])
             elif input_dim == 5 and mode == 'nearest':
-                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size,
+                                                               scale_factor[0], scale_factor[1], scale_factor[2])
             elif input_dim == 3 and mode == 'linear':
-                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners)
+                grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners,
+                                                              scale_factor[0])
             elif input_dim == 4 and mode == 'bilinear':
-                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners)
+                grad_input = torch.upsample_bilinear2d_backward(grad, output_size, input_size, align_corners,
+                                                                scale_factor[0], scale_factor[1])
             elif input_dim == 5 and mode == 'trilinear':
-                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners)
+                grad_input = torch.upsample_trilinear3d_backward(grad, output_size, input_size, align_corners,
+                                                                 scale_factor[0], scale_factor[1], scale_factor[2])
             elif input_dim == 4 and mode == 'bicubic':
-                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners)
+                grad_input = torch.upsample_bicubic2d_backward(grad, output_size, input_size, align_corners,
+                                                               scale_factor[0], scale_factor[1])
             elif input_dim == 3 and mode == 'area':
                 grad_input = AD_adaptive_avg_pool1d_backward(grad, input, output_size)
             elif input_dim == 4 and mode == 'area':
@@ -1252,7 +1281,7 @@ const std::vector<std::string> functions = {
                 grad_input = torch.adaptive_avg_pool3d_backward(grad, input)
             else:
                 # NEVER REACH HERE
-                grad_input = torch.zeros_like(input)
+                grad_input = torch.zeros_like(input, memory_format=1)
                 raise RuntimeError('Input Error: Only 3D, 4D and 5D input Tensors supported')
 
             return grad_input
@@ -1260,52 +1289,68 @@ const std::vector<std::string> functions = {
         def __interpolate_0(input,
                             size: Optional[int],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            mode: str,
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
         def __interpolate_1(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[List[float]],
-                            mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            mode: str,
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
         def __interpolate_2(input,
                             size: Optional[int],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            mode: str,
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
 
         def __interpolate_3(input,
                             size: Optional[List[int]],
                             scale_factor: Optional[float],
-                            mode: str='nearest',
-                            align_corners: Optional[bool]):
+                            mode: str,
+                            align_corners: Optional[bool],
+                            use_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners)
-                return grad_self, None, None, None, None
+                if use_scale_factor is None:
+                    use_scale_factor = False
+                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
+                grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
+                return grad_self, None, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",
@@ -1316,7 +1361,7 @@ const std::vector<std::string> functions = {
         def add_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.add(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1327,7 +1372,7 @@ const std::vector<std::string> functions = {
 
         def add_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.add(self, other, alpha=alpha), backward
@@ -1335,7 +1380,7 @@ const std::vector<std::string> functions = {
         def sub_0(self,
                   other,
                   *,
-                  alpha: number = 1.0):
+                  alpha: number):
             result = torch.sub(self, other, alpha=alpha)
             self_size, other_size = AD_sizes_if_not_equal_multi_1(self, other, result)
             def backward(grad_output):
@@ -1346,7 +1391,7 @@ const std::vector<std::string> functions = {
 
         def sub_1(self,
                   other: number,
-                  alpha: number = 1.0):
+                  alpha: number):
             def backward(grad_output):
                 return grad_output, None, None
             return torch.sub(self, other, alpha=alpha), backward

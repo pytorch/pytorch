@@ -96,6 +96,31 @@ inline Tensor local_response_norm(
   return detail::local_response_norm(input, options.size(), options.alpha(), options.beta(), options.k());
 }
 
+// ============================================================================
+
+namespace detail {
+inline Tensor group_norm(
+    const Tensor& input,
+    int64_t num_groups,
+    const Tensor& weight,
+    const Tensor& bias,
+    double eps) {
+  return torch::group_norm(input, num_groups, weight, bias, eps,
+                           at::globalContext().userEnabledCuDNN());
+}
+} // namespace detail
+
+inline Tensor group_norm(
+    const Tensor& input,
+    const GroupNormFuncOptions& options) {
+  return detail::group_norm(
+    input,
+    options.num_groups(),
+    options.weight(),
+    options.bias(),
+    options.eps());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

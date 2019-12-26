@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""
@@ -37,15 +38,15 @@ class Linear(nnq.Linear):
     def forward(self, x):
         # Note that we can handle self.bias == None case.
         Y = torch.ops.quantized.linear_dynamic(
-            x, self._packed_params)
+            x, self._packed_params._packed_params)
         return Y.to(x.dtype)
 
     def _get_name(self):
         return 'DynamicQuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}'.format(
-            self.in_features, self.out_features
+        return 'in_features={}, out_features={}, qscheme={}'.format(
+            self.in_features, self.out_features, self.weight().qscheme()
         )
 
     @classmethod
@@ -68,8 +69,7 @@ class Linear(nnq.Linear):
             weight_observer = default_dynamic_qconfig.weight()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_per_tensor(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qlinear = Linear(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

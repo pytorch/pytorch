@@ -183,9 +183,11 @@ def gen_py_variable_methods(out, declarations, template_path):
     """
     Generate Tensor methods.
     """
-    py_variable_methods = get_py_variable_methods(declarations)
     PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
-    env = create_python_bindings(py_variable_methods, True)
+
+    py_variable_methods = get_py_variable_methods(declarations)
+
+    env = create_python_bindings(py_variable_methods, is_python_method=True, is_module=False)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
 
 
@@ -205,14 +207,15 @@ def gen_py_nn_functions(out, declarations, template_path):
     """
     Generate functions in the "nn" module.
     """
+    PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
     # TODO move header out of codegen, has no nontrivial generated content
     PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
-    write(out, 'python_nn_functions.h', PY_NN_FUNCTIONS_H, {})
 
     py_nn_functions = get_py_nn_functions(declarations)
-    PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
+
     env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
+    write(out, 'python_nn_functions.h', PY_NN_FUNCTIONS_H, {})
 
 
 def get_py_torch_functions(declarations):
@@ -233,9 +236,11 @@ def gen_py_torch_functions(out, declarations, template_path):
     """
     Generate functions in the "torch" module.
     """
-    py_torch_functions = get_py_torch_functions(declarations)
     PY_TORCH_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_torch_functions.cpp')
-    env = create_python_bindings(py_torch_functions, is_python_method=False)
+
+    py_torch_functions = get_py_torch_functions(declarations)
+
+    env = create_python_bindings(py_torch_functions, is_python_method=False, is_module=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 
 
@@ -245,22 +250,24 @@ def group_declarations(declarations):
         groups[op_name(d)].append(d)
     return groups
 
-
 #
 # codegen
 #
 
-def create_python_bindings(python_functions, is_python_method, is_module=False):
+def create_python_bindings(python_functions, is_python_method, is_module):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
+    py_forwards = []
 
     for name in sorted(python_functions.keys()):
         overload_decls = python_functions[name]
-        py_methods.append(method_impl(name, overload_decls, is_python_method))
+        py_methods.append(method_impl(name, overload_decls, is_python_method, is_module))
         py_method_defs.append(method_def(name, overload_decls, is_python_method, is_module))
+        py_forwards.extend(forward_decls(name, overload_decls, is_python_method, is_module))
 
     return {
+        'py_forwards': py_forwards,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
     }
@@ -285,6 +292,7 @@ UNPACK_METHODS = {
     'c10::optional<Scalar>': 'scalarOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
     'c10::optional<bool>': 'toBoolOptional',
+    'c10::optional<double>': 'toDoubleOptional',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',
@@ -565,7 +573,7 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     dispatch_callee = get_dispatch_callee(declaration)
     dispatch_args = get_op_args(declaration, {name: name for name, _ in argmap.items()})
 
-    auto_no_gil = [] if declaration['with_gil'] else ['AutoNoGIL no_gil;']
+    auto_no_gil = [] if declaration['with_gil'] else ['pybind11::gil_scoped_release no_gil;']
 
     simple_return_type = get_simple_return_type(declaration)
 
@@ -689,9 +697,10 @@ case ${i}: {
 
 def emit_dispatch_case(i, dictionary, is_python_method):
     """
-    Emit dispatch code for a single parsed signature. This may correspond to either one
-    or two declared overloads: those that differ only in optional output params are paired
-    up in the generated binding.
+    Emit dispatch code for a single parsed signature. This corresponds to either
+    a single overload, or a pair that differ only in output params. In the latter
+    case, a single signature is used for both and dispatching switches on the
+    presence/absence of passed output args.
     - i: this signature's position in generated binding's signature list if number of
       signatures > 1, otherwise None
     - dictionary: contains a no-output overload declaration under 'base', and optionally
@@ -820,7 +829,7 @@ def emit_namedtuple_typedefs(declarations):
 # method impl codegen
 #
 
-def pycname(name):
+def get_pycname(name):
     return 'THPVariable_{}'.format(name)
 
 
@@ -840,6 +849,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
+  ${check_has_torch_function}
 
   switch (_r.idx) {
     ${dispatch}
@@ -861,6 +871,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
+  ${check_has_torch_function}
 
   ${dispatch}
   ${method_footer}
@@ -880,19 +891,27 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 """)
 
+TORCH_FUNCTION_CHECK = """\
+if(_r.has_torch_function()) {
+  return handle_torch_function(_r, args, kwargs, THPVariableFunctions);
+}
+"""
+
 # NOTE: we type the unpacked self as Tensor not Variable to avoid return type
 # discrepancies on method resolution (e.g. Variable::detach_ returns void
 # rather than Tensor &)
 UNPACK_SELF = "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
 
 
-def method_impl(name, declarations, is_python_method):
+def method_impl(name, declarations, is_python_method, is_module):
     """
     Generate a python binding for all overloads of an op.
     """
     for declaration in declarations:
         # formals for python binding signature
         declaration['python_arglists'] = make_python_arglists(declaration, is_python_method)
+
+    pycname = get_pycname(name)
 
     method_header = ['HANDLE_TH_ERRORS']
     method_header += emit_namedtuple_typedefs(declarations)
@@ -902,11 +921,12 @@ def method_impl(name, declarations, is_python_method):
 
     # emit dispatch
     if is_noarg_binding(declarations):
+        dispatch = emit_single_dispatch(declaration, is_python_method)
         return PY_VARIABLE_METHOD_NOARGS.substitute(
             name=name,
-            pycname=pycname(name),
+            pycname=pycname,
             method_header=method_header,
-            dispatch=emit_single_dispatch(declaration, is_python_method),
+            dispatch=dispatch,
             method_footer=method_footer,
         )
 
@@ -924,20 +944,55 @@ def method_impl(name, declarations, is_python_method):
         dispatch.append(emit_dispatch_case(overload_index, dictionary, is_python_method))
 
     if is_singleton:
-        impl_template = PY_VARIABLE_METHOD_VARARGS_SINGLETON
+        template = PY_VARIABLE_METHOD_VARARGS_SINGLETON
     else:
-        impl_template = PY_VARIABLE_METHOD_VARARGS
+        template = PY_VARIABLE_METHOD_VARARGS
 
-    return impl_template.substitute(
+    if not is_module and not is_python_method:
+        check_has_torch_function = TORCH_FUNCTION_CHECK
+    else:
+        check_has_torch_function = ''
+
+    max_args = max([get_python_argc(decl) for decl in declarations])
+    traceable = 'true' if all(should_trace(d) for d in declarations) else 'false'
+
+    return template.substitute(
         name=name,
-        pycname=pycname(name),
+        pycname=pycname,
         method_header=method_header,
-        max_args=max([get_python_argc(decl) for decl in declarations]),
+        max_args=max_args,
         signatures=signatures,
-        traceable='true' if all(should_trace(d) for d in declarations) else 'false',
+        traceable=traceable,
+        check_has_torch_function=check_has_torch_function,
         dispatch=dispatch,
         method_footer=method_footer,
     )
+
+
+#
+# forward declarations
+#
+
+PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
+""")
+
+PY_VARIABLE_FUNCTION_NOARGS_FORWARD_DECLARATION = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args);
+""")
+
+
+def forward_decls(name, declarations, is_python_method, is_module):
+    if is_module or is_python_method:
+        return []
+
+    if is_noarg_binding(declarations):
+        template = PY_VARIABLE_FUNCTION_NOARGS_FORWARD_DECLARATION
+    else:
+        template = PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION
+
+    pycname = get_pycname(name)
+    return [template.substitute(pycname=pycname)]
 
 
 #
@@ -979,6 +1034,8 @@ def method_def(name, declarations, is_python_method, is_module):
     """
     Generate method def entry.
     """
+    pycname = get_pycname(name)
+
     if is_noarg_binding(declarations):
         pycfunc_voidcast = ''
         flags = 'METH_NOARGS' if is_python_method else 'METH_VARARGS | METH_KEYWORDS'
@@ -996,7 +1053,7 @@ def method_def(name, declarations, is_python_method, is_module):
 
     return def_template.substitute(
         name=name,
-        pycname=pycname(name),
+        pycname=pycname,
         pycfunc_voidcast=pycfunc_voidcast,
         flags=flags,
     )
@@ -1343,7 +1400,7 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
-        py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
+        py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
             'default': 'torch.strided',
             'dynamic_type': 'Layout',

@@ -21,8 +21,6 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
-BUILD_NAMEDTENSOR = os.getenv('BUILD_NAMEDTENSOR', '').upper() == '1'
-
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
     # Guess #1
@@ -104,7 +102,7 @@ COMMON_NVCC_FLAGS = [
 
 # See comment in load_inline for more information
 # The goal is to be able to call the safe version of the
-# function exactely as if it was the original one.
+# function exactly as if it was the original one.
 # We need to create a pointer to this new function to give
 # it to pybind later.
 
@@ -227,7 +225,7 @@ class BuildExtension(build_ext, object):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++11``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++14``) as well as mixed
     C++/CUDA compilation (and support for CUDA files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -257,8 +255,6 @@ class BuildExtension(build_ext, object):
         self._check_abi()
         for extension in self.extensions:
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
-            if BUILD_NAMEDTENSOR:
-                self._add_compile_flag(extension, '-DBUILD_NAMEDTENSOR')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -291,7 +287,7 @@ class BuildExtension(build_ext, object):
                 # NVCC does not allow multiple -std to be passed, so we avoid
                 # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
-                    cflags.append('-std=c++11')
+                    cflags.append('-std=c++14')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -458,6 +454,7 @@ def CppExtension(name, sources, *args, **kwargs):
         libraries = kwargs.get('libraries', [])
         libraries.append('c10')
         libraries.append('torch')
+        libraries.append('torch_cpu')
         libraries.append('torch_python')
         libraries.append('_C')
         kwargs['libraries'] = libraries
@@ -503,6 +500,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     if IS_WINDOWS:
         libraries.append('c10')
         libraries.append('c10_cuda')
+        libraries.append('torch_cpu')
+        libraries.append('torch_cuda')
         libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('_C')
@@ -943,6 +942,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         lib_path = os.path.join(torch_path, 'lib')
 
         extra_ldflags.append('c10.lib')
+        if with_cuda:
+            extra_ldflags.append('c10_cuda.lib')
+        extra_ldflags.append('torch_cpu.lib')
+        if with_cuda:
+            extra_ldflags.append('torch_cuda.lib')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         extra_ldflags.append('_C.lib')
@@ -1131,8 +1135,6 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
-    if BUILD_NAMEDTENSOR:
-        common_cflags.append('-DBUILD_NAMEDTENSOR')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
@@ -1143,7 +1145,7 @@ def _write_ninja_file(path,
         from distutils.spawn import _nt_quote_args
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
@@ -1157,7 +1159,7 @@ def _write_ninja_file(path,
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++11')
+                cuda_flags.append('-std=c++14')
 
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
