@@ -214,7 +214,7 @@ When it decorates a function :code:`outputs = f(inputs)`, it is defined as enfor
 
 .. math::
 
-    \forall \text{in} \in \text{inputs}, \forall \text{out} \in \text{outputs}, \dfrac{\partial{out}}{\partial{in}} = 0.
+    \forall \text{in} \in \text{inputs}, \forall \text{out} \in \text{outputs}, \dfrac{\partial\text{out}}{\partial\text{in}} = 0.
 
 Note that, for the context manager version, outputs are all the variables that are assigned (variables on the left side of an :code:`=` in the block).
 
@@ -362,7 +362,7 @@ Non-differentiable functions
 The chain rule can **only** be applied at points where all elementary operations
 are differentiable. If any of them is evaluated at a point where it is not,
 the computed gradient can be incorrect. For example, consider the gradient at :math:`0` of the identity function
-when it is decomposed as :math:`id(x) = relu(x) - relu(-x)`.
+when it is decomposed as :math:`\text{id}(x) = \text{relu}(x) - \text{relu}(-x)`.
 
 This also means that the function that computes the :math:`2`-norm and the one that squares all the elements of a tensor, sums them and returns the square root
 of the result will not have the same behavior with respect to gradients all the time.
@@ -370,7 +370,7 @@ In particular, if the sum is :math:`0`, the square root function is not differen
 
 To try and reduce the impact of this limitation, we define the gradients of the elementary operations by applying the following rules in order:
 
-#. If the function is not defined (:math:`sqrt(-1)` or :math:`log(-1)` for example) then this is undefined. Most function will return :math:`nan`, but for performance reasons, some functions will return not-nan values (:math:`log(-1)` for example).
+#. If the function is not defined (:math:`\sqrt(-1)` or :math:`\log(-1)` for example) then this is undefined. Most function will return :math:`nan`, but for performance reasons, some functions will return not-nan values (:math:`\log(-1)` for example).
 #. If a gradient exist at the current point, return it.
 #. If the function is convex, return one of it's subgradients at the current point, if more than one exists, return the subgradient with minimum norm (as it is always a descent direction, see "Convex Optimization Algorithms" by Dimitri Bertsekas, Proposition 4.3.1 for a proof).
 #. Define the gradient at the current point by continuity (note that :math:`inf` is possible here). If multiple values are possible, pick one arbitrarily.
