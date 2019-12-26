@@ -1860,6 +1860,28 @@ class TestSparse(TestCase):
             self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
 
+    def test_legacy_constructor(self):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor(v.storage()))
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor(v))
+        self.assertEqual(torch.sparse_coo, torch.sparse.FloatTensor(torch.Size([2, 3])).layout)
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor([6]))
+
+    def test_legacy_new(self):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+        s = torch.sparse_coo_tensor(i, v, size)
+
+        self.assertEqual(torch.sparse_coo, s.new(device='cpu').layout)
+        self.assertRaises(TypeError, lambda: s.new(v.storage()))
+        self.assertRaises(TypeError, lambda: s.new(v))
+        self.assertEqual(torch.sparse_coo, s.new(torch.Size([2, 3])).layout)
+        self.assertRaises(TypeError, lambda: s.new([6]))
+
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
