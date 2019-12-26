@@ -140,8 +140,15 @@ void cpu_upsample_nearest_backward(
     Tensor& grad_input_,
     const Tensor& grad_output_,
     const scale_type& scales) {
+
   TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
               " for `grad_input` but got dtype ", grad_input_.dtype());
+
+  scale_type scales_{scales.begin(), scales.end()};
+  while (scales_.size() < 3) {
+    scales_.push_back(-1);
+  }
+
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
@@ -166,11 +173,11 @@ void cpu_upsample_nearest_backward(
   auto loop = [&](int64_t begin, int64_t end) {
     for (int64_t c = begin; c < end; c++) {
       for (int64_t od = 0; od < output_depth; od++) {
-        int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
+        int64_t id = nearest_idx(od, input_depth, output_depth, scales_[0]);
         for (int64_t oh = 0; oh < output_height; oh++) {
-          int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
+          int64_t ih = nearest_idx(oh, input_height, output_height, scales_[1]);
           for (int64_t ow = 0; ow < output_width; ow++) {
-            int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
+            int64_t iw = nearest_idx(ow, input_width, output_width, scales_[2]);
             int64_t output_offset = c * output_slice_size +
                 od *  output_height * output_width + oh * output_width + ow;
             int64_t input_offset = c * input_slice_size +
