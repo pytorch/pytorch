@@ -851,7 +851,6 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
   ${check_has_torch_function}
-
   switch (_r.idx) {
     ${dispatch}
   }
@@ -873,7 +872,6 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
   ${check_has_torch_function}
-
   ${dispatch}
   ${method_footer}
 }
@@ -893,7 +891,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 """)
 
 TORCH_FUNCTION_CHECK = """\
-if(_r.has_torch_function()) {
+if (_r.has_torch_function()) {
   return handle_torch_function(_r, args, kwargs, THPVariableFunctions);
 }
 """
