@@ -26,7 +26,7 @@
 # - no nontrivial nested functions. couple-liners are ok but please no more.
 #   especially avoid functions that read/write outer variables defined far away.
 
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 import re
 from .gen_variable_type import should_trace
 from .utils import write
@@ -617,6 +617,7 @@ def handle_python_binding_args(declaration, output_gap):
 
     def binding_arg_index(name):
         return binding_arg_base + binding_arg_ixs[name]
+
     def parse_binding_arg(name):
         binding_arg = python_binding_args[binding_arg_ixs[name]]
         expr, _ = parse_arg(binding_arg, binding_arg_index(name))
