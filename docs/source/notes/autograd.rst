@@ -352,7 +352,7 @@ How do we express gradients of zero
 A gradient of :math:`0` (or independent) can be expressed in any of the following ways:
 
 - A Tensor full of zeros
-- In python, a ``None`` Tensor
+- In Python, a ``None`` Tensor
 - In cpp, and ``undefined`` Tensor
 - Using ``autograd.grad(allow_unused=False)``, an error stating that the output is independent of the input
 
