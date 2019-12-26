@@ -2459,11 +2459,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the output_size.  If `recompute_scale_factor` is ```True`` or not specified,
+            to compute the `output_size`.  If `recompute_scale_factor` is ```True`` or not specified,
             a new `scale_factor` will be computed based on the output and input sizes for use in the
-            interpolation computation.  Otherwise, the passed-in `scale_factor` will be used in the
-            interpolation computation.  Note that when scale_factor is floating-point, the recomputed
-            scale_factor may differ from the one passed in due to precision issues.
+            interpolation computation (i.e. the computation will be identical to if the computed
+            `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
+            be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+            the recomputed scale_factor may differ from the one passed in due to rounding and precision
+            issues.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
