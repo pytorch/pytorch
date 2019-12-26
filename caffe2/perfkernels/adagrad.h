@@ -98,12 +98,20 @@ inline void adagrad_update_prefetch_inlined(
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
 
+#ifdef __AVX2__
+    __m256 nhi = _mm256_fmadd_ps(gi, gi, hi);
+#else
     __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
+#endif
     _mm256_storeu_ps(nh + i, nhi);
     __m256 vtmp = _mm256_div_ps(
         gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+#ifdef __AVX2__
+    _mm256_storeu_ps(nw + i, _mm256_fmadd_ps(_mm256_set1_ps(lr), vtmp, wi));
+#else
     _mm256_storeu_ps(
         nw + i, _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp)));
+#endif
   }
 #endif
 
@@ -139,7 +147,11 @@ inline void rowwise_adagrad_update_inlined(
   __m256 partial_sum = _mm256_setzero_ps();
   for (; i + kSize <= N; i += kSize) {
     __m256 gi = _mm256_loadu_ps(g + i);
+#ifdef __AVX2__
+    partial_sum = _mm256_fmadd_ps(gi, gi, partial_sum);
+#else
     partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(gi, gi));
+#endif
   }
   // Reduce sum to 1 value
   __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
@@ -168,7 +180,11 @@ inline void rowwise_adagrad_update_inlined(
     __m256 gi = _mm256_loadu_ps(g + i);
     __m256 wi = _mm256_loadu_ps(w + i);
 
+#ifdef __AVX2__
+    _mm256_storeu_ps(w + i, _mm256_fmadd_ps(gi, step, wi));
+#else
     _mm256_storeu_ps(w + i, _mm256_add_ps(wi, _mm256_mul_ps(gi, step)));
+#endif
   }
 #endif
 
