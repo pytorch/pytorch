@@ -628,8 +628,8 @@ def handle_python_binding_args(declaration, output_gap):
     if has_options:
         # if we have a tensor options arg, these are its scattered fields
         assert not has_output, '{}: tensor options with output arg'.format(declaration['name'])
-        assert all([name in binding_arg_ixs for name in \
-            ['dtype', 'device', 'layout', 'pin_memory', 'requires_grad']]), \
+        assert all([name in binding_arg_ixs for name in
+                ['dtype', 'device', 'layout', 'pin_memory', 'requires_grad']]), \
             "{}: incomplete tensor options args".format(declaration['name'])
 
         argname = tensor_options_arg['name']
@@ -800,7 +800,7 @@ def emit_namedtuple_typedefs(declarations):
         fieldsname = flddefnames.get(fn_key)
         if fieldsname is None:
             fieldsname = 'NamedTuple_fields{}'.format('' if flddefs == [] else len(fielddefs))
-            fields=['{{"{}", ""}}'.format(fn) for fn in fieldnames]
+            fields = ['{{"{}", ""}}'.format(fn) for fn in fieldnames]
             fieldsdef = PY_NAMEDTUPLE_FIELDSDEF.substitute(
                 fieldsname=fieldsname,
                 fields=fields
@@ -1341,9 +1341,7 @@ def make_python_arglists(declaration, is_python_method):
 
 # TODO blowtorch
 def dtype_default_type_hack(name):
-    if (name.startswith('randperm') or
-        name == 'tril_indices' or
-        name == 'triu_indices'):
+    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'
