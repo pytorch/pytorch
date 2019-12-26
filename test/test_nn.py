@@ -9260,6 +9260,20 @@ class TestNNDeviceType(NNTestCase):
                     grad_input, = torch.autograd.grad(output, input, create_graph=True)
                     grad_input.sum().backward()
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    def test_conv_large_nosplit(self, device):
+        # Here we just test the convolution correctly route to the fallback implementation
+        # that is, it does not crash. The correctness of fallback implementation should be
+        # covered in other tests
+        dtype = torch.half if self.device_type == 'cuda' else torch.float
+        conv1 = nn.Conv2d(2, 2, 8, 8).to(device).to(dtype)
+        input_large = torch.randn(1, 2, 1024, 1024 * 1024, dtype=dtype, device=device)
+        conv1(input_large)
+        conv2 = torch.nn.Conv2d(1, 1024, 1, 1).to(device).to(dtype)
+        input_large = torch.randn(1, 1, 2048, 1024 , dtype=dtype, device=device)
+        conv2(input_large)
+
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
@@ -9298,6 +9312,30 @@ class TestNNDeviceType(NNTestCase):
                 conv1.bias = nn.Parameter(bias_c)
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    def test_conv_transposed_large(self, device):
+        dtype = torch.half if self.device_type == 'cuda' else torch.float
+        conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
+        input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
+        ret = conv(input_large)
+        maxdiff0 = (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024))).abs_().max().item()
+        maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
+        maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
+        maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
+        self.assertEqual(maxdiff0, 0)
+        self.assertEqual(maxdiff1, 0)
+        self.assertEqual(maxdiff2, 0)
+        self.assertEqual(maxdiff3, 0)
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    def test_conv_large(self, device):
+        dtype = torch.half if self.device_type == 'cuda' else torch.float
+        conv1 = nn.Conv2d(2, 2, 8, 8).to(device).to(dtype)
+        input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
+        ret = conv1(input_large)
+        self.assertEqual(ret[:2048], conv1(input_large[:2048]))
+        self.assertEqual(ret[2048:], conv1(input_large[2048:]))
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)

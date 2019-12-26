@@ -3,7 +3,6 @@
 
 #include "c10/macros/Macros.h"
 #include "c10/util/StringUtil.h"
-#include "c10/util/Deprecated.h"
 
 #include <cstddef>
 #include <exception>
@@ -259,6 +258,18 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+
+// Debug only version of TORCH_CHECK. This macro only checks in debug
+// build, and does nothing in release build.
+#ifdef NDEBUG
+// Optimized version - generates no code.
+#define TORCH_DCHECK(...) \
+  while (false)           \
+  TORCH_CHECK(__VA_ARGS__)
+#else
+#define TORCH_DCHECK(...) TORCH_CHECK(__VA_ARGS__)
+#endif
+
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
@@ -310,38 +321,38 @@ namespace c10 { namespace detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")
+[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")]]
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")
+[[deprecated("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")]]
 */
 inline void deprecated_AT_INDEX_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_WARN is deprecated, use TORCH_WARN instead.")
+[[deprecated("AT_WARN is deprecated, use TORCH_WARN instead.")]]
 */
 inline void deprecated_AT_WARN() {}
 
-C10_DEPRECATED_MESSAGE("AT_CHECK is deprecated, use TORCH_CHECK instead.")
+[[deprecated("AT_CHECK is deprecated, use TORCH_CHECK instead.")]]
 inline void deprecated_AT_CHECK() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
+[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
+[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
 */
 inline void deprecated_AT_ASSERTM() {}
 
