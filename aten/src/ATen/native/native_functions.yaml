@@ -4237,7 +4237,7 @@
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_exponential_
+    CPU: exponential_cpu_
     CUDA: exponential_cuda_
   supports_named_tensor: True
 

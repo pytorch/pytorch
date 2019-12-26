@@ -111,6 +111,10 @@ int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(bernoulli_mkl_stub);
+DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(exponential_mkl_stub);
+
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
 }
@@ -156,8 +160,6 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
   });
   return self;
 }
-
-DEFINE_DISPATCH(bernoulli_mkl_stub);
 
 Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
@@ -327,6 +329,24 @@ Tensor multinomial(const Tensor& self, int64_t n_sample, bool with_replacement, 
   return result;
 }
 
-DEFINE_DISPATCH(multinomial_stub);
+Tensor& exponential_cpu_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda > 0, "exponential__ expects lambda greate 0, but got lambda=", lambda);
+#if AT_MKL_ENABLED()
+  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    exponential_mkl_stub(kCPU, self, lambda, gen);
+    return self;
+  }
+#endif
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "exponential_cpu_", [&] {
+    auto generator  = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, lambda](scalar_t& ret_val) {
+          at::exponential_distribution<double> exponential(lambda);
+          ret_val = static_cast<scalar_t>(exponential(generator));
+        });
+  });
+  return self;
+}
 
 }} // namespace at::native

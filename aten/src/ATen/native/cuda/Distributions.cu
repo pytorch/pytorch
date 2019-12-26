@@ -758,6 +758,7 @@ Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) 
 }
 
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda > 0, "exponential__ expects lambda greate 0, but got lambda=", lambda);
   auto iter = TensorIterator::nullary_op(self);
   exponential_kernel_cuda(iter, lambda, gen);
   return self;
