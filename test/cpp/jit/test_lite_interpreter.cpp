@@ -130,22 +130,16 @@ void testLiteInterpreterPrimOverload() {
 
 void testLiteInterpreterPrim() {
   script::Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
   m.define(R"JIT(
         def test_shape_prop(self, x):
-            # type: (int) -> int
-            if not bool(x):
-                return x
-            else:
-                z = torch.zeros([2, 2], dtype=torch.int64)
-            return int(z[0])
+            return int(x)
   )JIT");
 
   std::vector<IValue> inputs;
-  auto minput = 0.5 * torch::ones({});
-//  int minput = 1;
+  auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
   auto ref = m.run_method("test_shape_prop", minput);
+  std::cout << ref << std::endl;
 
 //  std::stringstream ss;
 //  m._save_for_mobile(ss);
