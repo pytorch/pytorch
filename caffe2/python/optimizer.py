@@ -621,10 +621,12 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
 
-        # Adding masked Adagrad for dense parameter for now
-        if not isinstance(grad, core.GradientSlice) and self.mask_tensor is not None:
+        if self.use_mask is True:
             # Assuming np array for the mask tensor
-            mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+            if not isinstance(grad, core.GradientSlice):
+                mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+            else:
+                mask_blob = param_init_net.GivenTensorBoolFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
 
         self._aux_params.local.append(param_squared_sum)
 
@@ -637,12 +639,22 @@ class AdagradOptimizer(Optimizer):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+
+            input_args = [param, param_squared_sum, grad.indices, grad.values, lr]
             if self.rowWise:
-                op = 'RowWiseSparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedRowWiseSparseAdagrad'
+                    input_args += [mask_blob]
+                else:
+                    op = 'RowWiseSparseAdagrad'
             else:
-                op = 'SparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedSparseAdagrad'
+                    input_args += [mask_blob]
+                else:
+                    op = 'SparseAdagrad'
             net.__getattr__(op)(
-                [param, param_squared_sum, grad.indices, grad.values, lr],
+                input_args,
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
                 engine=self.engine,
