@@ -2531,7 +2531,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     def _scale_factors(dim):
         scale_factor_len = dim - 2
-        scale_factor_list = _ntuple(scale_factor_len)(-1)
+        scale_factor_list = _ntuple(scale_factor_len)(None)
         if scale_factor is not None and recompute_scale_factor is False:
             scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
         return scale_factor_list
