@@ -746,7 +746,7 @@ class Module(object):
 
         local_state = itertools.chain(self._parameters.items(), self._buffers.items())
 
-        for name, param in local_state.items():
+        for name, param in local_state:
             if param is None:
                 continue
             key = prefix + name
