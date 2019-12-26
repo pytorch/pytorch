@@ -52,8 +52,8 @@ the automatic differentiation will compute :math:`v^T J_f = (v^T J_{op_2}) J_{op
 What is your code computing?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-You can request that PyTorch computes gradients for a tensor by passing the keyword argument `requires_grad=True`
-when constructing the tensor (or, post facto, set this attribute with `requires_grad_(True)`).
+You can request that PyTorch computes gradients for a tensor by passing the keyword argument ``requires_grad=True``
+when constructing the tensor (or, post facto, set this attribute with ``requires_grad_(True)``).
 The user can then use any PyTorch function on this tensor to compute the final value of its function.
 Each of these functions is composed of one or more elementary operation.
 Each operation will add an element to the "chain" if Jacobian products that the backward pass will compute.
