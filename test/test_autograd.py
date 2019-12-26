@@ -2523,7 +2523,10 @@ class TestAutograd(TestCase):
         x = torch.randn(10, 10)
 
         with profile() as p:
+            self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
+
+        self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
         names = ['mul', 'add']
