@@ -9,10 +9,10 @@ void THNN_(SpatialClassNLLCriterion_shapeCheck)(
            THCTensor *weights)
 {
   TORCH_CHECK(target->dim() == 3, 1,
-           "only batches of spatial targets supported (non-empty 3D tensors)" \
+           "only batches of spatial targets supported (3D tensors)" \
            " but got targets of size: : ", target->sizes());
   TORCH_CHECK(input->dim() == 4, 2,
-           "only batches of spatial inputs supported (non-empty 4D tensors), "      \
+           "only batches of spatial inputs supported (4D tensors), "      \
            "but got input of size: ", input->sizes());
   if (THCTensor_(size)(state, input, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, input, 2) != THCIndexTensor_(size)(state, target, 1) ||
