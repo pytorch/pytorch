@@ -21,9 +21,9 @@ CONFIG_TREE_DATA = [
             ("7", [X("3.6")]),
         ]),
         ("clang", [
-            ("5", [
-                XImportant("3.6"),  # This is actually the ASAN build
-            ]),
+            # ("5", [
+            #     XImportant("3.6"),  # This is actually the ASAN build
+            # ]),
             ("7", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
