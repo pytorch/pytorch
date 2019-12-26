@@ -605,6 +605,7 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
 {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
+  // no names guard here?
   max_pool2d_with_indices_out_cuda_template(
     output,
     indices,
@@ -614,6 +615,7 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
+  // propgate here
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
