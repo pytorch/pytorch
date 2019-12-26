@@ -1055,6 +1055,8 @@ Tensor cudnn_convolution_backward_input(
 
   // See #4500
   Tensor weight_contig = weight->contiguous(grad_output->suggest_memory_format());
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), grad_output->suggest_memory_format());
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
@@ -1094,7 +1096,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
     if (output_mask[0]) {
@@ -1117,7 +1118,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
       grad_bias = at::cudnn_convolution_backward_bias(grad_output);
     }
   }
-
   return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
 
