@@ -81,10 +81,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     new_schema_dict = dict()
     with open(args.new_schemas, 'r') as f:
-        line = f.readline()
-        while line:
-            s = parse_schema(line.strip())
+        while True:
             line = f.readline()
+            if not line:
+                break
+            if "__torch__.torch.classes" in line:
+                # TODO Fix type __torch__.torch.classes.xxx
+                continue
+            s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)
             new_schema_dict[s.name] = slist

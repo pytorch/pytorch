@@ -70,7 +70,7 @@ DEFINE_DISPATCH(index_put_accum_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
 static bool all_strides_match(TensorList tensors) {
-  AT_ASSERT(tensors.size() >= 1);
+  TORCH_CHECK(tensors.size() >= 1);
   auto strides = tensors[0].strides();
   for (auto& tensor : tensors.slice(1)) {
     if (!strides.equals(tensor.strides())) {
@@ -149,7 +149,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // restride_src with an unhelpful error message.
   if (std::find(indexed_sizes.begin(), indexed_sizes.end(), 0) != indexed_sizes.end() &&
       std::find(replacement_shape.begin(), replacement_shape.end(), 0) == replacement_shape.end()) {
-    AT_INDEX_ERROR("index is out of bounds for dimension with size 0");
+    TORCH_CHECK_INDEX(false, "index is out of bounds for dimension with size 0");
   }
 
   this->dims_before = dims_before;
@@ -181,7 +181,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   try {
     indices = expand_outplace(indices);
   } catch (std::exception& e) {
-    AT_INDEX_ERROR("shape mismatch: indexing tensors could not be broadcast together"
+    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
                    " with shapes ", shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
@@ -203,10 +203,8 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
 }
 
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
-  if (!is_expandable_to(value.sizes(), info.src.sizes())) {
-    AT_ERROR("shape mismatch: value tensor of shape ", value.sizes(),
+  TORCH_CHECK(is_expandable_to(value.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
              " cannot be broadcast to indexing result of shape ", info.src.sizes());
-  }
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
@@ -232,9 +230,7 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
-  if (indices.size() > (size_t)self.dim()) {
-    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  }
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   auto info = make_info(self, indices);
   auto iter = make_index_iterator(info);
@@ -247,10 +243,10 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
 }
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
-  if (indices.size() > (size_t)self.dim()) {
-    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  }
+    TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (accumulate && self.device().type() == kCUDA) {
+      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
+      value.device(), " for value tensor");
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
@@ -268,21 +264,17 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, con
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (index.dim() >= 2) {
-    AT_INDEX_ERROR("index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
-  }
+  TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
 
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
-    AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
-    AT_INDEX_ERROR("index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
                    source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
 
-  if (index.scalar_type() != ScalarType::Long) {
-    AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
-  }
+  TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected LongTensor for index");
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -300,12 +292,10 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
     ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
     ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
-    AT_ERROR(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
-  if (source.dim() > 0 && numIndices != source.size(dim)) {
-     AT_INDEX_ERROR(
+  TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
-  }
 
   return at::_index_copy_(self, dim, index, source);
 }

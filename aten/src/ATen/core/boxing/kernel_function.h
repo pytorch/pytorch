@@ -15,7 +15,7 @@ namespace detail {
       return (*kernel_func)(std::forward<Parameters>(args)...);
     }
   };
-  template<class FuncType, FuncType* kernel_func, class Enable = guts::enable_if_t<guts::is_function_type<FuncType>::value>>
+  template<class FuncType, FuncType* kernel_func, class Enable = std::enable_if_t<guts::is_function_type<FuncType>::value>>
   struct WrapKernelFunction final {
     using type = WrapKernelFunction_<
         FuncType,

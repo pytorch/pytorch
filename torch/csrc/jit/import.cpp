@@ -245,7 +245,7 @@ script::Module load(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai =
-      caffe2::make_unique<IStreamAdapter>(&in);
+      std::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
@@ -254,7 +254,7 @@ script::Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
