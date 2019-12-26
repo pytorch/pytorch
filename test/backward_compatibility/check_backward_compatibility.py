@@ -71,9 +71,9 @@ def check_bc(new_schema_dict):
         print('Found backward compatible schemas for all existing schemas')
     else:
         print('The PR is introducing backward incompatible changes to the '
-                'operator library. Please contact PyTorch team to confirm '
-                'whether this change is wanted or not. \n\nBroken ops: '
-                '[\n\t{}\n]'.format("\n\t".join(broken_ops)))
+              'operator library. Please contact PyTorch team to confirm '
+              'whether this change is wanted or not. \n\nBroken ops: '
+              '[\n\t{}\n]'.format("\n\t".join(broken_ops)))
     return is_bc
 
 
