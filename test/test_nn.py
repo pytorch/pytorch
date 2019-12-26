@@ -5966,6 +5966,13 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             nn.BCEWithLogitsLoss()(input, target)
 
+    def test_bce_with_logits_raises_if_pos_weight_length_and_num_classes_are_different_size(self):
+        target = torch.rand(5, 3)
+        input = torch.rand(5, 3)
+        pos_weight = torch.tensor([0.1, 0.9])
+        with self.assertRaises(ValueError):
+            nn.BCEWithLogitsLoss()(input, target, pos_weight=pos_weight)
+
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self):
         sigmoid = nn.Sigmoid()
 
