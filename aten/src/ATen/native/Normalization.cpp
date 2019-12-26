@@ -71,7 +71,7 @@ void batch_norm_cpu_inference_collect_liner_and_constant_terms(
   /// output(n, c, h, w)
   ///     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   ///         + bias(c)
-  ///     = input(n, c, h, w) * inv_var(c) * weight(c) +
+  ///     = input(n, c, h, w) * inv_var(c) * weight(c) 
   ///         - mean(c) * inv_var(c) * weight(c) + bias(c),
   /// where inv_var(c) = 1 / sqrt(var(c) + eps).
   /// So the linear term, alpha(c) = inv_var(c) * weight(c),
@@ -115,7 +115,7 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  // Keep the loop struture simple to make sure compiler vectorization kicks in.
   if (image_size != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t c = 0; c < n_channel; ++c) {
