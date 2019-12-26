@@ -160,6 +160,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   Returns worker information of the node that owns this ``RRef``.
               )")
           .def(
+              "rref_id",
+              &PyRRef::rrefId,
+              R"(
+                  Returns a string of its RRefId. Different RRefs will have the
+                  same RRefId if they share the same OwnerRRef, i.e., they are
+                  referencing the same data object.
+              )")
+          .def(
               "to_here",
               &PyRRef::toHere,
               py::call_guard<py::gil_scoped_release>(),

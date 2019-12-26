@@ -37,6 +37,13 @@ PyRRef::PyRRef(const py::object& value)
         return rref;
       }()) {}
 
+std::string PyRRef::rrefId() const {
+  std::stringstream ss;
+  auto& rrefId = rref_->rrefId();
+  ss << rrefId.createdOn_ << '_' << rrefId.localId_;
+  return ss.str();
+}
+
 bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }

@@ -136,6 +136,10 @@ def my_sleep_func(seconds=1):
     time.sleep(seconds)
 
 
+def has_same_rref_id(rref1, rref2):
+    return rref1.rref_id() == rref2.rref_id()
+
+
 def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
@@ -1124,6 +1128,24 @@ class RpcTest(RpcAgentTestFixture):
             rref2.__str__(),
             "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
         )
+
+    @dist_init
+    def test_rref_id(self):
+        dst = "worker{}".format((self.rank + 1) % self.world_size)
+        rref1 = RRef(self.rank)
+        self.assertTrue(
+            rpc.rpc_sync(dst, has_same_rref_id, args=(rref1, rref1))
+        )
+
+        rref2 = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+        self.assertTrue(
+            rpc.rpc_sync(dst, has_same_rref_id, args=(rref2, rref2))
+        )
+
+        self.assertFalse(
+            rpc.rpc_sync(dst, has_same_rref_id, args=(rref1, rref2))
+        )
+
 
     @dist_init
     def test_rref_context_debug_info(self):

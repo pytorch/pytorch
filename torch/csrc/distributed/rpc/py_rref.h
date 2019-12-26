@@ -16,6 +16,7 @@ class PyRRef {
   // creates a local RRef with the given object as value
   explicit PyRRef(const py::object& value);
 
+  std::string rrefId() const;
   bool isOwner() const;
   WorkerInfo owner() const;
   py::object toHere();
