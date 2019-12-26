@@ -730,7 +730,7 @@ void InsertQuantDeQuantHelper::cleanup(
   }
 
   // If we have seen this graph before, we'll replay the observer
-  // slots removal in the same order
+  // slots removal using the slot index
   if (removed_observer_slots_.count(g)) {
     for (auto slot: removed_observer_slots_.at(g)) {
       module._ivalue()->unsafeRemoveSlot(slot);
