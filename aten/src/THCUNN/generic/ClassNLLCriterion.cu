@@ -151,7 +151,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   }
 
-  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
+  if (n_dims != 1 && n_dims != 2) {
+    THError("input tensor should be 1D or 2D");
+  }
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
   int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
@@ -165,24 +167,26 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   if (reduction == at::Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
-    if (weights) {
-      weights = THCTensor_(newContiguous)(state, weights);
-    }
+    if (batch_size != 0) {
+      if (weights) {
+        weights = THCTensor_(newContiguous)(state, weights);
+      }
 
-    ClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
-      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
-        batch_size,
-        toDeviceTensor<THCIndex_t, 1>(state, target),
-        toDeviceTensor<scalar_t, 1>(state, gradOutput),
-        toDeviceTensor<scalar_t, 2>(state, gradInput),
-        weights ? THCTensor_(data)(state, weights) : NULL,
-        n_classes,
-        ignore_index);
+      ClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
+        <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+          batch_size,
+          toDeviceTensor<THCIndex_t, 1>(state, target),
+          toDeviceTensor<scalar_t, 1>(state, gradOutput),
+          toDeviceTensor<scalar_t, 2>(state, gradInput),
+          weights ? THCTensor_(data)(state, weights) : NULL,
+          n_classes,
+          ignore_index);
 
-    THCudaCheck(cudaGetLastError());
+      THCudaCheck(cudaGetLastError());
 
-    if (weights) {
-      THCTensor_(free)(state, weights);
+      if (weights) {
+        THCTensor_(free)(state, weights);
+      }
     }
     return;
   }
