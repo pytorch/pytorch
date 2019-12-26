@@ -17,6 +17,8 @@ using hardtanh_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using shrink_fn = void (*)(TensorIterator&, Scalar);
 using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
 using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
+using leaky_relu_fn = void (*)(TensorIterator&, Scalar);
+using leaky_relu_backward_fn = void (*)(TensorIterator&, Scalar);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_fn, elu_backward_stub);
@@ -27,6 +29,8 @@ DECLARE_DISPATCH(hardtanh_backward_fn, hardtanh_backward_stub);
 DECLARE_DISPATCH(shrink_fn, hardshrink_stub);
 DECLARE_DISPATCH(shrink_fn, softshrink_stub);
 DECLARE_DISPATCH(shrink_backward_fn, shrink_backward_stub);
+DECLARE_DISPATCH(leaky_relu_fn, leaky_relu_stub);
+DECLARE_DISPATCH(leaky_relu_backward_fn, leaky_relu_backward_stub);
 
 } // namespace native
 
