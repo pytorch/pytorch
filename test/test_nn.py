@@ -5971,7 +5971,7 @@ class TestNN(NNTestCase):
         input = torch.rand(5, 3)
         pos_weight = torch.tensor([0.1, 0.9])
         with self.assertRaises(ValueError):
-            nn.BCEWithLogitsLoss()(input, target, pos_weight=pos_weight)
+            nn.BCEWithLogitsLoss(pos_weight=pos_weight)(input, target)
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self):
         sigmoid = nn.Sigmoid()
