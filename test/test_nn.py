@@ -5970,7 +5970,8 @@ class TestNN(NNTestCase):
         target = torch.rand(5, 3)
         input = torch.rand(5, 3)
         pos_weight = torch.tensor([0.1, 0.9])
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "The length of pos_weight (2) must be "
+                                                "the same as the number of classes (input.size(-1) = 3)"):
             nn.BCEWithLogitsLoss(pos_weight=pos_weight)(input, target)
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss(self):
