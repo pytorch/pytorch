@@ -14,6 +14,7 @@ from .conv import Conv1d as Conv1d, Conv2d as Conv2d, Conv3d as Conv3d, ConvTran
 from .distance import CosineSimilarity as CosineSimilarity, PairwiseDistance as PairwiseDistance
 from .dropout import AlphaDropout as AlphaDropout, Dropout as Dropout, Dropout2d as Dropout2d, Dropout3d as Dropout3d, \
     FeatureAlphaDropout as FeatureAlphaDropout
+from .flatten import Flatten as Flatten
 from .fold import Fold as Fold, Unfold as Unfold
 from .instancenorm import InstanceNorm1d as InstanceNorm1d, InstanceNorm2d as InstanceNorm2d, \
     InstanceNorm3d as InstanceNorm3d
