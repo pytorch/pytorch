@@ -241,8 +241,8 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
     std::vector<std::unique_ptr<TensorCPU>> XQs(k2b1bXBits);
     std::vector<std::unique_ptr<TensorCPU>> YQs(k2b1bXBits);
     for (auto i = 0; i < k2b1bXBits; ++i) {
-      XQs[i] = caffe2::make_unique<Tensor>(CPU);
-      YQs[i] = caffe2::make_unique<Tensor>(CPU);
+      XQs[i] = std::make_unique<Tensor>(CPU);
+      YQs[i] = std::make_unique<Tensor>(CPU);
     }
     Tensor WQN(CPU), WQ(CPU);
     uniformQuantize2b1b(X, XQs, 0.5, 1.0);

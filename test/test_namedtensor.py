@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -238,6 +235,15 @@ class TestNamedTensor(TestCase):
             output = x.index_fill('C', torch.tensor([0, 1], device=device), torch.tensor(4.))
             self.assertEqual(output.names, expected_names)
 
+    def test_equal(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(2, 3, device=device)
+            other = tensor.clone()
+
+            self.assertTrue(torch.equal(tensor.rename('N', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename('M', 'C'), other.rename('N', 'C')))
+            self.assertFalse(torch.equal(tensor.rename(None, 'C'), other.rename('N', 'C')))
+
     def test_squeeze(self):
         x = create('N:3,C:1,H:1,W:1')
         output = x.squeeze('C')
@@ -258,6 +264,14 @@ class TestNamedTensor(TestCase):
         none_named_tensor = torch.zeros(2, 3).rename_(None, None)
         self.assertEqual(repr(none_named_tensor), expected)
 
+    def test_diagonal(self):
+        named_tensor = torch.zeros(2, 3, 5, 7, names=list('ABCD'))
+        self.assertEqual(named_tensor.diagonal().names, ['C', 'D', None])
+        self.assertEqual(named_tensor.diagonal(1, 3).names, ['A', 'C', None])
+
+        self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
+                         ['A', 'C', 'E'])
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()
@@ -275,12 +289,11 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @unittest.skip("Issue 27753")
-    def test_big_tensor_repr(self):
+    def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
-            expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
-            self.assertEqual(repr(named_tensor), expected)
+            names_tag = 'names={}'.format(named_tensor.names)
+            self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
 
@@ -689,6 +702,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -714,6 +730,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
@@ -722,26 +739,27 @@ class TestNamedTensor(TestCase):
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
-    def test_logical_xor(self):
+    def test_logical_ops(self):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
             return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
-        self._test_name_inference(
-            torch.logical_xor,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+        for op in ('logical_xor', 'logical_and', 'logical_or'):
+            self._test_name_inference(
+                getattr(torch, op),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            Tensor.logical_xor_,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                getattr(Tensor, op + '_'),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            lambda out, x, y: torch.logical_xor(x, y, out=out),
-            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                lambda out, x, y: getattr(torch, op)(x, y, out=out),
+                (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
@@ -1030,6 +1048,11 @@ class TestNamedTensor(TestCase):
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
         with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
             tensor.unflatten('D', (('H', 3), ('W', 5)))
 
@@ -1053,6 +1076,14 @@ class TestNamedTensor(TestCase):
             for out in output:
                 self.assertEqual(out.names, expected_names)
 
+        def sum_all_outputs(output):
+            if isinstance(output, torch.Tensor):
+                return output.sum()
+            result = 0
+            for out in output:
+                result = out + result
+            return result.sum()
+
         def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             check_output(op(t, 1), ['N', 'L'])
@@ -1062,6 +1093,11 @@ class TestNamedTensor(TestCase):
                 op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
+
+        def test_autograd_supports_dimname_overload(op, device):
+            t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device, requires_grad=True)
+            sum_all_outputs(op(t, 'C')).backward()
+            self.assertIsNotNone(t.grad)
 
         def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
@@ -1126,6 +1162,7 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             op = testcase.op
             test_simple_reduce(op, device)
+            test_autograd_supports_dimname_overload(op, device)
 
             if testcase.supports_keepdim:
                 test_keepdim(op, device)
@@ -1913,11 +1950,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

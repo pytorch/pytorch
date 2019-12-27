@@ -12,6 +12,7 @@ class CustomClassHolder : public c10::intrusive_ptr_target {};
 struct Function;
 namespace script {
 struct CompilationUnit;
+struct Module;
 }
 } // namespace jit
 } // namespace torch
@@ -176,10 +177,10 @@ struct CAFFE2_API IValue final {
 
   template <
       typename... Args,
-      c10::guts::enable_if_t<
-          !c10::guts::disjunction<
+      std::enable_if_t<
+          !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              c10::guts::negation<std::is_constructible<IValue, Args>>...>::
+              guts::negation<std::is_constructible<IValue, Args>>...>::
               value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
@@ -236,7 +237,7 @@ struct CAFFE2_API IValue final {
   IValue(c10::List<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  [[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")]]
   /// \endcond
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
@@ -256,7 +257,7 @@ struct CAFFE2_API IValue final {
   // DoubleList
   IValue(c10::List<double> v);
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  [[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")]]
   /// \endcond
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
@@ -267,7 +268,7 @@ struct CAFFE2_API IValue final {
   // BoolList
   IValue(c10::List<bool> v);
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  [[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")]]
   /// \endcond
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
@@ -277,7 +278,7 @@ struct CAFFE2_API IValue final {
   //TensorList
   IValue(c10::List<at::Tensor> v);
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  [[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")]]
   /// \endcond
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
@@ -296,7 +297,7 @@ struct CAFFE2_API IValue final {
   IValue(c10::List<T> v);
   template<class T>
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+  [[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")]]
   /// \endcond
   IValue(std::vector<T> v);
 
@@ -311,7 +312,7 @@ struct CAFFE2_API IValue final {
 
   template<class Key, class Value>
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+  [[deprecated("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
@@ -325,6 +326,9 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
   const ivalue::Object& toObjectRef() const;
+
+  torch::jit::script::Module toModule() const;
+  bool isModule() const;
 
   // None
   bool isNone() const {

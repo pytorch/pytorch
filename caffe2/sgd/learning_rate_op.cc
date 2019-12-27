@@ -33,8 +33,10 @@ Required:
    `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
    `composite`: uses `sub_policy_num_iters` and additional args with format
    `cyclic`: uses `max_lr`, `stepsize`
+   `cosine`: uses `min_lr`, `max_lr`, `period`, `t_mult`, `lr_shrink`
    `constantThenLinearWarmup`: uses `start_warmup_multiplier`, `constant_warmup_num_iter`, `linear_warmup_num_iter`
    `compositeCyclical`: uses `start_warmup_multiplier`, `constant_warmup_num_iter`, `linear_warmup_num_iter`, `cyclical_max_lr`, `cyclical_step_size`, `cyclical_decay`
+   `compositeCosine`: uses `start_warmup_multiplier`, `constant_warmup_num_iter`, `linear_warmup_num_iter`, `cosine_max_lr`, `cosine_period`, `cosine_t_mult`, `cosine_lr_shrink`
    sub_policy_{sub_policy_index}_{sub_policy_arg}, for example:
    sub_policy_0_policy: "exp", sub_policy_0_gamma: 0.99,
    sub_policy_0_lr_scale: 1.2
@@ -58,10 +60,15 @@ Optional:
   `m3`: defaults to 0.5, the third piece lr of piece warmup
   `start_warmup_multiplier`: defaults to 0.1, part of constantThenLinearWarmup
   `constant_warmup_num_iter`: defaults to 10000000, part of constantThenLinearWarmup and constantThenLinearWarmup
-  `linear_warmup_num_iter`: defaults to 10000000, part of constantThenLinearWarmup and CompositeCyclicalLRPolicy
+  `linear_warmup_num_iter`: defaults to 10000000, part of constantThenLinearWarmup, CompositeCyclicalLRPolicy, CompositeCosineLRPolicy
   `cyclical_max_lr`: defaults to 0.05, part of CompositeCyclicalLRPolicy
   `cyclical_step_size`: defaults to 1000000, part of CompositeCyclicalLRPolicy
   `cyclical_decay`: defaults to 1.0, part of CompositeCyclicalLRPolicy
+  `cosine_min_lr`:defaults to 0.01, part of CompositeCosineLRPolicy
+  `cosine_max_lr`:defaults to 0.05, part of CompositeCosineLRPolicy
+  `cosine_period`:defaults to 50, part of CompositeCosineLRPolicy
+  `cosine_t_mult`:defaults to 1.0, part of CompositeCosineLRPolicy
+  `cosine_lr_shrink`:defaults to 0.99, part of CompositeCosineLRPolicy
 
 Usage:
   train_net.LearningRate(*iterations*, "*label*", base_lr=*float*,
@@ -120,6 +127,13 @@ Example usage:
     .Arg(
         "cyclical_decay",
         "defaults to 0.999, part of CompositeCyclicalLRPolicy")
+    .Arg("cosine_min_lr", "defaults to 0.01, part of CompositeCosineLRPolicy")
+    .Arg("cosine_max_lr", "defaults to 0.05, part of CompositeCosineLRPolicy")
+    .Arg("cosine_period", "defaults to 50, part of CompositeCosineLRPolicy")
+    .Arg("cosine_t_mult", "defaults to 1,0, part of CompositeCosineLRPolicy")
+    .Arg(
+        "cosine_lr_shrink",
+        "defaults to 0.99, part of CompositeCosineLRPolicy")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {

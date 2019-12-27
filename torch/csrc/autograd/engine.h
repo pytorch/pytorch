@@ -191,7 +191,9 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
-protected:
+  size_t ready_queue_size(at::Device device);
+
+ protected:
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,

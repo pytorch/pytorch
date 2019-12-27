@@ -10,15 +10,6 @@
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
 
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/extrema.h>
-#include <thrust/inner_product.h>
-#include <thrust/sequence.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/NamedTensorUtils.h>
@@ -191,9 +182,9 @@ template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return self.clone(at::MemoryFormat::Contiguous);
   }
-  auto self_copy = self.clone().view(-1);
+  auto self_copy = self.clone(at::MemoryFormat::Contiguous).view(-1);
   auto values = at::empty({1}, self.options());
   auto indices = at::empty({1}, self.options().dtype(kLong));
   TORCH_CHECK(
@@ -247,22 +238,16 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t dim,
     bool keepdim) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return kthvalue_out_impl_cuda(values, indices, self, k, dim, keepdim);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
-#endif
   return result;
 }
 
 Tensor median_cuda(const Tensor& self) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "median", [&] {
     return median_cuda_template<scalar_t>(self);
   });

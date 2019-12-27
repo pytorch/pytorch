@@ -116,7 +116,7 @@ struct C10_API TensorOptions {
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+           typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -130,7 +130,7 @@ struct C10_API TensorOptions {
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
   template <typename... Args,
-            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+            typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -142,25 +142,6 @@ struct C10_API TensorOptions {
   /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
-  }
-
-  /// True if all elements of the `TensorOptions` match that of the other.
-  bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
-        has_device_ == other.has_device_ &&
-        has_requires_grad_ == other.has_requires_grad_ &&
-        (!has_dtype_ || dtype_ == other.dtype_) &&
-        (!has_layout_ || layout_ == other.layout_) &&
-        (!has_device_ || device_ == other.device_) &&
-        (!requires_grad_ || requires_grad_ == other.requires_grad_);
-  }
-
-  /// True if any of the elements of this `TensorOptions` do not match that of
-  /// the other.
-  bool operator!=(const TensorOptions& other) const noexcept {
-    return !(*this == other);
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
@@ -311,6 +292,15 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
+  }
+
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
@@ -354,14 +344,16 @@ struct C10_API TensorOptions {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
+          case DeviceType::CPU: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
               return TensorTypeId::ComplexCPUTensorId;
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
+            if (isQIntType(dtype_tmp)) {
               return TensorTypeId::QuantizedCPUTensorId;
             }
             return TensorTypeId::CPUTensorId;
+            }
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
               return TensorTypeId::ComplexCUDATensorId;
@@ -553,6 +545,12 @@ C10_API std::ostream& operator<<(
 template <typename T>
 inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
+}
+
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine

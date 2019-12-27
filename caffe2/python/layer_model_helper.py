@@ -76,7 +76,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._breakdown_map = None
 
         # Connect Schema to self.net. That particular instance of schmea will be
-        # use for generation of the Layers accross the network and would be used
+        # use for generation of the Layers across the network and would be used
         # for connection with Readers.
         self._input_feature_schema = schema.NewRecord(
             self.net,

@@ -1,3 +1,4 @@
+#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/Device.h>
@@ -85,7 +86,10 @@ static PyObject * THCPStream_query(THCPStream *self, PyObject *noargs) {
 
 static PyObject * THCPStream_synchronize(THCPStream *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  with_no_gil([&] { self->cuda_stream.synchronize(); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    self->cuda_stream.synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -126,7 +130,7 @@ PyTypeObject THCPStreamType = {
   sizeof(THCPStream),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THCPStream_dealloc,        /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */

@@ -10,20 +10,6 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
 
-
-template <typename T>
-struct TensorSigmoidOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) const {
-    T one = (T) 1.0;
-    *out = one / (one + THCNumerics<T>::exp(- *in));
-  }
-
-  __device__ __forceinline__ void operator()(T* v) const {
-    T one = (T) 1.0;
-    *v = one / (one + THCNumerics<T>::exp(- *v));
-  }
-};
-
 template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}

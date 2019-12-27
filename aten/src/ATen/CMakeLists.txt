@@ -63,6 +63,8 @@ FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
 FILE(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+FILE(GLOB native_h "native/*.h")
+FILE(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
@@ -121,9 +123,6 @@ filter_list(core_generated_h core_generated_cpp "\\.h$")
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
-IF(NOT AT_LINK_STYLE)
-  SET(AT_LINK_STYLE SHARED)
-ENDIF()
 
 IF (USE_TBB)
   message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
@@ -354,39 +353,12 @@ list(APPEND ATen_HIP_INCLUDE ${ATen_CPU_INCLUDE})
 # built when USE_CUDA=1 and CUDA is available.  (libATen_hip.so works
 # the same way as libATen_cuda.so)
 set(ATen_CPU_SRCS ${all_cpu_cpp})
-if(AT_LINK_STYLE STREQUAL "INTERFACE")
-  # Source code can't be added to an interface library, so it is
-  # passed back to be compiled into the containing library
-  add_library(ATen_cpu INTERFACE)
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
-else()
-  add_library(ATen_cpu ${AT_LINK_STYLE} ${ATen_CPU_SRCS})
-  if (ATen_THIRD_PARTY_INCLUDE)
-    target_include_directories(ATen_cpu SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-  endif()
-  target_include_directories(ATen_cpu INTERFACE $<INSTALL_INTERFACE:include>)
-  target_include_directories(ATen_cpu PRIVATE ${ATen_CPU_INCLUDE})
-  target_link_libraries(ATen_cpu PUBLIC ${ATen_CPU_DEPENDENCY_LIBS})
-  target_link_libraries(ATen_cpu PRIVATE ATEN_CPU_FILES_GEN_LIB)
-  caffe2_interface_library(ATen_cpu ATen_cpu_library)
-  # Set standard properties on the target
-  torch_set_target_props(ATen_cpu)
-
-  # Make sure these don't get built by parent
-  set(ATen_CPU_SRCS)
-endif()
+list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 
 if(USE_CUDA)
   set(ATen_CUDA_SRCS ${all_cuda_cpp})
   set(ATen_NVRTC_STUB_SRCS ${cuda_nvrtc_stub_cpp})
-  if(AT_LINK_STYLE STREQUAL "INTERFACE")
-    # Source code can't be added to an interface library, so it is
-    # passed back to be compiled into the containing library
-    add_library(ATen_cuda INTERFACE)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
-  else()
-    message(FATAL_ERROR "Non-INTERFACE AT_LINK_STYLE no longer supported")
-  endif()
+  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
 
 if(USE_ROCM)
@@ -394,46 +366,9 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   set(ATen_NVRTC_STUB_SRCS ${hip_nvrtc_stub_cpp})
-  if(AT_LINK_STYLE STREQUAL "INTERFACE")
-    # Source code can't be added to an interface library, so it is
-    # passed back to be compiled into the containing library
-    add_library(ATen_hip INTERFACE)
-    # NB: Instead of adding it to this list, we add it by hand
-    # to caffe2_hip, because it needs to be a PRIVATE dependency
-    # list(APPEND ATen_HIP_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
-  else()
-    message(FATAL_ERROR "Non-INTERFACE AT_LINK_STYLE not (yet) supported for ROCm build")
-  endif()
-endif()
-
-
-if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
-  if(USE_CUDA)
-    if (NOT $ENV{ATEN_STATIC_CUDA})
-      cuda_add_cublas_to_target(ATen_cuda)
-      cuda_add_cufft_to_target(ATen_cuda)
-    endif()
-  endif()
-
-  if(NOT MSVC)
-    torch_compile_options(ATen_cpu)
-    if(USE_CUDA)
-      torch_compile_options(ATen_cuda)
-    endif()
-    if(USE_ROCM)
-      torch_compile_options(ATen_hip)
-    endif()
-  endif()
-
-  if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
-    set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
-    if(USE_CUDA)
-      set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
-    endif()
-    if(USE_ROCM)
-      set_property(TARGET ATen_hip PROPERTY CXX_STANDARD 11)
-    endif()
-  endif()
+  # NB: Instead of adding it to this list, we add it by hand
+  # to caffe2_hip, because it needs to be a PRIVATE dependency
+  # list(APPEND ATen_HIP_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
 
 SET(ATEN_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_INCLUDE_DIR}")
@@ -444,7 +379,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 if(INTERN_BUILD_MOBILE)
   set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake

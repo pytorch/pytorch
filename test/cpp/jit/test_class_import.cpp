@@ -89,12 +89,12 @@ void testScriptObject() {
   Module m2("m2");
   std::vector<at::Tensor> constantTable;
   import_libs(
-      m1.class_compilation_unit(),
+      m1._ivalue()->compilation_unit(),
       "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
       constantTable);
   import_libs(
-      m2.class_compilation_unit(),
+      m2._ivalue()->compilation_unit(),
       "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
       constantTable);

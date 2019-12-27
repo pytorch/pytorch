@@ -163,12 +163,11 @@ class ShapePropagator {
         auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
                                                : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
-        auto t = at::empty_strided(
+        return at::empty_strided(
                      *type->sizes().concrete_sizes(),
                      *type->strides().concrete_sizes(),
                      attype.options())
                      .zero_();
-        return autograd::make_variable(t, /*requires_grad=*/false);
       }
       // fallthrough
     } else if (type_->isSubtypeOf(FloatType::get())) {
@@ -1125,12 +1124,12 @@ class ShapePropagator {
             "aten::replication_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
-            "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
-            "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
-            "aten::upsample_nearest1d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_nearest2d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_nearest3d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
+            "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners, float scales_1, float scales_2) -> Tensor",
+            "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners, float scales_1) -> Tensor",
+            "aten::upsample_nearest1d(Tensor self, int[] output_size, float scales_1) -> Tensor",
+            "aten::upsample_nearest2d(Tensor self, int[] output_size, float scales_1, float scales_2) -> Tensor",
+            "aten::upsample_nearest3d(Tensor self, int[] output_size, float scales_1, float scales_2, float scales_3) -> Tensor",
+            "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners, float scales_1, float scales_2, float scales_3) -> Tensor",
             "aten::prelu(Tensor self, Tensor weight) -> Tensor",
         },
         [](Node* node) -> type_vec_t {

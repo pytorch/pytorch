@@ -126,6 +126,7 @@ _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
 _(aten, _sparse_sum) \
 _(aten, _sqrt) \
+_(aten, _square) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
@@ -502,6 +503,7 @@ _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
 _(aten, bitwise_not) \
+_(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -618,6 +620,7 @@ _(aten, sparse_resize_and_clear) \
 _(aten, split) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
+_(aten, square) \
 _(aten, squeeze) \
 _(aten, sspaddmm) \
 _(aten, stack) \
@@ -649,9 +652,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \

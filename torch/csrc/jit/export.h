@@ -1,8 +1,10 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/onnx/onnx.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ostream>
 
@@ -28,7 +30,9 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool strip_doc_string = true,
-    bool keep_initializers_as_inputs = true);
+    bool keep_initializers_as_inputs = true,
+    const std::map<std::string, int>& custom_opsets = {},
+    bool add_node_names = true);
 
 // For testing purposes
 TORCH_API std::string pretty_print_onnx(
@@ -39,7 +43,9 @@ TORCH_API std::string pretty_print_onnx(
     ::torch::onnx::OperatorExportTypes operator_export_type =
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false,
-    bool keep_initializers_as_inputs = true);
+    bool keep_initializers_as_inputs = true,
+    const std::map<std::string, int>& custom_opsets = {},
+    bool add_node_names = true);
 
 TORCH_API void ExportModule(
     const script::Module& module,
@@ -59,11 +65,23 @@ TORCH_API void ExportModule(
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
     bool bytecode_format = false);
 
+// Write the bytes of a pickle archive and the tensors referenced inside that
+// archive
+TORCH_API void writeArchiveAndTensors(
+    const std::string& archive_name,
+    const char* pickle_bytes,
+    size_t size,
+    const std::vector<WriteableTensorData>& tensors,
+    caffe2::serialize::PyTorchStreamWriter& out);
+
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
 using ExportModuleExtraFilesHook =
     std::function<script::ExtraFilesMap(const script::Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
+
+// Returns a list of names of all operators in the module and its submodules.
+TORCH_API std::vector<std::string> export_opnames(const script::Module& m);
 
 } // namespace jit
 } // namespace torch

@@ -9,6 +9,11 @@ sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase
 from common_utils import suppress_warnings
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class TestTypeSharing(JitTestCase):
     def assertSameType(self, m1, m2):
         if not isinstance(m1, torch.jit.ScriptModule):
@@ -278,6 +283,34 @@ class TestTypeSharing(JitTestCase):
 
         self.assertDifferentType(fn1_mod, fn2_mod)
 
+    def test_builtin_function_same(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.add)
+
+        self.assertSameType(c1, c2)
+
+    def test_builtin_function_different(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.sub)
+
+        self.assertDifferentType(c1, c2)
+
     def test_script_function_attribute_same(self):
         """
         Same functions passed in should lead to same types
@@ -403,8 +436,3 @@ class TestTypeSharing(JitTestCase):
         a = M((torch.ones(1), ))
         b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")

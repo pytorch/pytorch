@@ -121,7 +121,7 @@ class MatchGraph : public Graph<MatchPredicate<GraphType>> {
   // is rooted at the given rootNode.
   // The flag invertGraphTraversal specify if we should follow out edges or
   // in edges. The default is true which is useful for a functional
-  // intepretation of a dataflow graph.
+  // interpretation of a dataflow graph.
   SubgraphMatchResultType isSubgraphMatch(
       typename GraphType::NodeRef root,
       const typename MatchGraph::NodeRef& rootCriteriaRef,

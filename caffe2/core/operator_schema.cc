@@ -266,7 +266,7 @@ OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
 
 OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {
   cost_inference_function_ =
-      caffe2::make_unique<CostInferenceFunctionType>(function);
+      std::make_unique<CostInferenceFunctionType>(function);
   return *this;
 }
 

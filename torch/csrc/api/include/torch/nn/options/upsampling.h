@@ -12,8 +12,35 @@
 namespace torch {
 namespace nn {
 
+/// Options for a `D`-dimensional Upsample module.
+struct TORCH_API UpsampleOptions {
+  /// output spatial sizes.
+  TORCH_ARG(std::vector<int64_t>, size) = {};
+
+  /// multiplier for spatial size.
+  TORCH_ARG(std::vector<double>, scale_factor) = {};
+
+  /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
+  /// "bicubic" and "trilinear". Default: "nearest"
+  typedef c10::variant<
+      enumtype::kNearest,
+      enumtype::kLinear,
+      enumtype::kBilinear,
+      enumtype::kBicubic,
+      enumtype::kTrilinear> mode_t;
+  TORCH_ARG(mode_t, mode) = torch::kNearest;
+
+  /// if "True", the corner pixels of the input and output tensors are
+  /// aligned, and thus preserving the values at those pixels. This only has
+  /// effect when :attr:`mode` is "linear", "bilinear", or
+  /// "trilinear". Default: "False"
+  TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
+};
+
+namespace functional {
+
 /// Options for a `D`-dimensional interpolate functional.
-struct TORCH_API InterpolateOptions {
+struct TORCH_API InterpolateFuncOptions {
   typedef c10::variant<
       enumtype::kNearest,
       enumtype::kLinear,
@@ -44,30 +71,7 @@ struct TORCH_API InterpolateOptions {
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };
 
-/// Options for a `D`-dimensional Upsample module.
-struct TORCH_API UpsampleOptions {
-  /// output spatial sizes.
-  TORCH_ARG(std::vector<int64_t>, size) = {};
-
-  /// multiplier for spatial size.
-  TORCH_ARG(std::vector<double>, scale_factor) = {};
-
-  /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
-  /// "bicubic" and "trilinear". Default: "nearest"
-  typedef c10::variant<
-      enumtype::kNearest,
-      enumtype::kLinear,
-      enumtype::kBilinear,
-      enumtype::kBicubic,
-      enumtype::kTrilinear> mode_t;
-  TORCH_ARG(mode_t, mode) = torch::kNearest;
-
-  /// if "True", the corner pixels of the input and output tensors are
-  /// aligned, and thus preserving the values at those pixels. This only has
-  /// effect when :attr:`mode` is "linear", "bilinear", or
-  /// "trilinear". Default: "False"
-  TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
-};
+} // namespace functional
 
 } // namespace nn
 } // namespace torch
