@@ -264,7 +264,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        legacy::cpu::_th_mm_out(r, batch1.select(0, b), batch2.select(0, b));
+        native::mm_cpu_out(r, batch1.select(0, b), batch2.select(0, b));
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
