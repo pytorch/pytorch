@@ -10416,6 +10416,11 @@ class TestTorchDeviceType(TestCase):
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
+        # Check that cummulative sum over a zero length dimension doesn't crash on backprop
+        zeroNumelTensor = torch.zeros(2, 0, requires_grad=True)
+        integrated = zeroNumelTensor.cumsum(dim=-1).sum()
+        integrated.backward()
+
     def test_cumprod(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)

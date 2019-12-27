@@ -415,7 +415,7 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
-  if (x.dim() == 0) {
+  if (x.dim() == 0 || x.numel() == 0) {
     return x;
   }
   auto ret = at::cumsum(-x, dim);
