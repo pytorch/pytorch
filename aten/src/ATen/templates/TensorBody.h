@@ -210,8 +210,7 @@ class CAFFE2_API Tensor {
       if (!channels_last_strides_exact_match) {
         return at::MemoryFormat::ChannelsLast;
       }
-      if (impl_->is_contiguous() &&
-          get_channels_last_strides(sizes()) == strides()) {
+      if (get_channels_last_strides(sizes()) == strides()) {
         return at::MemoryFormat::ChannelsLast;
       }
     }
