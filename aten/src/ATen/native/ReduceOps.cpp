@@ -234,14 +234,12 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
     else {
       //update out_ and indices_ for the first values along the dimension dim
       auto out_ = self.narrow(dim, 0, 1);
-      auto indices_ = at::zeros({dim, 0, 1});
+      auto indices_ = at::zeros(out_.sizes(), at::kLong);
       for(int64_t i=1; i<self.size(dim); i++) {
         auto res_at_i = at::native::max(at::cat({out_.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
         auto out_at_i = (std::get<0>(res_at_i)).unsqueeze(dim);
         out_ = at::cat({out_, out_at_i}, dim);
-        auto indices_at_i_minus_1 = indices_.narrow(dim, i-1, 1);
-        auto max_indices_at_i = indices_at_i_minus_1.scatter_(dim, (std::get<1>(res_at_i)).unsqueeze(dim), i*at::ones(indices_at_i_minus_1.sizes()));
-        //auto max_indices_at_i = at::max(indices_.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)).toType(at::kDouble));
+        auto max_indices_at_i = at::max(indices_.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)));
         indices_ = at::cat({indices_, max_indices_at_i}, dim);
        }
     out=out_;
@@ -254,14 +252,8 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
 }
 
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  auto out = at::empty(self.sizes());
+  auto out = integer_upcast(at::empty(self.sizes()), dtype);//.options().dtype(dtype_);
   auto indices = at::empty(self.sizes(), at::kLong);
-
-  if (dtype.has_value()) {
-    auto out = at::empty(self.sizes()).options.dtype(dtype);
-  } else {
-    auto out = at::empty(self.sizes());
-  }
   at::cummax_out(out, indices, self, dim, dtype);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }

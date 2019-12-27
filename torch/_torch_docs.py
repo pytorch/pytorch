@@ -1405,7 +1405,7 @@ Example::
     torch.return_types.cummax(
         out=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
          1.9946,  1.9946]),
-        indices=tensor([0., 0., 2., 2., 2., 5., 6., 6., 8., 8.]))
+        indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
 """.format(**reduceops_common_args))
 
 add_docstr(torch.cumprod,
