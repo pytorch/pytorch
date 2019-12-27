@@ -1,4 +1,5 @@
 #include <ATen/CPUGenerator.h>
+#include <ATen/MT19937CPUGenerator.h>
 #include <c10/util/C++17.h>
 #include <algorithm>
 
@@ -22,7 +23,7 @@ static std::shared_ptr<CPUGenerator> default_gen_cpu;
  */
 CPUGenerator* getDefaultCPUGenerator() {
   std::call_once(cpu_gen_init_flag, [&] {
-    default_gen_cpu = std::make_shared<CPUGenerator>(getNonDeterministicRandom());
+    default_gen_cpu = createCPUGenerator(getNonDeterministicRandom());
   });
   return default_gen_cpu.get();
 }
@@ -31,7 +32,7 @@ CPUGenerator* getDefaultCPUGenerator() {
  * Utility to create a CPUGenerator. Returns a shared_ptr
  */
 std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
-  return std::make_shared<CPUGenerator>(seed_val);
+  return std::make_shared<MT19937CPUGenerator>(seed_val);
 }
 
 /**
@@ -49,39 +50,8 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : Generator{Device(DeviceType::CPU)},
-    engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
     next_double_normal_sample_{c10::optional<double>()} { }
-
-/**
- * Manually seeds the engine with the seed input
- * See Note [Acquire lock when using random generators]
- */
-void CPUGenerator::set_current_seed(uint64_t seed) {
-  next_float_normal_sample_.reset();
-  next_double_normal_sample_.reset();
-  engine_ = mt19937(seed);
-}
-
-/**
- * Gets the current seed of CPUGenerator.
- */
-uint64_t CPUGenerator::current_seed() const {
-  return engine_.seed();
-}
-
-/**
- * Gets a nondeterministic random number from /dev/urandom or time,
- * seeds the CPUGenerator with it and then returns that number.
- * 
- * FIXME: You can move this function to Generator.cpp if the algorithm
- * in getNonDeterministicRandom is unified for both CPU and CUDA
- */
-uint64_t CPUGenerator::seed() {
-  auto random = detail::getNonDeterministicRandom();
-  this->set_current_seed(random);
-  return random;
-}
 
 /**
  * Gets the DeviceType of CPUGenerator.
@@ -92,22 +62,13 @@ DeviceType CPUGenerator::device_type() {
 }
 
 /**
- * Gets a random 32 bit unsigned integer from the engine
- * 
- * See Note [Acquire lock when using random generators]
- */
-uint32_t CPUGenerator::random() {
-  return engine_();
-}
-
-/**
  * Gets a random 64 bit unsigned integer from the engine
  * 
  * See Note [Acquire lock when using random generators]
  */
 uint64_t CPUGenerator::random64() {
-  uint32_t random1 = engine_();
-  uint32_t random2 = engine_();
+  uint32_t random1 = random();
+  uint32_t random2 = random();
   return detail::make64BitsFrom32Bits(random1, random2);
 }
 
@@ -144,41 +105,12 @@ void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
 }
 
 /**
- * Get the engine of the CPUGenerator
- */
-at::mt19937 CPUGenerator::engine() {
-  return engine_;
-}
-
-/**
- * Set the engine of the CPUGenerator
- * 
- * See Note [Acquire lock when using random generators]
- */
-void CPUGenerator::set_engine(at::mt19937 engine) {
-  engine_ = engine;
-}
-
-/**
  * Public clone method implementation
  * 
  * See Note [Acquire lock when using random generators]
  */
 std::shared_ptr<CPUGenerator> CPUGenerator::clone() const {
-  return std::shared_ptr<CPUGenerator>(this->clone_impl());
-}
-
-/**
- * Private clone method implementation
- * 
- * See Note [Acquire lock when using random generators]
- */
-CPUGenerator* CPUGenerator::clone_impl() const {
-  auto gen = new CPUGenerator();
-  gen->set_engine(engine_);
-  gen->set_next_float_normal_sample(next_float_normal_sample_);
-  gen->set_next_double_normal_sample(next_double_normal_sample_);
-  return gen;
+  return std::shared_ptr<CPUGenerator>(dynamic_cast<CPUGenerator*>(this->clone_impl()));
 }
 
 } // namespace at

@@ -74,7 +74,7 @@ struct CAFFE2_API Generator {
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
-  private:
+  protected:
     Device device_;
     virtual Generator* clone_impl() const = 0;
 };

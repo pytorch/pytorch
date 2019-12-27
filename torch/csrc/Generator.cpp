@@ -3,6 +3,7 @@
 #include <structmember.h>
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
+#include <ATen/MT19937CPUGenerator.h>
 
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
@@ -54,11 +55,10 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
-
     THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
     if (device.type() == at::kCPU) {
-      self->cdata = new CPUGenerator();
+      self->cdata = new MT19937CPUGenerator();
     } else if (device.type() == at::kCUDA){
       self->cdata = new CUDAGenerator(device.index());
     } else {
@@ -69,7 +69,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
     TORCH_CHECK(device.type() == at::kCPU,
                 "Device type ", c10::DeviceTypeName(device.type()),
                 " is not supported for torch.Generator() api.");
-    self->cdata = new CPUGenerator();
+    self->cdata = new MT19937CPUGenerator();
 #endif
     self->owner = true;
     return (PyObject*)self.release();
