@@ -370,9 +370,10 @@ inline IValue toIValue(
       }
       if (THPLayout_Check(obj.ptr())) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
-        std::cout << "toIValue: qscheme" << std::endl;
+        std::cout << "toIValue: layout" << std::endl;
         return static_cast<int8_t>(layout->layout);
       }
+      std::cout << "toIValue: int64_t" << py::cast<int64_t>(obj) << std::endl;
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
