@@ -6074,6 +6074,9 @@
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
 
+- func: _test_optional_float(Tensor self, *, float? scale=None) -> Tensor
+  variants: function
+
 - func: upsample_linear1d.out(Tensor self, int[1] output_size, bool align_corners, float scales_1=-1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
