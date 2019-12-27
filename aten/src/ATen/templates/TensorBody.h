@@ -203,9 +203,17 @@ class CAFFE2_API Tensor {
     return impl_->is_non_overlapping_and_dense();
   }
 
-  at::MemoryFormat suggest_memory_format() const {
-    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
-      return at::MemoryFormat::ChannelsLast;
+  // TODO(vitalyf): Comment this boolean
+  at::MemoryFormat suggest_memory_format(
+      bool channels_last_strides_exact_match = false) const {
+    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
+      if (!channels_last_strides_exact_match) {
+        return at::MemoryFormat::ChannelsLast;
+      }
+      if (impl_->is_contiguous() &&
+          get_channels_last_strides(sizes()) == strides()) {
+        return at::MemoryFormat::ChannelsLast;
+      }
     }
     return at::MemoryFormat::Contiguous;
   }
