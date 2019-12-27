@@ -2899,10 +2899,11 @@ class _TestTorchMixin(object):
         idx = cast(torch.LongTensor().resize_(*idx_size))
         _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
+        src_size = [random.randint(1, 5) + s for s in idx_size]
         if is_scalar:
             src = random.random()
         else:
-            src = cast(torch.Tensor(*idx_size).normal_())
+            src = cast(torch.Tensor(*src_size).normal_())
 
         base = cast(torch.randn(m, n, o))
         actual = getattr(base.clone(), method)(dim, idx, src)
