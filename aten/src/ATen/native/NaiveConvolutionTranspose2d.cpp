@@ -85,7 +85,6 @@ static inline void slow_conv_transpose2d_shape_check(
     dimw++;
   }
 
-
   // Allow for empty batch size but not other dimensions
   bool valid_empty = false;
   if (ndim == 3) {
