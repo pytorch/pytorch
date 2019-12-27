@@ -537,16 +537,16 @@ at::Tensor _convolution(
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
-  //  std::cout << "calling _convolution.\n";
+    std::cout << "calling _convolution.\n";
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
 
-  if (input.numel() == 0) {
-    return Tensor(input);
-  }
+  // if (input.numel() == 0) {
+  //   return Tensor(input);
+  // }
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
   if (input_is_mkldnn && (k == input.ndimension() + 1)) {
@@ -652,18 +652,18 @@ at::Tensor _convolution(
     }
 #endif
   } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
-    //std::cout << "if input dev: CPU\n";
+    std::cout << "if input dev: CPU\n";
     if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
-      //std::cout << "\tif use cpu depth wise\n";
+      std::cout << "\tif use cpu depth wise\n";
       output = convolution_depthwise3x3_winograd_stub(
         input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
     } else if (params.groups == 1) {
-      // std::cout << "\telse if params groups\n";
+       std::cout << "\telse if params groups\n";
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
-      std::cout << "output grad_fn: " << output.grad_fn() << std::endl;
+      std::cout << "\toutput grad_fn: " << output.grad_fn() << std::endl;
     } else {
-      //std::cout << "if input device type CPU.\n";
+      std::cout << "if input device type CPU.\n";
       std::vector<Tensor> outputs(params.groups);
       input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {

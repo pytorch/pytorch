@@ -85,10 +85,10 @@ static inline void slow_conv_transpose2d_shape_check(
     dimw++;
   }
 
-  TORCH_CHECK(
-      input.numel() != 0 && (ndim == 3 || ndim == 4),
-      "non-empty 3D or 4D input tensor expected but got a tensor with size ",
-      input.sizes());
+  // TORCH_CHECK(
+  //     input.numel() != 0 && (ndim == 3 || ndim == 4),
+  //     "non-empty 3D or 4D input tensor expected but got a tensor with size ",
+  //     input.sizes());
 
   int64_t input_height = input.size(dimh);
   int64_t input_width = input.size(dimw);
