@@ -351,7 +351,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     dy_j / dx_k = 0, which is done right after the assert.
   */
 
-  if (input.dim() == 0) {
+  if (input.numel() == 0) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
@@ -415,7 +415,7 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
-  if (x.dim() == 0) {
+  if (x.numel() == 0) {
     return x;
   }
   auto ret = at::cumsum(-x, dim);
