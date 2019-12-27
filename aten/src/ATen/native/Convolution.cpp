@@ -661,6 +661,7 @@ at::Tensor _convolution(
       // std::cout << "\telse if params groups\n";
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+      std::cout << "output grad_fn: " << output.grad_fn() << std::endl;
     } else {
       //std::cout << "if input device type CPU.\n";
       std::vector<Tensor> outputs(params.groups);
