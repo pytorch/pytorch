@@ -39,6 +39,7 @@ struct ConvParams {
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
+  bool cudnn_use_channels_last(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
@@ -360,7 +361,6 @@ bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
   }
   return false;
 }
-
 // Use cudnn for FP16 depthwise convolutions
 auto ConvParams::use_cudnn_depthwise(
         const at::Tensor& input, const at::Tensor& weight) const -> bool {
@@ -385,6 +385,17 @@ auto ConvParams::use_cudnn_depthwise(
   } else {
     return false;
   }
+}
+
+auto ConvParams::cudnn_use_channels_last(
+        const at::Tensor& input, const at::Tensor& weight) const -> bool {
+  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
+    return false;
+  }
+  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+  // old cudnn version has sparse group convolution support for NHWC layout
+  return (groups == 1 || cudnn_version >= 7603) &&
+      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 static void check_shape_forward(const at::Tensor& input,
@@ -607,6 +618,9 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
+  at::MemoryFormat cudnn_memory_format = params.cudnn_use_channels_last(input, weight) ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
+
   Tensor output;
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
@@ -617,7 +631,7 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(input.suggest_memory_format()), weight, bias,
+            input.contiguous(cudnn_memory_format), weight, bias,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
 
       } else if (params.use_miopen(input)){
@@ -637,11 +651,11 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input.contiguous(cudnn_memory_format), weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(input.suggest_memory_format()), weight, bias,
+          input.contiguous(cudnn_memory_format), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
