@@ -69,6 +69,8 @@ DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
+DEFINE_DISPATCH(scatter_add_stub);
+
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
   auto strides = tensors[0].strides();
@@ -393,161 +395,8 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar so
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
 }
 
-namespace scattergather {
-  int64_t ensure_nonempty_dim(int64_t dim) {
-    return std::max<int64_t>(dim, 1);
-  }
-
-  int64_t ensure_nonempty_size(const Tensor& t, int64_t dim) {
-    return t.dim() == 0 ? 1 : t.size(dim);
-  }
-
-  int64_t ensure_nonempty_stride(const Tensor& t, int64_t dim) {
-    return t.dim() == 0 ? 1 : t.stride(dim);
-  }
-
-  template <typename TSelf, typename TIndex, typename TSrc>
-  struct TensorDimApply3Functor {
-    template <typename SizeCheckFunc, typename KernelOpFunc>
-    void operator()(
-      Tensor& self,
-      const Tensor& index,
-      const Tensor& src,
-      int64_t dim,
-      SizeCheckFunc sizeCheckFunc,
-      KernelOpFunc kernelOpFunc
-    ) {
-      if (index.numel() == 0) {
-        return;
-      }
-
-      sizeCheckFunc(self, index, src, dim);
-
-      TSelf* self_data = self.data_ptr<TSelf>();
-      int64_t self_dim_stride = ensure_nonempty_stride(self, dim);
-      int64_t self_dim_size = ensure_nonempty_size(self, dim);
-
-      const TIndex* index_data = index.data_ptr<TIndex>();
-      int64_t index_dim_stride = ensure_nonempty_stride(index, dim);
-      int64_t index_dim_size = ensure_nonempty_size(index, dim);
-
-      const TSrc* src_data = src.data_ptr<TSrc>();
-      int64_t src_dim_stride = ensure_nonempty_stride(src, dim);
-      int64_t src_dim_size = ensure_nonempty_size(src, dim);
-
-      bool applyHasFinished = false;
-      int64_t index_dim = ensure_nonempty_dim(index.dim());
-      std::vector<int64_t> idxCounter(index_dim, 0);
-      while (!applyHasFinished) {
-        kernelOpFunc(
-          index_dim_size, self_dim_size,
-          self_data, self_dim_stride,
-          index_data, index_dim_stride,
-          src_data, src_dim_stride
-        );
-
-        if (index_dim == 1) {
-          break;
-        }
-        
-        for (int64_t d = 0; d < index_dim; ++d) {
-          if (d == dim) {
-            if (d == (index_dim - 1)) {
-              applyHasFinished = true;
-              break;
-            }
-            continue;
-          }
-
-          idxCounter[d]++;
-          self_data += ensure_nonempty_stride(self, d);
-          index_data += ensure_nonempty_stride(index, d);
-          src_data += ensure_nonempty_stride(src, d);
-
-          if (idxCounter[d] == ensure_nonempty_size(index, d)) {
-            if (d == (index_dim - 1)) {
-              applyHasFinished = true;
-              break;
-            }
-            else {
-              self_data -= idxCounter[d] * ensure_nonempty_stride(self, d);
-              index_data -= idxCounter[d] * ensure_nonempty_stride(index, d);
-              src_data -= idxCounter[d] * ensure_nonempty_stride(src, d);
-              idxCounter[d] = 0;
-            }
-          }
-          else {
-            break;
-          }
-        } // for (d = 0...index_dim-1)
-      } // while (!applyHasFinished)
-    }
-  };
-
-  /*
-   * Used for 'scatter' and 'scatter_add'
-   * 
-   * Tests:
-   *  1. index.size(d) <= src.size(d) for all d
-   *  2. index.size(d) <= self.size(d) for all d != dim
-   */
-  struct ScatterSizeCheckFunctor {
-    void operator()(
-      const Tensor& self, const Tensor& index,
-      const Tensor& src, int64_t dim
-    ) {
-      bool is_wrong_shape = false;
-      int64_t self_dims = ensure_nonempty_dim(self.dim());
-      for (int64_t d = 0; d < self_dims; ++d) {
-        int64_t index_d_size = ensure_nonempty_size(index, d);
-        if (index_d_size > ensure_nonempty_size(src, d)) {
-          is_wrong_shape = true;
-          break;
-        }
-        if (d != dim) {
-          if (index_d_size > ensure_nonempty_size(self, d)) {
-            is_wrong_shape = true;
-            break;
-          }
-        }
-      }
-
-      TORCH_CHECK(!is_wrong_shape,
-        "Expected ", index, " ", index.sizes(),
-        "to be smaller size than ", src, " ", src.sizes(),
-        " and to be smaller than ", self, " ", self.sizes(),
-        " apart from dimension ", dim
-      );
-    }
-  };
-} // namespace scattergather
-
 Tensor & scatter_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  AT_DISPATCH_ALL_TYPES_AND2(
-    ScalarType::Bool, ScalarType::Half, self.scalar_type(),
-    "scatter_add_", [&] {
-      scattergather::TensorDimApply3Functor<scalar_t, int64_t, scalar_t>()(
-        self, index, src, dim,
-        scattergather::ScatterSizeCheckFunctor(),
-        [] (
-          auto elems_per_dim, auto self_dim_size,
-          auto* self_data, auto self_dim_stride,
-          const auto* index_data, auto index_dim_stride,
-          const auto* src_data, auto src_dim_stride
-        ) {
-          for (int64_t i = 0; i < elems_per_dim; ++i) {
-            int64_t idx_dim = index_data[i * index_dim_stride];
-            TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
-              "Invalid index in scatter_add");
-            self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
-          }
-        }
-      );
-    }
-  );
-
+  scatter_add_stub(self.device().type(), self, dim, index, src);
   return self;
 }
 
