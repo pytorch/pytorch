@@ -1407,6 +1407,14 @@ new_module_tests = [
         check_with_long_tensor=True,
     ),
     dict(
+        module_name='ConvTranspose2d',
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(0, 3, 7, 5),
+        cudnn=True,
+        desc='zero_batch',
+        check_with_long_tensor=True
+    ),
+    dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
@@ -1661,6 +1669,14 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
+    ),
+    dict(
+        module_name='ConvTranspose3d',
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(0, 3, 3, 4, 5),
+        cudnn=True,
+        check_with_long_tensor=True,
+        desc='zero_batch'
     ),
     dict(
         module_name='MaxPool3d',
