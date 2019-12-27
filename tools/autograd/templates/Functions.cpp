@@ -430,8 +430,8 @@ Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &
   if (input.dim() == 0) {
     return input;
   }
-  auto result = at::zeros(indices.sizes());
-  return result.scatter_add_(dim, indices, grad.toType(at::kDouble));
+  auto result = at::zeros(input.sizes());
+  return result.scatter_add_(dim, indices, grad);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
