@@ -72,7 +72,7 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
     """
-    print("this is inside backward().")
+#    print("this is inside backward().")
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
         if grad_tensors is None:
