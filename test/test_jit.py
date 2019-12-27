@@ -4048,6 +4048,23 @@ def foo(x):
         with self.assertRaisesRegex(RuntimeError, "out of range"):
             torch.jit.script(waytoobig)
 
+    def test_big_float_literals(self):
+        def ok():
+            # Python interprets this as inf
+            a = 1.2E400
+            return a
+
+        def check(fn):
+            self.assertTrue(fn() == ok())
+
+        # checkScript doesn't work since assertEqual doesn't consider
+        # `inf` == `inf`
+        check(torch.jit.script(ok))
+
+        cu = torch.jit.CompilationUnit()
+        cu.define(dedent(inspect.getsource(ok)))
+        check(cu.ok)
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))
@@ -4549,6 +4566,7 @@ def foo(x):
         self.assertFalse("training" in w.state_dict())
 
     @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
