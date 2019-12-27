@@ -46,8 +46,6 @@ REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
 
-CAFFE_KNOWN_TYPE(const float*);
-
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
 
 __global__ void NanCheckKernel(int N, const float* X, bool* result) {
@@ -227,24 +225,24 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
     // In order to have all device pointers of x_i (and weight_i similarly)
     // consecutively in device memory, copy pointers to a host vector and then
     // copy back into a device array.
-    ReinitializeTensor(&x_data_host_, {B}, at::dtype<const float*>().device(CPU));
-    ReinitializeTensor(&weights_host_, {B}, at::dtype<const float*>().device(CPU));
-    ReinitializeTensor(&x_data_device_, {B}, at::dtype<const float*>().device(CUDA));
-    ReinitializeTensor(&weights_device_, {B}, at::dtype<const float*>().device(CUDA));
+    ReinitializeTensor(&x_data_host_, {B}, at::dtype<float*>().device(CPU));
+    ReinitializeTensor(&weights_host_, {B}, at::dtype<float*>().device(CPU));
+    ReinitializeTensor(&x_data_device_, {B}, at::dtype<float*>().device(CUDA));
+    ReinitializeTensor(&weights_device_, {B}, at::dtype<float*>().device(CUDA));
 
-    const float** x_data_host = x_data_host_.mutable_data<const float*>();
-    const float** weights_host = weights_host_.mutable_data<const float*>();
-    const float** x_data_device = x_data_device_.mutable_data<const float*>();
-    const float** weights_device = weights_device_.mutable_data<const float*>();
+    float** x_data_host = x_data_host_.mutable_data<float*>();
+    float** weights_host = weights_host_.mutable_data<float*>();
+    float** x_data_device = x_data_device_.mutable_data<float*>();
+    float** weights_device = weights_device_.mutable_data<float*>();
 
     for (int inp = 3; inp < InputSize(); inp += 2) {
       int idx = (inp - 3) / 2;
-      x_data_host[idx] = static_cast<const float*>(Input(inp).raw_data());
-      weights_host[idx] = static_cast<const float*>(Input(inp + 1).raw_data());
+      x_data_host[idx] = static_cast<float*>(Input(inp).raw_data());
+      weights_host[idx] = static_cast<float*>(Input(inp + 1).raw_data());
     }
-    context_.Copy<const float*, CPUContext, CUDAContext>(
+    context_.Copy<float*, CPUContext, CUDAContext>(
         B, x_data_host, x_data_device);
-    context_.Copy<const float*, CPUContext, CUDAContext>(
+    context_.Copy<float*, CPUContext, CUDAContext>(
         B, weights_host, weights_device);
 
     AxpySliceKernel<<<
@@ -256,8 +254,8 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         K,
         B,
         block_size,
-        weights_device,
-        x_data_device,
+        const_cast<const float **>(weights_device),
+        const_cast<const float**>(x_data_device),
         indices.template data<Index>(),
         data,
         M);
