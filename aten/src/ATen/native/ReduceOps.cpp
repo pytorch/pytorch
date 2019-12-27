@@ -234,7 +234,7 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
     else {
       //update out_ and indices_ for the first values along the dimension dim
       auto out_ = self.narrow(dim, 0, 1);
-      auto indices_ = at::zeros(out_.sizes());
+      auto indices_ = at::zeros({dim, 0, 1});
       for(int64_t i=1; i<self.size(dim); i++) {
         auto res_at_i = at::native::max(at::cat({out_.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
         auto out_at_i = (std::get<0>(res_at_i)).unsqueeze(dim);
@@ -248,16 +248,21 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
     indices=indices_;
    }
   }
-  indices.toType(at::kLong);
   namedinference::propagate_names(out, self);
   namedinference::propagate_names(indices, self);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }
 
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  auto out = at::empty(self.sizes(), self.options());
-  auto indices = at::empty(self.sizes(), self.options());
-  at::cummax_out(out, indices, self, dim);
+  auto out = at::empty(self.sizes());
+  auto indices = at::empty(self.sizes(), at::kLong);
+
+  if (dtype.has_value()) {
+    auto out = at::empty(self.sizes()).options.dtype(dtype);
+  } else {
+    auto out = at::empty(self.sizes());
+  }
+  at::cummax_out(out, indices, self, dim, dtype);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }
 // ALL REDUCE #################################################################
