@@ -21,9 +21,10 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
+    call conda install -y -q -c conda-forge cmake
 )
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install -q ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow
+pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
@@ -46,7 +47,7 @@ goto cuda_build_common
 :cuda_build_10
 
 pushd .
-call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+call "C:\Program Files (x86)\Microsoft Visual Studio\2017\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=14.11
 @echo on
 popd
 

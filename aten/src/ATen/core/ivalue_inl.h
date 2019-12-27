@@ -471,7 +471,7 @@ struct _fake_type {};
 // based on the return type.
 template <class Elem>
 // TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
-//[[deprecated("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")]]
+//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -519,7 +519,7 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-[[deprecated("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
+C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {

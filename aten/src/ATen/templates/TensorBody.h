@@ -11,6 +11,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
@@ -234,7 +235,7 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  [[deprecated("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")]]
+  C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
@@ -258,7 +259,7 @@ class CAFFE2_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  [[deprecated("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")]]
+  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
     return !at::impl::variable_excluded_from_dispatch();
   }
@@ -313,7 +314,7 @@ class CAFFE2_API Tensor {
   T * data_ptr() const;
 
   template<typename T>
-  [[deprecated("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")]]
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
     return data_ptr<T>();
   }
@@ -364,12 +365,12 @@ class CAFFE2_API Tensor {
   PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  [[deprecated("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")]]
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
     return generic_packed_accessor<T,N,PtrTraits,index_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  [[deprecated("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")]]
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;

@@ -93,9 +93,9 @@ class NamedAnyModule {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-[[deprecated("`torch::nn::modules_ordered_dict` is deprecated. " \
+C10_DEPRECATED_MESSAGE("`torch::nn::modules_ordered_dict` is deprecated. " \
                        "To construct a `Sequential` with named submodules, " \
-                       "you can do `Sequential sequential({{\"m1\", MyModule(1)}, {\"m2\", MyModule(2)}})`")]]
+                       "you can do `Sequential sequential({{\"m1\", MyModule(1)}, {\"m2\", MyModule(2)}})`")
 TORCH_API torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
   std::initializer_list<NamedAnyModule> named_modules);
 
