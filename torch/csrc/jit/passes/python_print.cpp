@@ -819,7 +819,7 @@ struct PythonPrintImpl {
     } else {
       ss << v;
       std::cout << "ss << v" << std::endl;
-      std::cout << "isInt: " <<  v.isInt() << " isString: " << v.isString() << " isBool:" << v.isBool() << " isDouble:" << v.isDouble() << std::endl;
+      std::cout << "isNone:" << v.isNone() << "isInt: " << v.isInt() << " isString: " << v.isString() << " isBool:" << v.isBool() << " isDouble:" << v.isDouble() << std::endl;
       std::cout << "ss.str():" << ss.str() << std::endl;
     }
     stmt << ss.str();
