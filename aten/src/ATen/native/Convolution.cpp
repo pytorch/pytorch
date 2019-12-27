@@ -530,18 +530,23 @@ at::Tensor convolution_overrideable(
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
 }
 
+// Function for dynamically dispatching convolution to the appropriate function
+// depending on the type of tensor and the DNN library to be used.
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
-
   //  std::cout << "calling _convolution.\n";
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
+
+  if (input.numel() == 0) {
+    return Tensor(input);
+  }
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
   if (input_is_mkldnn && (k == input.ndimension() + 1)) {
