@@ -11686,7 +11686,6 @@ class TestTorchDeviceType(TestCase):
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/31108")
     def test_int_pow(self, device):
 
         def _test_integral_pow(dt, range, dev):
