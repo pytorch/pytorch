@@ -20,7 +20,7 @@ class TestCustomOps(unittest.TestCase):
         }
 
         static auto registry =
-          torch::jit::RegisterOperators("custom_namespace::custom_add", &custom_add);
+          torch::RegisterOperators("custom_namespace::custom_add", &custom_add);
         """
 
         torch.utils.cpp_extension.load_inline(

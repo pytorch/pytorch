@@ -49,7 +49,7 @@ namespace c10 {
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
   _(prim, Return)                    \
-  _(prim, ReturnStmt)              \
+  _(prim, ReturnStmt)                \
   _(prim, BreakStmt)                 \
   _(prim, ContinueStmt)              \
   _(prim, Store)                     \
@@ -71,12 +71,14 @@ namespace c10 {
   _(aten, Int)                       \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
   _(prim, requires_grad)             \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
+  _(aten, grad)                      \
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
@@ -92,6 +94,8 @@ namespace c10 {
   _(prim, enumerate)                 \
   _(prim, range)                     \
   _(prim, rangelist)                 \
+  _(prim, isinstance)                \
+  _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
   _(aten, _ncf_unsqueeze)            \
@@ -109,12 +113,17 @@ namespace c10 {
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \
+  _(prim, HasAttr)                   \
   _(prim, profile)                   \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
+  _(prim, annotate)                  \
+  _(prim, TracedModuleForward)       \
+  _(prim, TracedFork)                \
+  _(prim, TracedAttr)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -157,9 +166,13 @@ namespace c10 {
   _(aten, clear)                     \
   _(aten, setdefault)                \
   _(aten, bin)                       \
+  _(aten, pop)                       \
+  _(aten, insert)                    \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
+  _(aten, zero_)                     \
+  _(aten, fill_)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -183,6 +196,7 @@ namespace c10 {
   _(onnx, Loop)                      \
   _(onnx, If)                        \
   _(onnx, Reshape)                   \
+  _(onnx, Expand)                    \
   _(onnx, Equal)                     \
   _(onnx, Greater)                   \
   _(onnx, Less)                      \
@@ -191,6 +205,12 @@ namespace c10 {
   _(onnx, Split)                     \
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
+  _(onnx, Mod)                       \
+  _(onnx, SplitToSequence)           \
+  _(onnx, SequenceConstruct)         \
+  _(onnx, SequenceEmpty)             \
+  _(onnx, SequenceInsert)            \
+  _(onnx, ConcatFromSequence)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -218,7 +238,12 @@ namespace c10 {
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \
-  _(attr, slot)
+  _(attr, slot)                      \
+  _(attr, kinds)                     \
+  _(attr, types)                     \
+  _(attr, scope)                     \
+  _(attr, keepdims)                  \
+  _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

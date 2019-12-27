@@ -141,9 +141,9 @@ int ProcessGroupMPI::AsyncWork::sourceRank() const {
   return status_.MPI_SOURCE;
 }
 
-void ProcessGroupMPI::AsyncWork::wait() {
+bool ProcessGroupMPI::AsyncWork::wait() {
   if (request_ == MPI_REQUEST_NULL) {
-    return;
+    return true;
   }
 
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -153,6 +153,12 @@ void ProcessGroupMPI::AsyncWork::wait() {
     populateException();
     std::rethrow_exception(exception_);
   }
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
+void ProcessGroupMPI::AsyncWork::abort() {
+  TORCH_CHECK(false, "ProcessGroupMPI::AsyncWork::abort not implemented.")
 }
 
 void ProcessGroupMPI::AsyncWork::populateException() {
@@ -432,6 +438,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
   auto entry = std::unique_ptr<WorkEntry>(
       new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
   return enqueue(std::move(entry));
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllgatherOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupMPI does not support allgather_coalesced");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(

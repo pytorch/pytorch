@@ -6,4 +6,4 @@
 
 #include <c10/macros/Export.h>
 
-#define AT_CUDA_API CAFFE2_API
+// Use TORCH_CUDA_API for exports from this folder

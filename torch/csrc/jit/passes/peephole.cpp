@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/passes/peephole.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -152,8 +154,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
               }
             }
 
-            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
             auto* cOne = graph->insertConstant(1);
+            auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
             addmm_node->addInput(add_mat);
             addmm_node->addInput(mat1);
             addmm_node->addInput(mat2);
@@ -219,6 +221,15 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
             " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
             node->input()->debugName());
         node->output()->replaceAllUsesWith(input_node->input());
+      }
+    } else if (node->matches("aten::size(Tensor self) -> int[]")) {
+      if (auto ptt = node->input()->type()->cast<TensorType>()) {
+        if (auto sizes = ptt->sizes().concrete_sizes()) {
+          WithInsertPoint guard(node);
+          IValue ival(sizes);
+          auto const_sizes_val = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(const_sizes_val);
+        }
       }
     } else if (
         node->matches(
@@ -292,6 +303,15 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       if (input->mustNotBeNone()) {
         GRAPH_UPDATE(
             "Unwrapping ", *node, " as ", node->input(), " can't be optional");
+        node->output()->replaceAllUsesWith(node->input());
+      }
+    } else if (node->kind() == prim::unchecked_cast) {
+      // unchecked_cast is not generated for tensor properties, so we are not
+      // losing anything by calling unshapedType here
+      auto input_type = unshapedType(node->input()->type());
+      auto output_type = unshapedType(node->output()->type());
+      if (input_type->isSubtypeOf(output_type)) {
+        GRAPH_UPDATE("Removing ", *node, " as input type subtypes output type");
         node->output()->replaceAllUsesWith(node->input());
       }
     } else if (node->matches("prim::dtype(Tensor a) -> int")) {

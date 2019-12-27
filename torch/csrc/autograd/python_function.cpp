@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
+#include <pybind11/pybind11.h>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -20,7 +21,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/Exceptions.h>
 
 #include <exception>
@@ -45,7 +45,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
 
   THPObjectPtr pyInputs(PyTuple_New(inputs.size()));
   if (!pyInputs) throw python_error();
@@ -92,7 +92,7 @@ auto PyNode::legacy_apply(const variable_list& inputs) -> variable_list {
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Node::apply to a Python method "apply".
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
@@ -187,7 +187,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 }
 
 auto PyNode::is_traceable() -> bool {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   THPObjectPtr forward_class {PyObject_GetAttrString(obj, "_forward_cls")};
   if (!forward_class) throw python_error();
   THPObjectPtr traceable_py_bool {PyObject_GetAttrString(forward_class, "is_traceable")};
@@ -196,14 +196,14 @@ auto PyNode::is_traceable() -> bool {
 }
 
 auto PyNode::release_variables() -> void {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*) obj;
   f->saved_variables.clear();
   f->has_freed_buffers = 1;
 }
 
 auto PyNode::name() const -> std::string {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   auto f = (THPFunction*) obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
   // Python API functions are not const-correct
@@ -329,7 +329,7 @@ static std::unordered_set<at::TensorImpl*> _mark_dirty(THPFunction *self)
 
     dirty_inputs.insert(((THPVariable*)obj)->cdata.unsafeGetTensorImpl());
     auto variable = (THPVariable*)obj;
-    variable->cdata.bump_version();
+    torch::autograd::impl::bump_version(variable->cdata);
   }
   // We're not going to ever need this so let's remove references now
   Py_CLEAR(self->dirty_tensors);
@@ -1063,11 +1063,11 @@ static struct PyMethodDef THPFunction_methods[] = {
 
 PyTypeObject THPFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._FunctionBase",              /* tp_name */
-  sizeof(THPFunction),                   /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPFunction_dealloc,       /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  "torch._C._FunctionBase",                    /* tp_name */
+  sizeof(THPFunction),                         /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPFunction_dealloc,             /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -1082,24 +1082,24 @@ PyTypeObject THPFunctionType = {
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  nullptr,                               /* tp_doc */
-  (traverseproc)THPFunction_traverse,    /* tp_traverse */
-  (inquiry)THPFunction_clear,            /* tp_clear */
+  nullptr,                                     /* tp_doc */
+  (traverseproc)THPFunction_traverse,          /* tp_traverse */
+  (inquiry)THPFunction_clear,                  /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPFunction_methods,                   /* tp_methods */
+  THPFunction_methods,                         /* tp_methods */
   nullptr,                                     /* tp_members */
-  THPFunction_properties,                /* tp_getset */
+  THPFunction_properties,                      /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPFunction_new                        /* tp_new */
+  THPFunction_new                              /* tp_new */
 };
 
 bool THPFunction_initModule(PyObject *module)

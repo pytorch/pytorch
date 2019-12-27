@@ -4,7 +4,8 @@ repository, run:
 
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
-       $OUTPUT_DIR
+       $OUTPUT_DIR \
+       tools/autograd
 
 Where $OUTPUT_DIR is where you would like the files to be
 generated.  In the full build system, OUTPUT_DIR is

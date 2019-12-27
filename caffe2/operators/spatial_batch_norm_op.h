@@ -52,7 +52,7 @@ class SpatialBNOp : public Operator<Context> {
     const auto& bias = Input(BIAS);
 
     const int ndim = X.dim();
-    CAFFE_ENFORCE_GE(ndim, 3);
+    CAFFE_ENFORCE_GE(ndim, 2);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));

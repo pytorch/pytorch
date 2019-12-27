@@ -1,6 +1,8 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
 #include "caffe2_dnnlowp_utils.h"
+#include "quantization_error_minimization.h"
 
 namespace caffe2 {
 namespace python {
@@ -63,6 +65,40 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       },
       pybind11::arg("net_name"),
       pybind11::arg("out_file_name"),
+      pybind11::arg("dump_freq") = -1,
+      pybind11::arg("mul_nets") = false);
+
+  m.def(
+      "AddOutputColumnMaxHistogramObserver",
+      [](const string& net_name,
+         const string& out_file_name,
+         const std::vector<std::string>& observe_column_max_for_blobs,
+         int dump_freq,
+         bool mul_nets) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        CAFFE_ENFORCE(
+            gWorkspace->GetNet(net_name), "Can't find net ", net_name);
+        pybind11::gil_scoped_release g;
+
+        NetBase* net = gWorkspace->GetNet(net_name);
+        const Observable<NetBase>::Observer* observer = nullptr;
+
+        observer = net->AttachObserver(
+            make_unique<OutputColumnMaxHistogramNetObserver>(
+                net,
+                out_file_name,
+                observe_column_max_for_blobs,
+                2048,
+                dump_freq,
+                mul_nets));
+
+        CAFFE_ENFORCE(observer != nullptr);
+        return pybind11::cast(observer);
+      },
+      pybind11::arg("net_name"),
+      pybind11::arg("out_file_name"),
+      pybind11::arg("observe_column_max_for_blobs"),
       pybind11::arg("dump_freq") = -1,
       pybind11::arg("mul_nets") = false);
 
@@ -172,4 +208,71 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
         CAFFE_ENFORCE(transformed_net.SerializeToString(&protob));
         return pybind11::bytes(protob);
       });
+
+  pybind11::class_<dnnlowp::TensorQuantizationParams>(m, "QueryTensorQparam")
+      .def_property_readonly(
+          "scale",
+          [](dnnlowp::TensorQuantizationParams& qparam) {
+            return qparam.scale;
+          })
+      .def_property_readonly(
+          "zero_point",
+          [](dnnlowp::TensorQuantizationParams& qparam) {
+            return qparam.zero_point;
+          })
+      .def_property_readonly(
+          "min",
+          [](dnnlowp::TensorQuantizationParams& qparam) {
+            return qparam.Min();
+          })
+      .def_property_readonly(
+          "max", [](dnnlowp::TensorQuantizationParams& qparam) {
+            return qparam.Max();
+          });
+
+  m.def(
+      "ChooseStaticQuantizationParams",
+      [](float min,
+         float max,
+         const std::vector<uint64_t>& bins,
+         bool preserve_sparsity,
+         int precision,
+         const std::string& quant_scheme,
+         float p99_threshold,
+         bool is_weight) {
+        dnnlowp::Histogram hist = dnnlowp::Histogram(min, max, bins);
+
+        dnnlowp::QuantizationFactory::QuantizationKind quant_kind =
+            dnnlowp::QuantizationFactory::MIN_MAX_QUANTIZATION;
+        if (quant_scheme.compare("L2_MIN_QUANTIZATION") == 0) {
+          quant_kind = dnnlowp::QuantizationFactory::L2_MIN_QUANTIZATION;
+        } else if (quant_scheme.compare("L2_MIN_QUANTIZATION_APPROX") == 0) {
+          quant_kind = dnnlowp::QuantizationFactory::L2_MIN_QUANTIZATION_APPROX;
+        } else if (quant_scheme.compare("KL_MIN_QUANTIZATION") == 0) {
+          quant_kind = dnnlowp::QuantizationFactory::KL_MIN_QUANTIZATION;
+        } else if (quant_scheme.compare("P99_QUANTIZATION") == 0) {
+          quant_kind = dnnlowp::QuantizationFactory::P99_QUANTIZATION;
+        } else if (quant_scheme.compare("L1_MIN_QUANTIZATION") == 0) {
+          quant_kind = dnnlowp::QuantizationFactory::L1_MIN_QUANTIZATION;
+        } else {
+          LOG(INFO) << "Using DNNLOWP default MIN_MAX_QUANTIZATION";
+        }
+        dnnlowp::QuantizationFactory* qfactory =
+            dnnlowp::QuantizationFactory::GetDefaultInstance();
+        if (is_weight) {
+          qfactory->SetWeightP99Threshold(p99_threshold);
+        } else {
+          qfactory->SetActivationP99Threshold(p99_threshold);
+        }
+        return qfactory->ChooseQuantizationParams(
+            hist, quant_kind, precision, preserve_sparsity, is_weight);
+      },
+      pybind11::arg("min"),
+      pybind11::arg("max"),
+      pybind11::arg("bins"),
+      pybind11::arg("preserve_sparsity") = true,
+      pybind11::arg("precision") = 8,
+      pybind11::arg("quant_scheme") = "min_max",
+      pybind11::arg("p99_threshold") = 0.99,
+      pybind11::arg("is_weight") = false);
 }

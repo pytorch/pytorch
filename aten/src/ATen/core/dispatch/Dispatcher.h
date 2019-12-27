@@ -3,6 +3,7 @@
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
+#include <c10/util/LeftRight.h>
 #include <mutex>
 #include <list>
 
@@ -62,7 +63,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
+  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -78,7 +79,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for an operator.
@@ -88,26 +89,20 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func, void* unboxed_kernel_func);
-
-  RegistrationHandleRAII registerUnboxedAutogradKernel(const OperatorHandle& op, void* unboxed_autograd_kernel);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
+   * Register a fallback kernel for a backend.
+   * If an operator is called but there is no concrete kernel for the dispatch
+   * key of the given operator arguments, it will check if there is such a
+   * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
+  RegistrationHandleRAII registerBackendFallbackKernel(TensorTypeId dispatch_key, KernelFunction kernel);
 
-  /**
-   * Perform a dynamic dispatch and get the kernel for an operator.
-   */
-  // TODO Remove lookup(TensorTypeId) and instead have a lookup based on
-  // the (unboxed?) arguments the operator is to be called with.
-  OpKernel lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const;
+  template<class Return, class... Args>
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
-  // TODO Remove callUnboxedAutogradKernel() and instead figure out in a generic
-  // callKernel() wrapper if the autograd or the regular kernel need to be called.
-  template<class Result, class... Args>
-  Result callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const;
+  void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
    * Add a listener that gets called whenever a new op is registered or an existing
@@ -123,9 +118,13 @@ private:
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
+
+  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  impl::KernelFunctionTable backendFallbackKernels_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -150,6 +149,15 @@ public:
     return operatorIterator_->op.options();
   }
 
+  template<class Return, class... Args>
+  Return callUnboxed(Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
+  }
+
+  void callBoxed(Stack* stack) const {
+    c10::Dispatcher::singleton().callBoxed(*this, stack);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
@@ -158,39 +166,60 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
-class CAFFE2_API SchemaRegistrationHandleRAII final {
-public:
-  const OperatorHandle& opHandle() const {
-    return opHandle_;
+namespace detail {
+template<class... Args> inline void unused_arg_(const Args&...) {}
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+}
+
+inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  kernel.callBoxed(op, stack);
+}
+
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
+  if (C10_LIKELY(dispatchKey.has_value())) {
+
+    const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
+
+    if (nullptr != backendKernel) {
+      return *backendKernel;
+    }
+
+    const auto& backendFallbackKernel = backendFallbackKernels_[*dispatchKey];
+    if (backendFallbackKernel.isValid()) {
+      return backendFallbackKernel;
+    }
   }
 
-private:
-  friend class Dispatcher;
-  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
-    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
+  const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
+  if (C10_LIKELY(nullptr != catchallKernel)) {
+    return *catchallKernel;
+  }
 
-  OperatorHandle opHandle_;
-  RegistrationHandleRAII registrationHandle_;
-};
+  if (!dispatchKey.has_value() || *dispatchKey == TensorTypeId::UndefinedTensorId) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
 
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.lookupKernel(stack);
-}
-
-inline OpKernel Dispatcher::lookup(const OperatorHandle& op, TensorTypeId dispatchKey) const {
-  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.lookupKernel(dispatchKey);
-}
-
-template<class Result, class... Args>
-inline Result Dispatcher::callUnboxedAutogradKernel(const OperatorHandle& op, Args... args) const {
-  void* unboxed_autograd_kernel = op.operatorIterator_->op.lookupUnboxedAutogradKernel();
-  TORCH_CHECK(nullptr != unboxed_autograd_kernel, "Tried to call Dispatcher::callUnboxedAutogradKernel() for operator ", toString(op.schema()), " that doesn't have an autograd kernel.");
-
-  using OpSignature = Result (Args...);
-  OpSignature* kernel = reinterpret_cast<OpSignature*>(unboxed_autograd_kernel);
-  return (*kernel)(std::forward<Args>(args)...);
+  const std::string dispatchKeyStr = toString(*dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 } // namespace c10

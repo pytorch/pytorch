@@ -46,6 +46,8 @@ class L1ErrorMinimization : public NormMinimization {
 
 class P99 : public QuantizationErrorMinimization {
  public:
+  float threshold_;
+  P99(float p99_threshold = 0.99) : threshold_(p99_threshold) {}
   TensorQuantizationParams ChooseQuantizationParams(
       const Histogram& hist,
       bool preserve_sparsity = true,

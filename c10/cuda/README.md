@@ -30,7 +30,7 @@ void my_func();
 ```
 
 Thus, if you add new functionality to c10, you must also update `C10_MAPPINGS`
-`tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py` to transpile
+`torch/utils/hipify/cuda_to_hip_mappings.py` to transpile
 occurrences of `cuda::my_func` to `hip::my_func`.  (At the moment,
 we do NOT have a catch all `cuda::` to `hip::` namespace conversion,
 as not all `cuda` namespaces are converted to `hip::`, even though

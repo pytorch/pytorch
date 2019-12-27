@@ -11,7 +11,7 @@
 #include <qnnpack/q8dwconv.h>
 #include <requantization/runtime-sse2.h>
 
-void q8dwconv_ukernel_up8x9__sse2(
+void pytorch_q8dwconv_ukernel_up8x9__sse2(
     size_t channels,
     size_t output_width,
     const uint8_t** input,

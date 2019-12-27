@@ -27,9 +27,6 @@ C10_DEFINE_string(server, "tcp://*:5555", "The server address.");
 C10_DEFINE_string(input_db, "", "The input db.");
 C10_DEFINE_string(input_db_type, "", "The input db type.");
 
-using caffe2::db::DB;
-using caffe2::db::Cursor;
-using caffe2::string;
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);

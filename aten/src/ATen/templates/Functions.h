@@ -6,14 +6,12 @@
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
-#include <c10/util/Deprecated.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/DeviceGuard.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
 
 namespace at {
@@ -28,6 +26,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
+  AutoNonVariableTypeMode guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
     TORCH_CHECK(
@@ -66,6 +65,10 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+}
+
+inline int64_t numel(const Tensor& tensor) {
+  return tensor.numel();
 }
 
 // function definitions are all static inline because

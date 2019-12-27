@@ -4,7 +4,7 @@ if "%DEBUG%" == "1" (
   set BUILD_TYPE=release
 )
 
-set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
+set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: This inflates our log size slightly, but it is REALLY useful to be
 :: able to see what our cl.exe commands are (since you can actually
@@ -38,14 +38,14 @@ pushd .
 call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 @echo on
 popd
-set DISTUTILS_USE_SDK=1
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0
-set CUDA_PATH_V9_0=%CUDA_PATH%
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
+set CUDA_PATH_V9_2=%CUDA_PATH%
 
 goto cuda_build_common
 
 :cuda_build_10
+call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
@@ -53,6 +53,8 @@ set CUDA_PATH_V10_1=%CUDA_PATH%
 goto cuda_build_common
 
 :cuda_build_common
+
+set DISTUTILS_USE_SDK=1
 
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%
@@ -64,8 +66,10 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
-:: Target only our CI GPU machine's CUDA arch to speed up the build
-set TORCH_CUDA_ARCH_LIST=5.2
+:: Target only our CI GPU machine's CUDA arch to speed up the build, we can overwrite with env var
+:: default on circleci is Tesla T4 which has capability of 7.5, ref: https://developer.nvidia.com/cuda-gpus
+:: jenkins has M40, which is 5.2
+if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 
 sccache --stop-server
 sccache --start-server

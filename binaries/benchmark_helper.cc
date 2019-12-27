@@ -47,19 +47,14 @@ defined(TARGET_IPHONE_SIMULATOR)
 #include <malloc.h>
 #endif
 
-using std::map;
-using std::shared_ptr;
-using std::string;
-using std::unique_ptr;
-using std::vector;
 
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
   caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+    return std::make_unique<caffe2::PerfNetObserver>(subject);
   });
   caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+      std::make_unique<caffe2::NetObserverReporterPrint>());
 }
 
 bool backendCudaSet(const string& backend) {
@@ -230,7 +225,7 @@ void fillInputBlob(
     if (blob == nullptr) {
       blob = workspace->CreateBlob(tensor_kv.first);
     }
-    // todo: support gpu and make this function a tempalte
+    // todo: support gpu and make this function a template
     int protos_size = tensor_kv.second.protos_size();
     if (protos_size == 1 && iteration > 0) {
       // Do not override the input data if there is only one input data,

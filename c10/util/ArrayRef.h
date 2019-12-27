@@ -18,7 +18,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Deprecated.h>
 
 #include <array>
 #include <iterator>
@@ -145,13 +144,13 @@ class ArrayRef final {
   }
 
   /// front - Get the first element.
-  AT_CPP14_CONSTEXPR const T& front() const {
+  C10_CPP14_HOST_CONSTEXPR const T& front() const {
     TORCH_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
-  AT_CPP14_CONSTEXPR const T& back() const {
+  C10_CPP14_HOST_CONSTEXPR const T& back() const {
     TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
@@ -163,7 +162,7 @@ class ArrayRef final {
 
   /// slice(n, m) - Chop off the first N elements of the array, and keep M
   /// elements in the array.
-  AT_CPP14_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
+  C10_CPP14_HOST_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
@@ -188,7 +187,7 @@ class ArrayRef final {
   }
 
   /// Vector compatibility
-  AT_CPP14_CONSTEXPR const T& at(size_t Index) const {
+  C10_CPP14_HOST_CONSTEXPR const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",
@@ -275,6 +274,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
+[[deprecated]] typedef ArrayRef<int64_t> IntList;
 
 } // namespace c10

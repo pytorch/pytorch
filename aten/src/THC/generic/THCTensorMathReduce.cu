@@ -117,14 +117,14 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
 void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
+  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
+  THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
+  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
+
   THCTensor *self_;
   THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
   THCTensor *data = THCTensor_(newClone)(state, src_);
   int64_t numel = THCTensor_(nElement)(state, data);
-
-  THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
-  THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
-  THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
   if (numel > 0) {
     ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
@@ -148,7 +148,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   THCTensor_(free)(state, data);
 }
 
-void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
+void THCTensor_(std_single)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool unbiased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
@@ -157,7 +157,7 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
-                           VarianceWelford<accreal, scalar_t>{biased, true},
+                           VarianceWelford<accreal, scalar_t>{unbiased, true},
                            init,
                            dimension,
                            keepdim)) {
@@ -167,7 +167,7 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
+void THCTensor_(var_single)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, bool unbiased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
@@ -176,7 +176,7 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
-                           VarianceWelford<accreal, scalar_t>{biased, false},
+                           VarianceWelford<accreal, scalar_t>{unbiased, false},
                            init,
                            dimension,
                            keepdim)) {
@@ -186,13 +186,13 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
   THCudaCheck(cudaGetLastError());
 }
 
-accreal THCTensor_(stdall)(THCState *state, THCTensor *self, int biased)
+accreal THCTensor_(std_all)(THCState *state, THCTensor *self, bool unbiased)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  return THCNumerics<accreal>::sqrt((THCTensor_(varall)(state, self, biased)));
+  return THCNumerics<accreal>::sqrt((THCTensor_(var_all)(state, self, unbiased)));
 }
 
-accreal THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
+accreal THCTensor_(var_all)(THCState *state, THCTensor *self, bool unbiased)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   accreal mean = THCTensor_(meanall)(state, self);
@@ -208,7 +208,7 @@ accreal THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
 
   val = THCNumerics<accreal>::div(
     val,
-    scalar_cast<accreal>(std::max<int64_t>(0, THCTensor_(nElement)(state, self) - (biased ? 0 : 1)))
+    scalar_cast<accreal>(std::max<int64_t>(0, THCTensor_(nElement)(state, self) - (unbiased ? 1 : 0)))
   );
 
   THCudaCheck(cudaGetLastError());
@@ -258,7 +258,7 @@ void THCTensor_(norm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t
     THC_reduceDim<scalar_t>(state, self, src,
                         TensorNormOp<accreal, -1>{value},
                         ReduceAdd<accreal>{},
-                        ReducePow<accreal>{THCNumerics<accreal>::cinv(value)},
+                        ReducePow<accreal>{static_cast<accreal>(1) / value},
                         scalar_cast<accreal>(0),
                         dimension, keepdim);
   }
@@ -309,8 +309,7 @@ accreal THCTensor_(normall)(THCState *state, THCTensor *self, scalar_t _value)
                         ReduceAdd<accreal>{},
                         scalar_cast<accreal>(0),
                         &result, 0);
-    result = THCNumerics<accreal>::pow(result,
-                                       THCNumerics<accreal>::cinv(value));
+    result = THCNumerics<accreal>::pow(result, static_cast<accreal>(1) / value);
   }
 
   THCudaCheck(cudaGetLastError());
@@ -364,7 +363,7 @@ accreal THCTensor_(dist)(THCState *state, THCTensor *self,
       thrust::plus<accreal>(),
       ThrustTensorDistOp<scalar_t, accreal>(value));
 
-    result = THCNumerics<accreal>::pow(result, THCNumerics<accreal>::cinv(value));
+    result = THCNumerics<accreal>::pow(result, static_cast<accreal>(1) / value);
   }
   THCTensor_(free)(state, src);
   THCTensor_(free)(state, self);

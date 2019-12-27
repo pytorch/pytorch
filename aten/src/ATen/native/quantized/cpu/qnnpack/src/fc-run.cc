@@ -14,7 +14,7 @@ struct q8gemm_context {
   uint8_t* c;
   size_t c_stride;
   union pytorch_qnnp_conv_quantization_params quantization_params;
-  const q8gemm_ukernel_function ukernel;
+  const pytorch_q8gemm_ukernel_function ukernel;
 };
 
 static void compute_q8gemm(

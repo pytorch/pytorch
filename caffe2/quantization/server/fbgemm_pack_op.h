@@ -57,6 +57,9 @@ class ConvDNNLowPPackWeightOp final
   bool TakeDepthWise3x3x3FastPath_();
   bool TakeGConvFastPath_();
 
+  fbgemm::conv_param_t<> GetConvParam_();
+  fbgemm::conv_param_t<3> GetConv3DParam_();
+
   // Save quantized weights right after quantization before layout packing for
   // performance purpose
   bool save_unpacked_weights_;

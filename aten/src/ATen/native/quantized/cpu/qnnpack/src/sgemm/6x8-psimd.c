@@ -10,7 +10,7 @@
 
 #include <qnnpack/sgemm.h>
 
-void sgemm_ukernel_6x8__psimd(
+void pytorch_sgemm_ukernel_6x8__psimd(
     size_t mr,
     size_t nr,
     size_t k,
