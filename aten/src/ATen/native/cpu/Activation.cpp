@@ -256,12 +256,12 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
 void GeluKernelImpl(TensorIterator& it) {
-  if (at::hasMKL() && it.is_contiguous()) {
+  if (it.dtype() != ScalarType::BFloat16 && at::hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
       GeluMKLKernelImpl<scalar_t>(&it);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, it.dtype(), "GeluKernelImpl", [&]() {
       using Vec = vec256::Vec256<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
       const Vec kOneVec(1);
@@ -269,7 +269,7 @@ void GeluKernelImpl(TensorIterator& it) {
       cpu_kernel_vec(
           it,
           [](scalar_t x) {
-            constexpr scalar_t kAlpha = M_SQRT1_2;
+            scalar_t kAlpha = M_SQRT1_2;
             return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
           },
           [&](Vec x_vec) {
@@ -281,12 +281,12 @@ void GeluKernelImpl(TensorIterator& it) {
 }
 
 void GeluBackwardKernelImpl(TensorIterator& it) {
-  if (hasMKL() && it.is_contiguous()) {
+  if (it.dtype() != ScalarType::BFloat16 && hasMKL() && it.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
       GeluBackwardMKLKernelImpl<scalar_t>(&it);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
       using Vec = vec256::Vec256<scalar_t>;
       const Vec kAlphaVec(M_SQRT1_2);
       const Vec kBetaVec(M_2_SQRTPI * M_SQRT1_2 * 0.5);
@@ -296,8 +296,8 @@ void GeluBackwardKernelImpl(TensorIterator& it) {
       cpu_kernel_vec(
           it,
           [](scalar_t dy, scalar_t x) {
-            constexpr scalar_t kAlpha = M_SQRT1_2;
-            constexpr scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+            scalar_t kAlpha = M_SQRT1_2;
+            scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
             const scalar_t cdf =
                 scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
             const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));

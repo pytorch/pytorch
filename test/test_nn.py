@@ -6000,6 +6000,17 @@ class TestNN(NNTestCase):
                 _test_gelu(n, m, torch.float64, True)
                 _test_gelu(n, m, torch.float64, False)
 
+    def test_gelu_bfloat16(self):
+        inputf = torch.randn((10, 10), dtype=torch.float, requires_grad=True)
+        input = inputf.detach().bfloat16().requires_grad_(True)
+        outputf = F.gelu(inputf)
+        output = F.gelu(input)
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output, outputf, prec=0.1)
+        gO = torch.empty_like(outputf).uniform_()
+        outputf.backward(gO)
+        output.backward(gO.bfloat16())
+        self.assertEqual(input.grad, inputf.grad, prec=0.01)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
