@@ -89,10 +89,10 @@ static inline void slow_conv_transpose2d_shape_check(
   // Allow for empty batch size but not other dimensions
   bool valid_empty = false;
   if (ndim == 3) {
-    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
   } else if (ndim == 4) {
-    valid_empty = input->size(0) == 0 && input->size(1) != 0 &&
-      input->size(2) != 0 && input->size(3) != 0;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0;
   }
   TORCH_CHECK(
               (input.numel() != 0 || valid_empty) && (ndim == 3 || ndim == 4),

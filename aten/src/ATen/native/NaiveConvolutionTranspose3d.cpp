@@ -36,11 +36,11 @@ static inline void slow_conv_transpose3d_shape_check(
   bool valid_empty = false;
   int ndim = input.dim();
   if (ndim == 4) {
-    valid_empty = input->size(0) == 0 && input->size(1) != 0 &&
-      input->size(2) != 0 && input->size(3) != 0;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0;
   } else if (ndim == 5) {
-    valid_empty = input->size(0) == 0 && input->size(1) != 0 &&
-      input->size(2) != 0 && input->size(3) != 0 && input->size(4) != 0;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
   }
   TORCH_CHECK(
               (input.numel() != 0 || valid_empty) && (ndim == 4 || ndim == 5),
@@ -106,7 +106,6 @@ static inline void slow_conv_transpose3d_shape_check(
     AT_ERROR("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input.dim();
   int dimf = 0;
   int dimd = 1;
   int dimh = 2;
