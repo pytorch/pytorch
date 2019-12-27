@@ -1561,13 +1561,6 @@ def create_derived(backend_type_env, declarations):
                 elif ret['kind'] == 'type':
                     assert len(calls) == 1
                     call = calls[0]
-<<<<<<< HEAD
-                    if 'aten_custom_call' in option:
-                        # all aten_custom_call bodies handle settings on their own.
-                        case_body.append(CodeTemplate(
-                            option['aten_custom_call']).substitute(case_env))
-=======
->>>>>>> Kill aten_custom_call.
 
                     if ret['type'] in ALLOC_WRAP.keys():
                         wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
