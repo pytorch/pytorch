@@ -136,7 +136,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     bias_data = Input(BIAS).template data<T>();
   }
 
-  auto f = [&](Tensor* col_buffer) {
+  auto f = [this, &filter_offset, &bias_data, &X, &buffer_shape, &N, &Xdata, &offset_data, &M, &filter, &output_image_size, &kernel_dim, &Ydata, &input_offset, &offset_offset, &output_offset] (Tensor* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.

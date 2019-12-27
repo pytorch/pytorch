@@ -18,10 +18,10 @@ class ScriptModuleSerializer : public BlobSerializerBase {
       TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(typeMeta.Match<Module>());
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<Module>>());
 
     std::stringstream ss;
-    (*static_cast<const Module*>(pointer)).save(ss);
+    (*static_cast<const std::unique_ptr<Module>*>(pointer))->save(ss);
 
     // NB: wrapping the entire zip archive as one string is probably not a
     // good idea and might be slow. This is meant as a workaround, any proper
@@ -45,7 +45,8 @@ class ScriptModuleDeserializer : public BlobDeserializerBase {
     std::stringstream ss;
     ss << serialized;
     ss.seekg(0);
-    *blob->GetMutable<Module>() = torch::jit::load(ss);
+    blob->GetMutable<std::unique_ptr<Module>>()->reset(
+        new Module(torch::jit::load(ss)));
   }
 };
 
@@ -62,7 +63,8 @@ class ScriptModuleLoadOp final : public Operator<CPUContext> {
     std::stringstream ss;
     ss << moduleBinary;
     ss.seekg(0);
-    *OperatorBase::Output<Module>(0) = torch::jit::load(ss);
+    OperatorBase::Output<std::unique_ptr<Module>>(0)->reset(
+        new Module(torch::jit::load(ss)));
     return true;
   }
 };
@@ -91,16 +93,15 @@ class ScriptModuleOp final : public Operator<Context> {
     // want their gradients to be tracked in this operator.
     torch::NoGradGuard guard;
 
-    const auto& module = OperatorBase::Input<Module>(0);
-    Method method = module.get_method(method_name_);
+    const auto& module = OperatorBase::Input<std::unique_ptr<Module>>(0);
+    CAFFE_ENFORCE(module);
+    Method method = module->get_method(method_name_);
     // Assume all inputs are tensor for now
     std::vector<IValue> inputs;
     const int num_inputs = InputSize();
     inputs.reserve(num_inputs);
     for (int i = 1; i < num_inputs; ++i) {
-      // jit::Interpreter takes only autograd variables (which have
-      // require_grad=False in this case)
-      inputs.emplace_back(torch::autograd::make_variable(at::Tensor(Input(i))));
+      inputs.emplace_back(at::Tensor(Input(i)));
     }
     // We just convert specified inputs. If some of the inputs were omitted and
     // don't have default values, method::operator() is going to complain.
@@ -125,9 +126,11 @@ class ScriptModuleOp final : public Operator<Context> {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(Module);
+CAFFE_KNOWN_TYPE(std::unique_ptr<Module>);
 
-REGISTER_BLOB_SERIALIZER((TypeMeta::Id<Module>()), ScriptModuleSerializer);
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::unique_ptr<Module>>()),
+    ScriptModuleSerializer);
 // NB: the first argument to REGISTER_BLOB_DESERIALIZER macro doesn't really
 // need to be a real type, it just get converted to string
 REGISTER_BLOB_DESERIALIZER(

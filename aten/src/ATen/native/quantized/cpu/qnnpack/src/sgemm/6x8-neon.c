@@ -10,7 +10,7 @@
 
 #include <qnnpack/sgemm.h>
 
-void sgemm_ukernel_6x8__neon(
+void pytorch_sgemm_ukernel_6x8__neon(
     size_t mr,
     size_t nr,
     size_t k,

@@ -12,7 +12,7 @@
 
 #include <qnnpack/q8gavgpool.h>
 
-void q8gavgpool_ukernel_up8x7__sse2(
+void pytorch_q8gavgpool_ukernel_up8x7__sse2(
     size_t m,
     size_t n,
     const uint8_t* input,

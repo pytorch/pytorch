@@ -54,9 +54,7 @@ class GetEntryFromBlobs(NetModifier):
 
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            if not net.BlobIsDefined(blob):
-                raise Exception('blob {0} is not defined in net {1}'.format(
-                    blob, net.Name()))
+            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
 
             blob_i1 = net.Slice([blob], starts=[i1, 0], ends=[i1 + 1, -1])
             if self._i2 == -1:

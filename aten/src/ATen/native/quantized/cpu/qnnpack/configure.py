@@ -72,7 +72,7 @@ def main(args):
                     build.cc("requantization/gemmlowp-neon.c"),
                 ]
 
-        qnnpack_objects = [
+        qnnpytorch_pack_objects = [
             # Common parts
             build.cc("init.c"),
             build.cc("operator-delete.c"),
@@ -91,13 +91,14 @@ def main(args):
             build.cc("max-pooling.c"),
             build.cc("sigmoid.c"),
             build.cc("softargmax.c"),
+            build.cc("tanh.c"),
             # Scalar micro-kernels
             build.cc("u8lut32norm/scalar.c"),
             build.cc("x8lut/scalar.c"),
         ]
 
         with build.options(isa=arm.neon if build.target.is_arm else None):
-            qnnpack_objects += [
+            qnnpytorch_pack_objects += [
                 build.cc("sconv/6x8-psimd.c"),
                 build.cc("sdwconv/up4x9-psimd.c"),
                 build.cc("sgemm/6x8-psimd.c"),
@@ -105,7 +106,7 @@ def main(args):
 
         with build.options(isa=arm.neon if build.target.is_arm else None):
             if build.target.is_arm or build.target.is_arm64:
-                qnnpack_objects += [
+                qnnpytorch_pack_objects += [
                     build.cc("q8avgpool/mp8x9p8q-neon.c"),
                     build.cc("q8avgpool/up8x9-neon.c"),
                     build.cc("q8avgpool/up8xm-neon.c"),
@@ -134,7 +135,7 @@ def main(args):
                     build.cc("x8zip/xm-neon.c"),
                 ]
             if build.target.is_arm:
-                qnnpack_objects += [
+                qnnpytorch_pack_objects += [
                     build.cc("hgemm/8x8-aarch32-neonfp16arith.S"),
                     build.cc("q8conv/4x8-aarch32-neon.S"),
                     build.cc("q8dwconv/up8x9-aarch32-neon.S"),
@@ -142,13 +143,13 @@ def main(args):
                     build.cc("q8gemm/4x8c2-xzp-aarch32-neon.S"),
                 ]
             if build.target.is_arm64:
-                qnnpack_objects += [
+                qnnpytorch_pack_objects += [
                     build.cc("q8gemm/8x8-aarch64-neon.S"),
                     build.cc("q8conv/8x8-aarch64-neon.S"),
                 ]
             if build.target.is_x86 or build.target.is_x86_64:
                 with build.options(isa=x86.sse2):
-                    qnnpack_objects += [
+                    qnnpytorch_pack_objects += [
                         build.cc("q8avgpool/mp8x9p8q-sse2.c"),
                         build.cc("q8avgpool/up8x9-sse2.c"),
                         build.cc("q8avgpool/up8xm-sse2.c"),
@@ -170,7 +171,7 @@ def main(args):
                         build.cc("x8zip/x4-sse2.c"),
                         build.cc("x8zip/xm-sse2.c"),
                     ]
-            build.static_library("qnnpack", qnnpack_objects)
+            build.static_library("qnnpack", qnnpytorch_pack_objects)
 
     with build.options(
         source_dir="test",
@@ -218,6 +219,7 @@ def main(args):
         build.unittest("max-pooling-test", build.cxx("max-pooling.cc"))
         build.unittest("sigmoid-test", build.cxx("sigmoid.cc"))
         build.unittest("softargmax-test", build.cxx("softargmax.cc"))
+        build.unittest("tanh-test", build.cxx("tanh.cc"))
         build.unittest(
             "requantization-test",
             [build.cxx("requantization.cc")] + requantization_objects,
@@ -255,6 +257,7 @@ def main(args):
         build.benchmark("max-pooling-bench", build.cxx("max-pooling.cc"))
         build.benchmark("sigmoid-bench", build.cxx("sigmoid.cc"))
         build.benchmark("softargmax-bench", build.cxx("softargmax.cc"))
+        build.benchmark("tanh-bench", build.cxx("tanh.cc"))
 
         build.benchmark("q8gemm-bench", build.cxx("q8gemm.cc"))
         build.benchmark("hgemm-bench", build.cxx("hgemm.cc"))

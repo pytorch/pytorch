@@ -19,7 +19,7 @@ def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b):
         conv_b = bn_rm.new_zeros(bn_rm.shape)
     bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
 
-    conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape([-1, 1, 1, 1])
+    conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape([-1] + [1] * (len(conv_w.shape) - 1))
     conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
 
     return torch.nn.Parameter(conv_w), torch.nn.Parameter(conv_b)

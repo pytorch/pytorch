@@ -4,7 +4,7 @@ import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from caffe2.python import core, dyndep, utils, workspace
+from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
@@ -25,7 +25,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         size=st.integers(10, 16),
         # depthwise 3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
-        batch_size=st.integers(1, 3),
+        batch_size=st.integers(0, 3),
         prepack_weight=st.booleans(),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
@@ -108,8 +108,10 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
                 x_q_param = dnnlowp_utils.choose_quantization_params(
-                    X.min(), X.max(), preserve_activation_sparsity
+                    X_min, X_max, preserve_activation_sparsity
                 )
                 inputs = ["W"]
                 if do_dequantize:
@@ -118,11 +120,15 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    engine=engine,
                     group=group,
                     quantize_groupwise=quantize_groupwise,
-                    preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 
@@ -173,7 +179,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         size=st.integers(5, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 24, 32]),
-        batch_size=st.integers(1, 2),
+        batch_size=st.integers(0, 2),
         prepack_weight=st.booleans(),
         fuse_relu=st.booleans(),
         share_col_buffer=st.booleans(),
@@ -248,8 +254,10 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([quantize])
 
             if do_prepack_weight:
+                X_min = 0 if X.size == 0 else X.min()
+                X_max = 0 if X.size == 0 else X.max()
                 x_q_param = dnnlowp_utils.choose_quantization_params(
-                    X.min(), X.max(), preserve_activation_sparsity
+                    X_min, X_max, preserve_activation_sparsity
                 )
                 inputs = ["W"]
                 if do_dequantize:
@@ -258,11 +266,15 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    strides=[stride_0, stride_1, stride_2],
+                    kernels=[kernel] * 3,
+                    dilations=[dilation] * 3,
+                    pads=[pad] * (3 * 2),
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    engine=engine,
                     group=group,
                     quantize_groupwise=quantize_groupwise,
-                    preserve_weight_sparsity=preserve_weight_sparsity,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 

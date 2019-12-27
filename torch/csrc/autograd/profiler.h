@@ -65,10 +65,13 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
 #include <sys/time.h>
 // clock_gettime is not implemented on older versions of OS X (< 10.12).
 // If implemented, CLOCK_REALTIME will have already been defined.
+
+// clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
+// CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
 #endif
 
 inline int64_t getTime() {
@@ -76,7 +79,7 @@ inline int64_t getTime() {
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#elif defined(__MACH__) && !defined(CLOCK_REALTIME)
+#elif (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
   struct timeval now;
   gettimeofday(&now, NULL);
   return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
@@ -227,6 +230,7 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerConfig);
 TORCH_API thread_event_lists disableProfiler();
+TORCH_API bool profilerEnabled();
 
 
 // Usage:

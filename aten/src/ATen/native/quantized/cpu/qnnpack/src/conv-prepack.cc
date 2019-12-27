@@ -22,7 +22,7 @@ PrePackConvWeights::PrePackConvWeights(
       const uint32_t c_stride = (groups + (cr - 1)) & -cr;
       const size_t packed_weights_size =
           (sizeof(uint8_t) * kernel_size + sizeof(int32_t)) * c_stride;
-      packed_weights_ = aligned_alloc(16, packed_weights_size);
+      packed_weights_ = malloc(packed_weights_size);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
@@ -32,7 +32,7 @@ PrePackConvWeights::PrePackConvWeights(
 
       switch (kernel_size) {
         case 9:
-          pack_q8dw_wrq(
+          pytorch_pack_q8dw_wrq(
               kernel_height,
               kernel_width,
               groups,
@@ -43,7 +43,7 @@ PrePackConvWeights::PrePackConvWeights(
           break;
         case 25:
           /* change this later */
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -56,7 +56,7 @@ PrePackConvWeights::PrePackConvWeights(
               bias,
               packed_weights_,
               true);
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -70,7 +70,7 @@ PrePackConvWeights::PrePackConvWeights(
               (char*)packed_weights_ +
                   (10 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
               false);
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -100,7 +100,7 @@ PrePackConvWeights::PrePackConvWeights(
       const size_t packed_group_weights_size =
           (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
           n_stride;
-      packed_weights_ = aligned_alloc(16, packed_group_weights_size * groups);
+      packed_weights_ = malloc(packed_group_weights_size * groups);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
@@ -111,7 +111,7 @@ PrePackConvWeights::PrePackConvWeights(
       memset(packed_weights_, 0, packed_group_weights_size * groups);
 
       for (uint32_t group = 0; group < groups; group++) {
-        pack_swizzle_q8gemm_brq(
+        pytorch_pack_swizzle_q8gemm_brq(
             conv_p.group_output_channels,
             conv_p.group_input_channels,
             nr,
@@ -135,7 +135,7 @@ PrePackConvWeights::PrePackConvWeights(
       const size_t packed_group_weights_size =
           (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
           n_stride;
-      packed_weights_ = aligned_alloc(16, packed_group_weights_size * groups);
+      packed_weights_ = malloc(packed_group_weights_size * groups);
       if (packed_weights_ == nullptr) {
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
@@ -150,7 +150,7 @@ PrePackConvWeights::PrePackConvWeights(
       switch (ukernel_type) {
         case pytorch_qnnp_ukernel_type_gemm:
           for (uint32_t group = 0; group < groups; group++) {
-            pack_q8gemm_wrq(
+            pytorch_pack_q8gemm_wrq(
                 conv_p.group_output_channels,
                 conv_p.group_input_channels,
                 nr,
@@ -165,7 +165,7 @@ PrePackConvWeights::PrePackConvWeights(
           break;
         case pytorch_qnnp_ukernel_type_conv:
           for (uint32_t group = 0; group < groups; group++) {
-            pack_q8conv_wrq(
+            pytorch_pack_q8conv_wrq(
                 conv_p.group_output_channels,
                 kernel_size,
                 conv_p.group_input_channels,

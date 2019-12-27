@@ -1,0 +1,7 @@
+      # PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_mobile_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:405"

@@ -15,15 +15,12 @@ namespace jit {
 // introduce more granularity here (e.g. List[int] will never alias
 // List[float]).
 c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
-    return TypeKind::TensorType;
-  }
-
   switch (type->kind()) {
     case TypeKind::ListType:
     case TypeKind::TupleType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
+    case TypeKind::TensorType:
       return type->kind();
     case TypeKind::OptionalType:
       return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
@@ -32,14 +29,14 @@ c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
   }
 }
 
-bool AliasDb::shouldAnnotate(const TypePtr& type) {
+bool AliasDb::mutableType(const TypePtr& type) {
   return getMutableTypeKind(type) != c10::nullopt;
 }
 
 // We only need to annotate values that either are mutable or could contain
 // mutable types.
-bool AliasDb::shouldAnnotate(const Value* v) {
-  return shouldAnnotate(v->type());
+bool AliasDb::mutableType(const Value* v) {
+  return mutableType(v->type());
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
@@ -339,6 +336,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
+    case prim::unchecked_cast:
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
@@ -347,20 +345,28 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0) {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       return analyzeConservative(node);
-    case prim::Print:
     case prim::Uninitialized:
+      giveFreshAlias(node->output());
+      return;
+    case prim::Print:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -425,7 +431,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!shouldAnnotate(actualValue)) {
+    if (!mutableType(actualValue)) {
       continue;
     }
 
@@ -477,7 +483,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!shouldAnnotate(actual)) {
+    if (!mutableType(actual)) {
       continue;
     }
 
@@ -525,7 +531,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
-  if (!shouldAnnotate(v)) {
+  if (!mutableType(v)) {
     // don't need to register a write if the value isn't mutable
     return;
   }
@@ -658,7 +664,7 @@ void AliasDb::analyzeTupleConstruct(Node* node) {
   // only if it contains elements which need annotation
   getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
-    if (shouldAnnotate(input)) {
+    if (mutableType(input)) {
       addToContainedElements(input, node->output());
     }
   }
@@ -681,7 +687,7 @@ void AliasDb::analyzeConservative(Node* node) {
     registerWrite(input, node);
     // We may also write to any contained types
     for (const auto& type : input->type()->containedTypes()) {
-      if (shouldAnnotate(type)) {
+      if (mutableType(type)) {
         auto el = getOrCreateWildcard(type);
         registerWrite(el, node);
       }
@@ -747,8 +753,8 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  if (!shouldAnnotate(from)) {
-    TORCH_INTERNAL_ASSERT(!shouldAnnotate(to));
+  if (!mutableType(from)) {
+    TORCH_INTERNAL_ASSERT(!mutableType(to));
     return;
   }
 
@@ -764,7 +770,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   }
 
   // At this point, we should be dealing with two mutable types.
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(from) && shouldAnnotate(to));
+  TORCH_INTERNAL_ASSERT(mutableType(from) && mutableType(to));
 
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
@@ -775,7 +781,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 void AliasDb::addToContainedElements(
     const Value* elem,
     const Value* container) {
-  if (!shouldAnnotate(elem)) {
+  if (!mutableType(elem)) {
     return;
   }
 
@@ -788,7 +794,7 @@ void AliasDb::addToContainedElements(
 }
 
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
-  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+  if (!mutableType(a) || !mutableType(b)) {
     return false;
   }
 
@@ -851,7 +857,7 @@ bool AliasDb::mayContainAlias(
     if (cannotCheckAliasContainment(val)) {
       return true;
     }
-    if (shouldAnnotate(val)) {
+    if (mutableType(val)) {
       a_elements.push_back(elementMap_.at(val));
     }
   }
@@ -865,7 +871,7 @@ bool AliasDb::mayContainAlias(
     if (cannotCheckAliasContainment(val)) {
       return true;
     }
-    if (shouldAnnotate(val)) {
+    if (mutableType(val)) {
       b_elements.push_back(elementMap_.at(val));
     }
   }
@@ -881,7 +887,7 @@ void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
 }
 
 void AliasDb::giveFreshAlias(const Value* value) {
-  if (!shouldAnnotate(value)) {
+  if (!mutableType(value)) {
     return;
   }
 
@@ -1248,6 +1254,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      prim::isinstance,
+      prim::unchecked_cast,
   };
 
   // Operators that should not be used by alias analysis
@@ -1257,7 +1265,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Drop,
       at::onnx::Reshape,
       at::onnx::Shape,
-      prim::AutogradAnyNonZero,
       prim::AutogradAdd,
   };
 
@@ -1265,7 +1272,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
 }
 
 bool AliasDb::mayAliasWildcard(const Value* v) const {
-  if (!shouldAnnotate(v)) {
+  if (!mutableType(v)) {
     return false;
   }
 
@@ -1278,7 +1285,7 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
 
 // Search the wildcard index for an element that corresponds to the given type.
 Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
+  TORCH_INTERNAL_ASSERT(mutableType(type));
   const auto kind = getMutableTypeKind(type);
   TORCH_INTERNAL_ASSERT(kind);
 
@@ -1301,7 +1308,7 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
 
 // Register `v` as a wildcard value.
 void AliasDb::setWildcard(const Value* v) {
-  if (!shouldAnnotate(v)) {
+  if (!mutableType(v)) {
     return;
   }
   auto wildcardElement = getOrCreateWildcard(v->type());

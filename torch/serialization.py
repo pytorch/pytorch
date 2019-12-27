@@ -1,5 +1,4 @@
 import difflib
-import inspect
 import os
 import io
 import shutil
@@ -9,9 +8,11 @@ import torch
 import tarfile
 import tempfile
 import warnings
+import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
+from torch._utils_internal import get_source_lines_and_file
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
@@ -84,6 +85,47 @@ def register_package(priority, tagger, deserializer):
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
     _package_registry.sort()
+
+
+def check_module_version_greater_or_equal(module, req_version_tuple, error_if_malformed=True):
+    '''
+    Check if a module's version satisfies requirements
+
+    Usually, a module's version string will be like 'x.y.z', which would be represented
+    as a tuple (x, y, z), but sometimes it could be an unexpected format. If the version
+    string does not match the given tuple's format up to the length of the tuple, then
+    error and exit or emit a warning.
+
+    Args:
+        module: the module to check the version of
+        req_version_tuple: tuple (usually of ints) representing the required version
+        error_if_malformed: whether we should exit if module version string is malformed
+
+    Returns:
+        requirement_is_met: bool
+    '''
+    try:
+        version_strs = module.__version__.split('.')
+        # Cast module version fields to match the types of the required version
+        module_version = tuple(
+            type(req_field)(version_strs[idx]) for idx, req_field in enumerate(req_version_tuple)
+        )
+        requirement_is_met = module_version >= req_version_tuple
+
+    except Exception as e:
+        message = (
+            "'%s' module version string is malformed '%s' and cannot be compared"
+            " with tuple %s"
+        ) % (
+            module.__name__, module.__version__, str(req_version_tuple)
+        )
+        if error_if_malformed:
+            raise RuntimeError(message)
+        else:
+            warnings.warn(message + ', but continuing assuming that requirement is met')
+            requirement_is_met = True
+
+    return requirement_is_met
 
 
 def _cpu_tag(obj):
@@ -170,22 +212,83 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _with_file_like(f, mode, body):
-    """
-    Executes a body function with a file object for f, opening
-    it in 'mode' if it is a string filename.
-    """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = open(f, mode)
-    try:
-        return body(f)
-    finally:
-        if new_fd:
-            f.close()
+def _is_path(name_or_buffer):
+    return isinstance(name_or_buffer, str) or \
+        (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+        (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
+
+
+class _opener(object):
+    def __init__(self, file_like):
+        self.file_like = file_like
+
+    def __enter__(self):
+        return self.file_like
+
+    def __exit__(self, *args):
+        pass
+
+
+class _open_file(_opener):
+    def __init__(self, name, mode):
+        super(_open_file, self).__init__(open(name, mode))
+
+    def __exit__(self, *args):
+        self.file_like.close()
+
+
+class _open_buffer_reader(_opener):
+    def __init__(self, buffer):
+        super(_open_buffer_reader, self).__init__(buffer)
+        _check_seekable(buffer)
+
+
+class _open_buffer_writer(_opener):
+    def __exit__(self, *args):
+        self.file_like.flush()
+
+
+def _open_file_like(name_or_buffer, mode):
+    if _is_path(name_or_buffer):
+        return _open_file(name_or_buffer, mode)
+    else:
+        if 'w' in mode:
+            return _open_buffer_writer(name_or_buffer)
+        elif 'r' in mode:
+            return _open_buffer_reader(name_or_buffer)
+        else:
+            raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
+
+
+class _open_zipfile_reader(_opener):
+    def __init__(self, name_or_buffer):
+        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
+
+
+class _open_zipfile_writer_file(_opener):
+    def __init__(self, name):
+        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(name))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+
+
+class _open_zipfile_writer_buffer(_opener):
+    def __init__(self, buffer):
+        self.buffer = buffer
+        super(_open_zipfile_writer_buffer, self).__init__(torch._C.PyTorchFileWriter(buffer))
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+        self.buffer.flush()
+
+
+def _open_zipfile_writer(name_or_buffer):
+    if _is_path(name_or_buffer):
+        container = _open_zipfile_writer_file
+    else:
+        container = _open_zipfile_writer_buffer
+    return container(name_or_buffer)
 
 
 def _is_compressed_file(f):
@@ -229,8 +332,26 @@ def _check_seekable(f):
     except (io.UnsupportedOperation, AttributeError) as e:
         raise_err_msg(["seek", "tell"], e)
 
+def _check_dill_version(pickle_module):
+    '''Checks if using dill as the pickle module, and if so, checks if it is the correct version.
+    If dill version is lower than 0.3.1, a ValueError is raised.
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
+    Args:
+        pickle_module: module used for pickling metadata and objects
+
+    '''
+    if pickle_module.__name__ == 'dill':
+        required_dill_version = (0, 3, 1)
+        if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
+            raise ValueError((
+                "'torch' supports dill >= %s, but you have dill %s."
+                " Please upgrade dill or switch to 'pickle'"
+            ) % (
+                '.'.join([str(num) for num in required_dill_version]),
+                pickle_module.__version__
+            ))
+
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -257,10 +378,18 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
-    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
+    _check_dill_version(pickle_module)
+
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(f) as opened_file:
+            _save(obj, opened_file, pickle_module, pickle_protocol)
+            return
+
+    with _open_file_like(f, 'wb') as opened_file:
+        _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
-def _save(obj, f, pickle_module, pickle_protocol):
+def _legacy_save(obj, f, pickle_module, pickle_protocol):
     if sys.version_info[0] == 2:
         import StringIO
         if isinstance(f, StringIO.StringIO):
@@ -285,13 +414,14 @@ def _save(obj, f, pickle_module, pickle_protocol):
             serialized_container_types[obj] = True
             source_file = source = None
             try:
-                source_file = inspect.getsourcefile(obj)
-                source = inspect.getsource(obj)
+                source_lines, _, source_file = get_source_lines_and_file(obj)
+                source = ''.join(source_lines)
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
                               "for correctness upon loading.")
             return ('module', obj, source_file, source)
+
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             # Offset is always 0, but we keep it for backwards compatibility
@@ -338,6 +468,44 @@ def _save(obj, f, pickle_module, pickle_protocol):
         serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
+def _save(obj, zip_file, pickle_module, pickle_protocol):
+    serialized_storages = {}
+
+    def persistent_id(obj):
+        # FIXME: the docs say that persistent_id should only return a string
+        # but torch store returns tuples. This works only in the binary protocol
+        # see
+        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
+        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
+        if torch.is_storage(obj):
+            storage_type = normalize_storage_type(type(obj))
+            obj_key = str(obj._cdata)
+            location = location_tag(obj)
+            serialized_storages[obj_key] = obj
+
+            return ('storage',
+                    storage_type,
+                    obj_key,
+                    location,
+                    obj.size())
+        return None
+
+    # Write the pickle data for `obj`
+    data_buf = io.BytesIO()
+    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
+    pickler.persistent_id = persistent_id
+    pickler.dump(obj)
+    data_value = data_buf.getvalue()
+    zip_file.write_record('data.pkl', data_value, len(data_value))
+
+    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
+    for key in sorted(serialized_storages.keys()):
+        name = 'data/{}'.format(key)
+        storage = serialized_storages[key]
+        num_bytes = storage.size() * storage.element_size()
+        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+
+
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     """Loads an object saved with :func:`torch.save` from a file.
 
@@ -377,9 +545,9 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
-        pickle_load_args: optional keyword arguments passed over to
+        pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
-            :attr:`encoding=...`.
+            :attr:`errors=...`.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -387,10 +555,10 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
 
     .. note::
-        In Python 3, when loading files saved by Python 2, you may encounter
-        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
-        caused by the difference of handling in byte strings in Python2 and
-        Python 3. You may use extra :attr:`encoding` keyword argument to specify how
+        By default, we decode byte strings as ``utf-8``.  This is to avoid a common error
+        case ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``
+        when loading files saved by Python 2 in Python 3.  If this default
+        is incorrect, you may use an extra :attr:`encoding` keyword argument to specify how
         these objects should be loaded, e.g., :attr:`encoding='latin1'` decodes them
         to strings using ``latin1`` encoding, and :attr:`encoding='bytes'` keeps them
         as byte arrays which can be decoded later with ``byte_array.decode(...)``.
@@ -409,47 +577,51 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
+        # Load a module with 'ascii' encoding for unpickling
+        >>> torch.load('module.pt', encoding='ascii')
     """
-    new_fd = False
-    if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, 'rb')
-    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        new_fd = True
-        f = f.open('rb')
-    try:
-        return _load(f, map_location, pickle_module, **pickle_load_args)
-    finally:
-        if new_fd:
-            f.close()
+    _check_dill_version(pickle_module)
+
+    if sys.version_info >= (3, 0) and 'encoding' not in pickle_load_args.keys():
+        pickle_load_args['encoding'] = 'utf-8'
+
+    with _open_file_like(f, 'rb') as opened_file:
+        if _is_zipfile(opened_file):
+            with _open_zipfile_reader(f) as opened_zipfile:
+                if _is_torchscript_zip(opened_zipfile):
+                    warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
+                                  " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
+                                  " silence this warning)", UserWarning)
+                    return torch.jit.load(f)
+                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+        return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
-def _load(f, map_location, pickle_module, **pickle_load_args):
+# Register pickling support for layout instances such as
+# torch.sparse_coo, etc
+def _get_layout(name):
+    """Get layout extension object from its string representation.
+    """
+    cache = _get_layout.cache
+    if not cache:
+        for v in torch.__dict__.values():
+            if isinstance(v, torch.layout):
+                cache[str(v)] = v
+    return cache[name]
+
+
+_get_layout.cache = {}
+copyreg.pickle(torch.layout, lambda obj: (_get_layout, (str(obj),)))
+
+
+def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     deserialized_objects = {}
 
-    if map_location is None:
-        restore_location = default_restore_location
-    elif isinstance(map_location, dict):
-        def restore_location(storage, location):
-            location = map_location.get(location, location)
-            return default_restore_location(storage, location)
-    elif isinstance(map_location, _string_classes):
-        def restore_location(storage, location):
-            return default_restore_location(storage, map_location)
-    elif isinstance(map_location, torch.device):
-        def restore_location(storage, location):
-            return default_restore_location(storage, str(map_location))
-    else:
-        def restore_location(storage, location):
-            result = map_location(storage, location)
-            if result is None:
-                result = default_restore_location(storage, location)
-            return result
+    restore_location = _get_restore_location(map_location)
 
     def _check_container_source(container_type, source_file, original_source):
         try:
-            current_source = inspect.getsource(container_type)
+            current_source = ''.join(get_source_lines_and_file(container_type)[0])
         except Exception:  # saving the source is optional, so we can ignore any errors
             warnings.warn("Couldn't retrieve source code for container of "
                           "type " + container_type.__name__ + ". It won't be checked "
@@ -542,20 +714,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_objects = {}
 
-    def maybe_decode_ascii(bytes_str):
-        # When using encoding='bytes' in Py3, some **internal** keys stored as
-        # strings in Py2 are loaded as bytes. This function decodes them with
-        # ascii encoding, one that Py3 uses by default.
-        #
-        # NOTE: This should only be used on internal keys (e.g., `typename` and
-        #       `location` in `persistent_load` below!
-        if isinstance(bytes_str, bytes):
-            return bytes_str.decode('ascii')
-        return bytes_str
-
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
-        typename = maybe_decode_ascii(saved_id[0])
+        typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
         if typename == 'module':
@@ -565,7 +726,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             return data[0]
         elif typename == 'storage':
             data_type, root_key, location, size, view_metadata = data
-            location = maybe_decode_ascii(location)
+            location = _maybe_decode_ascii(location)
             if root_key not in deserialized_objects:
                 obj = data_type(size)
                 obj._torch_load_uninitialized = True
@@ -618,3 +779,81 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             offset = f.tell()
 
     return result
+
+
+def _maybe_decode_ascii(bytes_str):
+    # When using encoding='bytes' in Py3, some **internal** keys stored as
+    # strings in Py2 are loaded as bytes. This function decodes them with
+    # ascii encoding, one that Py3 uses by default.
+    #
+    # NOTE: This should only be used on internal keys (e.g., `typename` and
+    #       `location` in `persistent_load` below!
+    if isinstance(bytes_str, bytes):
+        return bytes_str.decode('ascii')
+    return bytes_str
+
+
+def _get_restore_location(map_location):
+    if map_location is None:
+        restore_location = default_restore_location
+    elif isinstance(map_location, dict):
+        def restore_location(storage, location):
+            location = map_location.get(location, location)
+            return default_restore_location(storage, location)
+    elif isinstance(map_location, _string_classes):
+        def restore_location(storage, location):
+            return default_restore_location(storage, map_location)
+    elif isinstance(map_location, torch.device):
+        def restore_location(storage, location):
+            return default_restore_location(storage, str(map_location))
+    else:
+        def restore_location(storage, location):
+            result = map_location(storage, location)
+            if result is None:
+                result = default_restore_location(storage, location)
+            return result
+    return restore_location
+
+
+def _load(zip_file, map_location, pickle_module, **pickle_load_args):
+    restore_location = _get_restore_location(map_location)
+
+    loaded_storages = {}
+
+    def load_tensor(obj, size, key, location):
+        loaded_storages[key] = restore_location(obj, location)
+        name = 'data/{}'.format(key)
+        size_long = struct.pack("<Q", size)
+        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
+        offset = None
+        is_real_file = False
+        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+
+    def persistent_load(saved_id):
+        assert isinstance(saved_id, tuple)
+        typename = _maybe_decode_ascii(saved_id[0])
+        data = saved_id[1:]
+
+        assert typename == 'storage', \
+            "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
+        data_type, key, location, size = data
+        if key not in loaded_storages:
+            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
+        storage = loaded_storages[key]
+        return storage
+
+    # Load the data (which may in turn use `persistent_load` to load tensors)
+    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+    unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+    unpickler.persistent_load = persistent_load
+    result = unpickler.load()
+
+    return result
+
+
+def _is_torchscript_zip(zip_file):
+    for file_name in zip_file.get_all_records():
+        parts = file_name.split(os.sep)
+        if len(parts) > 1 and parts[1] == 'constants.pkl':
+            return True
+    return False

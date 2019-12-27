@@ -35,7 +35,7 @@
 
 #else
 
-struct PyArrayObject;  // Forward declaring PyArrayObject for safety
+struct PyArrayObject; // Forward declaring PyArrayObject for safety
 
 #endif // USE_NUMPY
 
@@ -65,8 +65,11 @@ class C10_EXPORT BlobFetcherBase {
 class BlobFeederBase {
  public:
   virtual ~BlobFeederBase();
-  virtual void
-  Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob, bool in_place = false) = 0;
+  virtual void Feed(
+      const DeviceOption& option,
+      PyArrayObject* array,
+      Blob* blob,
+      bool in_place = false) = 0;
 };
 
 C10_DECLARE_TYPED_REGISTRY(
@@ -232,7 +235,8 @@ class TensorFeeder : public BlobFeederBase {
                 PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
                 "Had a PyBytes object but cannot convert it to a string.");
           } else if (PyUnicode_Check(input[i])) { // string
-            str = const_cast<char*>(PyUnicode_AsUTF8AndSize(input[i], &strSize));
+            str =
+                const_cast<char*>(PyUnicode_AsUTF8AndSize(input[i], &strSize));
             CAFFE_ENFORCE(
                 str,
                 "Had a PyUnicode object but cannot convert it to a string.");
@@ -327,10 +331,27 @@ class PythonOpBase : public Operator<Context> {
       try {
         auto pickle =
             py::reinterpret_steal<py::object>(PyImport_ImportModule("pickle"));
+
         CAFFE_ENFORCE(pickle);
         auto loads = pickle.attr("loads").cast<py::object>();
         CAFFE_ENFORCE(loads);
-        auto builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
+        py::tuple builder_call;
+        try {
+          builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
+        } catch (const py::error_already_set& e) {
+#if PY_MAJOR_VERSION >= 3
+          LOG(INFO) << "Cannot unpickle python operator: " << e.what();
+          LOG(INFO) << "Try latin1 encoding for python3 run";
+          // to use the `_a` literal for arguments
+          using namespace pybind11::literals;
+          builder_call = loads(py::bytes(pickled), "encoding"_a = "latin1")
+                             .template cast<py::tuple>();
+#else
+          // for py2, simply re-throw the exception, as there is no encoding
+          // argument for pickle.loads
+          throw;
+#endif
+        }
         CAFFE_ENFORCE(builder_call);
         CAFFE_ENFORCE_EQ(py::len(builder_call), 3);
         auto func = builder_call[0].cast<py::object>();

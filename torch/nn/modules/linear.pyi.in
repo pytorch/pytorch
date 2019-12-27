@@ -3,6 +3,13 @@ from .. import Parameter
 from ... import Tensor
 
 
+class Identity(Module):
+
+    def __init__(self) -> None: ...
+
+    def forward(self, input: Tensor) -> Tensor: ...
+
+
 class Linear(Module):
     in_features: int = ...
     out_features: int = ...

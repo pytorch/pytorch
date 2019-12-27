@@ -29,13 +29,13 @@ class StudentT(Distribution):
 
     @property
     def mean(self):
-        m = self.loc.clone()
+        m = self.loc.clone(memory_format=torch.contiguous_format)
         m[self.df <= 1] = nan
         return m
 
     @property
     def variance(self):
-        m = self.df.clone()
+        m = self.df.clone(memory_format=torch.contiguous_format)
         m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
         m[(self.df <= 2) & (self.df > 1)] = inf
         m[self.df <= 1] = nan

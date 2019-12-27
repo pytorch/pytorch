@@ -23,7 +23,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(1)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8_with_qmin) {
@@ -35,7 +35,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8_with_qmin) {
       .channels(8)
       .width(1)
       .qmin(128)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8_with_qmax) {
@@ -47,7 +47,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_eq_8_with_qmax) {
       .channels(8)
       .width(1)
       .qmax(128)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(
@@ -62,7 +62,7 @@ TEST(
       .width(1)
       .inputZeroPoint(255)
       .kernelZeroPoint(0)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(
@@ -77,7 +77,7 @@ TEST(
       .width(1)
       .inputZeroPoint(0)
       .kernelZeroPoint(255)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8) {
@@ -88,7 +88,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_subsampling) {
@@ -100,7 +100,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_subsampling) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_input_stride) {
@@ -112,7 +112,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_input_stride) {
       .channels(8)
       .width(5)
       .inputStride(17)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_output_stride) {
@@ -124,7 +124,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_eq_8_with_output_stride) {
       .channels(8)
       .width(5)
       .outputStride(19)
-      .test(q8dwconv_ukernel_up8x9__neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__neon);
 }
 
 TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_div_8) {
@@ -136,7 +136,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -149,7 +149,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -163,7 +163,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_div_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(171)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -176,7 +176,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -190,7 +190,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_gt_8_with_qmin) {
         .channels(channels)
         .width(1)
         .qmin(128)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -204,7 +204,7 @@ TEST(Q8DWCONV_UP8x9__NEON, single_output_channels_gt_8_with_qmax) {
         .channels(channels)
         .width(1)
         .qmax(128)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -221,7 +221,7 @@ TEST(
         .width(1)
         .inputZeroPoint(255)
         .kernelZeroPoint(0)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -238,7 +238,7 @@ TEST(
         .width(1)
         .inputZeroPoint(0)
         .kernelZeroPoint(255)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -251,7 +251,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -265,7 +265,7 @@ TEST(Q8DWCONV_UP8x9__NEON, multi_output_channels_gt_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(17)
-        .test(q8dwconv_ukernel_up8x9__neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__neon);
   }
 }
 
@@ -277,7 +277,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(1)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_subsampling) {
@@ -289,7 +289,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_subsampling) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_input_stride) {
@@ -301,7 +301,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_input_stride) {
       .channels(8)
       .width(5)
       .inputStride(17)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_output_stride) {
@@ -313,7 +313,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8_with_output_stride) {
       .channels(8)
       .width(5)
       .outputStride(19)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_eq_8_with_qmin) {
@@ -325,7 +325,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_eq_8_with_qmin) {
       .channels(8)
       .width(1)
       .qmin(128)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_eq_8_with_qmax) {
@@ -337,7 +337,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_eq_8_with_qmax) {
       .channels(8)
       .width(1)
       .qmax(128)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(
@@ -352,7 +352,7 @@ TEST(
       .width(1)
       .inputZeroPoint(255)
       .kernelZeroPoint(0)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(
@@ -367,7 +367,7 @@ TEST(
       .width(1)
       .inputZeroPoint(0)
       .kernelZeroPoint(255)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8) {
@@ -378,7 +378,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(3)
-      .test(q8dwconv_ukernel_mp8x25__neon);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
 }
 
 TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_div_8) {
@@ -390,7 +390,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -403,7 +403,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -417,7 +417,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_div_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(171)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -430,7 +430,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -444,7 +444,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_gt_8_with_qmin) {
         .channels(channels)
         .width(1)
         .qmin(128)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -458,7 +458,7 @@ TEST(Q8DWCONV_MP8x25__NEON, single_output_channels_gt_8_with_qmax) {
         .channels(channels)
         .width(1)
         .qmax(128)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -471,7 +471,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 
@@ -485,7 +485,7 @@ TEST(Q8DWCONV_MP8x25__NEON, multi_output_channels_gt_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(17)
-        .test(q8dwconv_ukernel_mp8x25__neon);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__neon);
   }
 }
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
@@ -499,7 +499,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(1)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_eq_8_with_qmin) {
@@ -511,7 +511,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_eq_8_with_qmin) {
       .channels(8)
       .width(1)
       .qmin(128)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_eq_8_with_qmax) {
@@ -523,7 +523,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_eq_8_with_qmax) {
       .channels(8)
       .width(1)
       .qmax(128)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(
@@ -538,7 +538,7 @@ TEST(
       .width(1)
       .inputZeroPoint(255)
       .kernelZeroPoint(0)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(
@@ -553,7 +553,7 @@ TEST(
       .width(1)
       .inputZeroPoint(0)
       .kernelZeroPoint(255)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(Q8DWCONV_UP8x9__AARCH32_NEON, multi_output_channels_eq_8) {
@@ -564,7 +564,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, multi_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(
@@ -578,7 +578,7 @@ TEST(
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(
@@ -592,7 +592,7 @@ TEST(
       .channels(8)
       .width(5)
       .inputStride(17)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(
@@ -606,7 +606,7 @@ TEST(
       .channels(8)
       .width(5)
       .outputStride(19)
-      .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+      .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
 }
 
 TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_div_8) {
@@ -618,7 +618,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -631,7 +631,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, multi_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -647,7 +647,7 @@ TEST(
         .channels(channels)
         .width(5)
         .outputStride(171)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -660,7 +660,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -674,7 +674,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_gt_8_with_qmin) {
         .channels(channels)
         .width(1)
         .qmin(128)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -688,7 +688,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, single_output_channels_gt_8_with_qmax) {
         .channels(channels)
         .width(1)
         .qmax(128)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -705,7 +705,7 @@ TEST(
         .width(1)
         .inputZeroPoint(255)
         .kernelZeroPoint(0)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -722,7 +722,7 @@ TEST(
         .width(1)
         .inputZeroPoint(0)
         .kernelZeroPoint(255)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -735,7 +735,7 @@ TEST(Q8DWCONV_UP8x9__AARCH32_NEON, multi_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 
@@ -751,7 +751,7 @@ TEST(
         .channels(channels)
         .width(5)
         .outputStride(17)
-        .test(q8dwconv_ukernel_up8x9__aarch32_neon);
+        .test(pytorch_q8dwconv_ukernel_up8x9__aarch32_neon);
   }
 }
 #endif /* CPUINFO_ARCH_ARM */
@@ -765,7 +765,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(1)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_eq_8_with_qmin) {
@@ -777,7 +777,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_eq_8_with_qmin) {
       .channels(8)
       .width(1)
       .qmin(128)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_eq_8_with_qmax) {
@@ -789,7 +789,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_eq_8_with_qmax) {
       .channels(8)
       .width(1)
       .qmax(128)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(
@@ -804,7 +804,7 @@ TEST(
       .width(1)
       .inputZeroPoint(255)
       .kernelZeroPoint(0)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(
@@ -819,7 +819,7 @@ TEST(
       .width(1)
       .inputZeroPoint(0)
       .kernelZeroPoint(255)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8) {
@@ -830,7 +830,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_subsampling) {
@@ -842,7 +842,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_subsampling) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_input_stride) {
@@ -854,7 +854,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_input_stride) {
       .channels(8)
       .width(5)
       .inputStride(17)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_output_stride) {
@@ -866,7 +866,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_eq_8_with_output_stride) {
       .channels(8)
       .width(5)
       .outputStride(19)
-      .test(q8dwconv_ukernel_up8x9__sse2);
+      .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
 }
 
 TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_div_8) {
@@ -878,7 +878,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -891,7 +891,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -905,7 +905,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_div_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(171)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -918,7 +918,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -932,7 +932,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_gt_8_with_qmin) {
         .channels(channels)
         .width(1)
         .qmin(128)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -946,7 +946,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, single_output_channels_gt_8_with_qmax) {
         .channels(channels)
         .width(1)
         .qmax(128)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -963,7 +963,7 @@ TEST(
         .width(1)
         .inputZeroPoint(255)
         .kernelZeroPoint(0)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -980,7 +980,7 @@ TEST(
         .width(1)
         .inputZeroPoint(0)
         .kernelZeroPoint(255)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -993,7 +993,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -1007,7 +1007,7 @@ TEST(Q8DWCONV_UP8x9__SSE2, multi_output_channels_gt_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(17)
-        .test(q8dwconv_ukernel_up8x9__sse2);
+        .test(pytorch_q8dwconv_ukernel_up8x9__sse2);
   }
 }
 
@@ -1019,7 +1019,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(1)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_eq_8_with_qmin) {
@@ -1031,7 +1031,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_eq_8_with_qmin) {
       .channels(8)
       .width(1)
       .qmin(128)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_eq_8_with_qmax) {
@@ -1043,7 +1043,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_eq_8_with_qmax) {
       .channels(8)
       .width(1)
       .qmax(128)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(
@@ -1058,7 +1058,7 @@ TEST(
       .width(1)
       .inputZeroPoint(255)
       .kernelZeroPoint(0)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(
@@ -1073,7 +1073,7 @@ TEST(
       .width(1)
       .inputZeroPoint(0)
       .kernelZeroPoint(255)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8) {
@@ -1084,7 +1084,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_subsampling) {
@@ -1096,7 +1096,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_subsampling) {
       .cr(8)
       .channels(8)
       .width(5)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_input_stride) {
@@ -1108,7 +1108,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_input_stride) {
       .channels(8)
       .width(5)
       .inputStride(17)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_output_stride) {
@@ -1120,7 +1120,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_eq_8_with_output_stride) {
       .channels(8)
       .width(5)
       .outputStride(19)
-      .test(q8dwconv_ukernel_mp8x25__sse2);
+      .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
 }
 
 TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_div_8) {
@@ -1132,7 +1132,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1145,7 +1145,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_div_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1159,7 +1159,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_div_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(171)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1172,7 +1172,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(1)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1186,7 +1186,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_gt_8_with_qmin) {
         .channels(channels)
         .width(1)
         .qmin(128)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1200,7 +1200,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, single_output_channels_gt_8_with_qmax) {
         .channels(channels)
         .width(1)
         .qmax(128)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1217,7 +1217,7 @@ TEST(
         .width(1)
         .inputZeroPoint(255)
         .kernelZeroPoint(0)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1234,7 +1234,7 @@ TEST(
         .width(1)
         .inputZeroPoint(0)
         .kernelZeroPoint(255)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1247,7 +1247,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_gt_8) {
         .cr(8)
         .channels(channels)
         .width(5)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 
@@ -1261,7 +1261,7 @@ TEST(Q8DWCONV_MP8x25__SSE2, multi_output_channels_gt_8_with_output_stride) {
         .channels(channels)
         .width(5)
         .outputStride(17)
-        .test(q8dwconv_ukernel_mp8x25__sse2);
+        .test(pytorch_q8dwconv_ukernel_mp8x25__sse2);
   }
 }
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */

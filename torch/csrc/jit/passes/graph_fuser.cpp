@@ -27,7 +27,7 @@ namespace {
 //      or all tensor inputs have the same scalar type and
 //         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
-//    - Produces contiguous outputs
+//    - Produces dense non-overlapping outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node* node) {
@@ -66,7 +66,6 @@ bool isSimpleMap(Node* node) {
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -79,6 +78,7 @@ bool isSimpleMap(Node* node) {
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",

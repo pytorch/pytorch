@@ -13,14 +13,20 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace at {
+namespace TypeDefault {
 
 ${type_method_definitions}
 
+}  // namespace TypeDefault
+
 #ifndef USE_STATIC_DISPATCH
-static auto& registerer = globalATenDispatch()
+namespace {
+auto registerer = torch::RegisterOperators()
   ${function_registrations};
-#endif
 }
+#endif
+
+}  // namespace at

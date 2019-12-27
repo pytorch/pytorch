@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import unittest
+import uuid
 
 TEST_TENSORBOARD = True
 try:
@@ -52,26 +53,35 @@ def tensor_N(shape, dtype=float):
 
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
+    def setUp(self):
+        if not TEST_TENSORBOARD:
+            return self.skipTest("Skip the test since TensorBoard is not installed")
+        self.temp_dirs = []
+
+    def createSummaryWriter(self):
+        temp_dir = str(uuid.uuid4())
+        self.temp_dirs.append(temp_dir)
+        return SummaryWriter(temp_dir)
+
     def tearDown(self):
         super(BaseTestCase, self).tearDown()
-        if os.path.exists('runs'):
-            # Remove directory created by SummaryWriter
-            shutil.rmtree('runs')
+        # Remove directories created by SummaryWriter
+        for temp_dir in self.temp_dirs:
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
 
 
 if TEST_TENSORBOARD:
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_pytorch_np(self):
         tensors = [torch.rand(3, 10, 10), torch.rand(1), torch.rand(1, 2, 3, 4, 5)]
         for tensor in tensors:
@@ -98,16 +108,16 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         self.assertIsInstance(make_np(x), np.ndarray)
 
     def test_pytorch_write(self):
-        with SummaryWriter() as w:
+        with self.createSummaryWriter() as w:
             w.add_scalar('scalar', torch.autograd.Variable(torch.rand(1)), 0)
 
     def test_pytorch_histogram(self):
-        with SummaryWriter() as w:
+        with self.createSummaryWriter() as w:
             w.add_histogram('float histogram', torch.rand((50,)))
             w.add_histogram('int histogram', torch.randint(0, 100, (50,)))
 
     def test_pytorch_histogram_raw(self):
-        with SummaryWriter() as w:
+        with self.createSummaryWriter() as w:
             num = 50
             floats = make_np(torch.rand((num,)))
             bins = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -150,10 +160,6 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
                                 bucket_counts=counts.tolist())
 
 class TestTensorBoardUtils(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_to_HWC(self):
         test_image = np.random.randint(0, 256, size=(3, 32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'chw')
@@ -204,15 +210,15 @@ precision = [0.3333333, 0.3786982, 0.5384616, 1.0, 0.0]
 recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 class TestTensorBoardWriter(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_writer(self):
-        with SummaryWriter() as writer:
+        with self.createSummaryWriter() as writer:
             sample_rate = 44100
 
             n_iter = 0
+            writer.add_hparams(
+                {'lr': 0.1, 'bsize': 1},
+                {'hparam/accuracy': 10, 'hparam/loss': 10}
+            )
             writer.add_scalar('data/scalar_systemtime', 0.1, n_iter)
             writer.add_scalar('data/scalar_customtime', 0.2, n_iter, walltime=n_iter)
             writer.add_scalars('data/scalar_group', {
@@ -248,13 +254,9 @@ class TestTensorBoardWriter(BaseTestCase):
             writer.add_mesh('my_mesh', vertices=v, colors=c, faces=f)
 
 class TestTensorBoardSummaryWriter(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_summary_writer_ctx(self):
         # after using a SummaryWriter as a ctx it should be closed
-        with SummaryWriter(filename_suffix='.test') as writer:
+        with self.createSummaryWriter() as writer:
             writer.add_scalar('test', 1)
         self.assertIs(writer.file_writer, None)
 
@@ -263,7 +265,7 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
         # OSError: [Errno 24] Too many open files
         passed = True
         try:
-            writer = SummaryWriter()
+            writer = self.createSummaryWriter()
             writer.close()
         except OSError:
             passed = False
@@ -276,19 +278,15 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
             import pathlib2 as pathlib
         else:
             import pathlib
-        p = pathlib.Path('./pathlibtest')
+        p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
         with SummaryWriter(p) as writer:
             writer.add_scalar('test', 1)
         import shutil
         shutil.rmtree(str(p))
 
 class TestTensorBoardEmbedding(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_embedding(self):
-        w = SummaryWriter()
+        w = self.createSummaryWriter()
         all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
         all_labels = torch.Tensor([33, 44, 55])
         all_images = torch.zeros(3, 3, 5, 5)
@@ -308,7 +306,7 @@ class TestTensorBoardEmbedding(BaseTestCase):
         # assert...
 
     def test_embedding_64(self):
-        w = SummaryWriter()
+        w = self.createSummaryWriter()
         all_features = torch.Tensor([[1, 2, 3], [5, 4, 1], [3, 7, 7]])
         all_labels = torch.Tensor([33, 44, 55])
         all_images = torch.zeros((3, 3, 5, 5), dtype=torch.float64)
@@ -327,10 +325,6 @@ class TestTensorBoardEmbedding(BaseTestCase):
                         global_step=2)
 
 class TestTensorBoardSummary(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_uint8_image(self):
         '''
         Tests that uint8 image (pixel values in [0, 255]) is not changed
@@ -443,7 +437,7 @@ class TestTensorBoardSummary(BaseTestCase):
             res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
         # metric data is used in writer.py so the code path is different, which leads to different exception type.
         with self.assertRaises(NotImplementedError):
-            with SummaryWriter() as writer:
+            with self.createSummaryWriter() as writer:
                 writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
 
     def test_mesh(self):
@@ -500,10 +494,6 @@ def write_proto(str_to_compare, function_ptr):
         f.write(str(str_to_compare))
 
 class TestTensorBoardPytorchGraph(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_pytorch_graph(self):
         dummy_input = (torch.zeros(1, 3),)
 
@@ -515,8 +505,25 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             def forward(self, x):
                 return self.l(x)
 
-        with SummaryWriter(comment='LinearModel') as w:
+        with self.createSummaryWriter() as w:
             w.add_graph(myLinear(), dummy_input)
+
+        actual_proto, _ = graph(myLinear(), dummy_input)
+
+        expected_str = read_expected_content(self)
+        expected_proto = GraphDef()
+        text_format.Parse(expected_str, expected_proto)
+
+        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        for i in range(len(expected_proto.node)):
+            expected_node = expected_proto.node[i]
+            actual_node = actual_proto.node[i]
+            self.assertEquals(expected_node.name, actual_node.name)
+            self.assertEquals(expected_node.op, actual_node.op)
+            self.assertEquals(expected_node.input, actual_node.input)
+            self.assertEquals(expected_node.device, actual_node.device)
+            self.assertEquals(
+                sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_mlp_graph(self):
         dummy_input = (torch.zeros(2, 1, 28, 28),)
@@ -543,14 +550,14 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 h = self.fc3(h)
                 return h
 
-        with SummaryWriter(comment='MLPModel') as w:
+        with self.createSummaryWriter() as w:
             w.add_graph(myMLP(), dummy_input)
 
     def test_wrong_input_size(self):
         with self.assertRaises(RuntimeError) as e_info:
             dummy_input = torch.rand(1, 9)
             model = torch.nn.Linear(3, 5)
-            with SummaryWriter(comment='expect_error') as w:
+            with self.createSummaryWriter() as w:
                 w.add_graph(model, dummy_input)  # error
 
     @skipIfNoTorchVision
@@ -567,18 +574,14 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             'mobilenet_v2': (2, 3, 224, 224),
         }
         for model_name, input_shape in model_input_shapes.items():
-            with SummaryWriter(comment=model_name) as w:
+            with self.createSummaryWriter() as w:
                 model = getattr(torchvision.models, model_name)()
                 w.add_graph(model, torch.zeros(input_shape))
 
 class TestTensorBoardFigure(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     @skipIfNoMatplotlib
     def test_figure(self):
-        writer = SummaryWriter()
+        writer = self.createSummaryWriter()
 
         figure, axes = plt.figure(), plt.gca()
         circle1 = plt.Circle((0.2, 0.5), 0.2, color='r')
@@ -598,7 +601,7 @@ class TestTensorBoardFigure(BaseTestCase):
 
     @skipIfNoMatplotlib
     def test_figure_list(self):
-        writer = SummaryWriter()
+        writer = self.createSummaryWriter()
 
         figures = []
         for i in range(5):
@@ -619,10 +622,6 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
 class TestTensorBoardNumpy(BaseTestCase):
-    def setUp(self):
-        if not TEST_TENSORBOARD:
-            return self.skipTest("Skip the test since TensorBoard is not installed")
-
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))

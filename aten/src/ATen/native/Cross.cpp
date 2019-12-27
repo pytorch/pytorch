@@ -9,17 +9,17 @@ namespace at { namespace native {
 DEFINE_DISPATCH(cross_stub);
 
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  Tensor out = at::empty_like(input);
+  Tensor out = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   native::cross_out(out, input, other, dimension);
   return out;
 }
 
 Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  auto device_res = input.type().device_type();
+  auto device_res = input.device().type();
   TORCH_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
-  auto device1 = input.type().device_type();
+  auto device1 = input.device().type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cross only supports CPU and CUDA devices, input got: ", device1);
-  auto device2 = other.type().device_type();
+  auto device2 = other.device().type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cross only supports CPU and CUDA devices, other got: ", device2);
   TORCH_CHECK(device_res == device1, "out and input must have the same device type. out: ", device_res, " input: ", device1);
   TORCH_CHECK(device1 == device2, "input and other must have the same device type. input: ", device1, " other: ", device2);

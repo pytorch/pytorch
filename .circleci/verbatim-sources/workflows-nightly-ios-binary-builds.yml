@@ -1,0 +1,33 @@
+      # Pytorch iOS binary builds
+      - binary_ios_build:
+          name: pytorch_ios_11_2_1_nightly_x86_64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-x86_64-build"
+          context: org-member
+          ios_platform: "SIMULATOR"
+          ios_arch: "x86_64"
+          requires: 
+            - setup
+          filters:
+            branches:
+              only: nightly
+      - binary_ios_build:
+          name: pytorch_ios_11_2_1_nightly_arm64_build
+          build_environment: "libtorch-ios-11.2.1-nightly-arm64-build"
+          context: org-member
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          requires: 
+            - setup
+          filters:
+            branches:
+              only: nightly
+      - binary_ios_upload:
+          build_environment: "libtorch-ios-11.2.1-nightly-binary-build-upload"
+          context: org-member
+          requires:
+            - setup
+            - pytorch_ios_11_2_1_nightly_x86_64_build
+            - pytorch_ios_11_2_1_nightly_arm64_build
+          filters:
+            branches:
+              only: nightly

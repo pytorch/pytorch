@@ -79,8 +79,16 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_scatter.*'  # opset 11 is not supported yet
                      '|test_unique.*'  # opset 11 is not supported yet
                      '|test_gathernd.*'  # opset 11 is not supported yet
+                     '|test_constant_pad.*'  # 1d pad is not supported
+                     '|test_edge_pad.*'  # 1d pad is not supported
+                     '|test_reflect_pad.*'  # 1d pad is not supported
+                     '|test_gemm_default_no_bias.*'  # no bias is not supported
+                     '|test_gemm_default_scalar_bias.*'  # incorrect type
+                     '|test_sequence_.*'  # type sequence is not supported yet
                      '|test_.*negative_ax.*'  # negative axis is not supported yet
                      '|test_.*negative_ind.*'  # negative axis is not supported yet
+                     '|test_argmax_.*select_last_index.*'  # unsupported case
+                     '|test_argmin_.*select_last_index_.*'  # unsupported case
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

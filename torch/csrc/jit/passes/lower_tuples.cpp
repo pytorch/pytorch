@@ -182,7 +182,7 @@ static void EnsureNoTuples(Block* block) {
   }
 }
 
-void LowerAllTuples(std::shared_ptr<Graph>& graph) {
+void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
   EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
@@ -197,7 +197,7 @@ void LowerSimpleTuples(Block* block) {
   }
 }
 
-void LowerSimpleTuples(std::shared_ptr<Graph>& graph) {
+void LowerSimpleTuples(const std::shared_ptr<Graph>& graph) {
   LowerSimpleTuples(graph->block());
   EliminateDeadCode(graph);
 }

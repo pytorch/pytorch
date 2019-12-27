@@ -36,6 +36,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
 echo "Python version:"
 python --version
 
@@ -58,6 +62,24 @@ if ! which conda; then
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
   fi
 fi
 
@@ -112,18 +134,11 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
-  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+  python setup.py install --user
 
-  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
-  if [ -e $ORIG_COMP ]; then
-    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-    # note that the wrapping always names the compiler "clang-7.0_original"
-    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
-    sudo mv $ORIG_COMP $WRAPPED
+  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+  bash tools/amd_build/unwrap_clang.sh
 
-  fi
   exit 0
 fi
 
@@ -140,10 +155,6 @@ export TORCH_CUDA_ARCH_LIST="5.2"
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
-  export DEBUG=1
 fi
 
 # Patch required to build xla
@@ -164,42 +175,60 @@ echo "The next three invocations are expected to fail with invalid command error
 ( ! get_exit_code python setup.py clean] )
 ( ! get_exit_code python setup.py clean bad_argument )
 
-# ppc64le build fails when WERROR=1
-# set only when building other architectures
-# only use for "python setup.py install" line
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-  WERROR=1 python setup.py install
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+  # ppc64le build fails when WERROR=1
+  # set only when building other architectures
+  # only use for "python setup.py install" line
+  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    WERROR=1 python setup.py install
+  else
+    python setup.py install
+  fi
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  if which sccache > /dev/null; then
+    echo 'PyTorch Build Statistics'
+    sccache --show-stats
+  fi
+
+  assert_git_not_dirty
+
+  # Test documentation build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    pushd docs
+    # TODO: Don't run this here
+    pip_install -r requirements.txt || true
+    LC_ALL=C make html
+    popd
+    assert_git_not_dirty
+  fi
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
 else
-  python setup.py install
-fi
+  # Test standalone c10 build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    mkdir -p c10/build
+    pushd c10/build
+    cmake ..
+    make -j
+    popd
+    assert_git_not_dirty
+  fi
 
-echo 'PyTorch Build Statistics'
-sccache --show-stats
-
-assert_git_not_dirty
-
-# Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  pushd docs
-  # TODO: Don't run this here
-  pip_install -r requirements.txt || true
-  LC_ALL=C make html
-  popd
-  assert_git_not_dirty
-fi
-
-# Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  mkdir -p c10/build
-  pushd c10/build
-  cmake ..
-  make -j
-  popd
-  assert_git_not_dirty
-fi
-
-# Test no-Python build
-if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  # Test no-Python build
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -208,17 +237,6 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
 fi
 
 # Test XLA build
@@ -238,7 +256,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
+  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
   sudo ./bazel-*.sh
   BAZEL="$(which bazel)"
@@ -250,7 +268,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
-  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"

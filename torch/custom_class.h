@@ -9,9 +9,8 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
-#include <pybind11/pybind11.h>
+#include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
@@ -19,21 +18,15 @@
 #include <sstream>
 
 
-namespace py = pybind11;
 namespace torch {
 namespace jit {
 
-static std::vector<c10::RegisterOperators> registeredOps;
+TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
+TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
 
 namespace detail {
 template <class R, class...>
 struct types {
-  constexpr static bool hasRet = true;
-  using type = types;
-};
-template <class... args>
-struct types<void, args...> {
-  constexpr static bool hasRet = false;
   using type = types;
 };
 template <class Sig>
@@ -60,58 +53,41 @@ detail::types<void, Types...> init() { return detail::types<void, Types...>{}; }
 
 template <class CurClass>
 class class_ {
+  static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
+    "torch::jit::class_<T> requires T to inherit from CustomClassHolder");
+
   std::string className;
   std::string qualClassName;
-  c10::optional<py::class_<CurClass>> pyClass = c10::nullopt;
-  std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
   const std::string topModule = "__torch__.torch";
 
  public:
-  class_(string className_) : className(std::move(className_)) {
+  class_(std::string className_) : className(std::move(className_)) {
     // Currently we register everything as a python class just for convenience.
     // We'll want to remove this at some point to get rid of the python
     // dependency. It would require significant changes to class registration,
     // (I think)?
     qualClassName = topModule + "." + parentModule + "." + className;
 
-    auto obj = py::module::import("torch").attr(parentModule.c_str());
-    pyClass = py::class_<CurClass>(obj, className.c_str());
-    pyClass->attr("qualified_name") = py::str(qualClassName);
-    auto newClass =
-        py::module::import("torch.jit")
-            .attr("_add_script_class")(*pyClass, qualClassName.c_str());
-
-    auto castToPython = [](void* objPtr) -> PyObject* {
-      CurClass x = *static_cast<CurClass*>(objPtr);
-      auto py_object = py::cast(x);
-      PyObject* rawPyObj = py_object.release().ptr();
-      return rawPyObj;
-    };
-    getClassConverter()[qualClassName] = castToPython;
-
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
-    classCu = torch::jit::get_python_cu();
     classTypePtr =
-        ClassType::create(c10::QualifiedName(qualClassName), classCu);
+        ClassType::create(c10::QualifiedName(qualClassName), classCU());
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
-                              StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCU(), classTypePtr)});
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
-                              StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCU(), classTypePtr)});
 
-    classCu->register_type(classTypePtr);
+    classCU()->register_type(classTypePtr);
   }
 
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
                                                // torch::jit::init<...>()
-    pyClass->def(py::init<Types...>());
-
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
@@ -120,85 +96,54 @@ class class_ {
       object->setSlot(0, capsule);
     };
 
-    defineMethod<void>("__init__", std::move(func), false);
+    defineMethod<void>("__init__", std::move(func));
     return *this;
   }
   template <typename Func>
-  class_& def(string name, Func f) {
+  class_& def(std::string name, Func f) {
     auto res = def_(name, f, detail::args_t<decltype(f)>{});
     return *this;
   }
 
  private:
-  template <class T>
-  struct addInput {
-    static Value* call(std::shared_ptr<Graph> graph) {
-      return graph->addInput()->setType(getTypePtr<T>());
-    }
-  };
-  template <class Func, size_t... arg_indices>
-  std::vector<Value*> addInputs_(
-      Func f,
-      std::shared_ptr<Graph> graph,
-      guts::index_sequence<arg_indices...>) {
-    using argTypes =
-        typename guts::infer_function_traits_t<Func>::parameter_types;
-    std::vector<Value*> res = {
-        addInput<guts::typelist::element_t<arg_indices, argTypes>>::call(
-            graph)...};
-    return res;
-  }
-  template <class Func>
-  std::vector<Value*> addInputs(Func f, std::shared_ptr<Graph> graph) {
-    constexpr auto numArgs =
-        guts::infer_function_traits_t<Func>::number_of_parameters;
-    return addInputs_(f, graph, guts::make_index_sequence<numArgs>());
-  }
-
-  template <typename Last>
-  std::string type_name() {
-    return std::string(typeid(Last).name());
-  }
-  template <typename First, typename Second, typename... Rest>
-  std::string type_name() {
-    return type_name<First>() + "_" + type_name<Second, Rest...>();
-  }
-
-  template <class T>
-  void addType(Value* v) {
-    v->setType(getTypePtr<T>());
-  }
   template<typename R, typename Func>
-  void defineMethod(std::string name, Func func, bool hasRet) {
+  void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    registeredOps.push_back(
+    ensure_c10_registerer_defined();
+    registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
+    auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
+    auto ops = torch::jit::getAllOperatorsFor(func_symbol);
+    TORCH_CHECK(ops.size() == 1);
+    auto &schema = ops[0]->schema();
 
+    for (const auto& arg : schema.arguments()) {
+      graph->addInput()->setType(arg.type());
+    }
 
-    std::vector<Value*> inputs = addInputs(func, graph);
+    bool hasRet = schema.returns().size();
     auto methodCall = graph->insertNode(graph->create(
-        Symbol::fromQualString(qualFuncName), inputs, hasRet));
+        func_symbol, graph->inputs(), hasRet));
     Value* res;
     if (hasRet) {
-      res = methodCall->output();
-      addType<R>(res);
+      const auto& returns = schema.returns();
+      TORCH_CHECK(returns.size() == 1);
+      res = methodCall->output()->setType(returns[0].type());
     } else {
       res = graph->insertConstant(IValue())->setType(NoneType::get());
     }
     graph->registerOutput(res);
 
-    auto method = classCu->create_function(qualClassName + "." + name, graph);
+    auto method = classCU()->create_function(qualClassName + "." + name, graph);
     classTypePtr->addMethod(method);
   }
   template <typename Func, typename R, typename... Types>
-  class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
-    pyClass->def(name.c_str(), f);
-
+  class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
-      return guts::invoke(f, *cur, args...);
+      return at::guts::invoke(f, *cur, args...);
     };
-    defineMethod<R>(name, std::move(func), funcInfo.hasRet);
+    defineMethod<R>(name, std::move(func));
     return *this;
   }
 };

@@ -13,7 +13,8 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -27,7 +28,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.DoubleTensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -61,12 +62,12 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.DoubleTensor([x / 4., x - x / 4.])
+                v = torch.Tensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.DoubleTensor([y - y / 4., y / 4.])
-            x = sparse.DoubleTensor(i, v, torch.Size([2]))
+                v = torch.Tensor([y - y / 4., y / 4.])
+            x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
@@ -342,6 +343,8 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
+    # ROCm precision is too low to pass this test
+    @skipIfRocm
     def test_adadelta(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
@@ -506,16 +509,41 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_no_cyclic_references(self):
+        import gc
+        param = Variable(torch.Tensor(10), requires_grad=True)
+        optim = SGD([param], lr=0.5)
+        scheduler = LambdaLR(optim, lambda epoch: 1.0)
+        del scheduler
+
+        # Prior to Python 3.7, local variables in a function will be referred by the current frame.
+        import sys
+        if sys.version_info < (3, 7):
+            import inspect
+            referrers = gc.get_referrers(optim)
+            self.assertTrue(
+                len(referrers) == 1 and referrers[0] is inspect.currentframe(),
+                "Optimizer should contain no cyclic references (except current frame)")
+            del referrers
+        else:
+            self.assertTrue(
+                len(gc.get_referrers(optim)) == 0,
+                "Optimizer should contain no cyclic references")
+
+        gc.collect()
+        del optim
+        self.assertEqual(
+            gc.collect(), 0, "Optimizer should be garbage-collected on __del__")
+
     def test_old_pattern_warning(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
@@ -525,13 +553,12 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern2():
-            for e in range(epochs):
-                scheduler.step(e)
+            for _ in range(epochs):
+                scheduler.step()
                 self.opt.step()
 
         self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
@@ -543,12 +570,11 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 scheduler.step()
                 self.opt.step()
 
@@ -561,13 +587,12 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern2():
-            for e in range(epochs):
-                scheduler.step(e)
+            for _ in range(epochs):
+                scheduler.step()
                 self.opt.step()
 
         self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
@@ -579,7 +604,6 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -595,8 +619,8 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def old_pattern2():
-            for e in range(epochs):
-                scheduler.step(e)
+            for _ in range(epochs):
+                scheduler.step()
                 self.opt.step()
 
         self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
@@ -605,14 +629,12 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
@@ -621,23 +643,20 @@ class TestLRScheduler(TestCase):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
-                scheduler.step(e)
+                scheduler.step()
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_new_pattern_no_warning_with_overridden_optim_step(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
@@ -685,15 +704,15 @@ class TestLRScheduler(TestCase):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
-    def test_get_computed_values_step_lr(self):
+    def test_get_last_lr_step_lr(self):
         from torch.nn import Parameter
         epochs = 10
         optimizer = torch.optim.SGD([Parameter(torch.randn(2, 2, requires_grad=True))], 0.1)
         targets = [[0.1] * 3 + [0.01] * 3 + [0.001] * 3 + [0.0001]]
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 3, gamma=0.1)
-        self._test_get_computed_values(scheduler, targets, epochs)
+        self._test_get_last_lr(scheduler, targets, epochs)
 
-    def test_get_computed_values_multi_step_lr(self):
+    def test_get_last_lr_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
         # lr = 0.005    if 2 <= epoch < 5
         # lr = 0.0005   if 5 <= epoch < 9
@@ -702,7 +721,7 @@ class TestLRScheduler(TestCase):
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 1
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
-        self._test_get_computed_values(scheduler, targets, epochs)
+        self._test_get_last_lr(scheduler, targets, epochs)
 
     def test_multi_step_lr(self):
         # lr = 0.05     if epoch < 2
@@ -1355,13 +1374,13 @@ class TestLRScheduler(TestCase):
         for key in scheduler.__dict__.keys():
             if key != 'optimizer':
                 self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
-        self.assertAlmostEqual(scheduler._compute_values(), scheduler_copy._compute_values())
+        self.assertAlmostEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
 
-    def _test_get_computed_values(self, schedulers, targets, epochs=10):
+    def _test_get_last_lr(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
-            result = [scheduler.get_computed_values() for scheduler in schedulers]
+            result = [scheduler.get_last_lr() for scheduler in schedulers]
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
             # print(target)
@@ -1429,7 +1448,6 @@ class TestLRScheduler(TestCase):
 
     def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False, use_beta1=False):
         for batch_num in range(batch_iterations):
-            scheduler.step(batch_num)
             if verbose:
                 if 'momentum' in self.opt.param_groups[0].keys():
                     print('batch{}:\tlr={},momentum={}'.format(batch_num, self.opt.param_groups[0]['lr'],
@@ -1456,6 +1474,7 @@ class TestLRScheduler(TestCase):
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
                             batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+            scheduler.step()
 
     def test_cosine_then_cyclic(self):
         # https://github.com/pytorch/pytorch/issues/21965

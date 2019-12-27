@@ -29,6 +29,11 @@ int main() {
   });
   t1.join();
 
+  #if !AT_PARALLEL_NATIVE
+  at::set_num_threads(5);
+  ASSERT_TRUE(at::get_num_threads() == 5);
+  #endif
+
   // test inter-op settings
   at::set_num_interop_threads(5);
   ASSERT_EQ(at::get_num_interop_threads(), 5);

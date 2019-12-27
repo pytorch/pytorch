@@ -31,12 +31,16 @@ SimpleNet::SimpleNet(
     VLOG(1) << "Creating operator " << operator_def.name() << ": "
             << operator_def.type();
     std::unique_ptr<OperatorBase> op{nullptr};
-    if (!operator_def.has_device_option() && net_def_has_device_option) {
-      // In the case that the operator def does not specify a device option but
-      // the net def has a default option, we copy the device option over to the
-      // operator def.
+    if (net_def_has_device_option) {
+      // In the case when net def specifies device option, final device option
+      // will be equal to merge of operator and net def device options, with
+      // preference to settings from the operator.
       OperatorDef temp_def(operator_def);
-      temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
+
+      DeviceOption temp_dev(net_def->device_option());
+      temp_dev.MergeFrom(operator_def.device_option());
+
+      temp_def.mutable_device_option()->CopyFrom(temp_dev);
       op = CreateOperator(temp_def, ws, idx);
     } else {
       op = CreateOperator(operator_def, ws, idx);

@@ -1,6 +1,8 @@
 #pragma once
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <c10/macros/Macros.h>
+
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
@@ -87,13 +89,13 @@ inline void _call_caffe2_op_from_c10(
 
 template <const c10::FunctionSchema& (*Schema)(), class Caffe2Operator>
 void call_caffe2_op_from_c10(
-    c10::Stack* stack,
-    c10::KernelCache* cache) { // TODO Pass in correct cache type
+    const c10::OperatorHandle& /*opHandle*/,
+    c10::Stack* stack) {
   _call_caffe2_op_from_c10(stack, Schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
 inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
-#if defined(CAFFE2_IS_XPLAT_BUILD)
+#if defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE)
   throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
 #else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
@@ -115,9 +117,6 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #endif
 }
 
-inline std::unique_ptr<c10::KernelCache> noCache() {
-  return nullptr;
-}
 }
 }
 
@@ -183,12 +182,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::CPUTensorId,                                      \
+              .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>>(::c10::TensorTypeId::CPUTensorId));
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
@@ -196,12 +193,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::CUDATensorId,                                     \
+              .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>>(::c10::TensorTypeId::CUDATensorId));
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
@@ -212,12 +207,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators().options()                               \
-              .kernel(                                                       \
-                  ::c10::TensorTypeId::HIPTensorId,                                      \
+              .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>,                                        \
-                  &::caffe2::detail::noCache));
+                      OperatorClass>>(::c10::TensorTypeId::HIPTensorId));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size

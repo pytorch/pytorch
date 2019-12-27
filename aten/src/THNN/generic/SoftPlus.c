@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/SoftPlus.c"
 #else
 
+#include <c10/util/math_compat.h>
+
 void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -15,7 +17,7 @@ void THNN_(SoftPlus_updateOutput)(
 
   // f(x) = 1/beta * log(1 + exp(beta * x))
   TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,               \
-    *output_data = (*input_data * beta) > threshold ? *input_data : THLog1p(exp(*input_data * beta)) / beta;
+    *output_data = (*input_data * beta) > threshold ? *input_data : std::log1p(exp(*input_data * beta)) / beta;
   );
 }
 

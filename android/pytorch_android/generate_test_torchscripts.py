@@ -35,6 +35,11 @@ class Test(torch.jit.ScriptModule):
         return input
 
     @torch.jit.script_method
+    def eqStr(self, input):
+        # type: (str) -> str
+        return input
+
+    @torch.jit.script_method
     def eqTensor(self, input):
         # type: (Tensor) -> Tensor
         return input
@@ -98,5 +103,9 @@ class Test(torch.jit.ScriptModule):
             return None
         return input
 
+    @torch.jit.script_method
+    def str3Concat(self, input):
+        # type: (str) -> str
+        return input + input + input
 
 scriptAndSave(Test(), "test.pt")

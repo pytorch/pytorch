@@ -254,7 +254,11 @@ def _nested_map(condition, fn, condition_msg=None):
         elif obj is None:
             return None
         elif isinstance(obj, (list, tuple)):
-            return type(obj)(_map(x) for x in obj)
+            mapped = (_map(x) for x in obj)
+            if hasattr(obj, '_fields'):
+                # obj is namedtuple
+                return type(obj)(*mapped)
+            return type(obj)(mapped)
         elif isinstance(obj, dict):
             return {x : _map(obj[x]) for x in obj}
         else:
