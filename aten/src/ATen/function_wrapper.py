@@ -516,7 +516,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'actuals': List[str],
     'api_name': str,
     'arguments': List[THFormal],
-    'aten_custom_call': str,
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
     'broadcast_actuals': List[str],
@@ -1545,12 +1544,7 @@ def create_derived(backend_type_env, declarations):
                 ret = option['return']
 
                 if ret['kind'] == 'arguments':
-                    if 'aten_custom_call' in option:
-                        # all aten_custom_call bodies handle settings on their own.
-                        case_body.append(CodeTemplate(
-                            option['aten_custom_call']).substitute(case_env))
-                    else:
-                        case_body.extend([call + ';' for call in calls])
+                    case_body.extend([call + ';' for call in calls])
                     arguments_indices = ret['arguments']
                     arguments = [option['arguments'][argi]
                                  for argi in arguments_indices]
@@ -1567,10 +1561,6 @@ def create_derived(backend_type_env, declarations):
                 elif ret['kind'] == 'type':
                     assert len(calls) == 1
                     call = calls[0]
-                    if 'aten_custom_call' in option:
-                        # all aten_custom_call bodies handle settings on their own.
-                        case_body.append(CodeTemplate(
-                            option['aten_custom_call']).substitute(case_env))
 
                     if ret['type'] in ALLOC_WRAP.keys():
                         wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(

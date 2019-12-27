@@ -994,6 +994,7 @@
 ]]
 [[
   name: _th_diag
+  cname: diag
   variants:
     - function
   return: argument 0
@@ -1002,11 +1003,6 @@
       output: True
     - THTensor* self
     - long diagonal
-  aten_custom_call: |
-    if (self_->dim() == 0) {
-      throw std::runtime_error("Input must be 1-d or 2-d");
-    }
-    ${THTensor}_diag(${state,}result_, self_, diagonal);
 ]]
 [[
   name: _th_addmm
