@@ -86,7 +86,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
   std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
 
-  setCuDNNStreamToCurrent();
   TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
   // checked in dispatch:
   // assert other conditions for cudnnCTCLoss: all label lengths <= 256
