@@ -82,12 +82,12 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
   return RRefForkData(ownerId, rrefId, forkId, parent);
 }
 
-//////////////////////////////  RRefBase  /////////////////////////////////////
+//////////////////////////////  RRef  /////////////////////////////////////
 
-RRefBase::RRefBase(worker_id_t ownerId, const RRefId& rrefId)
-    : RRef(), ownerId_(ownerId), rrefId_(rrefId) {}
+RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
+    : RRefInterface(), ownerId_(ownerId), rrefId_(rrefId) {}
 
-RRefForkData RRefBase::fork() const {
+RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
       ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId());
@@ -100,7 +100,7 @@ UserRRef<T>::UserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId)
-    : RRefBase(ownerId, rrefId), forkId_(forkId) {
+    : RRef(ownerId, rrefId), forkId_(forkId) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.

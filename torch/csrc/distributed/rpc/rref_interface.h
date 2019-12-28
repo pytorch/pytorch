@@ -8,16 +8,16 @@ namespace rpc {
 
 // This abstract class contains only user-facing APIs, and will be shared
 // between jit and distributed to implement TorchScript support.
-class RRef {
+class RRefInterface {
  public:
-  RRef() = default;
+  RRefInterface() = default;
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
-  RRef(const RRef& other) = delete;
-  RRef(RRef&& other) = delete;
-  RRef& operator=(RRef&& other) = delete;
+  RRefInterface(const RRefInterface& other) = delete;
+  RRefInterface(RRefInterface&& other) = delete;
+  RRefInterface& operator=(RRefInterface&& other) = delete;
 
-  virtual ~RRef() = default;
+  virtual ~RRefInterface() = default;
 
   // returns the worker id of the owner
   virtual worker_id_t owner() const = 0;

@@ -12,7 +12,7 @@ namespace rpc {
 // pickle and unpickle.
 class PyRRef {
  public:
-  explicit PyRRef(std::shared_ptr<RRefBase> rref);
+  explicit PyRRef(std::shared_ptr<RRef> rref);
   // creates a local RRef with the given object as value
   explicit PyRRef(const py::object& value);
 
@@ -25,7 +25,7 @@ class PyRRef {
   static PyRRef unpickle(const py::tuple& t);
 
  private:
-  std::shared_ptr<RRefBase> rref_;
+  std::shared_ptr<RRef> rref_;
 };
 
 } // namespace rpc
