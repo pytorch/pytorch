@@ -4558,6 +4558,7 @@ def foo(x):
         self.assertFalse("training" in w.state_dict())
 
     @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()
