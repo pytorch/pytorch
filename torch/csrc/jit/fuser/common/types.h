@@ -1,75 +1,57 @@
 #pragma once
 
-#include <cstdint>
+#include <cassert>
 #include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
-using int32 = std::int32_t;
-
-// Switch to PT/Aten dtypes
-
-// Data types for scalar and vector elements.
-class Dtype {
- public:
-  explicit Dtype(int type) : scalar_type_(type), lanes_(1) {}
-  Dtype(int scalar_type, int lanes) : scalar_type_(scalar_type), lanes_(lanes) {}
-  Dtype(Dtype type, int lanes) : scalar_type_(type.scalar_type_), lanes_(lanes) {
-    //TODO! swithc to PyT check
-    //CHECK(type.lanes() == 1);
-  }
-  int lanes() const { return lanes_; }
-  Dtype scalar_type() const;
-  bool operator==(const Dtype& other) const {
-    return scalar_type_ == other.scalar_type_ && lanes_ == other.lanes_;
-  }
-  bool operator!=(const Dtype& other) const { return !(*this == other); }
-
- private:
-  friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
-  int scalar_type_;
-  int lanes_;  // the width of the element for a vector time
+//Order based on type promotion rules
+enum class CType {
+  kFloat32,
+  kInt32,
+  kStatement,
+  kNull
 };
 
-extern Dtype kUninitialized;
-extern Dtype kInt32;
-extern Dtype kFloat32;
-extern Dtype kHandle;
-extern Dtype kNull;
+// Data types for scalar and vector elements.
+class DType {
+ public:
+  DType(CType ctype, int lanes = 1)
+      : ctype_(ctype), lanes_(lanes) {}
 
-template <typename T>
-Dtype ToDtype();
+  DType(const DType &d2):ctype_(d2.ctype()), lanes_(d2.lanes()){} 
 
-template <>
-inline Dtype ToDtype<int>() {
-  return kInt32;
-}
-
-template <>
-inline Dtype ToDtype<float>() {
-  return kFloat32;
-}
-
-inline Dtype BinaryOpDtype(Dtype op1_dtype, Dtype op2_dtype) {
-  if (op1_dtype == op2_dtype) {
-    return op1_dtype;
+  const CType& ctype() const{
+    return ctype_;
   }
-  //TODO! switch to PYT EQ
-  //CHECK_EQ(op1_dtype.lanes(), op2_dtype.lanes()) << "vector lengths must match";
-  Dtype op1_scalar = op1_dtype.scalar_type();
-  Dtype op2_scalar = op2_dtype.scalar_type();
 
-  if (op1_scalar == kInt32 && op2_scalar == kFloat32) {
-    return op2_dtype;
+  const int& lanes() const {
+    return lanes_;
   }
-  if (op1_scalar == kFloat32 && op2_scalar == kInt32) {
-    return op1_dtype;
+
+  bool operator==(const DType& other) const {
+    return ctype_ == other.ctype_ && lanes_ == other.lanes_;
   }
-  //TODO! switch to PyT Log
-  //LOG(FATAL) << "Invalid dtypes: " << op1_dtype << ", " << op2_dtype;
-}
+  bool operator!=(const DType& other) const {
+    return !(*this == other);
+  }
+
+ private:
+  const CType ctype_;
+  const int lanes_; // the width of the element for a vector time
+};
+
+std::ostream& operator<<(std::ostream& os, const DType& dtype);
+
+bool is_scalar(const CType& type);
+
+CType promote(const CType& t1, const CType& t2);
+
+bool is_scalar(const DType& type);
+
+DType promote(const DType& t1, const DType& t2);
 
 } // namespace fuser
 } // namespace jit

@@ -98,6 +98,7 @@ namespace jit {
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
   _(GPUFusion)                  \
+  _(GPUHelloFusion)             \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)

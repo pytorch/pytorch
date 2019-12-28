@@ -4,60 +4,47 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-enum ScalarType {
-  kScalarUninitialized,
-  kScalarHandle,
-  kScalarInt32,
-  kScalarFloat32,
-  kScalarNull
-};
+  std::ostream& operator<<(std::ostream& os, const DType& dtype){
 
-Dtype Dtype::scalar_type() const {
-  switch (static_cast<ScalarType>(scalar_type_)) {
-    case kScalarUninitialized:
-      return kUninitialized;
-    case kScalarHandle:
-      return kHandle;
-    case kScalarInt32:
-      return kInt32;
-    case kScalarFloat32:
-      return kFloat32;
-      //TODO switch to PyT LOG
-      //default:
-      //LOG(FATAL) << "invalid scalar type: " << scalar_type_;
+  switch(dtype.ctype()){
+    case(CType::kInt32):
+    os<<"int32";
+    break;
+    case(CType::kFloat32):
+    os<<"float32";
+    break;
+    case(CType::kStatement):
+    break;
+    case(CType::kNull):
+    break;
+    }
+    return os;
   }
+
+
+bool is_scalar(const CType& type){
+  if(type<CType::kStatement)
+    return true;
+  return false;
 }
 
-Dtype kInt32(kScalarInt32, 1);
-Dtype kFloat32(kScalarFloat32, 1);
-Dtype kHandle(kScalarHandle, 1);
-Dtype kUninitialized(kScalarUninitialized, 1);
-Dtype kNull(kScalarNull, 1);
-
-std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
-  switch (static_cast<ScalarType>(dtype.scalar_type_)) {
-    case kScalarUninitialized:
-      stream << "uninitialized";
-      break;
-    case kScalarHandle:
-      stream << "handle";
-      break;
-    case kScalarInt32:
-      stream << "int32";
-      break;
-    case kScalarFloat32:
-      stream << "float32";
-      break;
-      //TODO switch to PyT LOG
-      //default:
-      //LOG(FATAL) << "invalid scalar type: " << dtype.scalar_type_;
-  }
-  if (dtype.lanes() > 1) {
-    stream << "x" << dtype.lanes();
-    ;
-  }
-  return stream;
+CType promote(const CType& t1, const CType& t2){
+  assert(
+    (t1 < CType::kStatement && t2 < CType::kStatement) ||
+    (t1 > CType::kStatement && t2 > CType::kStatement)
+  );
+  return(t1 < t2 ? t1 : t2);
 }
+
+bool is_scalar(const DType& type){
+  return is_scalar(type.ctype());
+}
+
+DType promote(const DType& t1, const DType& t2){
+  assert(t1.lanes() == t2.lanes());
+  return DType(promote(t1.ctype(), t2.ctype()), t1.lanes());
+}
+
 
 } // namespace fuser
 } // namespace jit

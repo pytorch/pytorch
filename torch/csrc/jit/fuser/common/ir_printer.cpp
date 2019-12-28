@@ -46,11 +46,11 @@ void IRPrinter::visit(const FloatImm* v) {
   os << v->value();
 }
 
+
 void IRPrinter::visit(const Cast* v) {
-  auto dtype = v->dtype();
-  os << dtype << "(";
+  os <<"( (" << v->dst_type() << ") ";
   v->src_value().accept(this);
-  os << ")";
+  os<< " )";
 }
 
 void IRPrinter::visit(const Variable* v) {

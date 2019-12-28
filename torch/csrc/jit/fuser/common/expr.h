@@ -18,12 +18,12 @@ class IRNode : public RefCounted {
 // The common base between all expression node.
 class BaseExprNode : public IRNode {
  public:
-  explicit BaseExprNode(Dtype dtype) : dtype_(dtype) {}
+  explicit BaseExprNode(DType dtype) : dtype_(dtype) {}
 
-  Dtype dtype() const { return dtype_; }
+  DType dtype() const { return dtype_; }
 
  private:
-  Dtype dtype_;
+  DType dtype_;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -33,7 +33,7 @@ class ExprNode : public BaseExprNode {
  public:
   using ExprNodeBase = ExprNode<Op>;
   void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
-  explicit ExprNode(Dtype dtype) : BaseExprNode(dtype) {}
+  explicit ExprNode(DType dtype) : BaseExprNode(dtype) {}
 };
 
 // A refcounted pointer to the underlying ExprNode.
@@ -59,7 +59,7 @@ class Expr : public RefHandle<BaseExprNode> {
     return dynamic_cast<const Op*>(this->node());
   }
 
-  Dtype dtype() const { return node()->dtype(); }
+  DType dtype() const { return node()->dtype(); }
 
   // Handling the math operators.
   Expr operator+(const Expr& other) const;
