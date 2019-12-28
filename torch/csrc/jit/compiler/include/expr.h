@@ -19,7 +19,9 @@ class IRNode : public RefCounted {
 class BaseExprNode : public IRNode {
  public:
   explicit BaseExprNode(Dtype dtype) : dtype_(dtype) {}
-  Dtype dtype() const { return dtype_; }
+  Dtype dtype() const {
+    return dtype_;
+  }
 
  private:
   Dtype dtype_;
@@ -37,7 +39,9 @@ template <class Op>
 class ExprNode : public BaseExprNode {
  public:
   using ExprNodeBase = ExprNode<Op>;
-  void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
+  void accept(IRVisitor* visitor) const override {
+    visitor->visit(static_cast<const Op*>(this));
+  }
   explicit ExprNode(Dtype dtype) : BaseExprNode(dtype) {}
 };
 
@@ -45,7 +49,9 @@ template <class Op>
 class StmtNode : public BaseStmtNode {
  public:
   using StmtNodeBase = StmtNode<Op>;
-  void accept(IRVisitor* visitor) const override { visitor->visit(static_cast<const Op*>(this)); }
+  void accept(IRVisitor* visitor) const override {
+    visitor->visit(static_cast<const Op*>(this));
+  }
   StmtNode() {}
 };
 
@@ -72,7 +78,9 @@ class Expr : public RefHandle<BaseExprNode> {
     return dynamic_cast<const Op*>(this->node());
   }
 
-  Dtype dtype() const { return node()->dtype(); }
+  Dtype dtype() const {
+    return node()->dtype();
+  }
 
   // Handling the math operators.
   Expr operator+(const Expr& other) const;
@@ -86,7 +94,9 @@ class Stmt : public RefHandle<BaseStmtNode> {
   using BaseHandle = RefHandle<BaseStmtNode>;
   explicit Stmt(BaseStmtNode* node) : BaseHandle(node) {}
 
-  void accept(IRVisitor* visitor) const { node()->accept(visitor); }
+  void accept(IRVisitor* visitor) const {
+    node()->accept(visitor);
+  }
 
   template <class Op>
   const Op* AsNode() const {
