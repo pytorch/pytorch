@@ -134,6 +134,7 @@ class Variable : public ExprNode<Variable> {
 // For example: Var x('x'); Expr x2 = x;
 class Var : public Expr {
  public:
+  Var() : Expr(nullptr) {}
   Var(Dtype dtype) : Expr(Variable::make(dtype)) {}
   Var(const std::string& name_hint, Dtype dtype)
       : Expr(Variable::make(name_hint, dtype)) {}
@@ -145,6 +146,13 @@ class Var : public Expr {
   }
   bool operator!=(const Var& other) const {
     return !(*this == other);
+  }
+
+  const std::string& name_hint() const {
+    return this->node()->name_hint();
+  }
+  bool is_null() const {
+    return (this->node() == nullptr);
   }
 };
 

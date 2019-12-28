@@ -56,6 +56,11 @@ class RefCounted {
 
 template <class NodeType>
 class RefHandle {
+ public:
+  bool is_null() const {
+    return node_ == nullptr;
+  }
+
  protected:
   virtual ~RefHandle() { reset(); }
 
