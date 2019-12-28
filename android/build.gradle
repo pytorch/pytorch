@@ -1,8 +1,4 @@
 allprojects {
-    if (name == "pytorch_host") {
-        return
-    }
-
     buildscript {
         ext {
             minSdkVersion = 21
@@ -37,8 +33,6 @@ allprojects {
         jcenter()
     }
 }
-
-ext.isPublishing = { ['uploadArchives', 'bintrayUpload'].any { gradle.startParameter.taskNames.contains(it) } }
 
 ext.deps = [
         jsr305: 'com.google.code.findbugs:jsr305:3.0.1',

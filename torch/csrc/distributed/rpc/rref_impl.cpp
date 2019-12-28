@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -81,32 +82,6 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
   return RRefForkData(ownerId, rrefId, forkId, parent);
 }
 
-RRefForkData RRefForkData::fromIValue(const at::IValue& ivalue) {
-  auto ivalues = ivalue.toTuple()->elements();
-
-  TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 4,
-      "Constructing RRefForkData from ivalue "
-      "expects a GenericList of 4 elements, but got ",
-      ivalues.size());
-
-  int64_t ownerId = ivalues[0].toInt();
-  TORCH_INTERNAL_ASSERT(
-      ownerId < std::numeric_limits<worker_id_t>::max(),
-      "RRefId createdOn out of range, got ",
-      ownerId);
-
-  RRefId rrefId = RRefId::fromIValue(ivalues[1]);
-  ForkId forkId = ForkId::fromIValue(ivalues[2]);
-
-  int64_t parent = ivalues[3].toInt();
-  TORCH_INTERNAL_ASSERT(
-      parent < std::numeric_limits<worker_id_t>::max(),
-      "RRefId createdOn out of range, got ",
-      parent);
-  return RRefForkData(ownerId, rrefId, forkId, parent);
-}
-
 //////////////////////////////  RRefBase  /////////////////////////////////////
 
 RRefBase::RRefBase(worker_id_t ownerId, const RRefId& rrefId)
@@ -135,15 +110,16 @@ UserRRef<T>::UserRRef(
 
 template <typename T>
 UserRRef<T>::~UserRRef() {
-  // TODO: queue this in RRefContext instead of doing it here.
-  auto& ctx = RRefContext::getInstance();
-  if (ctx.getWorkerId() != ownerId_) {
-    auto fm = ctx.agent()->send(
-        ctx.agent()->getWorkerInfo(ownerId_),
-        RRefUserDelete(rrefId_, forkId_).toMessage());
-
-    fm->addCallback(
-        [](const Message& message) { RRefContext::handleException(message); });
+  try {
+    RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
+  } catch (const std::exception& ex) {
+    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << ex.what();
+  } catch (...) {
+    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+               << "unknown error";
   }
 }
 
@@ -153,8 +129,7 @@ const ForkId& UserRRef<T>::forkId() const {
 }
 
 template <>
-std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
-  auto future = std::make_shared<ivalue::Future>(nullptr);
+IValue UserRRef<IValue>::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -166,18 +141,14 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
       ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
       true /* forceGradRecording */);
 
-  futureResponse->addCallback([future](const Message& message) {
-    RRefContext::handleException(message);
-    auto response = deserializeResponse(message);
-    auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
-    future->markCompleted(rfr.values().front());
-  });
-  return future;
+  const Message& message = futureResponse->wait();
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+  return rfr.values().front();
 }
 
 template <>
-std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
-  auto future = std::make_shared<ivalue::Future>(nullptr);
+py::object UserRRef<py::object>::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // PythonRRefFetchCall message always carries autograd context id even if
@@ -189,13 +160,11 @@ std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
       PythonRRefFetchCall(ownerId_, rrefId()).toMessage(),
       true /* forceGradRecording */);
 
-  futureResponse->addCallback([future](const Message& message) {
-    RRefContext::handleException(message);
-    auto response = deserializeResponse(message);
-    auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
-    future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
-  });
-  return future;
+  const Message& message = futureResponse->wait();
+  auto response = deserializeResponse(message);
+  auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
+  return PythonRpcHandler::getInstance().deserialize(
+      SerializedPyObj::fromIValues(rfr.values()));
 }
 
 template class UserRRef<IValue>;
@@ -205,19 +174,43 @@ template class UserRRef<py::object>;
 
 template <typename T>
 const T& OwnerRRef<T>::getValue() const {
-  // TODO: use callback to make this non-blocking
   std::unique_lock<std::mutex> lock(mutex_);
   valueCV_.wait(lock, [this] { return value_.has_value(); });
   return value_.value();
 }
 
 template <typename T>
-void OwnerRRef<T>::setValue(T&& value) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    value_ = std::move(value);
+bool OwnerRRef<T>::hasValue() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return value_.has_value();
+}
+
+template <typename T>
+std::shared_ptr<FutureMessage> OwnerRRef<T>::getFuture() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (future_.get()) {
+    return future_;
   }
+  future_ = std::make_shared<FutureMessage>();
+  std::shared_ptr<FutureMessage> ret = future_;
+  if (value_.has_value()) {
+    lock.unlock();
+    ret->markCompleted(Message());
+  }
+  return ret;
+}
+
+template <typename T>
+void OwnerRRef<T>::setValue(T&& value) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  value_ = std::move(value);
+  std::shared_ptr<FutureMessage> future;
+  future.swap(future_);
+  lock.unlock();
   valueCV_.notify_all();
+  if (future.get() && !future->completed()) {
+    future->markCompleted(Message());
+  }
 }
 
 template class OwnerRRef<IValue>;

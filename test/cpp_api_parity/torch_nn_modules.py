@@ -115,6 +115,7 @@ module_metadata_map = {
     'RReLU': TorchNNModuleMetadata(),
     'SELU': TorchNNModuleMetadata(),
     'CELU': TorchNNModuleMetadata(),
+    'GELU': TorchNNModuleMetadata(),
     'Sigmoid': TorchNNModuleMetadata(),
     'Softplus': TorchNNModuleMetadata(),
     'Softshrink': TorchNNModuleMetadata(),

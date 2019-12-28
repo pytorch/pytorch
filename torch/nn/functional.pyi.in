@@ -137,6 +137,9 @@ def rrelu(input: Tensor, lower: float = ..., upper: float = ..., training: bool 
           inplace: bool = ...) -> Tensor: ...
 
 
+def gelu(input: Any): ...
+
+
 def hardshrink(input: Tensor, lambd: float = ...) -> Tensor: ...
 
 

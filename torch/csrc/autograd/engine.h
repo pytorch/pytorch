@@ -165,7 +165,7 @@ struct TORCH_API Engine {
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  variable_list execute_with_graph_task(
+  virtual variable_list execute_with_graph_task(
       std::shared_ptr<GraphTask> graph_task,
       std::shared_ptr<Node> graph_root);
 
@@ -191,7 +191,9 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
-protected:
+  size_t ready_queue_size(at::Device device);
+
+ protected:
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
       std::shared_ptr<GraphTask>& graph_task,

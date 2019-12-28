@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {
@@ -13,12 +14,12 @@ IValue deepCopy(const IValue& self) {
 
   // Tensors need special handling, since copy assignment creates an alias
   if (self.isTensor()) {
-    return IValue(self.toTensor().clone());
+    return IValue(self.toTensor().clone(at::MemoryFormat::Preserve));
   }
   if (self.isTensorList()) {
     c10::List<at::Tensor> newList;
     for (const at::Tensor& oldTensor : self.toTensorListRef()) {
-      newList.push_back(oldTensor.clone());
+      newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
     }
     return newList;
   }
@@ -178,15 +179,8 @@ c10::optional<IValue> toIValueProp(const Value* v) {
   }
 
   if (v->node()->kind() == aten::Float) {
-    auto op = getOperation(v->node());
-    if (auto input = toIValue(v->node()->input())) {
-      auto op = getOperation(v->node());
-      Stack stack;
-      push(stack, *input);
-      op(stack);
-      return stack.back();
-    } else {
-      return c10::nullopt;
+    if (auto maybe_stack = runNodeIfInputsAreConstant(v->node())) {
+      return maybe_stack->at(0);
     }
   }
   return c10::nullopt;

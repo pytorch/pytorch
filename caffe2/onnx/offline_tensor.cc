@@ -79,6 +79,9 @@ void OfflineTensorShapeFunctions::SetupExternalTensorDescriptor(
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
+
+  // It is an offline tensor
+  desc->isOffline = 1;
 }
 
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(

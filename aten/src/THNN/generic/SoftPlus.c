@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/SoftPlus.c"
 #else
 
+#include <c10/util/math_compat.h>
+
 void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input,

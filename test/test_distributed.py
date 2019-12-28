@@ -1426,27 +1426,33 @@ class _DistTestBase(object):
                     ] for rank_iter in group
                 ]
                 assert self._run_all_gather_coalesced_and_verify(
-                    output_tensor_lists, input_tensors, expected_tensors, group_id)
+                    output_tensor_lists, input_tensors,
+                    expected_tensors, group_id
+                ), "output tensors do not match expected ouputs"
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    def test_all_gather_coalesced(self):
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_simple(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_with_empty(self):
         group, group_id, rank = self._init_global_test()
         input_tensors = [
@@ -1909,6 +1915,54 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        # DDP does not support replicating BN layers within a process, hence
+        # testing with one module replica per process
+        gpus = [rank]
+
+        model = nn.BatchNorm1d(2)
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpus[0])
+
+        # DDP training setup
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpus[0])
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=gpus
+        )
+
+        local_bs = len(gpus) * 2
+        global_bs = int(WORLD_SIZE) * local_bs
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 2)
+        loss = nn.MSELoss()
+
+        # disabling cudnn.
+        # SyncBatchNorm goes through native_batch_norm kernel, this avoids the
+        # numerical issue created by the divergent code path.
+        with torch.backends.cudnn.flags(False):
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_cpu.cuda(gpus[0]),
+                target.cuda(gpus[0]),
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True
+            )
+            self._barrier()
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")

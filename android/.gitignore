@@ -6,11 +6,5 @@ gradle/wrapper
 .idea/*
 .externalNativeBuild
 build
-pytorch_android/src/main/cpp/libtorch_include/x86/**
-pytorch_android/src/main/cpp/libtorch_include/x86_64/**
-pytorch_android/src/main/cpp/libtorch_include/armeabi-v7a/**
-pytorch_android/src/main/cpp/libtorch_include/arm64-v8a/**
-pytorch_android/src/main/jniLibs/x86/**
-pytorch_android/src/main/jniLibs/x86_64/**
-pytorch_android/src/main/jniLibs/armeabi-v7a/**
-pytorch_android/src/main/jniLibs/arm64-v8a/**
+pytorch_android/src/main/cpp/libtorch_include/**
+pytorch_android/src/main/jniLibs/**

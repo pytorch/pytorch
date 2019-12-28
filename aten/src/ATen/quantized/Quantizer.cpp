@@ -111,8 +111,6 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
   );
 }
 
-// TODO: dequantize_val?
-
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
   auto fn_name = "quantize_tensor";
@@ -474,10 +472,9 @@ QuantizerPtr make_per_channel_affine_quantizer(
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
-  // TODO: remove this when Variable and Tensor are merged
-  TORCH_INTERNAL_ASSERT(
-      !self.is_variable(),
-      "_internal_get_QTensorImpl: should not be a variable");
+  TORCH_CHECK(
+      !self.requires_grad(),
+      "quantized tensors do not support autograd");
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }

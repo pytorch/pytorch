@@ -1157,32 +1157,6 @@ def all_gather(tensor_list,
     else:
         work.wait()
 
-def _check_lists_of_same_shape(list1, list2):
-    """
-    Helper to check that individual tensors of 'list1' and 'list2' match in
-    shape point-wise.
-
-    Returns:
-        True if list1 matches list2
-    """
-    return (len(list1) == len(list2) and
-            all(t1.size() == t2.size() for t1, t2 in zip(list1, list2)))
-
-
-def _check_input_output(output_tensor_lists, input_tensor_list, param_name):
-    """
-    Helper to check that each element of output_tensor_lists matches input_tensor_list in shape.
-
-    """
-    if not isinstance(output_tensor_lists, list):
-        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
-                           "to be of type List[List[torch.Tensor]].".format(param_name))
-    all(_check_tensor_list(
-        output_tensor_list, param_name + " element ") for output_tensor_list in output_tensor_lists)
-    if not all(_check_lists_of_same_shape(
-            output_tensor_list, input_tensor_list) for output_tensor_list in output_tensor_lists):
-        raise RuntimeError("Shape tensor mismatch in {}".format(param_name))
-
 def all_gather_coalesced(output_tensor_lists,
                          input_tensor_list,
                          group=group.WORLD,
@@ -1197,7 +1171,6 @@ def all_gather_coalesced(output_tensor_lists,
             current process. At least one tensor has to be non empty.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op.
-            currently does not support async_op being True
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -1228,41 +1201,28 @@ def all_gather_coalesced(output_tensor_lists,
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
-    _check_tensor_list(input_tensor_list, "tensor_list")
-    _check_input_output(
-        output_tensor_lists, input_tensor_list, "output_tensor_lists")
+    # We only check basic compatibility with C++ params here, C++ code will
+    # do shape and type checking.
     if _rank_not_in_group(group):
         return
-
-    # Flatten the input and create a list of flat outputs.
-    input_coalesced = torch.cat([t.flatten() for t in input_tensor_list])
-    output_coalesced = [
-        torch.empty(input_coalesced.numel()) for _ in output_tensor_lists]
+    _check_tensor_list(input_tensor_list, "tensor_list")
+    if not isinstance(output_tensor_lists, list):
+        RuntimeError("Invalid function argument: "
+                     "output_tensor_lists should be a list")
+    for output_tensor_list in output_tensor_lists:
+        _check_tensor_list(output_tensor_list, "output_tensor_lists")
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.allgather([output_coalesced], [input_coalesced])
+        work = _default_pg.allgather_coalesced(
+            output_tensor_lists, input_tensor_list)
     else:
-        work = group.allgather([output_coalesced], [input_coalesced])
+        work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
-        raise RuntimeError("all_gather_coalesced does not support "
-                           "async mode yet.")
+        return work
     else:
         work.wait()
-        assert len(output_tensor_lists) == len(output_coalesced)
-        # Iterate through flat outputs and store them in output_tensor_lists
-        for rank, rank_output in enumerate(output_coalesced):
-            current_element = 0
-            for index_output, output_tensor in enumerate(
-                    output_tensor_lists[rank]):
-                output_tensor.copy_(
-                    rank_output.narrow(
-                        dim=0,
-                        start=current_element,
-                        length=output_tensor.numel()).reshape(
-                            output_tensor.size()))
-                current_element += output_tensor.numel()
 
 
 def gather(tensor,

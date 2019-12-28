@@ -10,9 +10,29 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
+
+c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
+  Stack stack;
+  for (const Value* input : node->inputs()) {
+    if (auto ival = toIValue(input)) {
+      stack.push_back(ival);
+    } else {
+      return c10::nullopt;
+    }
+  }
+  try {
+    auto op = getOperation(node);
+    op(stack);
+    TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
+  } catch (...) {
+    return c10::nullopt;
+  }
+  return stack;
+}
 
 namespace {
 
@@ -36,14 +56,32 @@ std::unordered_set<Symbol> tuple_ops = {
 };
 
 struct ConstantPropagator {
-  ConstantPropagator(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), aliasDb(graph_){};
+  // Runs constant propagation with an aliasing db and checks if inputs or
+  // outputs might be mutated in the graph
+  static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
+    return ConstantPropagator(graph, true);
+  }
+
+  // Runs constant propagation only on ops that clearly do not have aliased
+  // inputs or outputs without computing aliasing information
+  static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
+    return ConstantPropagator(graph, false);
+  }
 
   void run() {
     ConstantPropagation(graph_->block());
   }
 
  private:
+  ConstantPropagator(std::shared_ptr<Graph> graph, bool aliasing_types)
+      : graph_(std::move(graph)) {
+    if (aliasing_types) {
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    } else {
+      aliasDb_ = nullptr;
+    }
+  }
+
   void pushIValue(Value* v, Stack& stack) {
     if (tuples.count(v)) {
       const auto& ival = tuples[v];
@@ -293,35 +331,52 @@ struct ConstantPropagator {
     return false;
   };
 
+  bool noMutableValues(at::ArrayRef<Value*> values) {
+    return std::none_of(values.begin(), values.end(), [](Value* v) {
+      return AliasDb::mutableType(v);
+    });
+  }
+
+  bool supportedNode(Node* n) {
+    bool no_mutation;
+    if (aliasDb_) {
+      no_mutation = !aliasDb_->hasWriters(n);
+    } else {
+      no_mutation =
+          noMutableValues(n->inputs()) && noMutableValues(n->outputs());
+    }
+    return no_mutation && !n->kind().is_onnx() &&
+        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+        !n->hasSideEffects() && n->blocks().size() == 0;
+  }
+
+  void ConstantPropagation(at::ArrayRef<Block*> blocks) {
+    for (Block* block : blocks) {
+      ConstantPropagation(block);
+    }
+  }
+
   void ConstantPropagation(Node* n) {
     bool runnable_inputs = runnableInputs(n);
-    bool supported_node = !n->kind().is_onnx() &&
-        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && !aliasDb.hasWriters(n);
-    auto run_blocks = [&]() {
-      for (Block* block : n->blocks()) {
-        ConstantPropagation(block);
-      }
-    };
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
       if (runnable_inputs) {
         inlineIf(n);
       } else {
-        run_blocks();
+        ConstantPropagation(n->blocks());
         removeExtraIfOutputs(n);
       }
     } else if (n->kind() == prim::Loop) {
       if (loopWillNotRun(n)) {
         removeLoopNode(n);
       } else {
-        run_blocks();
+        ConstantPropagation(n->blocks());
         removeExtraLoopOutputs(n);
       }
-    } else if (runnable_inputs && supported_node) {
+    } else if (runnable_inputs && supportedNode(n)) {
       propagateNode(n);
     } else {
-      run_blocks();
+      ConstantPropagation(n->blocks());
     }
   }
 
@@ -334,17 +389,25 @@ struct ConstantPropagator {
   }
 
   std::shared_ptr<Graph> graph_;
-  AliasDb aliasDb;
+  std::unique_ptr<AliasDb> aliasDb_;
   // these are tuples which we know the computed IValue for
   std::unordered_map<Value*, IValue> tuples;
 };
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp(graph);
+  ConstantPropagator cp = ConstantPropagator::WithAliasDb(graph);
   cp.run();
   EliminateDeadCode(graph);
   GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
+
+void ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+  ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
+  cp.run();
+  EliminateDeadCode(graph);
+  GRAPH_DUMP("After ConstantPropagation: ", graph);
+}
+
 } // namespace jit
 } // namespace torch

@@ -110,6 +110,9 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   void ConvNHWCCore_(const T* col_buffer_data, vector<std::int32_t>* Y_int32);
 
+  fbgemm::conv_param_t<> GetConvParam_();
+  fbgemm::conv_param_t<3> GetConv3DParam_();
+
   std::vector<dnnlowp::RequantizationParams> requantization_params_;
 
   // used in fast path for T == uint8_t
@@ -120,6 +123,9 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   // For small gconv
   std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>>
       Wq_gconv_packed_;
+  std::shared_ptr<
+      fbgemm::PackWeightMatrixForGConv<std::int8_t, std::int32_t, 3>>
+      Wq_gconv3d_packed_;
 
   // pre-computed biases and offsets
   std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
