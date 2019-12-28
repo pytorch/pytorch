@@ -537,7 +537,6 @@ class Module(object):
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
-#        print("result grad_fn: ", result.grad_fn)
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:

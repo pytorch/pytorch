@@ -255,7 +255,6 @@ void slow_conv_transpose2d_out_cpu_template(
     ones.fill_(1);
   }
 
-  std::cout << "3 output.grad=" << output.grad_fn() << std::endl;
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
       input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
@@ -342,7 +341,6 @@ void slow_conv_transpose2d_out_cpu_template(
           input.resize_({n_input_plane, input_height, input_width});
         }
       });
-    std::cout << "4 output.grad=" << output.grad_fn() << std::endl;
 }
 
 static void slow_conv_transpose2d_backward_out_cpu_template(
@@ -782,7 +780,6 @@ Tensor slow_conv_transpose2d_cpu(
       columns,
       ones);
 
-  std::cout << "slow_conv_transpose2d: " << output.grad_fn() << std::endl;
   return output;
 }
 

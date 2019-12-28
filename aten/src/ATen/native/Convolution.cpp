@@ -602,11 +602,14 @@ at::Tensor _convolution(
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same");
 
+    std::cout << "---- INSIDE CUDNN -----\n";
     if (params.transposed) {
+      std::cout << "---- PARAM TRANSPOSED ----\n";
       output = at::cudnn_convolution_transpose(
           input.contiguous(input.suggest_memory_format()), weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
+      std::cout << "---- PARAM NOT TRANSPOSED ----\n";
       output = at::cudnn_convolution(
           input.contiguous(input.suggest_memory_format()), weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
