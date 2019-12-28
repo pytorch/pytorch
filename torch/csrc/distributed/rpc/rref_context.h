@@ -107,13 +107,15 @@ class RRefContext {
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
   void addPendingChild(
-      const ForkId& forkId, const std::shared_ptr<RRefBase>& rref);
+      const ForkId& forkId,
+      const std::shared_ptr<RRefBase>& rref);
   void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
   void addPendingUser(
-      const ForkId& forkId, const std::shared_ptr<RRefBase>& rref);
+      const ForkId& forkId,
+      const std::shared_ptr<RRefBase>& rref);
   void delPendingUser(const ForkId& forkId);
 
   void delUser(
@@ -173,7 +175,8 @@ class RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence kept alive
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
-  std::unordered_map<ForkId, std::shared_ptr<RRefBase>, ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, std::shared_ptr<RRefBase>, ForkId::Hash>
+      pendingUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.
