@@ -84,8 +84,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     RpcAgent& agent,
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
-    IValue rrefId,
-    IValue forkId) {
+    const IValue& rrefId,
+    const IValue& forkId) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
