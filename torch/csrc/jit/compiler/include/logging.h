@@ -30,7 +30,8 @@ class MessageLogger {
     }
   }
 
-  MessageLogger(const char* file, int line, int severity) : severity_(severity) {
+  MessageLogger(const char* file, int line, int severity)
+      : severity_(severity) {
     stream_ << SeverityToString(severity) << ":" << file << ":" << line << ": ";
   }
 
@@ -41,11 +42,15 @@ class MessageLogger {
     }
   }
   // Return the stream associated with the logger object.
-  std::stringstream& stream() { return stream_; }
+  std::stringstream& stream() {
+    return stream_;
+  }
 
  private:
   // When there is a fatal log, we simply abort.
-  void DealWithFatal() { abort(); }
+  void DealWithFatal() {
+    abort();
+  }
 
   const char* tag_;
   std::stringstream stream_;
@@ -88,10 +93,13 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 
 #define LOG(n) MessageLogger((char*)__FILE__, __LINE__, n).stream()
 
-#define FATAL_IF(condition) \
-  condition ? (void)0 : LoggerVoidify() & MessageLogger((char*)__FILE__, __LINE__, FATAL).stream()
+#define FATAL_IF(condition)     \
+  condition ? (void)0           \
+            : LoggerVoidify() & \
+          MessageLogger((char*)__FILE__, __LINE__, FATAL).stream()
 
-#define CHECK(condition) FATAL_IF(condition) << "Check failed: (" #condition ") "
+#define CHECK(condition) \
+  FATAL_IF(condition) << "Check failed: (" #condition ") "
 
 #ifndef NDEBUG
 // Debug only version of CHECK
@@ -99,12 +107,13 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 #else
 // Optimized version - generates no code.
 #define DCHECK(condition) \
-  while (false) CHECK(condition)
-#endif  // NDEBUG
+  while (false)           \
+  CHECK(condition)
+#endif // NDEBUG
 
-#define CHECK_OP(val1, val2, op)                                                                \
-  FATAL_IF((val1 op val2)) << "Check failed: " #val1 " " #op " " #val2 ": " << (val1) << " vs " \
-                           << (val2)
+#define CHECK_OP(val1, val2, op)                                            \
+  FATAL_IF((val1 op val2)) << "Check failed: " #val1 " " #op " " #val2 ": " \
+                           << (val1) << " vs " << (val2)
 
 #define CHECK_EQ(val1, val2) CHECK_OP(val1, val2, ==)
 #define CHECK_NE(val1, val2) CHECK_OP(val1, val2, !=)
@@ -121,21 +130,27 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 #define DCHECK_LT(val1, val2) CHECK_OP(val1, val2, <)
 #define DCHECK_GE(val1, val2) CHECK_OP(val1, val2, >=)
 #define DCHECK_GT(val1, val2) CHECK_OP(val1, val2, >)
-#else  // !NDEBUG
+#else // !NDEBUG
 // These versions generate no code in optimized mode.
 #define DCHECK_EQ(val1, val2) \
-  while (false) CHECK_OP(val1, val2, ==)
+  while (false)               \
+  CHECK_OP(val1, val2, ==)
 #define DCHECK_NE(val1, val2) \
-  while (false) CHECK_OP(val1, val2, !=)
+  while (false)               \
+  CHECK_OP(val1, val2, !=)
 #define DCHECK_LE(val1, val2) \
-  while (false) CHECK_OP(val1, val2, <=)
+  while (false)               \
+  CHECK_OP(val1, val2, <=)
 #define DCHECK_LT(val1, val2) \
-  while (false) CHECK_OP(val1, val2, <)
+  while (false)               \
+  CHECK_OP(val1, val2, <)
 #define DCHECK_GE(val1, val2) \
-  while (false) CHECK_OP(val1, val2, >=)
+  while (false)               \
+  CHECK_OP(val1, val2, >=)
 #define DCHECK_GT(val1, val2) \
-  while (false) CHECK_OP(val1, val2, >)
-#endif  // NDEBUG
+  while (false)               \
+  CHECK_OP(val1, val2, >)
+#endif // NDEBUG
 
 } // namespace compiler
 } // namespace jit

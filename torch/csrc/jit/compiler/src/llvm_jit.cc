@@ -54,7 +54,8 @@ class PytorchLLVMJITImpl {
                 return Sym;
               else if (auto Err = Sym.takeError())
                 return std::move(Err);
-              if (auto SymAddr = RTDyldMemoryManager::getSymbolAddressInProcess(Name))
+              if (auto SymAddr =
+                      RTDyldMemoryManager::getSymbolAddressInProcess(Name))
                 return JITSymbol(SymAddr, JITSymbolFlags::Exported);
               return nullptr;
             },
@@ -64,13 +65,16 @@ class PytorchLLVMJITImpl {
         ObjectLayer(
             ES,
             [this](VModuleKey) {
-              return JITLinkingLayer::Resources{std::make_shared<SectionMemoryManager>(), Resolver};
+              return JITLinkingLayer::Resources{
+                  std::make_shared<SectionMemoryManager>(), Resolver};
             }),
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   }
 
-  TargetMachine& getTargetMachine() { return *TM; }
+  TargetMachine& getTargetMachine() {
+    return *TM;
+  }
 
   VModuleKey addModule(std::unique_ptr<Module> M) {
     // Add the module to the JIT with a new VModuleKey.
@@ -90,23 +94,35 @@ class PytorchLLVMJITImpl {
     return cantFail(findSymbol(Name).getAddress());
   }
 
-  void removeModule(VModuleKey K) { cantFail(CompileLayer.removeModule(K)); }
+  void removeModule(VModuleKey K) {
+    cantFail(CompileLayer.removeModule(K));
+  }
 };
 
-PytorchLLVMJIT::PytorchLLVMJIT() : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
-
+PytorchLLVMJIT::PytorchLLVMJIT()
+    : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
 
 PytorchLLVMJIT::~PytorchLLVMJIT() = default;
 
-TargetMachine& PytorchLLVMJIT::getTargetMachine() { return impl_->getTargetMachine(); }
+TargetMachine& PytorchLLVMJIT::getTargetMachine() {
+  return impl_->getTargetMachine();
+}
 
-VModuleKey PytorchLLVMJIT::addModule(std::unique_ptr<Module> M) { return impl_->addModule(std::move(M)); }
+VModuleKey PytorchLLVMJIT::addModule(std::unique_ptr<Module> M) {
+  return impl_->addModule(std::move(M));
+}
 
-JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) { return impl_->findSymbol(Name); }
+JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
+  return impl_->findSymbol(Name);
+}
 
-JITTargetAddress PytorchLLVMJIT::getSymbolAddress(const std::string Name) { return impl_->getSymbolAddress(Name); }
+JITTargetAddress PytorchLLVMJIT::getSymbolAddress(const std::string Name) {
+  return impl_->getSymbolAddress(Name);
+}
 
-void PytorchLLVMJIT::removeModule(VModuleKey K) { impl_->removeModule(K); }
+void PytorchLLVMJIT::removeModule(VModuleKey K) {
+  impl_->removeModule(K);
+}
 
-}  // end namespace orc
-}  // end namespace llvm
+} // end namespace orc
+} // end namespace llvm

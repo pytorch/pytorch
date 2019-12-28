@@ -14,13 +14,15 @@ LLVMCodeGen::LLVMCodeGen() : irb_(context_) {
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", context_);
   module_->setDataLayout(jit_->getTargetMachine().createDataLayout());
-  module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().normalize());
+  module_->setTargetTriple(
+      jit_->getTargetMachine().getTargetTriple().normalize());
 
   // Emit prototype.
   int32Ty_ = llvm::Type::getInt32Ty(context_);
 
   llvm::FunctionType* fntype = llvm::FunctionType::get(int32Ty_, {}, false);
-  fn_ = llvm::Function::Create(fntype, llvm::Function::ExternalLinkage, "pytorch", module_.get());
+  fn_ = llvm::Function::Create(
+      fntype, llvm::Function::ExternalLinkage, "pytorch", module_.get());
   bb_ = llvm::BasicBlock::Create(context_, "entry", fn_);
   irb_.SetInsertPoint(bb_);
 }
@@ -58,10 +60,13 @@ void LLVMCodeGen::visit(const Div* v) {
 }
 
 void LLVMCodeGen::visit(const IntImm* v) {
-  value_ = llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, v->value()));
+  value_ =
+      llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, v->value()));
 }
 
-void LLVMCodeGen::visit(const FloatImm* v) { assert(false && "Integer only now sorry"); }
+void LLVMCodeGen::visit(const FloatImm* v) {
+  assert(false && "Integer only now sorry");
+}
 
 int LLVMCodeGen::value() {
   irb_.CreateRet(value_);
