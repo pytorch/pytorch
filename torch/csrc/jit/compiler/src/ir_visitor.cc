@@ -10,17 +10,27 @@ static void visit_binary_op(const BinaryOpNode<Op>* v, IRVisitor* visitor) {
   v->rhs().accept(visitor);
 }
 
-void IRVisitor::visit(const Add* v) { visit_binary_op(v, this); }
+void IRVisitor::visit(const Add* v) {
+  visit_binary_op(v, this);
+}
 
-void IRVisitor::visit(const Sub* v) { visit_binary_op(v, this); }
+void IRVisitor::visit(const Sub* v) {
+  visit_binary_op(v, this);
+}
 
-void IRVisitor::visit(const Mul* v) { visit_binary_op(v, this); }
+void IRVisitor::visit(const Mul* v) {
+  visit_binary_op(v, this);
+}
 
-void IRVisitor::visit(const Div* v) { visit_binary_op(v, this); }
+void IRVisitor::visit(const Div* v) {
+  visit_binary_op(v, this);
+}
 
 void IRVisitor::visit(const IntImm* v) {}
 void IRVisitor::visit(const FloatImm* v) {}
-void IRVisitor::visit(const Cast* v) { v->src_value().accept(this); }
+void IRVisitor::visit(const Cast* v) {
+  v->src_value().accept(this);
+}
 void IRVisitor::visit(const Variable* v) {}
 void IRVisitor::visit(const Let* v) {
   v->var().accept(this);
@@ -59,7 +69,9 @@ void IRVisitor::visit(const For* v) {
   v->body().accept(this);
 }
 
-void IRVisitor::visit(const Broadcast* v) { v->value().accept(this); }
+void IRVisitor::visit(const Broadcast* v) {
+  v->value().accept(this);
+}
 
 } // namespace compiler
 } // namespace jit

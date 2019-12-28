@@ -21,11 +21,11 @@ class PytorchLLVMJIT {
   JITSymbol findSymbol(const std::string Name);
   JITTargetAddress getSymbolAddress(const std::string Name);
   void removeModule(VModuleKey K);
-  
+
  private:
   // Use PImpl idiom here to hide the no-rtti parts of the JIT structure.
   std::unique_ptr<PytorchLLVMJITImpl> impl_;
 };
 
-}  // end namespace orc
+} // end namespace orc
 } // end namespace llvm

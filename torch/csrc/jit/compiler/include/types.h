@@ -17,21 +17,27 @@ using int32 = std::int32_t;
 class Dtype {
  public:
   explicit Dtype(int type) : scalar_type_(type), lanes_(1) {}
-  Dtype(int scalar_type, int lanes) : scalar_type_(scalar_type), lanes_(lanes) {}
-  Dtype(Dtype type, int lanes) : scalar_type_(type.scalar_type_), lanes_(lanes) {
+  Dtype(int scalar_type, int lanes)
+      : scalar_type_(scalar_type), lanes_(lanes) {}
+  Dtype(Dtype type, int lanes)
+      : scalar_type_(type.scalar_type_), lanes_(lanes) {
     CHECK(type.lanes() == 1);
   }
-  int lanes() const { return lanes_; }
+  int lanes() const {
+    return lanes_;
+  }
   Dtype scalar_type() const;
   bool operator==(const Dtype& other) const {
     return scalar_type_ == other.scalar_type_ && lanes_ == other.lanes_;
   }
-  bool operator!=(const Dtype& other) const { return !(*this == other); }
+  bool operator!=(const Dtype& other) const {
+    return !(*this == other);
+  }
 
  private:
   friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
   int scalar_type_;
-  int lanes_;  // the width of the element for a vector time
+  int lanes_; // the width of the element for a vector time
 };
 
 extern Dtype kUninitialized;

@@ -13,8 +13,8 @@ namespace compiler {
 // Callers can call "Ref()" and "Unref" to increment and decrement its reference
 // count.
 // When the refrence count goes this zero, "this" object will be deleted through
-// the local "delete". This assumes the object is created through "new" on the same
-// heap.
+// the local "delete". This assumes the object is created through "new" on the
+// same heap.
 class RefCounted {
  public:
   // Initial reference count is one.
@@ -40,12 +40,16 @@ class RefCounted {
   }
 
   // Return whether the reference count is one.
-  bool RefCountIsOne() const { return (ref_.load(std::memory_order_acquire) == 1); }
+  bool RefCountIsOne() const {
+    return (ref_.load(std::memory_order_acquire) == 1);
+  }
 
  protected:
   // Make destructor protected so that RefCounted objects cannot
   // be instantiated directly. Only subclasses can be instantiated.
-  virtual ~RefCounted() { DCHECK_EQ(ref_.load(), 0); }
+  virtual ~RefCounted() {
+    DCHECK_EQ(ref_.load(), 0);
+  }
 
  private:
   mutable std::atomic_int_fast32_t ref_;
@@ -62,7 +66,9 @@ class RefHandle {
   }
 
  protected:
-  virtual ~RefHandle() { reset(); }
+  virtual ~RefHandle() {
+    reset();
+  }
 
   RefHandle() {}
   RefHandle(NodeType* node) : node_(node) {}
@@ -96,8 +102,12 @@ class RefHandle {
     node_ = nullptr;
   }
 
-  const NodeType* node() const { return node_; }
-  NodeType* node() { return node_; }
+  const NodeType* node() const {
+    return node_;
+  }
+  NodeType* node() {
+    return node_;
+  }
 
  private:
   NodeType* node_ = nullptr;
