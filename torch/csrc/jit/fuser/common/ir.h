@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "expr.h"
+#include "types.h"
 
 namespace torch {
 namespace jit {
@@ -19,17 +20,18 @@ enum IRNodeType {
 class Cast : public ExprNode<Cast> {
  public:
   const Expr& src_value() const { return src_value_; }
-  static Expr make(Dtype dtype, const Expr& src_value) { return Expr(new Cast(dtype, src_value)); }
+  const DType& dst_type() const {return dst_type_;}
+
+  Cast(const DType& dst_type, const Expr& src_value) : ExprNode<Cast>(dst_type), dst_type_(dst_type), src_value_(src_value){}
+
+  static Expr make(const DType& dst_type, const Expr& src_value) {
+    return Expr(new Cast(dst_type, src_value));
+  }
 
  private:
-  Cast(Dtype dtype, const Expr& src_value) : ExprNodeBase(dtype), src_value_(src_value) {}
-  Expr src_value_;
+  const DType dst_type_;
+  const Expr src_value_;
 };
-
-template <typename T>
-Expr cast(const Expr& src_value) {
-  return Cast::make(Dtype(ToDtype<T>(), src_value.dtype().lanes()), src_value);
-}
 
 // Represent the expression node for binary operators.
 // A CRTP pattern to share common code among the operators.
@@ -44,13 +46,13 @@ class BinaryOpNode : public ExprNode<Op> {
 
  protected:
   BinaryOpNode(const Expr& lhs_v, const Expr& rhs_v, IRNodeType expr_type)
-      : ExprNode<Op>(BinaryOpDtype(lhs_v.dtype(), rhs_v.dtype())),
+      : ExprNode<Op>(promote(lhs_v.dtype(), rhs_v.dtype())),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
         rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())),
         expr_type_(expr_type) {}
 
  private:
-  static Expr CastIfNeeded(const Expr& expr, Dtype dst_dtype) {
+  static Expr CastIfNeeded(const Expr& expr, DType dst_dtype) {
     if (expr.dtype() == dst_dtype) {
       return expr;
     }
@@ -93,7 +95,7 @@ class IntImm : public ExprNode<IntImm> {
   static Expr make(int value) { return Expr(new IntImm(value)); }
 
  private:
-  IntImm(int value) : ExprNodeBase(kInt32), value_(value) {}
+  IntImm(int value) : ExprNodeBase(DType(CType::kInt32, 1)), value_(value) {}
   int value_;
 };
 
@@ -104,7 +106,7 @@ class FloatImm : public ExprNode<FloatImm> {
   static Expr make(float value) { return Expr(new FloatImm(value)); }
 
  private:
-  FloatImm(float value) : ExprNodeBase(kFloat32), value_(value) {}
+  FloatImm(float value) : ExprNodeBase(DType(CType::kFloat32, 1)), value_(value) {}
   float value_;
 };
 
@@ -113,10 +115,10 @@ class FloatImm : public ExprNode<FloatImm> {
 // might be the same. We should consider add a unique_name as well.
 class Variable : public ExprNode<Variable> {
  public:
-  static Expr make(const std::string& name_hint, Dtype dtype) {
+  static Expr make(const std::string& name_hint, DType dtype) {
     return Expr(new Variable(name_hint, dtype));
   }
-  static Expr make(Dtype dtype) { return Expr(new Variable("", dtype)); }
+  static Expr make(DType dtype) { return Expr(new Variable("", dtype)); }
 
   // TODO: unique_name
   const std::string& name_hint() const {
@@ -124,7 +126,7 @@ class Variable : public ExprNode<Variable> {
   }
 
  private:
-  Variable(const std::string& name_hint, Dtype dtype)
+  Variable(const std::string& name_hint, DType dtype)
       : ExprNodeBase(dtype), name_hint_(name_hint) {}
   std::string name_hint_;
 };
@@ -136,7 +138,7 @@ class Block : public ExprNode<Block> {
   const Expr& expr(int index) const { return exprs_[index]; }
 
  private:
-  explicit Block(const std::vector<Expr>& exprs) : ExprNodeBase(kNull), exprs_(exprs) {}
+  explicit Block(const std::vector<Expr>& exprs) : ExprNodeBase(DType(CType::kNull)), exprs_(exprs) {}
   std::vector<Expr> exprs_;
 };
 
@@ -152,7 +154,7 @@ class For : public ExprNode<For> {
 
  private:
   For(const Expr& var, const Expr& start, const Expr& stop, const Expr& body)
-      : ExprNodeBase(kNull), var_(var), start_(start), stop_(stop), body_(body) {
+      : ExprNodeBase(DType(CType::kNull)), var_(var), start_(start), stop_(stop), body_(body) {
         //TODO! make sure var is of type Variable
       }
   Expr var_;
@@ -166,7 +168,7 @@ class EmptyExpr : public  ExprNode<EmptyExpr> {
   public:
     static Expr make (){ return Expr(new EmptyExpr()); }
   private:
-    EmptyExpr():ExprNodeBase(kNull){}
+    EmptyExpr():ExprNodeBase(DType(CType::kNull)){}
 };
 
 } // namespace fuser

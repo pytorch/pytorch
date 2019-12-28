@@ -10,8 +10,7 @@ namespace jit {
 namespace fuser {
 
 class IRPrinter : public IRVisitor {
-  void indent();
-  int indent_count;
+  
  public:
   IRPrinter(std::ostream&);
   void print(Expr);
@@ -25,9 +24,11 @@ class IRPrinter : public IRVisitor {
   void visit(const Variable* v) override;
   void visit(const For* v) override;
   void visit(const Block* v) override;
-
- private:
+private:
+  void indent();
   std::ostream& os;
+  int indent_count;
+  
 };
 
 std::ostream& operator<<(std::ostream& stream, const Expr&);
