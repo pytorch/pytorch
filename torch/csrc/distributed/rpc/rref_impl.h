@@ -13,7 +13,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-
 class RRef;
 class RRefContext;
 template <typename T>
