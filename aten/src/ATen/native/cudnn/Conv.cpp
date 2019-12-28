@@ -1046,6 +1046,10 @@ Tensor cudnn_convolution_backward_input(
 
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
 
+  if (grad_input_t.numel() == 0) {
+    return grad_input_t;
+  }
+
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
