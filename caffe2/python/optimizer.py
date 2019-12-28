@@ -519,7 +519,8 @@ class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
-                 output_effective_lr_and_update=False, **kwargs):
+                 output_effective_lr_and_update=False,
+                 mask_tensor=None, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -531,7 +532,13 @@ class AdagradOptimizer(Optimizer):
         self.lars = lars
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
+        self.mask_tensor = mask_tensor
         self.init_kwargs = kwargs
+
+        self.use_mask = False
+        if self.mask_tensor is not None:
+            assert type(mask_tensor) is np.ndarray, "mask_tensor must be a numpy array!"
+            self.use_mask = True
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -614,6 +621,15 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
 
+        if self.use_mask is True:
+            if not isinstance(grad, core.GradientSlice):
+                mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+            else:
+                self.mask_tensor = self.mask_tensor.astype(np.uint8)
+                mask_blob = param_init_net.GivenTensorBoolFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+                mask_blob = param_init_net.Cast(mask_blob, to=core.DataType.UINT8)
+                mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"], value=False, dtype=core.DataType.BOOL, shape=[1])
+
         self._aux_params.local.append(param_squared_sum)
 
         if self.rowWise:
@@ -625,12 +641,22 @@ class AdagradOptimizer(Optimizer):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+
+            input_args = [param, param_squared_sum, grad.indices, grad.values, lr]
             if self.rowWise:
-                op = 'RowWiseSparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedRowWiseSparseAdagrad'
+                    input_args += [mask_blob, mask_changed_blob]
+                else:
+                    op = 'RowWiseSparseAdagrad'
             else:
-                op = 'SparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedSparseAdagrad'
+                    input_args += [mask_blob, mask_changed_blob]
+                else:
+                    op = 'SparseAdagrad'
             net.__getattr__(op)(
-                [param, param_squared_sum, grad.indices, grad.values, lr],
+                input_args,
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
                 engine=self.engine,
@@ -638,18 +664,31 @@ class AdagradOptimizer(Optimizer):
         else:
             output_args = [param, param_squared_sum]
             if self.output_effective_lr_and_update:
+                assert self.use_mask is False, \
+                    "MaskedAdagrad doesn't support outputting effective_lr_and_update"
                 output_args.append(str(param) + '_effective_lr')
                 output_args.append(str(param) + '_update')
             elif self.output_effective_lr:
+                assert self.use_mask is False, \
+                    "MaskedAdagrad doesn't support outputting effective_lr"
                 output_args.append(str(param) + '_effective_lr')
 
-            net.Adagrad(
-                [param, param_squared_sum, grad, lr],
-                output_args,
-                epsilon=self.epsilon,
-                decay=float(self.decay),
-                engine=self.engine
-            )
+            if self.use_mask:
+                net.MaskedAdagrad(
+                    [param, param_squared_sum, grad, lr, mask_blob],
+                    output_args,
+                    epsilon=self.epsilon,
+                    decay=float(self.decay),
+                    engine=self.engine
+                )
+            else:
+                net.Adagrad(
+                    [param, param_squared_sum, grad, lr],
+                    output_args,
+                    epsilon=self.epsilon,
+                    decay=float(self.decay),
+                    engine=self.engine
+                )
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale

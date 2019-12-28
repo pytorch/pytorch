@@ -193,6 +193,11 @@ The :any:`math` module is also supported (see :ref:`math-module` for details), b
 (built-in or third party) are supported.
 
 
+Python Language Reference Comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a full listing of supported Python features, see :ref:`python-language-reference`.
+
 Debugging
 ---------
 
