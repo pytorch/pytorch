@@ -109,7 +109,7 @@ size_t ClassType::addConstant(
   size_t slot = constantNames_.size();
   constantNames_.push_back(name);
   constantValues_.push_back(value);
-  std::cout << "adding constant " << name << "=" << ivalue << " to classtype" << std::endl;
+  std::cout << "adding constant " << name << "=" << value << " to classtype" << std::endl;
   return slot;
 }
 
