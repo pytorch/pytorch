@@ -994,6 +994,7 @@ void raw_cudnn_convolution_backward_input_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
 
+  std::cout << "\tRAW CUDNN backward.\n";
   auto dataType = getCudnnDataType(grad_output);
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
@@ -1046,6 +1047,7 @@ Tensor cudnn_convolution_backward_input(
 
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
 
+  std::cout << "\tCUDNN conv backward input.\n";
   if (grad_input_t.numel() == 0) {
     return grad_input_t;
   }
@@ -1072,6 +1074,7 @@ Tensor cudnn_convolution_transpose_forward(
 {
   auto input_size = conv_input_size(grad_output->sizes(), weight->sizes(),
                                     padding, output_padding, stride, dilation, groups);
+  std::cout << "\tCUDNN conv transpose fwd.\n";
   return cudnn_convolution_backward_input(c, input_size, grad_output, weight,
                                     padding, stride, dilation, groups, benchmark, deterministic);
 }
