@@ -103,6 +103,7 @@ Random sampling
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
+.. autofunction:: poisson
 .. autofunction:: rand
 .. autofunction:: rand_like
 .. autofunction:: randint
