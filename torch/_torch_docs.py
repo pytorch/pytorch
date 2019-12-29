@@ -4096,6 +4096,31 @@ Args:
 
 """)
 
+add_docstr(torch.poisson,
+           r"""
+poisson(input *, generator=None) -> Tensor
+
+Returns a tensor of the same size as :attr:`input` with each element
+sampled from a Poisson distribution with rate parameter given by the corresponding
+element in :attr:`input` i.e.,
+
+.. math::
+    \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
+
+Args:
+    input (Tensor): the input tensor containing the rates of the Poisson distribution
+    {generator}
+
+Example::
+
+    >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
+    >>> torch.poisson(rates)
+    tensor([[9., 1., 3., 5.],
+            [8., 6., 6., 0.],
+            [0., 4., 5., 3.],
+            [2., 1., 4., 2.]])    
+""".format(**common_args))
+
 add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, out=None) -> Tensor
