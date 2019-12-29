@@ -68,7 +68,8 @@ def get_tensor_options(declaration):
     if len(args) == 0:
         return None
     if len(args) != 1:
-        raise RuntimeError('{}: multiple tensor options arguments'.
+        raise RuntimeError(
+            '{}: multiple tensor options arguments'.
             format(declaration['name']))
     return args[0]
 
@@ -96,12 +97,14 @@ def op_name(declaration):
     name = declaration['name']
     if has_outputs(declaration):
         if not name.endswith("_out"):
-            raise RuntimeError('{} has output params, expecting name ending with \'_out\''.
+            raise RuntimeError(
+                '{} has output params, expecting name ending with \'_out\''.
                 format(declaration['name']))
         return name[:-4]
     else:
         if name.endswith("_out"):
-            raise RuntimeError('{}: name ends with \'_out\', expecting output params'.
+            raise RuntimeError(
+                '{}: name ends with \'_out\', expecting output params'.
                 format(declaration['name']))
         return name
 
@@ -331,16 +334,18 @@ def parsed_arg_expr(arg, arg_index):
     default_init = arg.get('python_default_init')
     if default_init is not None:
         default_init = arg['python_default_init']
-        if not typename in UNPACK_WITH_DEFAULT_METHODS:
-            raise RuntimeError('type \'{}\' is not supported in python_default_init'.
+        if typename not in UNPACK_WITH_DEFAULT_METHODS:
+            raise RuntimeError(
+                'type \'{}\' is not supported in python_default_init'.
                 format(typename))
         unpack_with_default = UNPACK_WITH_DEFAULT_METHODS[typename]
         return '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_init)
 
     size = arg.get('size')
     if size is not None:
-        if not typename in UNPACK_WITH_SIZE_METHODS:
-            raise RuntimeError('type \'{}\' with definite size ({}) is not supported'.
+        if typename not in UNPACK_WITH_SIZE_METHODS:
+            raise RuntimeError(
+                'type \'{}\' with definite size ({}) is not supported'.
                 format(typename, size))
         unpack_with_size = UNPACK_WITH_SIZE_METHODS[typename].format(size)
         return '_r.{}({})'.format(unpack_with_size, arg_index)
@@ -651,16 +656,16 @@ def handle_python_binding_args(declaration, output_gap):
             if typename is None:
                 raise RuntimeError(
                     '{}: unrecognized tensor options field \'{}\' in python binding arguments'.
-                        format(declaration['name'], arg['name']))
+                    format(declaration['name'], arg['name']))
             if typename != arg['simple_type']:
                 raise RuntimeError(
                     '{}: unrecognized type \'{}\' for tensor options field \'{}\' in python binding arguments'.
-                        format(declaration['name'], arg['type'], arg['name']))
+                    format(declaration['name'], arg['type'], arg['name']))
         python_binding_argnames = [arg['name'] for arg in python_binding_args]
         if not all([key in python_binding_argnames for key in TENSOR_OPTIONS_FIELDS.keys()]):
             raise RuntimeError(
                 '{}: incomplete tensor options args: {}'.
-                    format(declaration['name'], [arg['name'] for arg in python_binding_args]))
+                format(declaration['name'], [arg['name'] for arg in python_binding_args]))
         # generate a gathering initialization of options struct
         argname = tensor_options_arg['name']
         inits.append(TENSOR_OPTIONS_DECL.substitute({
@@ -685,11 +690,11 @@ def handle_python_binding_args(declaration, output_gap):
             if not has_output:
                 raise RuntimeError(
                     '{}: dtype in python_binding_args without output arg'.
-                        format(declaration['name']))
+                    format(declaration['name']))
             if not all([name in binding_arg_ixs for name in ['layout', 'device']]):
                 raise RuntimeError(
                     '{}: incomplete tensor options for output check'.
-                        format(declaration['name']))
+                    format(declaration['name']))
             check_type = PY_VARIABLE_CHECK_OUT_TYPE_HACK.substitute(
                 out_idx=get_python_output_index(declaration),
                 type_idx=binding_arg_index('dtype'),
@@ -701,7 +706,7 @@ def handle_python_binding_args(declaration, output_gap):
         if not 'requires_grad' in binding_arg_ixs:
             raise RuntimeError(
                 '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]'.
-                    format(declaration['name'], [arg['name'] for arg in python_binding_args]))
+                format(declaration['name'], [arg['name'] for arg in python_binding_args]))
         requires_grad = parse_binding_arg('requires_grad')
         set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
 
@@ -1339,7 +1344,7 @@ def make_python_arglists(declaration, is_python_method):
         for arg in output_args:
             if not arg['simple_type'] == 'Tensor':
                 raise RuntimeError('{}: unsupported output argument type {}'.
-                    format(declaration['name'], arg['type']))
+                format(declaration['name'], arg['type']))
         typename = 'TensorList'
         output_args = [{
             'default': 'None',
