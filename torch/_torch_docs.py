@@ -5170,7 +5170,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5184,8 +5184,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
     {out}
 
 Example::
@@ -5221,7 +5221,7 @@ Example::
     >>> torch.std_mean(a)
     (tensor(0.3457), tensor(0.5472))
 
-.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+.. function:: std_mean(input, dim, unbiased=True, keepdim=False) -> (Tensor, Tensor)
 
 Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5235,8 +5235,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
 
 Example::
 
