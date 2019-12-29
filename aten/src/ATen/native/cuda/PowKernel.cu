@@ -43,6 +43,39 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
   }
 }
 
+namespace {
+// SFINAE doesn't work well with NVCC under Windows for pow.
+// So we need to define the functions with the explicit function signatures.
+#ifdef _MSC_VER
+  inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
+    return static_cast<at::Half>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
+  }
+
+  template <typename Base_type, typename Exp_type>
+  inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
+    pow_(Base_type base, Exp_type exp) {
+    return std::pow(base, exp);
+  }
+
+  template <typename Base_type, typename Exp_type>
+  inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
+    pow_(Base_type base, Exp_type exp) {
+    return powi(base, exp);
+  }
+
+  template <typename Base_type, typename Exp_type>
+  inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
+    pow_(Base_type base, Exp_type exp) {
+    return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
+  }
+#else
+  template <typename Base_type, typename Exp_type>
+  inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
+    return std::pow(base, exp);
+  }
+#endif
+}
+
 template<typename Base_type, typename Exp_type>
 void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
                                                  Exp_type exp) {
@@ -73,7 +106,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
     });
   } else {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return ::pow(base, exp);
+      return pow_(base, exp);
     });
   }
 }
