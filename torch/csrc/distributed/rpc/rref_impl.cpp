@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -85,7 +85,7 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
-    : ownerId_(ownerId), rrefId_(rrefId) {}
+    : RRefInterface(), ownerId_(ownerId), rrefId_(rrefId) {}
 
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
