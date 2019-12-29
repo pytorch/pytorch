@@ -1480,4 +1480,3 @@ def op_name(declaration):
                 '{}: name ends with \'_out\', expecting output params'.
                 format(declaration['name']))
         return name
-
