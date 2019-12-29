@@ -76,7 +76,6 @@ Tensor& quantized_resize_cpu_(
       "Can only resize quantized tensors with per-tensor schemes!");
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
-  self_->maybe_zero_dim(size.size() == 0);
   return self;
 }
 static auto registry = torch::RegisterOperators()

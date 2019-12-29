@@ -71,6 +71,7 @@ namespace c10 {
   _(aten, Int)                       \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
@@ -165,6 +166,8 @@ namespace c10 {
   _(aten, clear)                     \
   _(aten, setdefault)                \
   _(aten, bin)                       \
+  _(aten, pop)                       \
+  _(aten, insert)                    \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
@@ -206,6 +209,8 @@ namespace c10 {
   _(onnx, SplitToSequence)           \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
+  _(onnx, SequenceInsert)            \
+  _(onnx, ConcatFromSequence)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -237,7 +242,8 @@ namespace c10 {
   _(attr, kinds)                     \
   _(attr, types)                     \
   _(attr, scope)                     \
-  _(attr, keepdims)
+  _(attr, keepdims)                  \
+  _(attr, new_axis)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

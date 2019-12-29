@@ -42,13 +42,13 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       filter.dim32(3),
       this->kernel_w(),
       "filter width must be equal to kernel width");
+  const std::vector<std::int64_t> Y_dims =
+      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     return true;
   }
-  const std::vector<std::int64_t> Y_dims =
-      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
-  auto* Y = Output(0, Y_dims, at::dtype<T>());
 
   const int K_HxW = kernel_h() * kernel_w();
   const int kernel_dim = C / G * K_HxW;
@@ -196,13 +196,13 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_w(),
       "filter width must be equal to kernel width");
 
+  const std::vector<std::int64_t> Y_dims =
+      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
     return true;
   }
-  const std::vector<std::int64_t> Y_dims =
-      ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
-  auto* Y = Output(0, Y_dims, at::dtype<T>());
 
   const int K_HxW = kernel_h() * kernel_w();
   const int kernel_dim = C / G * K_HxW;
@@ -362,7 +362,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   if (X.numel() == 0) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
-    math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    if (dbias_data != nullptr) {
+      math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    }
     return true;
   }
 
@@ -525,7 +527,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   if (X.numel() == 0) {
     VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
-    math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    if (dbias_data != nullptr) {
+      math::Set<T, Context>(C, T(0), dbias_data, &context_);
+    }
     return true;
   }
 

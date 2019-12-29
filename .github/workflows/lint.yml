@@ -22,7 +22,9 @@ jobs:
           pip install -r requirements.txt
           cd .circleci && ./ensure-consistency.py
       - name: Ensure Docker version is correctly deployed
-        run: .circleci/validate-docker-version.py
+        run: |
+          pip install pyyaml
+          .circleci/validate-docker-version.py
       - name: Shellcheck Jenkins scripts
         run: |
           sudo apt-get install -y shellcheck
