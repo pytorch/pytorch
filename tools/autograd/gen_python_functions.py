@@ -4,7 +4,7 @@
 # torch._C._nn object.
 #
 
-# Worth trying to keep this code organized by the following rules:
+# Code tries to stick to the following rules:
 #
 # - templates should be colocated with the functions that use them.
 #   no templates are currently shared between functions, but if that
@@ -25,6 +25,12 @@
 #
 # - no nontrivial nested functions. couple-liners are ok but please no more.
 #   especially avoid functions that read/write outer variables defined far away.
+#
+# - raise RuntimeError instead of asserting, and put as much
+#   information as is available into the message. I.e. no need to
+#   plumb in new params whose only purpose is to fill out an error
+#   message, but use what's there
+#
 
 from collections import defaultdict
 import re
@@ -36,78 +42,6 @@ try:
 except ImportError:
     from tools.shared.module_loader import import_module
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
-
-#
-# declaration derived props, utils, etc.
-# declarations are dicts loaded from Declarations.yaml,
-# passed to our codegen methods by callers in gen_autograd
-#
-
-
-def is_tensor_self(arg):
-    return arg['name'] == 'self' and arg['simple_type'] == 'Tensor'
-
-
-def is_tensor_options(arg):
-    return arg['simple_type'] == 'TensorOptions'
-
-
-def is_scatter(arg):
-    return arg.get('scatter_args') is not None
-
-def is_output(arg):
-    return arg.get('output', False)
-
-
-def has_outputs(declaration):
-    return any([is_output(arg) for arg in declaration['arguments']])
-
-
-def get_tensor_options(declaration):
-    args = [arg for arg in declaration['arguments'] if is_tensor_options(arg)]
-    if len(args) == 0:
-        return None
-    if len(args) != 1:
-        raise RuntimeError(
-            '{}: multiple tensor options arguments'.
-            format(declaration['name']))
-    return args[0]
-
-
-def has_tensor_options(declaration):
-    return get_tensor_options(declaration) is not None
-
-
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
-
-
-def is_torch_function(declaration):
-    return 'namespace' in declaration['method_of']
-
-
-def function_namespace(declaration):
-    if has_tensor_options(declaration) or op_name(declaration).endswith('_like'):
-        return 'torch'
-    else:
-        return 'at'
-
-
-def op_name(declaration):
-    name = declaration['name']
-    if has_outputs(declaration):
-        if not name.endswith("_out"):
-            raise RuntimeError(
-                '{} has output params, expecting name ending with \'_out\''.
-                format(declaration['name']))
-        return name[:-4]
-    else:
-        if name.endswith("_out"):
-            raise RuntimeError(
-                '{}: name ends with \'_out\', expecting output params'.
-                format(declaration['name']))
-        return name
-
 
 #
 # declarations blacklist
@@ -163,7 +97,6 @@ def should_generate_python_binding(declaration):
             return False
 
     return True
-
 
 #
 # top-level codegen functions, called from gen_autograd
@@ -254,9 +187,6 @@ def group_declarations(declarations):
         groups[op_name(d)].append(d)
     return groups
 
-#
-# codegen
-#
 
 def create_python_bindings(python_functions, is_python_method, is_module):
     """Generates Python bindings to ATen functions"""
@@ -458,7 +388,6 @@ def get_simple_return_type(declaration):
         raise RuntimeError(declaration['name'] + " returns unsupported type " + simple_return_type)
     return simple_return_type
 
-
 #
 # dispatch codegen
 #
@@ -605,7 +534,7 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     )
 
 
-# arg['name'] to arg['simple_type']
+# arg['name'] to arg['simple_type'] for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
     'dtype': 'Type',
     'device': 'Device',
@@ -1114,12 +1043,12 @@ def group_overloads(declarations, is_python_method):
 
     # first group by signature ignoring out arguments
     for declaration in declarations:
-        signature = get_python_arg_parser_schema(declaration, is_python_method, skip_outputs=True)
+        signature = get_python_signature(declaration, is_python_method, skip_outputs=True)
         v = grouped[signature]
         if declaration['name'].endswith('_out'):
             v['out'] = declaration
             # prefer the signature with optional out=... arguments
-            v['signature'] = get_python_arg_parser_schema(declaration, is_python_method)
+            v['signature'] = get_python_signature(declaration, is_python_method)
         else:
             v['base'] = declaration
             if 'signature' not in v:
@@ -1249,7 +1178,7 @@ PYTHON_ARG_PARSER_SCHEMA = CodeTemplate("""\
 ${name}(${schema_formals})${deprecated}""")
 
 
-def get_python_arg_parser_schema(declaration, is_python_method, skip_outputs=False):
+def get_python_signature(declaration, is_python_method, skip_outputs=False):
     # Compute the Python function signature for argument parsing,
     # as specified in torch/csrc/utils/python_arg_parser.h.  WARNING:
     # this is NOT the same type signature as specified by PEP 484
@@ -1280,7 +1209,6 @@ def get_python_arg_parser_schema(declaration, is_python_method, skip_outputs=Fal
         schema_formals=schema_formals,
         deprecated=deprecated,
     )
-
 
 #
 # op args to python parsed args transform
@@ -1482,3 +1410,74 @@ def make_python_binding_args(declaration):
         python_binding_arguments.append(requires_grad_arg)
 
     return python_binding_arguments
+
+#
+# declaration derived props, utils, etc.
+# declarations are dicts loaded from Declarations.yaml,
+# passed to our codegen methods by callers in gen_autograd
+#
+
+def is_tensor_self(arg):
+    return arg['name'] == 'self' and arg['simple_type'] == 'Tensor'
+
+
+def is_tensor_options(arg):
+    return arg['simple_type'] == 'TensorOptions'
+
+
+def is_scatter(arg):
+    return arg.get('scatter_args') is not None
+
+def is_output(arg):
+    return arg.get('output', False)
+
+
+def has_outputs(declaration):
+    return any([is_output(arg) for arg in declaration['arguments']])
+
+
+def get_tensor_options(declaration):
+    args = [arg for arg in declaration['arguments'] if is_tensor_options(arg)]
+    if len(args) == 0:
+        return None
+    if len(args) != 1:
+        raise RuntimeError(
+            '{}: multiple tensor options arguments'.
+            format(declaration['name']))
+    return args[0]
+
+
+def has_tensor_options(declaration):
+    return get_tensor_options(declaration) is not None
+
+
+def is_tensor_method(declaration):
+    return 'Tensor' in declaration['method_of']
+
+
+def is_torch_function(declaration):
+    return 'namespace' in declaration['method_of']
+
+
+def function_namespace(declaration):
+    if has_tensor_options(declaration) or op_name(declaration).endswith('_like'):
+        return 'torch'
+    else:
+        return 'at'
+
+
+def op_name(declaration):
+    name = declaration['name']
+    if has_outputs(declaration):
+        if not name.endswith("_out"):
+            raise RuntimeError(
+                '{} has output params, expecting name ending with \'_out\''.
+                format(declaration['name']))
+        return name[:-4]
+    else:
+        if name.endswith("_out"):
+            raise RuntimeError(
+                '{}: name ends with \'_out\', expecting output params'.
+                format(declaration['name']))
+        return name
+
