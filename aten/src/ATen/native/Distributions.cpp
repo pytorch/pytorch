@@ -55,6 +55,7 @@ namespace {
 
 
 int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
+  TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
