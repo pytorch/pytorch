@@ -67,7 +67,9 @@ def get_tensor_options(declaration):
     args = [arg for arg in declaration['arguments'] if is_tensor_options(arg)]
     if len(args) == 0:
         return None
-    assert len(args) == 1, '{}: multiple tensor options args'.format(declataion['name'])
+    if len(args) != 1:
+        raise RuntimeError('{}: multiple tensor options arguments'.
+            format(declaration['name']))
     return args[0]
 
 
@@ -76,12 +78,7 @@ def has_tensor_options(declaration):
 
 
 def is_tensor_method(declaration):
-    if 'Tensor' in declaration['method_of']:
-        # args = declaration['arguments']
-        # assert any([arg['name'] == 'self' and arg['simple_type'] == 'Tensor' for arg in args]), \
-        #     "No Tensor-typed self found in {}".format(declaration['name'])
-        return True
-    return False
+    return 'Tensor' in declaration['method_of']
 
 
 def is_torch_function(declaration):
@@ -98,10 +95,14 @@ def function_namespace(declaration):
 def op_name(declaration):
     name = declaration['name']
     if has_outputs(declaration):
-        assert name.endswith("_out"), "output params, expecting name ending with '_out'"
+        if not name.endswith("_out"):
+            raise RuntimeError('{} has output params, expecting name ending with \'_out\''.
+                format(declaration['name']))
         return name[:-4]
     else:
-        assert not name.endswith('_out'), "name ending with '_out', expecting output params"
+        if name.endswith("_out"):
+            raise RuntimeError('{}: name ends with \'_out\', expecting output params'.
+                format(declaration['name']))
         return name
 
 
@@ -330,24 +331,28 @@ def parsed_arg_expr(arg, arg_index):
     default_init = arg.get('python_default_init')
     if default_init is not None:
         default_init = arg['python_default_init']
-        assert typename in UNPACK_WITH_DEFAULT_METHODS, \
-            '`{}` type is not supported in python_default_init'.format(typename)
+        if not typename in UNPACK_WITH_DEFAULT_METHODS:
+            raise RuntimeError('type \'{}\' is not supported in python_default_init'.
+                format(typename))
         unpack_with_default = UNPACK_WITH_DEFAULT_METHODS[typename]
         return '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_init)
 
     size = arg.get('size')
     if size is not None:
-        assert typename in UNPACK_WITH_SIZE_METHODS, \
-            '`{}` type with definite size ({}) is not supported'.format(typename, size)
+        if not typename in UNPACK_WITH_SIZE_METHODS:
+            raise RuntimeError('type \'{}\' with definite size ({}) is not supported'.
+                format(typename, size))
         unpack_with_size = UNPACK_WITH_SIZE_METHODS[typename].format(size)
         return '_r.{}({})'.format(unpack_with_size, arg_index)
 
-    assert typename in UNPACK_METHODS, '`{}` type is not supported'.format(typename)
-    unpack = UNPACK_METHODS[typename]
+    unpack = UNPACK_METHODS.get(typename)
+    if unpack is None:
+        raise RuntimeError('type \'{}\' is not supported'.format(typename))
+
     return '_r.{}({})'.format(unpack, arg_index)
 
 
-# TODO
+# TODO make this part of something more general, or get rid of it
 def unpack_optional_dimname_list_hack(name, expr):
     # optional<ArrayRef<T>> are special. The PythonArgParser returns an
     # optional<vector<T>>, which cannot be implictly converted to
@@ -595,23 +600,33 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     )
 
 
+# arg['name'] to arg['simple_type']
+TENSOR_OPTIONS_FIELDS = {
+    'dtype': 'Type',
+    'device': 'Device',
+    'layout': 'Layout',
+    'pin_memory': 'bool',
+    'requires_grad': 'bool',
+}
+
 def handle_python_binding_args(declaration, output_gap):
     # map synthetic python binding args to op args and misc other stuff
     # note: this logic shares arcane knowledge with make_python_binding_args
+    # and isn't completely airtight w.r.t. the possible contents of
+    # python_binding_args. TODO
+
     argmap = {}
     inits = []
     set_requires_grad = ''
 
     pa = declaration['python_arglists']
     python_binding_args = pa['python_binding_args']
-    args = pa['input_args'] + pa['input_kwargs'] + pa['output_args']
 
     if len(python_binding_args) == 0:
+        # nothing to see here
         return argmap, inits, set_requires_grad
 
-    tensor_options_arg = get_tensor_options(declaration)
-    has_options = tensor_options_arg is not None
-
+    args = pa['input_args'] + pa['input_kwargs'] + pa['output_args']
     binding_arg_base = len(args) + output_gap
     binding_arg_ixs = {arg['name']: i for i, arg in enumerate(python_binding_args)}
 
@@ -624,14 +639,29 @@ def handle_python_binding_args(declaration, output_gap):
         return expr
 
     has_output = len(pa['output_args']) == 1
+    tensor_options_arg = get_tensor_options(declaration)
 
-    if has_options:
-        # if we have a tensor options arg, these are its scattered fields
-        assert not has_output, '{}: tensor options with output arg'.format(declaration['name'])
-        assert all([name in binding_arg_ixs for name in
-                ['dtype', 'device', 'layout', 'pin_memory', 'requires_grad']]), \
-            "{}: incomplete tensor options args".format(declaration['name'])
-
+    if tensor_options_arg is not None:
+        # if our op has a tensor options arg, these are its scattered fields.
+        # first some checks
+        if has_output:
+            raise RuntimeError('{}: tensor options with output arg'.format(declaration['name']))
+        for arg in python_binding_args:
+            typename = TENSOR_OPTIONS_FIELDS.get(arg['name'])
+            if typename is None:
+                raise RuntimeError(
+                    '{}: unrecognized tensor options field \'{}\' in python binding arguments'.
+                        format(declaration['name'], arg['name']))
+            if typename != arg['simple_type']:
+                raise RuntimeError(
+                    '{}: unrecognized type \'{}\' for tensor options field \'{}\' in python binding arguments'.
+                        format(declaration['name'], arg['type'], arg['name']))
+        python_binding_argnames = [arg['name'] for arg in python_binding_args]
+        if not all([key in python_binding_argnames for key in TENSOR_OPTIONS_FIELDS.keys()]):
+            raise RuntimeError(
+                '{}: incomplete tensor options args: {}'.
+                    format(declaration['name'], [arg['name'] for arg in python_binding_args]))
+        # generate a gathering initialization of options struct
         argname = tensor_options_arg['name']
         inits.append(TENSOR_OPTIONS_DECL.substitute({
             'name': argname,
@@ -642,21 +672,24 @@ def handle_python_binding_args(declaration, output_gap):
             'pin_memory': parse_binding_arg('pin_memory'),
         }))
         inits.append('torch::utils::maybe_initialize_cuda({});'.format(argname))
-
+        # and add to op arg map
         argmap['options'] = {
             'value': argname,
             'formal': get_cpp_formal(tensor_options_arg),
         }
 
-    elif len(python_binding_args) > 0:
-
+    else:
+        # not the scattered fields of a tensor options - sort of a grab bag
         if 'dtype' in binding_arg_ixs:
             # we're an output-arg variant, check these args against output tensor
-            assert has_output, \
-                '{}: dtype in python_binding_args without output arg'.forma(declaration['name'])
-            assert all([name in binding_arg_ixs for name in ['layout', 'device']]), \
-                "{}: incomplete tensor options for output check".format(declaration['name'])
-
+            if not has_output:
+                raise RuntimeError(
+                    '{}: dtype in python_binding_args without output arg'.
+                        format(declaration['name']))
+            if not all([name in binding_arg_ixs for name in ['layout', 'device']]):
+                raise RuntimeError(
+                    '{}: incomplete tensor options for output check'.
+                        format(declaration['name']))
             check_type = PY_VARIABLE_CHECK_OUT_TYPE_HACK.substitute(
                 out_idx=get_python_output_index(declaration),
                 type_idx=binding_arg_index('dtype'),
@@ -664,12 +697,11 @@ def handle_python_binding_args(declaration, output_gap):
                 device_idx=binding_arg_index('device'),
             )
             inits.append(check_type)
-
         # we'll set requires_grad on outgoing tensor
-        assert 'requires_grad' in binding_arg_ixs, \
-            '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]' \
-            .format(declaration['name'], [arg['name'] for arg in python_binding_args])
-
+        if not 'requires_grad' in binding_arg_ixs:
+            raise RuntimeError(
+                '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]'.
+                    format(declaration['name'], [arg['name'] for arg in python_binding_args]))
         requires_grad = parse_binding_arg('requires_grad')
         set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
 
@@ -1304,7 +1336,10 @@ def make_python_arglists(declaration, is_python_method):
     # - force a default. This is so we can use this sig for both out and non-out variants
     num_outputs = len(output_args)
     if num_outputs > 1:
-        assert all([a['simple_type'] == 'Tensor' for a in output_args])
+        for arg in output_args:
+            if not arg['simple_type'] == 'Tensor':
+                raise RuntimeError('{}: unsupported output argument type {}'.
+                    format(declaration['name'], arg['type']))
         typename = 'TensorList'
         output_args = [{
             'default': 'None',
