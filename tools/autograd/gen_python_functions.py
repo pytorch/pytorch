@@ -703,7 +703,7 @@ def handle_python_binding_args(declaration, output_gap):
             )
             inits.append(check_type)
         # we'll set requires_grad on outgoing tensor
-        if not 'requires_grad' in binding_arg_ixs:
+        if 'requires_grad' not in binding_arg_ixs:
             raise RuntimeError(
                 '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]'.
                 format(declaration['name'], [arg['name'] for arg in python_binding_args]))
@@ -1343,8 +1343,9 @@ def make_python_arglists(declaration, is_python_method):
     if num_outputs > 1:
         for arg in output_args:
             if not arg['simple_type'] == 'Tensor':
-                raise RuntimeError('{}: unsupported output argument type {}'.
-                format(declaration['name'], arg['type']))
+                raise RuntimeError(
+                    '{}: unsupported output argument type {}'.
+                    format(declaration['name'], arg['type']))
         typename = 'TensorList'
         output_args = [{
             'default': 'None',
