@@ -48,7 +48,7 @@ namespace {
 // So we need to define the functions with the explicit function signatures.
 #ifdef _MSC_VER
   inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
-    return static_cast<at::Half>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
+    return static_cast<at::Half>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
   }
 
   template <typename Base_type, typename Exp_type>
@@ -66,7 +66,7 @@ namespace {
   template <typename Base_type, typename Exp_type>
   inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
     pow_(Base_type base, Exp_type exp) {
-    return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
+    return static_cast<Base_type>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
   }
 #else
   template <typename Base_type, typename Exp_type>
