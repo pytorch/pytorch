@@ -6525,6 +6525,7 @@ class TestTorchDeviceType(TestCase):
                     res2 = res1.clone().zero_()
                     for i in range(res2.size(0)):
                         res2[i] = math.pow(m1[4][i], num)
+                    print("pow: {}, {}, {}, {}".format(m1[4], num, res1, res2))
                     self.assertEqual(res1, res2)
 
                     # non-contiguous
