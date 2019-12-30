@@ -446,10 +446,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/expr.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir_printer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir_visitor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -478,6 +476,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
 <<<<<<< HEAD
+<<<<<<< HEAD
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/kernel_cache.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/compiler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
@@ -499,6 +498,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
 =======
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
+=======
+>>>>>>> Build fixes
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
 >>>>>>> Removes (most) old code, updates README
@@ -536,12 +537,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/asmjit_codegen.cc
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/expr.cc
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/function.cc
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/ir_printer.cc
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/ir_visitor.cc
-      ${TORCH_SRC_DIR}/csrc/jit/compiler/src/types.cc
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/asmjit_codegen.cpp
       ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
