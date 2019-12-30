@@ -217,6 +217,7 @@ class TestModels(JitTestCase):
 
         self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
+    @slowTest
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
 
@@ -427,6 +428,7 @@ class TestModels(JitTestCase):
         self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
+    @slowTest
     def test_super_resolution(self):
         self._test_super_resolution(self, device='cpu')
 
