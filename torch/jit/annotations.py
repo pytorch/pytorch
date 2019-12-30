@@ -51,7 +51,7 @@ class EvalEnv(object):
             return self.rcb(name)
         return getattr(builtins, name, None)
 
-def get_signature(fn, rcb, loc, is_method):
+def get_signature(fn, rcb, loc):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     signature = None
     if PY35:
@@ -73,13 +73,16 @@ def get_signature(fn, rcb, loc, is_method):
 
 
 def is_vararg(the_callable):
-    if not inspect.isroutine(the_callable) and hasattr(the_callable, '__call__'):
+    if not inspect.isroutine(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
         # If `the_callable` is a class, de-sugar the call so we can still get
         # the signature
         the_callable = the_callable.__call__
 
     if inspect.isroutine(the_callable):
-        return inspect.getfullargspec(the_callable).varargs is not None
+        if PY2:
+            raise RuntimeError("TODO")
+        else:
+            return inspect.getfullargspec(the_callable).varargs is not None
     else:
         return False
 
@@ -292,7 +295,8 @@ __all__ = [
     # TODO: Consider not exporting these during wildcard import (reserve
     # that for the types; for idiomatic typing code.)
     'get_signature',
-    'get_num_params',
+    'check_fn',
+    'get_param_names',
     'parse_type_line',
     'get_type_line',
     'split_type_line',

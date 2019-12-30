@@ -35,8 +35,8 @@ FunctionSchema PythonValue::getSchema(
   const auto callable = moduleSelf_ ? py::getattr(self, "original_fn") : self;
 
   annotations.attr("check_fn")(callable, loc);
-  auto signature = annotations.attr("get_signature")(
-      callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
+  auto signature =
+      annotations.attr("get_signature")(callable, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
 
   auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
@@ -45,13 +45,13 @@ FunctionSchema PythonValue::getSchema(
   auto names_it = param_names.begin();
   if (moduleSelf_) {
     ++names_it;
-    args.push_back(Argument("self", moduleSelf_->type(), {}, {}, false));
+    args.emplace_back(Argument("self", moduleSelf_->type(), {}, {}, false));
   }
   if (signature.is_none()) {
     // No type signature was provided on the callable, so make a default
     // signature where each argument is typed as a Tensor
     for (; names_it != param_names.end(); ++names_it) {
-      args.push_back(Argument(
+      args.emplace_back(Argument(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
           /*N=*/c10::nullopt,
@@ -67,7 +67,7 @@ FunctionSchema PythonValue::getSchema(
       std::vector<TypePtr> tuple_values(n_binders, ret_type);
       ret_type = TupleType::create(std::move(tuple_values));
     }
-    rets.push_back(Argument("0", ret_type, {}, {}, false));
+    rets.emplace_back(Argument("0", ret_type, {}, {}, false));
   } else {
     // Use the provided type signature
     std::vector<TypePtr> arg_types;
