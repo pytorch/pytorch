@@ -69,13 +69,13 @@ class TORCH_API Future final {
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
+    finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
       callback(value_, error_);
     }
-    finished_cv_.notify_all();
   }
 
   void setError(std::string errorMsg) {
@@ -90,13 +90,13 @@ class TORCH_API Future final {
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
+    finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
       callback(value_, error_);
     }
-    finished_cv_.notify_all();
   }
 
   bool completed() const {
