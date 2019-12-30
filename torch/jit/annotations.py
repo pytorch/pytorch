@@ -68,14 +68,19 @@ def get_signature(fn, rcb, loc, is_method):
         # because it didn't have any annotations.
         if type_line is not None:
             signature = parse_type_line(type_line, rcb, loc)
+            if is_method:
+                # Add a fake self arg so the names all line up below
+                signature[0].insert(0, None)
 
     if signature is None:
         return None
 
     param_types, return_type = signature
-    if is_method:
-        # Chop off `self` arg
-        param_types = param_types[1:]
+    # param_types = list(map(lambda x: ("meow", x), param_types))
+    arg_spec = inspect.getfullargspec(fn)
+    def get_name(index):
+        return arg_spec.args[index]
+    param_types = [(get_name(i), the_type) for i, the_type in enumerate(param_types)]
     return param_types, return_type
 
 
@@ -84,12 +89,17 @@ def get_param_names(fn, is_method):
         arg_names = inspect.getargspec(fn).args
     else:
         arg_names = inspect.getfullargspec(fn).args
-    print(inspect.getfullargspec(fn))
     if is_method:
         # Chop off `self` arg
         arg_names = arg_names[1:]
     return arg_names
 
+
+def get_param_names(fn, n_args):
+    if inspect.isroutine(fn):
+        return inspect.getfullargspec(fn).args
+    else:
+        return [str(i) for i in range(n_args)]
 
 # This is essentially a weaker form of get_signature(), where we don't care if
 # we have the types, we just care that we can figure out how many parameters

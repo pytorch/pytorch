@@ -38,28 +38,53 @@ FunctionSchema PythonValue::getSchema(
       fn_to_get_signature, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
   std::vector<Argument> args, rets;
 
+  // std::cout << "signautre none? " << (signature.is_none() ? "yes" : "no") << "\n";
+
+  auto is_class = py::cast<bool>(py::module::import("inspect").attr("isclass")(fn_to_get_signature));
+  if (is_class) {
+    std::cout << "bad!\n";
+  }
+
   if (moduleSelf_) {
     args.push_back(Argument("self", moduleSelf_->type(), {}, {}, false));
   }
   // We may mutate this if we can determine the number of args from Python
   // introspection.
   size_t actual_n_args = moduleSelf_ ? n_args + 1 : n_args;
-  auto py_arg_names =
-      annotations.attr("get_param_names")(fn_to_get_signature, bool(moduleSelf_));
-  std::vector<std::string> arg_names = py::cast<std::vector<std::string>>(py_arg_names);
+  // auto py_arg_names =
+  //     annotations.attr("get_param_names")(fn_to_get_signature, bool(moduleSelf_));
+  // std::vector<std::string> arg_names = py::cast<std::vector<std::string>>(py_arg_names);
   if (!signature.is_none()) {
-    std::vector<TypePtr> arg_types;
+    using NamedTypePtr = std::pair<std::string, TypePtr>;
+    std::vector<NamedTypePtr> named_arg_types;
     TypePtr ret_type;
-    std::tie(arg_types, ret_type) =
-        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
-    args.reserve(arg_types.size());
-    TORCH_INTERNAL_ASSERT(arg_names.size() == arg_types.size());
-    size_t i = 0;
-    for (auto& arg_type : arg_types) {
-      args.push_back(
-          Argument(arg_names.at(i), std::move(arg_type), {}, {}, false));
-      i++;
+    std::tie(named_arg_types, ret_type) =
+        py::cast<std::pair<std::vector<NamedTypePtr>, TypePtr>>(signature);
+    auto it = named_arg_types.begin();
+    if (moduleSelf_) {
+      ++it;
     }
+    args.reserve(named_arg_types.size());
+    // std::cout << "NAMED: " << named_arg_types.size() << "\n";
+    for (; it != named_arg_types.end(); ++it) {
+      // std::cout << "Name is " << named_arg_type.first << "\n";
+      args.push_back(Argument(
+          /*name=*/it->first,
+          /*type=*/std::move(it->second),
+          /*N=*/c10::nullopt,
+          /*default_value=*/c10::nullopt,
+          /*kwarg_only=*/false));
+    }
+    // TORCH_INTERNAL_ASSERT(arg_names.size() == arg_types.size());
+    // for (auto& named_arg_type : named_arg_types) {
+    //   std::cout << "Name is " << named_arg_type.first << "\n";
+    //   args.push_back(Argument(
+    //       /*name=*/named_arg_type.first,
+    //       /*type=*/std::move(named_arg_type.second),
+    //       /*N=*/c10::nullopt,
+    //       /*default_value=*/c10::nullopt,
+    //       /*kwarg_only=*/false));
+    // }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   } else {
     // Create a default signature using what information we have
@@ -68,6 +93,7 @@ FunctionSchema PythonValue::getSchema(
     // irrespective of the presence of explicit type annotations
     auto num_params =
         annotations.attr("get_num_params")(fn_to_get_signature, loc);
+    // if (!)
     if (!num_params.is_none()) {
       // Return a signature with the correct number of params according to the
       // Python function. The error handling in call() will catch any mismatch
@@ -77,15 +103,32 @@ FunctionSchema PythonValue::getSchema(
         TORCH_INTERNAL_ASSERT(actual_n_args > 0);
         --actual_n_args;
       }
+    } else {
+      std::cout << "no num parms@\n";
     }
-    TORCH_INTERNAL_ASSERT(arg_names.size() == actual_n_args);
+    auto param_names = py::cast<std::vector<std::string>>(
+          annotations.attr("get_param_names")(fn_to_get_signature, actual_n_args));
+    // TORCH_INTERNAL_ASSERT(arg_names.size() == actual_n_args);
     // Construct the default signature: all arguments and returns will be
-    // DynamicType
-    args.reserve(actual_n_args);
-    for (size_t i = 0; i < actual_n_args; ++i) {
-      args.push_back(
-          Argument(arg_names.at(i), TensorType::get(), {}, {}, false));
+    // TensorType
+    args.reserve(param_names.size());
+    auto it = param_names.begin();
+    if (moduleSelf_) {
+      // Skip `self` arg name
+      ++it;
     }
+    for (; it != param_names.end(); ++it) {
+      args.push_back(Argument(
+          /*name=*/*it,
+          /*type=*/TensorType::get(),
+          /*N=*/c10::nullopt,
+          /*default_value=*/c10::nullopt,
+          /*kwarg_only=*/false));
+    }
+    // for (size_t i = 0; i < actual_n_args; ++i) {
+    //   args.push_back(
+    //       Argument(std::to_string(i), TensorType::get(), {}, {}, false));
+    // }
     TypePtr ret_type = TensorType::get();
     if (n_binders == 0) {
       ret_type = NoneType::get();
