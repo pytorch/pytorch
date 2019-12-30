@@ -72,15 +72,21 @@ def get_signature(fn, rcb, loc):
     return signature
 
 
+def is_script_callable(the_callable):
+    # A stricter version of `inspect.isroutine` that does not pass for built-in
+    # functions
+    return inspect.isfunction(the_callable) or inspect.ismethod(the_callable)
+
+
 def is_vararg(the_callable):
-    if not inspect.isroutine(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
+    if not is_script_callable(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
         # If `the_callable` is a class, de-sugar the call so we can still get
         # the signature
         the_callable = the_callable.__call__
 
-    if inspect.isroutine(the_callable):
+    if is_script_callable(the_callable):
         if PY2:
-            raise RuntimeError("TODO")
+            return inspect.getargspec(the_callable).varargs is not None
         else:
             return inspect.getfullargspec(the_callable).varargs is not None
     else:
@@ -88,8 +94,11 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
-    if inspect.isroutine(fn):
-        return inspect.getfullargspec(fn).args
+    if is_script_callable(fn):
+        if PY2:
+            return inspect.getargspec(fn).args
+        else:
+            return inspect.getfullargspec(fn).args
     else:
         # The `fn` was not a method or function (maybe a class with a __call__
         # method, so use a default param name list)
