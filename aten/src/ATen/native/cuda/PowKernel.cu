@@ -51,12 +51,12 @@ inline __host__ __device__ T powi(T a, T b) {
   // Functions for sqrt
   // sqrt (floating)
   template <typename T>
-  inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type sqrt(T x) {
+  inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type sqrt_(T x) {
     return std::sqrt(x);
   }
   // sqrt (integral)
   template <typename T>
-  inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt(T x) {
+  inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt_(T x) {
     return static_cast<T>(std::sqrt(static_cast<double>(x)));
   }
 #else
@@ -65,7 +65,7 @@ inline __host__ __device__ T powi(T a, T b) {
     return std::pow(base, exp);
   }
   template <typename T>
-  inline __host__ __device__ T sqrt(T x) {
+  inline __host__ __device__ T sqrt_(T x) {
     return std::sqrt(x);
   }
 #endif
