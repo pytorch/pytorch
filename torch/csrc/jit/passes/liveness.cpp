@@ -11,10 +11,23 @@ namespace jit {
 // "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
 struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)), changed_(false) {}
+
+  void extendLiveness(Block* b, const SparseBitVector& loop_block) {
+    for (Node* lit : b->nodes()) {
+      changed_ = changed_ | (liveness_sets_.at(lit) |= loop_block);
+      for (Block* ib : lit->blocks()) {
+        extendLiveness(ib, loop_block);
+      }
+    }
+  }
 
   std::unordered_map<Node*, std::vector<Value*>> run() {
-    processBlock(graph_->block(), SparseBitVector{});
+    do {
+      changed_ = false;
+      processBlock(graph_->block(), SparseBitVector{});
+    } while (changed_);
+
     std::unordered_map<Node*, std::vector<Value*>> result;
 
     for (const auto& e : liveness_sets_) {
@@ -100,6 +113,7 @@ struct LivenessAnalyzer {
         mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
+        extendLiveness(lv.bodyBlock(), loop_block);
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
         auto true_liveness = processBlock(it->blocks()[0], liveness);
@@ -108,12 +122,13 @@ struct LivenessAnalyzer {
         liveness |= false_liveness;
       }
       liveness |= toSparseBitVector(it->inputs());
-      liveness_sets_.insert({it, liveness});
+      changed_ = changed_ | (liveness_sets_[it] |= liveness);
     }
     return liveness;
   }
 
   std::shared_ptr<Graph> graph_;
+  bool changed_;
   std::map<Node*, SparseBitVector> liveness_sets_;
   std::map<size_t, Value*> ids_to_values_;
 };
