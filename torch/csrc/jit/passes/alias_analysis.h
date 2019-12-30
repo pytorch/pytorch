@@ -141,6 +141,8 @@ class AliasDb {
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
 
+  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
+
   /**
    * Special analysis methods
    */
@@ -191,7 +193,9 @@ class AliasDb {
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
   bool mayAliasWildcard(const Value* v) const;
+  bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
+
   /**
    * State for tracking write info.
    */

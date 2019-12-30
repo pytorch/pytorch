@@ -937,28 +937,23 @@ bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
   });
 }
 
+bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
+  return mayContainAlias(graph_->inputs(), vs) ||
+      mayContainAlias(graph_->outputs(), vs) || mayAliasWildcard(vs);
+}
+
 // Correctness conditions:
 // no values in either set can have writers, and values in both sets
 // cannot escape the current graph scope. Values can escape the current scope
-// by aliasing a graph output or input, or aliasing an input to
-// prim::FunctionCall or MethodCall. FunctionCall and MethodCall are marked as
-// mutating ops, so we do not need to check for them because they are covered
-// by the writers condition.
+// by aliasing a graph output or input, or by aliasing the wildcard set.
 bool AliasDb::safeToChangeAliasingRelationship(
     const at::ArrayRef<Value*>& a,
     const at::ArrayRef<Value*>& b) const {
   if (hasWriters(a) || hasWriters(b)) {
     return false;
   }
-  auto graph_outputs = graph_->outputs();
-  auto graph_inputs = graph_->inputs();
 
-  bool a_escapes_scope =
-      mayContainAlias(graph_inputs, a) || mayContainAlias(graph_outputs, b);
-  bool b_escapes_scope =
-      mayContainAlias(graph_inputs, a) || mayContainAlias(graph_outputs, b);
-
-  return !a_escapes_scope || !b_escapes_scope;
+  return !(escapesScope(a) && escapesScope(b));
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.
@@ -1312,6 +1307,11 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
   }
   // There were no wildcards of this type, so return false.
   return false;
+}
+
+bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
+  return std::any_of(
+      vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
 
 // Search the wildcard index for an element that corresponds to the given type.

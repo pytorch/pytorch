@@ -425,18 +425,34 @@ void testAliasAnalysis() {
       %b : Tensor = aten::add(%x, %2, %3)
       %c : Tensor = aten::add(%x, %2, %3)
       %d : Tensor = aten::add(%x, %2, %3)
+      %e : Tensor = aten::add(%x, %2, %3)
+      %f : Tensor[] = prim::ListConstruct(%e)
       %14 : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
       return (%14)
     )IR",
-        &*graph, vmap);
+        &*graph,
+        vmap);
 
     AliasDb aliasDb(graph);
     // x, b, c escape scope, so we can't introduce an aliasing relationship
     TORCH_INTERNAL_ASSERT(!aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["b"]));
-    TORCH_INTERNAL_ASSERT(!aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
+    TORCH_INTERNAL_ASSERT(
+        !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["x"]));
+    TORCH_INTERNAL_ASSERT(
+        !aliasDb.safeToChangeAliasingRelationship(vmap["b"], vmap["c"]));
+    TORCH_INTERNAL_ASSERT(
+        !aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["b"]));
+
+    // e aliases the wildcard set because it's contained in a list
+    TORCH_INTERNAL_ASSERT(
+        !aliasDb.safeToChangeAliasingRelationship(vmap["e"], vmap["x"]));
+    TORCH_INTERNAL_ASSERT(
+        !aliasDb.safeToChangeAliasingRelationship(vmap["x"], vmap["e"]));
 
     // d is a temporary with no writers, safe to change aliasing relationship here
     TORCH_INTERNAL_ASSERT(aliasDb.safeToChangeAliasingRelationship(vmap["c"], vmap["d"]));
+    TORCH_INTERNAL_ASSERT(
+        aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
   }
 }
 
