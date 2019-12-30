@@ -71,7 +71,7 @@ class RefHandle {
   }
 
   RefHandle() {}
-  RefHandle(NodeType* node) : node_(node) {}
+  RefHandle(const NodeType* node) : node_(const_cast<NodeType*>(node)) {}
 
   RefHandle(const RefHandle& other) {
     this->reset();

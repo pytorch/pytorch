@@ -1,7 +1,9 @@
+#include <sstream>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
 
+#include "torch/csrc/jit/compiler/include/ir_printer.h"
 #include "torch/csrc/jit/compiler/tests/test_utils.h"
 
 using namespace torch::jit::compiler;
@@ -123,4 +125,22 @@ TEST(ExprTest, VectorAdd01) {
   for (int i = 0; i < c_v.size(); ++i) {
     ASSERT_NEAR(c_v[i], c_ref[i], 1e-5) << "i: " << i;
   }
+}
+
+TEST(ExprTest, Substitute01) {
+  Expr x = Variable::make("x", kFloat32);
+  Expr y = Variable::make("y", kFloat32);
+  Expr e = (x - 1.0f) * (x + y + 2.0f);
+
+  Expr z = Variable::make("z", kFloat32);
+  Expr e2 = Substitute(&e, {{x, z + 1.0f}});
+  Expr e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
+  std::ostringstream oss;
+  oss << e2;
+  std::string e2_str = oss.str();
+
+  oss.str("");
+  oss << e2_ref;
+  std::string e2_ref_str = oss.str();
+  ASSERT_EQ(e2_str, e2_ref_str);
 }
