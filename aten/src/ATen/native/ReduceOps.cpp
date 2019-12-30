@@ -217,44 +217,36 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value() || (out.scalar_type() == dtype.value()),
-      "provided dtype must match dtype of result in cummax. Got ",
-      toString(out.scalar_type()),
-      " and ",
-      toString(dtype.value()),
-      ".");
+std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tensor& self, int64_t dim) {
    {
     NoNamesGuard guard;
     if(self.dim() == 0) {
-      out = self;
-      indices = self;
+      out.resize_({}).fill_(self.item());
+      indices.resize_({}).fill_(0);
     }
     else {
-      //update out_ and indices_ for the first values along the dimension dim
-      auto out_ = self.narrow(dim, 0, 1);
-      auto indices_ = at::zeros(out_.sizes(), at::kLong);
+      // update out_ and indices_ for the first values along the dimension dim
+      out.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
+      indices = integer_upcast(indices.fill_(0), at::kLong);
       for(int64_t i=1; i<self.size(dim); i++) {
-        auto res_at_i = at::native::max(at::cat({out_.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
-        auto out_at_i = (std::get<0>(res_at_i)).unsqueeze(dim);
-        out_ = at::cat({out_, out_at_i}, dim);
-        auto max_indices_at_i = at::max(indices_.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)));
-        indices_ = at::cat({indices_, max_indices_at_i}, dim);
+        auto res_at_i = at::max(at::cat({out.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
+        // output at index i
+        out.narrow(dim, i, 1) = (std::get<0>(res_at_i)).unsqueeze(dim);
+        // output indices at index i
+        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)));
        }
-    out=out_;
-    indices=indices_;
    }
+   out=integer_upcast(out, self.scalar_type());
   }
   namedinference::propagate_names(out, self);
   namedinference::propagate_names(indices, self);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }
 
-std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  auto out = integer_upcast(at::empty(self.sizes()), dtype);//.options().dtype(dtype_);
+std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
+  auto out = at::empty(self.sizes(), self.scalar_type());
   auto indices = at::empty(self.sizes(), at::kLong);
-  at::cummax_out(out, indices, self, dim, dtype);
+  at::cummax_out(out, indices, self, dim);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }
 // ALL REDUCE #################################################################
@@ -909,11 +901,11 @@ Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype)
 Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
 }
-std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  return at::cummax(self, dimname_to_position(self, dim), dtype);
+std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
+  return at::cummax(self, dimname_to_position(self, dim));
 }
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-  return at::cummax_out(out, indices, self, dimname_to_position(self, dim), dtype);
+std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tensor& self, Dimname dim) {
+  return at::cummax_out(out, indices, self, dimname_to_position(self, dim));
 }
 
 }} // namespace at::native
