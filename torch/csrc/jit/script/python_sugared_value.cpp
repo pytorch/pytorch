@@ -34,16 +34,19 @@ FunctionSchema PythonValue::getSchema(
   auto annotations = py::module::import("torch.jit.annotations");
   const auto callable = moduleSelf_ ? py::getattr(self, "original_fn") : self;
 
+  // Make sure the function is not a class instantiation
   annotations.attr("check_fn")(callable, loc);
+  auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
+
   auto signature =
       annotations.attr("get_signature")(callable, rcb ? *rcb : py::none(), loc);
   std::vector<Argument> args, rets;
 
   auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
-  auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
+    // If there is a `self` parameter on the callable, skip it on the names list
     ++names_it;
     args.emplace_back(Argument("self", moduleSelf_->type(), {}, {}, false));
   }
@@ -91,14 +94,14 @@ FunctionSchema PythonValue::getSchema(
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   }
 
-  std::string name("");
-  // Use the qualified name if possible
+  std::string name;
   if (py::hasattr(self, "__qualname__")) {
+    // Use the qualified name if possible
     name = py::str(py::getattr(self, "__qualname__"));
   } else if (py::hasattr(self, "__name__")) {
     name = py::str(py::getattr(self, "__name__"));
   }
-  return FunctionSchema("", "", std::move(args), std::move(rets), is_vararg);
+  return FunctionSchema(name, "", std::move(args), std::move(rets), is_vararg);
 }
 
 std::shared_ptr<SugaredValue> PythonValue::call(
