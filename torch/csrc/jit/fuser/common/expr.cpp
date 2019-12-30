@@ -1,5 +1,5 @@
-#include "expr.h"
-#include "ir.h"
+#include <torch/csrc/jit/fuser/common/expr.h>
+#include <torch/csrc/jit/fuser/common/ir.h>
 
 namespace torch {
 namespace jit {

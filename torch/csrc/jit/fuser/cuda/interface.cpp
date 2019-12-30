@@ -10,9 +10,9 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include "../common/ir.h"
-#include "../common/ir_printer.h"
-#include "../common/expr.h"
+// #include "../common/ir.h"
+// #include "../common/ir_printer.h"
+// #include "../common/expr.h"
 
 namespace torch {
 namespace jit {

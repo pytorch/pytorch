@@ -52,6 +52,11 @@ Do not use non-standard suffixes like .cc or .hpp.
 Currently contains considerable legacy code and only supports singleton
 fusion. Vertical fusion coming soon.
 
+## Common Issues
+
+- Remember to use TORCH_API to decorate functions and classes that may be
+    called externally. This includes in the CPP tests!
+
 
 ## TODO
 
@@ -59,14 +64,9 @@ fusion. Vertical fusion coming soon.
 - Add vertical fusion
 - Restore removed debug functionality (see torch/csrc/jit/init.cpp)
 - Repair custom fusion pass (see test/cpp/jit/test_misc.cpp)
-- Replace test_fuser.cpp
-- Change "fuser" name(space) to "fusion"
 - Update Python tests
-- Create cpp tests
 - Benchmark speedups on CPU and GPU with benchmark networks / snippets
-- Remove remaining unused "fuser" files
 - Update fusion README to reflect new requirements, capabilities, and design
-- CPU: LoopIR -> CPUIR
-- CPU: CPUIR -> callable
+- CPU: LoopIR -> CPUIR - > callable
 - Benchmark kernel caching
-- move branch to pytorch/pytorch (once tests are ready)
+- move branch to pytorch/pytorch (once Python tests are updated)
