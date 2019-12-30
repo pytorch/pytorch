@@ -42,7 +42,7 @@ static inline __host__ __device__ T powi(T a, T b) {
 // Functions for pow
 // pow for at::Half
 static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
-  return static_cast<at::Half>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
+  return static_cast<at::Half>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
 }
 // pow (floating, floating/int)
 template <typename Base_type, typename Exp_type>
