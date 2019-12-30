@@ -271,7 +271,7 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, FuncType, F, Ret, guts
     if (self.scalar_type() == run_as_type) {
       (*F)(self, cached_cast(run_as_type, args)...);
     } else {
-      AT_ASSERT(false, "In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)");
+      AT_ERROR("In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)");
     }
     return self;
   }
@@ -316,7 +316,7 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::inplace, decltype(OVERLOAD), OV
     if (self.scalar_type() == run_as_type) { \
       self.METHOD(cached_cast(run_as_type, args)...); \
     } else { \
-      AT_ASSERT(false, "In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)"); \
+      AT_ERROR("In-place operators that autocast to torch.float32 require that the argument modified in-place is already torch.float32.  (Other arguments may be any type.)"); \
     } \
     return self; \
   } \
@@ -433,7 +433,7 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::user_supplied_out, FuncType, F,
     if (out.scalar_type() == run_as_type) {
       (*F)(out, cached_cast(run_as_type, args)...);
     } else {
-      AT_ASSERT(false, "If you supply an 'out=my_output' argument to an op that autocasts to torch.float32, my_output must be torch.float32.  (Other arguments may be any type.)");
+      AT_ERROR("If you supply an 'out=my_output' argument to an op that autocasts to torch.float32, my_output must be torch.float32.  (Other arguments may be any type.)");
     }
     return out;
   }
