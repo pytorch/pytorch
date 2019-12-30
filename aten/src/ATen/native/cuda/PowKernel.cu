@@ -10,7 +10,7 @@ namespace at { namespace native {
 namespace {
 
 template <typename T>
-inline __host__ __device__ T powi(T a, T b) {
+static inline __host__ __device__ T powi(T a, T b) {
   T result = 1;
   while (b) {
     if (b & 1) {
@@ -41,60 +41,60 @@ inline __host__ __device__ T powi(T a, T b) {
 #ifdef _MSC_VER
 // Functions for pow
 // pow for at::Half
-inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
+static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
   return static_cast<at::Half>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
 }
 // pow (floating, floating/int)
 template <typename Base_type, typename Exp_type>
-inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
+static inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
   pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
 // pow (integral, integral)
 template <typename Base_type, typename Exp_type>
-inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
+static inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
   pow_(Base_type base, Exp_type exp) {
   return powi(base, exp);
 }
 // pow (Otherwise)
 template <typename Base_type, typename Exp_type>
-inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
+static inline __host__ __device__ typename std::enable_if<!std::is_same<Base_type, Exp_type>::value && !std::is_same<Exp_type, int>::value, Base_type>::type
   pow_(Base_type base, Exp_type exp) {
   return static_cast<Base_type>(std::pow(static_cast<double>(base), static_cast<double>(exp)));
 }
 // Functions for sqrt
 // sqrt (floating)
 template <typename T>
-inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type sqrt_(T x) {
+static inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type sqrt_(T x) {
   return std::sqrt(x);
 }
 // sqrt (integral)
 template <typename T>
-inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt_(T x) {
+static inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type sqrt_(T x) {
   return static_cast<T>(std::sqrt(static_cast<double>(x)));
 }
 // Function for inverse sqrt
 // invsqrt (floating)
 template <typename T>
-inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
+static inline __host__ __device__ typename std::enable_if<std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
   return 1.0 / std::sqrt(x);
 }
 // invsqrt (integral)
 template <typename T>
-inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
+static inline __host__ __device__ typename std::enable_if<!std::is_floating_point<T>::value, T>::type invsqrt_(T x) {
   return static_cast<T>(1.0 / std::sqrt(static_cast<double>(x)));
 }
 #else
 template <typename Base_type, typename Exp_type>
-inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
+static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
   return std::pow(base, exp);
 }
 template <typename T>
-inline __host__ __device__ T sqrt_(T x) {
+static inline __host__ __device__ T sqrt_(T x) {
   return std::sqrt(x);
 }
 template <typename T>
-inline __host__ __device__ T invsqrt_(T x) {
+static inline __host__ __device__ T invsqrt_(T x) {
   return 1.0 / std::sqrt(x);
 }
 #endif
