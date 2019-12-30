@@ -367,8 +367,9 @@ file called "dist_autograd_simple.py", it can be run with the command
       _run_process(rank, dst_rank, world_size)
       rpc.shutdown()
 
-  # Run world_size workers.
-  world_size = 2
-  mp.spawn(run_process, args=(world_size,), nprocs=world_size)
+  if __name__ == '__main__':
+    # Run world_size workers
+    world_size = 2
+    mp.spawn(run_process, args=(world_size,), nprocs=world_size)
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
