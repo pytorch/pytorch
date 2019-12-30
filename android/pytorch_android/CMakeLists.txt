@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_jni CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(TRACE_ENABLED OFF)
@@ -72,6 +72,7 @@ if (ANDROID_ABI)
   endfunction(import_static_lib)
 
   import_static_lib(libtorch)
+  import_static_lib(libtorch_cpu)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
   import_static_lib(libpytorch_qnnpack)
@@ -85,6 +86,7 @@ if (ANDROID_ABI)
       -Wl,--gc-sections
       -Wl,--whole-archive
       libtorch
+      libtorch_cpu
       -Wl,--no-whole-archive
       libc10
       libnnpack
@@ -100,6 +102,7 @@ else()
   target_link_libraries(pytorch_jni
       fbjni
       torch
+      torch_cpu
       c10
       nnpack
       pytorch_qnnpack

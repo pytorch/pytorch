@@ -820,6 +820,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
   }
 }
 
+void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+    if (u.user->isAfter(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
+    return u.user->isAfter(node);
+  }), uses_.end());
+}
+
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments().size(); ++i) {

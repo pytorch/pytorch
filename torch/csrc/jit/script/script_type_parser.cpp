@@ -5,24 +5,8 @@
 namespace torch {
 namespace jit {
 namespace script {
-
+const std::unordered_map<std::string, TypePtr>& string_to_type_lut();
 namespace {
-const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
-  static std::unordered_map<std::string, TypePtr> map = {
-      {"Tensor", TensorType::get()},
-      {"int", IntType::get()},
-      {"float", FloatType::get()},
-      {"bool", BoolType::get()},
-      {"str", StringType::get()},
-      {"Device", DeviceObjType::get()},
-      // technically this is not a python type but we need it when
-      // parsing serialized methods that use implicit converions to Scalar
-      {"number", NumberType::get()},
-      {"None", NoneType::get()},
-      {"Any", AnyType::get()},
-  };
-  return map;
-}
 
 bool isTorch(const Expr& expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
@@ -128,8 +112,8 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     throw ErrorReport(subscript.value().range())
         << "Broadcastable lists only supported for int or float";
 
-  auto elem_ptr = ident_to_type_lut().find(value_name);
-  AT_ASSERT(elem_ptr != ident_to_type_lut().end());
+  auto elem_ptr = string_to_type_lut().find(value_name);
+  AT_ASSERT(elem_ptr != string_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
@@ -178,8 +162,8 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
     }
     return subscriptToType(*value_name, subscript);
   } else if (auto name = parseBaseTypeName(expr)) {
-    auto itr = ident_to_type_lut().find(*name);
-    if (itr != ident_to_type_lut().end()) {
+    auto itr = string_to_type_lut().find(*name);
+    if (itr != string_to_type_lut().end()) {
       return itr->second;
     }
     if (resolver_) {
@@ -330,6 +314,37 @@ FunctionSchema ScriptTypeParser::parseSchemaFromDef(
   std::vector<Argument> returns = parseReturnFromDecl(def.decl());
   return FunctionSchema(
       name, "", std::move(args), std::move(returns), false, false);
+}
+
+c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
+  if (assign.lhs().kind() != TK_VAR) {
+    throw ErrorReport(assign.range())
+      << "Expected to a variable for class constant";
+  }
+  const auto final_type = assign.type().get();
+  auto expr = assign.rhs().get();
+  if (final_type.kind() != TK_SUBSCRIPT) {
+    throw ErrorReport(assign.range())
+      << "Expected subscripted type for class constant";
+  }
+  auto subscript = Subscript(final_type);
+  auto value_name = parseBaseTypeName(subscript.value());
+  if (!value_name) {
+    throw ErrorReport(subscript.value().range())
+      << "Subscripted type must be a type identifier";
+  }
+  if (*value_name != "Final") {
+    throw ErrorReport(subscript.range())
+      << "Base type must be Final for class constant";
+  }
+  if (subscript.subscript_exprs().size() != 1) {
+    throw ErrorReport(subscript)
+      << " expected exactly one element type but found "
+      << subscript.subscript_exprs().size();
+  }
+  auto type = *subscript.subscript_exprs().begin();
+  auto default_val = evaluateDefaults(expr.range(), {type}, {expr});
+  return *default_val.begin();
 }
 
 } // namespace script

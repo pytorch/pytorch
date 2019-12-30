@@ -103,6 +103,7 @@ Random sampling
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
+.. autofunction:: poisson
 .. autofunction:: rand
 .. autofunction:: rand_like
 .. autofunction:: randint
@@ -211,6 +212,7 @@ Pointwise Ops
 .. autofunction:: exp
 .. autofunction:: expm1
 .. autofunction:: floor
+.. autofunction:: floor_divide
 .. autofunction:: fmod
 .. autofunction:: frac
 .. autofunction:: imag
@@ -220,7 +222,9 @@ Pointwise Ops
 .. autofunction:: log10
 .. autofunction:: log1p
 .. autofunction:: log2
+.. autofunction:: logical_and
 .. autofunction:: logical_not
+.. autofunction:: logical_or
 .. autofunction:: logical_xor
 .. autofunction:: mul
 .. autofunction:: mvlgamma
@@ -237,6 +241,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc

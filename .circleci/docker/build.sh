@@ -67,6 +67,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-py3.6-gcc7.2)
     ANACONDA_PYTHON_VERSION=3.6

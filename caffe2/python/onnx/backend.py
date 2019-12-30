@@ -915,7 +915,7 @@ class Caffe2Backend(Backend):
 
         return init_net, pred_net
 
-    # wrapper for backwards compatability
+    # wrapper for backwards compatibility
     @classmethod
     def onnx_graph_to_caffe2_net(cls, model, device="CPU", opset_version=_known_opset_version):
         return cls._onnx_model_to_caffe2_net(model, device=device, opset_version=opset_version, include_initializers=True)

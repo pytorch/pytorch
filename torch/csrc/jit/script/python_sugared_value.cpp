@@ -201,7 +201,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
-  // eventhough it is possible, though rare, for someone to mutate them
+  // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
@@ -218,10 +218,6 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
-    if (!attrType) {
-      continue;
-    }
-
     if (attrType->is_module()) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
@@ -322,6 +318,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 5. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
+  } else if (
+      const auto builtin = concreteType_->findBuiltinFunction(field)) {
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
 
   // 6. Check if it's an attribute of the original Python class that this
