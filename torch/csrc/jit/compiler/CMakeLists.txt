@@ -40,6 +40,7 @@ add_library(nnc
   src/llvm_jit.cc
   src/types.cc
   src/ir_printer.cc
+  src/ir_mutator.cc
   src/schedule.cc
   src/tensor.cc
   ${ASMJIT_SRC}

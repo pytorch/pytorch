@@ -316,6 +316,42 @@ class SimpleIREvaluator : public IRVisitor {
   BufferMapping buffer_mapping_;
 };
 
+using VarMapping = std::vector<std::pair<Expr, Expr>>;
+
+class VarSubMutator : public IRMutator {
+ public:
+  VarSubMutator(const VarMapping& var_mapping) {
+    for (const auto& entry : var_mapping) {
+      const Expr& key = entry.first;
+      const Expr& value = entry.second;
+      const Variable* key_var = key.AsNode<Variable>();
+      CHECK(key_var != nullptr);
+      var_mapping_[key_var] = value;
+    }
+  }
+
+  Expr mutate(const Variable* var) override {
+    auto iter = var_mapping_.find(var);
+    if (iter == var_mapping_.end()) {
+      return Expr::make(const_cast<Variable*>(var));
+    }
+    return iter->second;
+  }
+
+ private:
+  std::unordered_map<const Variable*, Expr> var_mapping_;
+};
+
+inline Expr Substitute(Expr* expr, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return expr->accept_mutator(&var_sub);
+}
+
+inline Stmt Substitute(Stmt* stmt, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return stmt->accept_mutator(&var_sub);
+}
+
 } // namespace compiler
 } // namespace jit
 } // namespace torch
