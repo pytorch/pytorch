@@ -11717,6 +11717,7 @@ class TestTorchDeviceType(TestCase):
         floats = [0.0, 1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
         tensor = torch.tensor(ints, dtype=torch.int64, device=device)
         for pow in floats:
+            print("pow: ", pow)
             self._test_pow(tensor, pow)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
