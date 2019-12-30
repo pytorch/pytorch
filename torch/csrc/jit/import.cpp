@@ -263,8 +263,25 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
+  // Verify that we're loading a zip archive and not a torch.save pickle archive
+  // (marked by the 0x80 0x02 bytes at the start)
+  char first_short[2];
+  rai->read(
+      /*pos=*/0,
+      /*buf=*/reinterpret_cast<char*>(first_short),
+      /*n=*/2,
+      /*what=*/"checking archive");
+  if (first_short[0] == -0x80 && first_short[1] == 0x02) {
+    TORCH_CHECK(
+        false,
+        "`torch::jit::load()` received a file from `torch.save()`, "
+        "but `torch::jit::load()` can only load files"
+        " produced by `torch.jit.save()`");
+  }
+
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<script::CompilationUnit>();
+
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }

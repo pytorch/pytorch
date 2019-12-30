@@ -21,6 +21,8 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   // and python test runners), but is instead invoked manually by the
   // torch_python_test.cpp
   testEvalModeForLoadedModule();
+  testSerializationInterop();
+  testTorchSaveError();
 }
 #undef JIT_TEST
 #endif
