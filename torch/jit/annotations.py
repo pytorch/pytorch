@@ -68,62 +68,46 @@ def get_signature(fn, rcb, loc, is_method):
         # because it didn't have any annotations.
         if type_line is not None:
             signature = parse_type_line(type_line, rcb, loc)
-            if is_method:
-                # Add a fake self arg so the names all line up below
-                signature[0].insert(0, None)
 
-    if signature is None:
-        return None
-
-    param_types, return_type = signature
-    # param_types = list(map(lambda x: ("meow", x), param_types))
-    arg_spec = inspect.getfullargspec(fn)
-    def get_name(index):
-        return arg_spec.args[index]
-    param_types = [(get_name(i), the_type) for i, the_type in enumerate(param_types)]
-    return param_types, return_type
+    return signature
 
 
-def get_param_names(fn, is_method):
-    if PY2:
-        arg_names = inspect.getargspec(fn).args
+def is_vararg(the_callable):
+    if not inspect.isroutine(the_callable) and hasattr(the_callable, '__call__'):
+        # If `the_callable` is a class, de-sugar the call so we can still get
+        # the signature
+        the_callable = the_callable.__call__
+
+    if inspect.isroutine(the_callable):
+        return inspect.getfullargspec(the_callable).varargs is not None
     else:
-        arg_names = inspect.getfullargspec(fn).args
-    if is_method:
-        # Chop off `self` arg
-        arg_names = arg_names[1:]
-    return arg_names
+        return False
 
 
 def get_param_names(fn, n_args):
     if inspect.isroutine(fn):
         return inspect.getfullargspec(fn).args
     else:
+        # The `fn` was not a method or function (maybe a class with a __call__
+        # method, so use a default param name list)
         return [str(i) for i in range(n_args)]
 
-# This is essentially a weaker form of get_signature(), where we don't care if
-# we have the types, we just care that we can figure out how many parameters
-# a function takes.
-def get_num_params(fn, loc):
+
+def check_fn(fn, loc):
+    # Make sure the function definition is not a class instantiation
     try:
         source = dedent(''.join(get_source_lines_and_file(fn)[0]))
     except (TypeError, IOError):
-        return None
+        return
     if source is None:
-        return None
+        return
+
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
         raise torch.jit.frontend.FrontendError(
             loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
-    py_def = py_ast.body[0]
-    if py_def.args.vararg is not None:
-        return None
-    elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
-        return None
-    else:
-        return len(py_def.args.args)
 
 
 def parse_type_line(type_line, rcb, loc):

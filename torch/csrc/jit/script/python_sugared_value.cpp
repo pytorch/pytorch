@@ -32,103 +32,34 @@ FunctionSchema PythonValue::getSchema(
     const size_t n_binders,
     const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
-  const auto fn_to_get_signature =
-      moduleSelf_ ? py::getattr(self, "original_fn") : self;
+  const auto callable = moduleSelf_ ? py::getattr(self, "original_fn") : self;
+
+  annotations.attr("check_fn")(callable, loc);
   auto signature = annotations.attr("get_signature")(
-      fn_to_get_signature, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
+      callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
   std::vector<Argument> args, rets;
 
-  // std::cout << "signautre none? " << (signature.is_none() ? "yes" : "no") << "\n";
-
-  auto is_class = py::cast<bool>(py::module::import("inspect").attr("isclass")(fn_to_get_signature));
-  if (is_class) {
-    std::cout << "bad!\n";
-  }
-
+  auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
+  auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
+  auto param_names = py::cast<std::vector<std::string>>(py_param_names);
+  auto names_it = param_names.begin();
   if (moduleSelf_) {
+    ++names_it;
     args.push_back(Argument("self", moduleSelf_->type(), {}, {}, false));
   }
-  // We may mutate this if we can determine the number of args from Python
-  // introspection.
-  size_t actual_n_args = moduleSelf_ ? n_args + 1 : n_args;
-  // auto py_arg_names =
-  //     annotations.attr("get_param_names")(fn_to_get_signature, bool(moduleSelf_));
-  // std::vector<std::string> arg_names = py::cast<std::vector<std::string>>(py_arg_names);
-  if (!signature.is_none()) {
-    using NamedTypePtr = std::pair<std::string, TypePtr>;
-    std::vector<NamedTypePtr> named_arg_types;
-    TypePtr ret_type;
-    std::tie(named_arg_types, ret_type) =
-        py::cast<std::pair<std::vector<NamedTypePtr>, TypePtr>>(signature);
-    auto it = named_arg_types.begin();
-    if (moduleSelf_) {
-      ++it;
-    }
-    args.reserve(named_arg_types.size());
-    // std::cout << "NAMED: " << named_arg_types.size() << "\n";
-    for (; it != named_arg_types.end(); ++it) {
-      // std::cout << "Name is " << named_arg_type.first << "\n";
+  if (signature.is_none()) {
+    // No type signature was provided on the callable, so make a default
+    // signature where each argument is typed as a Tensor
+    for (; names_it != param_names.end(); ++names_it) {
       args.push_back(Argument(
-          /*name=*/it->first,
-          /*type=*/std::move(it->second),
-          /*N=*/c10::nullopt,
-          /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
-    }
-    // TORCH_INTERNAL_ASSERT(arg_names.size() == arg_types.size());
-    // for (auto& named_arg_type : named_arg_types) {
-    //   std::cout << "Name is " << named_arg_type.first << "\n";
-    //   args.push_back(Argument(
-    //       /*name=*/named_arg_type.first,
-    //       /*type=*/std::move(named_arg_type.second),
-    //       /*N=*/c10::nullopt,
-    //       /*default_value=*/c10::nullopt,
-    //       /*kwarg_only=*/false));
-    // }
-    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
-  } else {
-    // Create a default signature using what information we have
-
-    // First see if we can introspect the number of function parameters
-    // irrespective of the presence of explicit type annotations
-    auto num_params =
-        annotations.attr("get_num_params")(fn_to_get_signature, loc);
-    // if (!)
-    if (!num_params.is_none()) {
-      // Return a signature with the correct number of params according to the
-      // Python function. The error handling in call() will catch any mismatch
-      // later.
-      actual_n_args = py::cast<size_t>(num_params);
-      if (moduleSelf_) {
-        TORCH_INTERNAL_ASSERT(actual_n_args > 0);
-        --actual_n_args;
-      }
-    } else {
-      std::cout << "no num parms@\n";
-    }
-    auto param_names = py::cast<std::vector<std::string>>(
-          annotations.attr("get_param_names")(fn_to_get_signature, actual_n_args));
-    // TORCH_INTERNAL_ASSERT(arg_names.size() == actual_n_args);
-    // Construct the default signature: all arguments and returns will be
-    // TensorType
-    args.reserve(param_names.size());
-    auto it = param_names.begin();
-    if (moduleSelf_) {
-      // Skip `self` arg name
-      ++it;
-    }
-    for (; it != param_names.end(); ++it) {
-      args.push_back(Argument(
-          /*name=*/*it,
+          /*name=*/*names_it,
           /*type=*/TensorType::get(),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
           /*kwarg_only=*/false));
     }
-    // for (size_t i = 0; i < actual_n_args; ++i) {
-    //   args.push_back(
-    //       Argument(std::to_string(i), TensorType::get(), {}, {}, false));
-    // }
+
+    // Use as many outputs as are requested to make the return type
     TypePtr ret_type = TensorType::get();
     if (n_binders == 0) {
       ret_type = NoneType::get();
@@ -137,7 +68,29 @@ FunctionSchema PythonValue::getSchema(
       ret_type = TupleType::create(std::move(tuple_values));
     }
     rets.push_back(Argument("0", ret_type, {}, {}, false));
+  } else {
+    // Use the provided type signature
+    std::vector<TypePtr> arg_types;
+    TypePtr ret_type;
+    std::tie(arg_types, ret_type) =
+        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
+
+    // arg_types does not include self but param_names does, so adjust for that
+    // if needed
+    TORCH_INTERNAL_ASSERT(arg_types.size() == param_names.size() - (moduleSelf_ ? 1 : 0));
+
+    auto types_it = arg_types.begin();
+    for (; types_it != arg_types.end(); ++types_it, ++names_it) {
+      args.push_back(Argument(
+          /*name=*/*names_it,
+          /*type=*/std::move(*types_it),
+          /*N=*/c10::nullopt,
+          /*default_value=*/c10::nullopt,
+          /*kwarg_only=*/false));
+    }
+    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   }
+
   std::string name("");
   // Use the qualified name if possible
   if (py::hasattr(self, "__qualname__")) {
@@ -145,7 +98,7 @@ FunctionSchema PythonValue::getSchema(
   } else if (py::hasattr(self, "__name__")) {
     name = py::str(py::getattr(self, "__name__"));
   }
-  return FunctionSchema("", "", std::move(args), std::move(rets));
+  return FunctionSchema("", "", std::move(args), std::move(rets), is_vararg);
 }
 
 std::shared_ptr<SugaredValue> PythonValue::call(
