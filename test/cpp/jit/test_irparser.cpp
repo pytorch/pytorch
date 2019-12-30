@@ -204,6 +204,17 @@ graph(%0 : Tensor,
   }
 
   {
+    checkRoundtrip(
+        R"IR(
+graph():
+  %0 : float[] = prim::Constant[value=[1., 2., 3.]]()
+  %1 : str[] = prim::Constant[value=["ab", "cd", "ef"]]()
+  %2 : (float[], str[]) = prim::TupleConstruct(%0, %1)
+  return (%2)
+)IR");
+  }
+
+  {
     bool error_thrown = false;
     try {
       checkRoundtrip(
