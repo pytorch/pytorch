@@ -4096,6 +4096,31 @@ Args:
 
 """)
 
+add_docstr(torch.poisson,
+           r"""
+poisson(input *, generator=None) -> Tensor
+
+Returns a tensor of the same size as :attr:`input` with each element
+sampled from a Poisson distribution with rate parameter given by the corresponding
+element in :attr:`input` i.e.,
+
+.. math::
+    \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
+
+Args:
+    input (Tensor): the input tensor containing the rates of the Poisson distribution
+    {generator}
+
+Example::
+
+    >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
+    >>> torch.poisson(rates)
+    tensor([[9., 1., 3., 5.],
+            [8., 6., 6., 0.],
+            [0., 4., 5., 3.],
+            [2., 1., 4., 2.]])    
+""".format(**common_args))
+
 add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, out=None) -> Tensor
@@ -5170,7 +5195,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5184,8 +5209,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
     {out}
 
 Example::
@@ -5221,7 +5246,7 @@ Example::
     >>> torch.std_mean(a)
     (tensor(0.3457), tensor(0.5472))
 
-.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+.. function:: std_mean(input, dim, unbiased=True, keepdim=False) -> (Tensor, Tensor)
 
 Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5235,8 +5260,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
 
 Example::
 

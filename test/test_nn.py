@@ -9325,6 +9325,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    @unittest.skipIf(sys.platform == "win32", "See https://github.com/pytorch/pytorch/issues/31650")
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
