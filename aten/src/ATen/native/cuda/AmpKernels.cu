@@ -22,9 +22,9 @@ namespace native {
 // Returns:
 // A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
 // which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
-const Tensor& _amp_non_finite_check_and_unscale_cuda(Tensor& scaled_grad,
-                                                     Tensor& found_inf,
-                                                     const Tensor& inv_scale)
+void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
+                                             Tensor& found_inf,
+                                             const Tensor& inv_scale)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
   TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
@@ -46,17 +46,16 @@ const Tensor& _amp_non_finite_check_and_unscale_cuda(Tensor& scaled_grad,
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t val) -> scalar_t {
-          auto fval = static_cast<float>(val);
-          // std::isfinite caused an "unspecified launch failure" at runtime with cuda 9 on Windows.
-          if (!isfinite(fval)) {
-            *found_inf_ptr = 1.f;
-          }
-          const auto inv_scale = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
-          return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale);
+          // float fval = 1.0; // static_cast<float>(val);
+          // // std::isfinite caused an "unspecified launch failure" at runtime with cuda 9 on Windows.
+          // if (!isfinite(fval)) {
+          //   *found_inf_ptr = 1.f;
+          // }
+          // const auto inv_scale_val = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
+          // return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale_val);
+          return 1.0;
         });
     });
-
-  return scaled_grad;
 }
 
 
