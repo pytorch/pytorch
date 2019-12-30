@@ -2965,11 +2965,11 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
         g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
         torch.autograd.grad(g.sum(), [x])
         self.assertEqual(x, torch.tensor([[[[1.0]]]]))
