@@ -71,7 +71,7 @@ py::object PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      RRefContext::getInstance().getWorkerName());
+      owner().name_);
 
   if (rref_->isPyObj()) {
     const py::object& value =
@@ -94,6 +94,22 @@ py::object PyRRef::localValue() {
       return torch::jit::toPyObject(std::move(value));
     }
   }
+}
+
+std::string PyRRef::str() const {
+  std::stringstream ss;
+  if (rref_->isOwner()) {
+    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+  } else {
+    ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = ";
+    if (rref_->isPyObj()) {
+      ss << std::static_pointer_cast<UserRRef<py::object>>(rref_)->forkId();
+    } else {
+      ss << std::static_pointer_cast<UserRRef<IValue>>(rref_)->forkId();
+    }
+    ss << ")";
+  }
+  return ss.str();
 }
 
 py::tuple PyRRef::pickle() const {

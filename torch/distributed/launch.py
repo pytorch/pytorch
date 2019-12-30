@@ -174,7 +174,7 @@ def parse_args():
                              "--master_addr can simply be 127.0.0.1")
     parser.add_argument("--master_port", default=29500, type=int,
                         help="Master node (rank 0)'s free port that needs to "
-                             "be used for communciation during distributed "
+                             "be used for communication during distributed "
                              "training")
     parser.add_argument("--use_env", default=False, action="store_true",
                         help="Use environment variable to pass "

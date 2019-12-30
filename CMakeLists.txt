@@ -30,7 +30,7 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
@@ -119,11 +119,9 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-cmake_dependent_option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
-  "NOT MSVC" OFF)
+option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
-option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
 option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -395,10 +393,6 @@ if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
 endif()
 
-if(BUILD_NAMEDTENSOR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBUILD_NAMEDTENSOR")
-endif()
-
 if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
 endif()
@@ -417,8 +411,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")

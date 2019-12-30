@@ -116,7 +116,7 @@ struct C10_API TensorOptions {
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+           typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -130,7 +130,7 @@ struct C10_API TensorOptions {
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
   template <typename... Args,
-            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+            typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -292,6 +292,15 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
+  }
+
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
@@ -536,6 +545,12 @@ C10_API std::ostream& operator<<(
 template <typename T>
 inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
+}
+
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
 }
 
 // This is intended to be a centralized location by which we can determine

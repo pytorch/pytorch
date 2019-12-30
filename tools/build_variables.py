@@ -62,7 +62,6 @@ libtorch_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp",
-    "torch/csrc/distributed/rpc/future_message.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/python_call.cpp",
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
@@ -79,6 +78,7 @@ libtorch_sources = [
     "torch/csrc/jit/attributes.cpp",
     "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
+    "torch/csrc/jit/custom_class.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/export_module.cpp",
@@ -144,6 +144,7 @@ libtorch_sources = [
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_string_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
+    "torch/csrc/jit/register_distributed_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
@@ -166,6 +167,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/script/module_save.cpp",
     "torch/csrc/jit/script/object.cpp",
+    "torch/csrc/jit/script/string_to_type.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/fuser/kernel_cache.cpp",
     "torch/csrc/jit/fuser/compiler.cpp",
@@ -182,6 +184,7 @@ libtorch_sources = [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/type_parser.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
@@ -302,8 +305,8 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/python_functions.cpp",
         "torch/csrc/distributed/rpc/python_rpc_handler.cpp",
         "torch/csrc/distributed/rpc/request_callback_impl.cpp",
-        "torch/csrc/distributed/rpc/rref.cpp",
         "torch/csrc/distributed/rpc/rref_context.cpp",
+        "torch/csrc/distributed/rpc/rref_impl.cpp",
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
@@ -315,9 +318,11 @@ def add_torch_libs():
         "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
         "torch/csrc/jit/passes/onnx/scalar_type_analysis.cpp",
         "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
+        "torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.cpp",
         "torch/csrc/jit/passes/remove_inplace_ops.cpp",
         "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
         "torch/csrc/jit/python_arg_flatten.cpp",
+        "torch/csrc/jit/python_custom_class.cpp",
         "torch/csrc/jit/python_interpreter.cpp",
         "torch/csrc/jit/python_ir.cpp",
         "torch/csrc/jit/python_tracer.cpp",
@@ -346,7 +351,6 @@ def add_torch_libs():
         "torch/csrc/utils/tensor_new.cpp",
         "torch/csrc/utils/tensor_numpy.cpp",
         "torch/csrc/utils/tensor_types.cpp",
-        "torch/csrc/utils/tuple_parser.cpp",
         "test/cpp/jit/torch_python_test.cpp",
     ]
 
@@ -401,6 +405,13 @@ def add_torch_libs():
         "-Icaffe2/torch/csrc",
         "-Icaffe2/torch/csrc/nn",
         "-Icaffe2/torch/lib",
+        # T59288529: Temporary hack to support building from xplat.
+        # Remove with a proper fix.
+        "-Ifbcode/caffe2",
+        "-Ifbcode/caffe2/torch/csrc/api/include",
+        "-Ifbcode/caffe2/torch/csrc",
+        "-Ifbcode/caffe2/torch/csrc/nn",
+        "-Ifbcode/caffe2/torch/lib",
     ]
 
     cpp_library(
