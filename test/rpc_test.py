@@ -1297,38 +1297,28 @@ class RpcTest(RpcAgentTestFixture):
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
 
-    def _get_expected_debug_info(self):
-        from torch.distributed.rpc import _rref_context_get_debug_info
+    @dist_init
+    def test_debug_info(self):
+        # only test keys in this test case. Values should be covered by
+        # individual module debug info tests
+        from torch.distributed.rpc import (
+            _get_debug_info,
+            _rref_context_get_debug_info
+        )
         from torch.distributed.rpc.api import _agent
         import torch.distributed.autograd as dist_autograd
 
+        info = _get_debug_info()
+        rref_info = _rref_context_get_debug_info()
         agent_info = _agent.get_debug_info()
         autograd_info = dist_autograd._get_debug_info()
-        rref_info = _rref_context_get_debug_info()
         common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
         self.assertEqual(0, len(common_keys))
         expected = {}
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-
-        return expected
-
-    @dist_init
-    def test_debug_info(self):
-        # only test keys in this test case. Values should be covered by
-        # individual module debug info tests
-        from torch.distributed.rpc import _get_debug_info
-
-        info = _get_debug_info()
-        expected = self._get_expected_debug_info()
-        # Wait for metrics to stabilize since there could be inflight requests.
-        while info != expected:
-            info = _get_debug_info()
-            expected = self._get_expected_debug_info()
-            time.sleep(1)
-
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
