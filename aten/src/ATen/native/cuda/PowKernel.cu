@@ -94,7 +94,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
   const auto d_exp = static_cast<double>(exp);
   if (d_exp == 0.5) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return ::sqrt(base);
+      return sqrt_(base);
     });
   } else if (d_exp == 2) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
@@ -106,7 +106,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
     });
   } else if (d_exp == -0.5) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
-      return 1.0 / ::sqrt(base);
+      return 1.0 / sqrt_(base);
     });
   } else if (d_exp == -1) {
     gpu_kernel(iter, [=]GPU_LAMBDA(Base_type base) -> Base_type {
