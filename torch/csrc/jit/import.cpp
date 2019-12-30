@@ -265,13 +265,13 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
   // (marked by the 0x80 0x02 bytes at the start)
-  char first_short[2];
+  uint16_t first_short = 0;
   rai->read(
       /*pos=*/0,
-      /*buf=*/reinterpret_cast<char*>(first_short),
+      /*buf=*/reinterpret_cast<void*>(&first_short),
       /*n=*/2,
       /*what=*/"checking archive");
-  if (first_short[0] == -0x80 && first_short[1] == 0x02) {
+  if (first_short == 0x8002) {
     TORCH_CHECK(
         false,
         "`torch::jit::load()` received a file from `torch.save()`, "
