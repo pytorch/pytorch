@@ -1048,6 +1048,7 @@ Tensor cudnn_convolution_backward_input(
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
 
   std::cout << "\tCUDNN conv backward input.\n";
+  std::cout << "\tgrad_intput_t.numel() -> " << grad_input_t.numel() << std::endl;
   if (grad_input_t.numel() == 0) {
     return grad_input_t;
   }
@@ -1059,6 +1060,7 @@ Tensor cudnn_convolution_backward_input(
   // See #4500
   Tensor weight_contig = weight->contiguous(grad_output->suggest_memory_format());
 
+  std::cout << "\tpost weight contig.\n";
   raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
