@@ -11,7 +11,21 @@ namespace {
 static inline void cudaCheck(cudaError_t result, const char * file, int line) {
   if(result != cudaSuccess) {
     std::stringstream ss;
-    ss << file << ":" << line << ": " << cudaGetErrorString(result);
+    ss << file << ":" << line << ": ";
+    if (result == cudaErrorInitializationError) {
+      // It is common for users to use DataLoader with multiple workers
+      // and the autograd profiler. Throw a nice error message here.
+      ss << "CUDA initialization error. "
+         << "This can occur if one runs the profiler in CUDA mode on code "
+         << "that creates a DataLoader with num_workers > 0. This operation "
+         << "is currently unsupported; potential workarounds are: "
+         << "(1) don't use the profiler in CUDA mode or (2) use num_workers=0 "
+         << "in the DataLoader or (3) Don't profile the data loading portion "
+         << "of your code. https://github.com/pytorch/pytorch/issues/6313 "
+         << "tracks profiler support for multi-worker DataLoader.";
+    } else {
+      ss << cudaGetErrorString(result);
+    }
     throw std::runtime_error(ss.str());
   }
 }
