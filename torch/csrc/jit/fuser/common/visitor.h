@@ -9,14 +9,14 @@ namespace jit {
 namespace fuser {
 
 struct TORCH_API SimpleHandler {
-  int handle(Statement* statement);
-  int handle(Float* f);
+  int handle(const Statement* statement);
+  int handle(const Float* f);
 };
 
 struct TORCH_API IRPrinter {
-  int handle(Statement* statement);
-  int handle(Float* f);
-  int handle(Add* add);
+  int handle(const Statement* statement);
+  int handle(const Float* f);
+  int handle(const Add* add);
 };
 
 

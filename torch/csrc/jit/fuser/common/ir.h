@@ -19,19 +19,23 @@ namespace fuser {
 // nice pretty printing
 // validating by lowering TorchScript IR and pretty printing
 // supports visitor pattern
-// allows for easy manipulation/querying
+// allows for easy ~manipulation/~ querying
+// Immutable, when a node changes it must be recreated
 
 using StmtNameType = std::uint32_t;
 struct Fusion;
 
 struct TORCH_API Statement {
-  virtual ~Statement() = 0;
+  friend struct Fusion;
 
   template <typename T>
-  int dispatch(T handler);
+  int dispatch(T* handler) const;
 
   virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
   virtual c10::optional<ExprType> getExprType() const noexcept { return c10::nullopt; }
+
+  bool isVal() const noexcept { return getValType() != c10::nullopt; }
+  bool isExpr() const noexcept{ return getExprType() != c10::nullopt; }
 
   Fusion* fusion() const noexcept { return fusion_; }
   StmtNameType name() const noexcept { return name_; }
@@ -44,49 +48,61 @@ struct TORCH_API Statement {
   }
 
 protected:
+  virtual ~Statement() = 0;
+
   Fusion* fusion_;
   StmtNameType name_;
 };
 
 struct TORCH_API Val : public Statement {
+
+public:
   virtual ~Val() = 0;
 
   Val() = delete;
   Val(
-    const ValType _type)
-  : type_{_type} { }
-
-  Val(const Val& other) = default;
-  Val& operator=(const Val& other) = default;
-
-  Val(Val&& other) = default;
-  Val& operator=(Val&& other) = default;
-
+    const ValType _type,
+    Fusion& fusion);
+  
   c10::optional<ValType> getValType() const noexcept override { return type_; }
 
   ValType type() const noexcept { return type_; }
 
 protected:
   ValType type_;
+
+private:
+    Val(const Val& other) = delete;
+  Val& operator=(const Val& other) = delete;
+
+  Val(Val&& other) = delete;
+  Val& operator=(Val&& other) = delete;
+
 };
 
 // TODO: support symbolic floats vs literal (const) floats (make value an optional)
 struct TORCH_API Float : public Val {
-  ~Float() = default;
   Float() = delete;
+
   Float(
-    const float _value)
-  : Val(ValType::Float)
-  , value_{_value} { }
+    const float _value,
+    Fusion& fusion)
+  : Val(ValType::Float, fusion)
+  , value_{_value}
+  { }
 
-  Float(const Float& other) = default;
-  Float& operator=(const Float& other) = default;
 
-  Float(Float&& other) = default;
-  Float& operator=(Float&& other) = default;
+  Float(const Float& other) = delete;
+  Float& operator=(const Float& other) = delete;
+
+  Float(Float&& other) = delete;
+  Float& operator=(Float&& other) = delete;
 
   float value() const noexcept { return value_; }
 
+protected:
+  ~Float() = default;
+  
 private:
   float value_;
 };
@@ -94,10 +110,8 @@ private:
 // TODO: improve input/output model to track dataflow
 // TODO: add regions (e.g. loop exprs have bodies)
 struct TORCH_API Expr : public Statement {
+public:
   Expr() = delete;
-  Expr(
-    const ExprType _type)
-  : type_{_type} { }
 
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
 
@@ -111,35 +125,84 @@ struct TORCH_API Expr : public Statement {
     return outputs_[idx];
   }
 
-  void addInput(Statement* input) {
+  std::vector<Statement*>::size_type n_inputs() const {return inputs_.size();}
+  std::vector<Statement*>::size_type n_outputs() const {return outputs_.size();}
+
+protected:
+
+  Expr(
+    const ExprType _type,
+    Fusion& fusion);
+
+  void addInput(const Statement* input) {
     inputs_.push_back(input);
   }
 
-  void addOutput(Statement* output) {
+  void addOutput(const Statement* output) {
     outputs_.push_back(output);
   }
 
 private:
+
   ExprType type_;
 
-  std::vector<Statement*> inputs_;
-  std::vector<Statement*> outputs_;
+  std::vector<const Statement*> inputs_;
+  std::vector<const Statement*> outputs_;
 };
 
 struct TORCH_API Add : public Expr {
-  Add()
-  : Expr(ExprType::Add) { }
+  Add(const Statement* _lhs, const Statement* _rhs, Fusion& fusion )
+  : Expr(ExprType::Add, fusion)
+  , lhs_(_lhs)
+  , rhs_(_rhs) 
+  {
+    addInput(_lhs);
+    addInput(_rhs);
+  }
 
-  Add(const Add& other) = default;
-  Add& operator=(const Add& other) = default;
+  const Statement* const lhs_;
+  const Statement* const rhs_;
+
+  Add(const Add& other) = delete;
+  Add& operator=(const Add& other) = delete;
+
+  Add(Add&& other) = delete;
+  Add& operator=(Add&& other) = delete;
+
+  protected:
+  virtual ~Add() = default;
+};
+
+/*
+struct TORCH_API Region : public Expr {
+  Region(const Statement* _lhs, Fusion& fusion )
+  : Expr(ExprType::Add, fusion)
+  , lhs_(_lhs)
+  , rhs_(_rhs) 
+  {
+    addInput(_lhs);
+    addInput(_rhs);
+  }
+
+  const Statement* const lhs_;
+  const Statement* const rhs_;
+
+  Region(const Region& other) = default;
+  Region& operator=(const Region& other) = delete;
 
   Add(Add&& other) = default;
   Add& operator=(Add&& other) = default;
 
   virtual ~Add() = default;
 };
+*/
 
-}}} // torch::jit::fuser
+} // namespace fuser
+} // namespace jit
+} // namespace torch
+
+
+// torch::jit::fuser
 
 // #include <string>
 // #include <vector>

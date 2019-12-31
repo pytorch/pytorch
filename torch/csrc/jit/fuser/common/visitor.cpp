@@ -10,11 +10,11 @@ namespace fuser {
 * Simple handler definitions
 */
 
-int SimpleHandler::handle(Statement* statement) {
+int SimpleHandler::handle(const Statement* statement){
   return -1;
 }
 
-int SimpleHandler::handle(Float* f) {
+int SimpleHandler::handle(const Float* f){
   return f->value();
 }
 
@@ -22,16 +22,20 @@ int SimpleHandler::handle(Float* f) {
 * IRPrinter definitions
 */
 
-int IRPrinter::handle(Statement* statement) {
+int IRPrinter::handle(const Statement* statement){
   std::cout << "Unknown statement" << std::endl;
   return 0;
 }
-int IRPrinter::handle(Float* f) {
+int IRPrinter::handle(const Float* f){
   std::cout << "f" << f->value();
   return 0;
 }
-int IRPrinter::handle(Add* add) {
-  std::cout << "Add" << std::endl;
+int IRPrinter::handle(const Add* add){
+  std::cout << "( ";
+  add->lhs_->dispatch(this);
+  std::cout << " + ";
+  add->rhs_->dispatch(this);
+  std::cout<<" )"<<std::endl;
   return 0;
 }
 
