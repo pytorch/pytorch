@@ -1044,6 +1044,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
+    @unittest.skip("The test is flaky, see Github issue 31750")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
