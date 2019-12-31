@@ -333,7 +333,7 @@ class VarSubMutator : public IRMutator {
   Expr mutate(const Variable* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return Expr::make(const_cast<Variable*>(var));
+      return Expr(const_cast<Variable*>(var));
     }
     return iter->second;
   }

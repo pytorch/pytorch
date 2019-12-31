@@ -17,12 +17,16 @@ namespace compiler {
 // same heap.
 class RefCounted {
  public:
-  // Initial reference count is one.
-  RefCounted() : ref_(1) {}
+  // Initial reference count is zero.
+  RefCounted() : ref_(0) {
+#ifndef NDEBUG
+    GlobalRefCount()++;
+#endif
+  }
 
   // Increments reference count by one.
   void Ref() const {
-    DCHECK_GE(ref_.load(), 1);
+    DCHECK_GE(ref_.load(), 0);
     ref_.fetch_add(1, std::memory_order_relaxed);
   }
 
@@ -44,11 +48,18 @@ class RefCounted {
     return (ref_.load(std::memory_order_acquire) == 1);
   }
 
+  static bool CheckNoLiveRefCount() {
+    return GlobalRefCount().load() == 0;
+  }
+
  protected:
   // Make destructor protected so that RefCounted objects cannot
   // be instantiated directly. Only subclasses can be instantiated.
   virtual ~RefCounted() {
     DCHECK_EQ(ref_.load(), 0);
+#ifndef NDEBUG
+    GlobalRefCount()--;
+#endif
   }
 
  private:
@@ -56,6 +67,11 @@ class RefCounted {
 
   RefCounted(const RefCounted&) = delete;
   void operator=(const RefCounted&) = delete;
+
+  static std::atomic<int>& GlobalRefCount() {
+    static std::atomic<int> global_count;
+    return global_count;
+  }
 };
 
 template <class NodeType>
@@ -71,7 +87,11 @@ class RefHandle {
   }
 
   RefHandle() {}
-  RefHandle(const NodeType* node) : node_(const_cast<NodeType*>(node)) {}
+  RefHandle(const NodeType* node) : node_(const_cast<NodeType*>(node)) {
+    if (node_ != nullptr) {
+      node_->Ref();
+    }
+  }
 
   RefHandle(const RefHandle& other) {
     this->reset();
