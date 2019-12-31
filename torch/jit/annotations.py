@@ -56,7 +56,7 @@ def get_signature(fn, rcb, loc, is_method):
     signature = None
     if PY35:
         signature = try_real_annotations(fn)
-        if is_method:
+        if signature is not None and is_method:
             # If this is a method, then the signaure will include a type for
             # `self`, but type comments do not contain a `self`. So strip it
             # away here so everything is consistent (`inspect.ismethod` does
