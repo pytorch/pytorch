@@ -176,8 +176,7 @@ std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
   auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return std::make_unique<RRefChildAccept>(
-      ForkId::fromIValue(values.back()));
+  return std::make_unique<RRefChildAccept>(ForkId::fromIValue(values.back()));
 }
 
 std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
