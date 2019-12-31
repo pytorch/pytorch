@@ -91,11 +91,11 @@ static inline __host__ __device__ Base_type pow_(Base_type base, Exp_type exp) {
 }
 template <typename T>
 static inline __host__ __device__ T sqrt_(T x) {
-  return std::sqrt(x);
+  return ::sqrt(x);
 }
 template <typename T>
 static inline __host__ __device__ T invsqrt_(T x) {
-  return 1.0 / std::sqrt(x);
+  return 1.0 / ::sqrt(x);
 }
 #endif
 
