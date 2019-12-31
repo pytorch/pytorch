@@ -162,9 +162,10 @@ class Variable : public ExprNode<Variable> {
 class Var : public Expr {
  public:
   Var() : Expr(nullptr) {}
-  Var(Dtype dtype) : Expr(Variable::make(dtype)) {}
+  explicit Var(Dtype dtype) : Expr(Variable::make(dtype)) {}
   Var(const std::string& name_hint, Dtype dtype)
       : Expr(Variable::make(name_hint, dtype)) {}
+  explicit Var(Variable* node) : Expr(node) {}
   const Variable* node() const {
     return static_cast<const Variable*>(Expr::node());
   }
@@ -328,11 +329,24 @@ class Load : public ExprNode<Load> {
   static Expr make(const Buffer& buffer, const Expr& index, const Expr& mask) {
     return Expr(new Load(buffer, index, mask));
   }
+  static Expr make(
+      Dtype dtype,
+      const Var& base_handle,
+      const Expr& index,
+      const Expr& mask) {
+    return Expr(new Load(dtype, base_handle, index, mask));
+  }
 
  private:
   Load(const Buffer& buffer, const Expr& index, const Expr& mask)
-      : ExprNodeBase(ChooseDtype(buffer.dtype(), index.dtype())),
-        base_handle_(buffer.data()),
+      : Load(
+            ChooseDtype(buffer.dtype(), index.dtype()),
+            buffer.data(),
+            index,
+            mask) {}
+  Load(Dtype dtype, const Var& base_handle, const Expr& index, const Expr& mask)
+      : ExprNodeBase(dtype),
+        base_handle_(base_handle),
         index_(index),
         mask_(mask) {
     CHECK_EQ(base_handle_.dtype(), kHandle);
@@ -373,6 +387,14 @@ class Store : public StmtNode<Store> {
     return Stmt(new Store(buffer, index, value, mask));
   }
 
+  static Stmt make(
+      const Var& base_handle,
+      const Expr& index,
+      const Expr& value,
+      const Expr& mask) {
+    return Stmt(new Store(base_handle, index, value, mask));
+  }
+
  private:
   // TODO: merge this with Load.
   Store(
@@ -380,17 +402,21 @@ class Store : public StmtNode<Store> {
       const Expr& index,
       const Expr& value,
       const Expr& mask)
-      : StmtNodeBase(),
-        base_handle_(buffer.data()),
-        index_(index),
-        value_(value),
-        mask_(mask) {
+      : Store(buffer.data(), index, value, mask) {
     CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
+    CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
+  }
+
+  Store(
+      const Var& base_handle,
+      const Expr& index,
+      const Expr& value,
+      const Expr& mask)
+      : base_handle_(base_handle), index_(index), value_(value), mask_(mask) {
     CHECK_EQ(base_handle_.dtype(), kHandle);
     CHECK_EQ(index.dtype().lanes(), mask.dtype().lanes());
     CHECK_EQ(index.dtype().lanes(), value.dtype().lanes());
     CHECK_EQ(index.dtype().scalar_type(), kInt32);
-    CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
   }
 
   Var base_handle_;
