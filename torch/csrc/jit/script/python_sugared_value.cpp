@@ -34,7 +34,7 @@ FunctionSchema PythonValue::getSchema(
   auto annotations = py::module::import("torch.jit.annotations");
   const auto callable = moduleSelf_ ? py::getattr(self, "original_fn") : self;
 
-  // Make sure the function is not a class instantiation
+  // Make sure the function is not a class instantiation (e.g. `Exception()`)
   annotations.attr("check_fn")(callable, loc);
   auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
 
@@ -47,8 +47,8 @@ FunctionSchema PythonValue::getSchema(
   auto names_it = param_names.begin();
   if (moduleSelf_) {
     // If there is a `self` parameter on the callable, skip it on the names list
+    args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
     ++names_it;
-    args.emplace_back(Argument("self", moduleSelf_->type(), {}, {}, false));
   }
   if (signature.is_none()) {
     // No type signature was provided on the callable, so make a default

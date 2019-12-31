@@ -110,6 +110,21 @@ class TestScriptPy3(JitTestCase):
         sm = torch.jit.script(M())
         FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
 
+    def test_python_callable(self):
+        class MyPythonClass(object):
+            @torch.jit.ignore
+            def __call__(self, *args) -> str:
+                return str(type(args[0]))
+
+        the_class = MyPythonClass()
+        @torch.jit.script
+        def fn(x):
+            return the_class(x)
+
+        # This doesn't involve the string frontend, so don't use checkScript
+        x = torch.ones(2)
+        self.assertEqual(fn(x), the_class(x))
+
     def test_bad_types(self):
         @torch.jit.ignore
         def fn(my_arg):

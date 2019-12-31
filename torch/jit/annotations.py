@@ -72,20 +72,24 @@ def get_signature(fn, rcb, loc):
     return signature
 
 
-def is_script_callable(the_callable):
+def is_function_or_method(the_callable):
     # A stricter version of `inspect.isroutine` that does not pass for built-in
     # functions
     return inspect.isfunction(the_callable) or inspect.ismethod(the_callable)
 
 
 def is_vararg(the_callable):
-    if not is_script_callable(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
+    if not is_function_or_method(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
         # If `the_callable` is a class, de-sugar the call so we can still get
         # the signature
         the_callable = the_callable.__call__
 
-    if is_script_callable(the_callable):
+    if is_function_or_method(the_callable):
         if PY2:
+            # [inspect args]
+            # `inspect.getfullargspec` is not available in Python 2 but
+            # `inspect.getargspec` is deprecated in Python 3, so we have to
+            # switch over them
             return inspect.getargspec(the_callable).varargs is not None
         else:
             return inspect.getfullargspec(the_callable).varargs is not None
@@ -94,8 +98,13 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
-    if is_script_callable(fn):
+    if hasattr(fn, '__call__') and is_function_or_method(fn.__call__):
+        # De-sugar calls to classes
+        fn = fn.__call__
+
+    if is_function_or_method(fn):
         if PY2:
+            # see [inspect args]
             return inspect.getargspec(fn).args
         else:
             return inspect.getfullargspec(fn).args
