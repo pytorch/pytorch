@@ -14,7 +14,7 @@ static Expr mutate_binary_op(const BinaryOpNode<Op>* v, IRMutator* mutator) {
   Expr lhs_new = lhs.accept_mutator(mutator);
   Expr rhs_new = rhs.accept_mutator(mutator);
   if (same_node(lhs, lhs_new) && same_node(rhs, rhs_new)) {
-    return Expr::make(v);
+    return Expr(v);
   }
   IRNodeType expr_type = v->expr_type();
   switch (expr_type) {
@@ -48,24 +48,24 @@ Expr IRMutator::mutate(const Div* v) {
 }
 
 Expr IRMutator::mutate(const IntImm* v) {
-  return Expr::make(v);
+  return Expr(v);
 }
 
 Expr IRMutator::mutate(const FloatImm* v) {
-  return Expr::make(v);
+  return Expr(v);
 }
 
 Expr IRMutator::mutate(const Cast* v) {
   Expr src_value = v->src_value();
   Expr src_value_new = src_value.accept_mutator(this);
   if (same_node(src_value_new, v->src_value())) {
-    return Expr::make(v);
+    return Expr(v);
   }
   return Cast::make(v->dtype(), src_value_new);
 }
 
 Expr IRMutator::mutate(const Variable* v) {
-  return Expr::make(v);
+  return Expr(v);
 }
 
 Expr IRMutator::mutate(const Let* v) {
@@ -77,7 +77,7 @@ Expr IRMutator::mutate(const Let* v) {
   Expr body_new = body.accept_mutator(this);
   if (same_node(var, var_new) && same_node(value, value_new) &&
       same_node(body, body_new)) {
-    return Expr::make(v);
+    return Expr(v);
   }
   return Let::make(var_new, value_new, body_new);
 }
@@ -88,7 +88,7 @@ Expr IRMutator::mutate(const Ramp* v) {
   Expr base_new = base.accept_mutator(this);
   Expr stride_new = stride.accept_mutator(this);
   if (same_node(base, base_new) && same_node(stride, stride_new)) {
-    return Expr::make(v);
+    return Expr(v);
   }
   return Ramp::make(base_new, stride_new, v->lanes());
 }
@@ -104,7 +104,7 @@ Expr IRMutator::mutate(const Load* v) {
   Expr mask_new = mask.accept_mutator(this);
   if (same_node(base_handle, base_handle_new) && same_node(index, index_new) &&
       same_node(mask, mask_new)) {
-    return Expr::make(v);
+    return Expr(v);
   }
   return Load::make(dtype, base_handle_new, index_new, mask_new);
 }
@@ -114,7 +114,7 @@ Expr IRMutator::mutate(const Broadcast* v) {
   int lanes = v->lanes();
   Expr value_new = value.accept_mutator(this);
   if (same_node(value, value_new)) {
-    return Expr::make(v);
+    return Expr(v);
   }
   return Broadcast::make(value_new, lanes);
 }
@@ -131,7 +131,7 @@ Stmt IRMutator::mutate(const For* v) {
   Stmt body_new = body.accept_mutator(this);
   if (same_node(var, var_new) && same_node(start, start_new) &&
       same_node(stop, stop_new) && same_node(body, body_new)) {
-    return Stmt::make(v);
+    return Stmt(v);
   }
   return For::make(var_new, start_new, stop_new, body_new);
 }
@@ -148,7 +148,7 @@ Stmt IRMutator::mutate(const Block* v) {
     stmts.push_back(stmt_new);
   }
   if (!any_change) {
-    return Stmt::make(v);
+    return Stmt(v);
   }
   return Block::make(stmts);
 }
@@ -165,7 +165,7 @@ Stmt IRMutator::mutate(const Store* v) {
   Expr mask_new = mask.accept_mutator(this);
   if (same_node(base_handle, base_handle_new) && same_node(index, index_new) &&
       same_node(value, value_new) && same_node(mask, mask_new)) {
-    return Stmt::make(v);
+    return Stmt(v);
   }
   return Store::make(base_handle_new, index_new, value_new, mask_new);
 }

@@ -275,6 +275,9 @@ class TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
   TensorExprOp(const Var& expr_var, const Expr& body)
       : expr_var_(expr_var), body_(body) {}
 
+  // TODO: this needs more work.
+  // The ancestor-axes mark the region to evaluate expression.
+  // We still need to know the buffer this writes to.
   Var expr_var_;
   Expr body_;
 };

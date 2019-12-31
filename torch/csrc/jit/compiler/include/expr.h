@@ -68,12 +68,6 @@ class Expr : public RefHandle<BaseExprNode> {
   using BaseHandle = RefHandle<BaseExprNode>;
   explicit Expr() : BaseHandle(nullptr) {}
   explicit Expr(const BaseExprNode* node) : BaseHandle(node) {}
-  static Expr make(const BaseExprNode* node) {
-    if (node != nullptr) {
-      const_cast<BaseExprNode*>(node)->Ref();
-    }
-    return Expr(node);
-  }
 
   void accept(IRVisitor* visitor) const {
     // TODO: Consider implement this without using recursion. Otherwise,
@@ -114,12 +108,6 @@ class Stmt : public RefHandle<BaseStmtNode> {
  public:
   using BaseHandle = RefHandle<BaseStmtNode>;
   explicit Stmt(const BaseStmtNode* node) : BaseHandle(node) {}
-  static Stmt make(const BaseStmtNode* node) {
-    if (node != nullptr) {
-      const_cast<BaseStmtNode*>(node)->Ref();
-    }
-    return Stmt(node);
-  }
 
   void accept(IRVisitor* visitor) const {
     node()->accept(visitor);
