@@ -51,11 +51,19 @@ class EvalEnv(object):
             return self.rcb(name)
         return getattr(builtins, name, None)
 
-def get_signature(fn, rcb, loc):
+def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     signature = None
     if PY35:
         signature = try_real_annotations(fn)
+        if is_method:
+            # If this is a method, then the signaure will include a type for
+            # `self`, but type comments do not contain a `self`. So strip it
+            # away here so everything is consistent (`inspect.ismethod` does
+            # not work here since `fn` is unbound at this point)
+            param_types, return_type = signature
+            param_types = param_types[1:]
+            signature = (param_types, return_type)
 
     if signature is None:
         type_line, source = None, None

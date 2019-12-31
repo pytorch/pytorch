@@ -38,8 +38,8 @@ FunctionSchema PythonValue::getSchema(
   annotations.attr("check_fn")(callable, loc);
   auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
 
-  auto signature =
-      annotations.attr("get_signature")(callable, rcb ? *rcb : py::none(), loc);
+  auto signature = annotations.attr("get_signature")(
+      callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
   std::vector<Argument> args, rets;
 
   auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
