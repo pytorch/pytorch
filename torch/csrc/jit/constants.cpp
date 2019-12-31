@@ -2,8 +2,8 @@
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir.h>
 
 namespace torch {
 namespace jit {
@@ -64,28 +64,16 @@ c10::optional<Value*> tryInsertConstant(
     n->is_(attr::value, val.toIntListRef().vec());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
-    n->ts_(attr::value, fmap(val.toTensorListRef(), [](const at::Tensor& t) {
-             AT_ASSERT(!t.requires_grad());
-             return t;
-           }));
-    n->output()->setType(ListType::ofTensors());
-  } else if (val.isDoubleList()) {
-    auto double_list = val.toDoubleList();
-    n->fs_(
+    n->ts_(
         attr::value,
-        std::vector<double>(double_list.begin(), double_list.end()));
-    n->output()->setType(ListType::ofFloats());
+        fmap(val.toTensorListRef(), [](const at::Tensor& t) {
+          AT_ASSERT(!t.requires_grad());
+          return t;
+        }));
+    n->output()->setType(ListType::ofTensors());
   } else if (val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
-  } else if (val.type()->isSubtypeOf(ListType::ofStrings())) {
-    std::vector<std::string> ss;
-    auto generic_list = val.toGenericListRef();
-    for (const IValue& ival : generic_list) {
-      ss.push_back(ival.toStringRef());
-    }
-    n->ss_(attr::value, ss);
-    n->output()->setType(ListType::create(StringType::get()));
   } else if (val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
@@ -149,12 +137,6 @@ RegisterOperators reg({
               push(stack, is);
               return 0;
             };
-          } else if (type->isSubtypeOf(ListType::ofFloats())) {
-            const auto& fs = node->fs(attr::value);
-            return [fs](Stack& stack) {
-              push(stack, fs);
-              return 0;
-            };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
             const auto bs = fmap<bool>(node->is(attr::value));
             return [bs](Stack& stack) {
@@ -165,16 +147,6 @@ RegisterOperators reg({
             const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
               push(stack, ts);
-              return 0;
-            };
-          } else if (type->isSubtypeOf(ListType::ofStrings())) {
-            const auto& ss = node->ss(attr::value);
-            auto vals = c10::impl::GenericList(StringType::get());
-            for (const auto& str : ss) {
-              vals.push_back(str);
-            }
-            return [ss](Stack& stack) {
-              push(stack, ss);
               return 0;
             };
           } else if (type == StringType::get()) {
