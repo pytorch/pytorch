@@ -90,7 +90,7 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 }
 
 Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-  loss = at::zeros_like(input);
+  loss = at::empty_like(input);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_out_cuda", [&]() {
     binary_cross_entropy_out_kernel<scalar_t>(loss, input, target);
   });
@@ -111,7 +111,7 @@ Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& inpu
 }
 
 Tensor& binary_cross_entropy_backward_out_cuda(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-  grad_input = at::zeros_like(input);
+  grad_input = at::empty_like(input);
   Tensor grad_expand = grad.expand_as(input);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
     binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, grad_expand, input, target);
