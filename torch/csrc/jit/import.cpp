@@ -268,7 +268,7 @@ script::Module load(
   char first_short[2];
   rai->read(
       /*pos=*/0,
-      /*buf=*/reinterpret_cast<void*>(&first_short),
+      /*buf=*/&first_short,
       /*n=*/2,
       /*what=*/"checking archive");
   if (std::string(first_short) == "\x80\x02") {
