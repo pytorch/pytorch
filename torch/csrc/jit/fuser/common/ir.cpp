@@ -1,52 +1,51 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 
+#include <torch/csrc/jit/fuser/common/visitor.h>
+
 #include <iostream>
 #include <unordered_map>
 #include <string>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
-static std::unordered_map<ValType, std::string> val_type_print_map {
-  {ValType::Expr, "Expr"}
-, {ValType::Scalar, "Scalar"}
-};
+/*
+* Statement member definitions
+*/
 
-std::ostream& operator<<(std::ostream& out, const ValType valtype) {
-  const auto iter = val_type_print_map.find(valtype);
-  if (iter == val_type_print_map.end()) {
-    out << "unknown val type";
-  } else {
-    out << val_type_print_map[valtype];
+Statement::~Statement() { }
+
+// Note: when adding a new val or expr a case must be added here
+template <typename T>
+int Statement::dispatch(T handler) {
+  const auto maybe_val_type = getValType();
+  if (maybe_val_type) {
+    switch (*maybe_val_type) {
+      case ValType::Float:
+        return handler->handle(static_cast<Float*>(this));
+      default:
+        throw std::runtime_error("Unknown valtype in dispatch!");
+    }
   }
 
-  return out;
-}
-
-template <typename T>
-int Val::dispatch(T& handler) {
-  if (type_ == ValType::Expr) {
-    return handler.handle(this, static_cast<Expr*>(contained_));
+  switch (*getExprType()) {
+    case ExprType::Add:
+      return handler->handle(static_cast<Add*>(this));
+    default:
+      throw std::runtime_error("Unknown exprtype in dispatch!");
   }
-
-  return handler.handle(this, contained_);
 }
 
-// TODO: document this requirement
-template int Val::dispatch(SampleValHandler&);
+// Handler template instantiations
+template int Statement::dispatch(SimpleHandler*);
+template int Statement::dispatch(IRPrinter*);
 
-template <typename T>
-int SampleValHandler::handle(Val* val, T* contained) {
-  return -1;
-}
+/*
+* Val member definitions
+*/
 
-// TODO: create macro that instantiates templates for all types
-template int SampleValHandler::handle(Val* val, void* contained);
-
-int SampleValHandler::handle(Val* val, Expr* expr) {
-  return 0;
-}
-
+Val::~Val() { }
 
 }}} // torch::jit::fuser
