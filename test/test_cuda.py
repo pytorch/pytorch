@@ -1983,8 +1983,8 @@ t2.start()
 
     def test_grad_scaling_state_dict(self):
         for lazy_init_scale in True, False:
-            s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=5.)
-            s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=8.)
+            s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=.5)
+            s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=.8)
 
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
@@ -1995,7 +1995,7 @@ t2.start()
 
             self.assertTrue(s1.get_scale() == 3.)
             self.assertTrue(s1.get_growth_factor() == 4.)
-            self.assertTrue(s1.get_backoff_factor() == 5.)
+            self.assertTrue(s1.get_backoff_factor() == .5)
 
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer

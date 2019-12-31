@@ -241,6 +241,8 @@ class AmpScaler(object):
         if optimizer_state["stage"] == self.STEPPED:
             raise RuntimeError("step() has already been called since the last update().")
 
+        retval = None
+
         if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
             # The contract with custom optimizers is that their step() should accept an additional,

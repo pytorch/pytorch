@@ -8,6 +8,28 @@
 #include <ATen/native/cuda/Loops.cuh>
 
 
+// Thin wrapper around https://docs.nvidia.com/cuda/cuda-math-api/group__CUDA__MATH__SINGLE.html#group__CUDA__MATH__SINGLE_1g57a3c8313f570282a1a7bcc78743b08e,
+// to ensure the Cuda math library's isfinite is actually what gets called in
+// _amp_non_finite_check_and_unscale_cuda_'s gpu_kernel lambda.
+//
+// I'm doing this for 4 reasons:
+// - A bare call to "isfinite(val)" in the lambda causes nvcc to prefer the unrelated
+//   Tensor at::native::isfinite(const Tensor&), resulting in an error:
+//   "no suitable constructor exists to convert from "float" to "at::Tensor""
+// - Unfortunately, the Cuda math library documentation doesn't say how (or if) you can provide a full namespace path
+//   to ensure that its version of a particular function is invoked.  It only shows bare (not-namespaced)
+//   calls to its routines inside kernel or device functions.
+// - Trying "std::isfinite(val)" in the lambda causes an "unspecified launch failure" at runtime with cuda 9 on Windows.
+// - Trying a forced-global "::isfinite(val)" compiles and runs, but makes me nervous.
+//
+// isfinite_ensure_cuda_math, declared at file scope outside the at::native region, uses isfinite as math library docs
+// suggest and allows disambiguated usage in the lambda within the at::native region.
+// GPU_LAMBDA is defined as __host__ __device__ (see Loops.cuh), so I need the __host__ keyword or else nvcc complains that
+// "calling a __device__ function("isfinite_ensure_cuda_math") from a __host__ __device__ function("operator()") is not allowed."
+static __host__ __device__ __forceinline__ int isfinite_ensure_cuda_math(float val) {
+  return isfinite(val);
+}
+
 namespace at {
 namespace native {
 
@@ -23,7 +45,7 @@ namespace native {
 // A tuple with references to scaled_grad, which is now unscaled in place, and found_inf,
 // which is now guaranteed to contain 1.0 if an inf or NaN was found in scaled_grad.
 void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
-                                             Tensor& found_inf,
+                                             const Tensor& found_inf,
                                              const Tensor& inv_scale)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
@@ -46,14 +68,13 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t val) -> scalar_t {
-          // float fval = 1.0; // static_cast<float>(val);
-          // // std::isfinite caused an "unspecified launch failure" at runtime with cuda 9 on Windows.
-          // if (!isfinite(fval)) {
-          //   *found_inf_ptr = 1.f;
-          // }
-          // const auto inv_scale_val = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
-          // return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale_val);
-          return 1.0;
+          float fval = static_cast<float>(val);
+          // See isfinite_ensure_cuda_math above.
+          if (!isfinite_ensure_cuda_math(fval)) {
+            *found_inf_ptr = 1.f;
+          }
+          const auto inv_scale_val = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
+          return static_cast<scalar_t>(inv_scale_val == 1.f ? fval : fval*inv_scale_val);
         });
     });
 }
