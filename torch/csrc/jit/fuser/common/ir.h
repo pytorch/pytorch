@@ -1,32 +1,18 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Optional.h>
+
+#include <torch/csrc/jit/fuser/common/type.h>
 
 #include <cstdint>
 #include <unordered_map>
-#include <iostream>
+#include <stdexcept>
+#include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
-
-using ValNameType = std::uint32_t;
-
-enum class TORCH_API ValType {
-  Expr
-, TensorLike
-, Addr
-, Scalar
-, Range
-};
-
-enum class TORCH_API ExprType {
-  Loop  // swap, merge, split
-, Index
-, Add
-};
-
-TORCH_API std::ostream& operator<<(std::ostream& out, const ValType valtype);
 
 // IR Requirements & Goals:
 // clear, easy, extensible way to add new vals, new exprs
@@ -35,22 +21,40 @@ TORCH_API std::ostream& operator<<(std::ostream& out, const ValType valtype);
 // supports visitor pattern
 // allows for easy manipulation/querying
 
-// Val Requirements & Goals
-  // support for dynamic dispatch
-  // symbol to determine dispatch / true type
-  // allow dispatch / visitors to handle a subset a vals with
-  //  a generic fallback
-  // allowing naming
-  // allow queries on fusion for what values are / what they're doing
-  // constness support
+using StmtNameType = std::uint32_t;
+struct Fusion;
 
-struct TORCH_API Val {
+struct TORCH_API Statement {
+  virtual ~Statement() = 0;
+
+  template <typename T>
+  int dispatch(T handler);
+
+  virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
+  virtual c10::optional<ExprType> getExprType() const noexcept { return c10::nullopt; }
+
+  Fusion* fusion() const noexcept { return fusion_; }
+  StmtNameType name() const noexcept { return name_; }
+
+  void setFusion(Fusion* fusion) {
+    fusion_ = fusion;
+  }
+  void setName(const StmtNameType name) {
+    name_ = name;
+  }
+
+protected:
+  Fusion* fusion_;
+  StmtNameType name_;
+};
+
+struct TORCH_API Val : public Statement {
+  virtual ~Val() = 0;
+
   Val() = delete;
   Val(
-    const ValNameType _name
-  , const ValType _type)
-  : name_{_name}
-  , type_{_type} { }
+    const ValType _type)
+  : type_{_type} { }
 
   Val(const Val& other) = default;
   Val& operator=(const Val& other) = default;
@@ -58,46 +62,81 @@ struct TORCH_API Val {
   Val(Val&& other) = default;
   Val& operator=(Val&& other) = default;
 
-  ~Val() = default;
+  c10::optional<ValType> getValType() const noexcept override { return type_; }
 
-  template <typename T>
-  int dispatch(T& handler);
-
-  ValNameType name() const noexcept { return name_; }
   ValType type() const noexcept { return type_; }
 
-private:
-  ValNameType name_;
+protected:
   ValType type_;
-  void* contained_ = nullptr;
 };
 
-struct Expr { // inputs, outputs, RAII, getType, cast/expect, dispatch method
-  // getFusion, getRegion
-  // implement IRVisitor for dispatch? want callable on one node vs. visit all
-};
+// TODO: support symbolic floats vs literal (const) floats (make value an optional)
+struct TORCH_API Float : public Val {
+  ~Float() = default;
+  Float() = delete;
+  Float(
+    const float _value)
+  : Val(ValType::Float)
+  , value_{_value} { }
 
-struct TORCH_API SampleValHandler {
-  template <typename T>
-  int handle(Val* val, T* contained);
+  Float(const Float& other) = default;
+  Float& operator=(const Float& other) = default;
 
-  int handle (Val* val, Expr* expr);
-};
+  Float(Float&& other) = default;
+  Float& operator=(Float&& other) = default;
 
+  float value() const noexcept { return value_; }
 
-
-struct Region { // list of nodes (expressions)
-};
-
-// Owns the exprs and vals
-// val name -> val map
-//
-struct Fusion {
-    // fusion: removeNode, addNodeBefore, addNodeAfter, addNodeAt
-    // name generator
-    // contains region
 private:
-  std::unordered_map<ValNameType, Val*> val_map_;
+  float value_;
+};
+
+// TODO: improve input/output model to track dataflow
+// TODO: add regions (e.g. loop exprs have bodies)
+struct TORCH_API Expr : public Statement {
+  Expr() = delete;
+  Expr(
+    const ExprType _type)
+  : type_{_type} { }
+
+  c10::optional<ExprType> getExprType() const noexcept override { return type_; }
+
+  ExprType type() const noexcept { return type_; }
+
+  const Statement* getInput(const std::vector<Statement*>::size_type idx) const {
+    return inputs_[idx];
+  }
+
+  const Statement* getOutput(const std::vector<Statement*>::size_type idx) const {
+    return outputs_[idx];
+  }
+
+  void addInput(Statement* input) {
+    inputs_.push_back(input);
+  }
+
+  void addOutput(Statement* output) {
+    outputs_.push_back(output);
+  }
+
+private:
+  ExprType type_;
+
+  std::vector<Statement*> inputs_;
+  std::vector<Statement*> outputs_;
+};
+
+struct TORCH_API Add : public Expr {
+  Add()
+  : Expr(ExprType::Add) { }
+
+  Add(const Add& other) = default;
+  Add& operator=(const Add& other) = default;
+
+  Add(Add&& other) = default;
+  Add& operator=(Add&& other) = default;
+
+  virtual ~Add() = default;
 };
 
 }}} // torch::jit::fuser
