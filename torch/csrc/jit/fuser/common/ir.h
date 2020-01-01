@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Optional.h>
+#include <c10/util/Exception.h>
 
 #include <torch/csrc/jit/fuser/common/type.h>
 
@@ -9,6 +10,8 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <vector>
+#include <limits>
+#include <deque>
 
 namespace torch {
 namespace jit {
@@ -22,14 +25,17 @@ namespace fuser {
 // allows for easy ~manipulation/~ querying
 // Immutable, when a node changes it must be recreated
 
-using StmtNameType = std::uint32_t;
+using StmtNameType = unsigned int;
+constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned int>::max();
+
 struct Fusion;
+struct Region;
 
 struct TORCH_API Statement {
-  friend struct Fusion;
+  virtual ~Statement() = 0;
 
   template <typename T>
-  int dispatch(T* handler) const;
+  int dispatch(T handler) const;
 
   virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
   virtual c10::optional<ExprType> getExprType() const noexcept { return c10::nullopt; }
@@ -38,164 +44,242 @@ struct TORCH_API Statement {
   bool isExpr() const noexcept{ return getExprType() != c10::nullopt; }
 
   Fusion* fusion() const noexcept { return fusion_; }
+  Region* region() const noexcept { return region_; }
   StmtNameType name() const noexcept { return name_; }
 
   void setFusion(Fusion* fusion) {
     fusion_ = fusion;
+  }
+  void setRegion(Region* region) {
+    region_ = region;
   }
   void setName(const StmtNameType name) {
     name_ = name;
   }
 
 protected:
-  virtual ~Statement() = 0;
-
-  Fusion* fusion_;
-  StmtNameType name_;
+  Fusion* fusion_ = nullptr;
+  Region* region_ = nullptr;
+  StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
 };
 
+/*
+* A Val represents a "value." These are objects, like tensors, scalars, and
+* memory locations, that are inputs and outputs of computations (represented
+* by Exprs, below). They also represent the flow of data through a program.
+*
+* Vals are constant and not unique. Conceptually, Vals could always be
+* manipulated using shared pointers to const.
+*/
 struct TORCH_API Val : public Statement {
 
 public:
   virtual ~Val() = 0;
 
   Val() = delete;
-  Val(
-    const ValType _type,
-    Fusion& fusion);
-  
-  c10::optional<ValType> getValType() const noexcept override { return type_; }
+  Val(const ValType _type) : type_{_type} { }
 
+  Val(const Val& other) = default;
+  Val& operator=(const Val& other) = default;
+
+  Val(Val&& other) = default;
+  Val& operator=(Val&& other) = default;
+
+  c10::optional<ValType> getValType() const noexcept override { return type_; }
   ValType type() const noexcept { return type_; }
 
 protected:
-  ValType type_;
-
-private:
-    Val(const Val& other) = delete;
-  Val& operator=(const Val& other) = delete;
-
-  Val(Val&& other) = delete;
-  Val& operator=(Val&& other) = delete;
-
+  const ValType type_;
 };
 
 // TODO: support symbolic floats vs literal (const) floats (make value an optional)
 struct TORCH_API Float : public Val {
+  ~Float() = default;
   Float() = delete;
 
   Float(
-    const float _value,
-    Fusion& fusion)
-  : Val(ValType::Float, fusion)
-  , value_{_value}
-  { }
+    const float _value)
+  : Val(ValType::Float)
+  , value_{_value} { }
 
 
-  Float(const Float& other) = delete;
-  Float& operator=(const Float& other) = delete;
+  Float(const Float& other) = default;
+  Float& operator=(const Float& other) = default;
 
-  Float(Float&& other) = delete;
-  Float& operator=(Float&& other) = delete;
+  Float(Float&& other) = default;
+  Float& operator=(Float&& other) = default;
 
   float value() const noexcept { return value_; }
 
-protected:
-  ~Float() = default;
-  
 private:
-  float value_;
+  const float value_;
+};
+
+struct TORCH_API IRInputOutput {
+  virtual ~IRInputOutput() = 0;
+
+  std::deque<Statement*>& inputs() noexcept { return inputs_; }
+  std::deque<Statement*>& outputs() noexcept { return outputs_; }
+
+  const std::deque<Statement*>& inputs() const noexcept { return inputs_; }
+  const std::deque<Statement*>& outputs() const noexcept { return outputs_; }
+
+  Statement* getInput(const std::deque<Statement*>::size_type idx) {
+    return inputs_[idx];
+  }
+  Statement* getOutput(const std::deque<Statement*>::size_type idx) {
+    return outputs_[idx];
+  }
+
+  const Statement* getInput(const std::deque<Statement*>::size_type idx) const {
+    return inputs_[idx];
+  }
+  const Statement* getOutput(const std::deque<Statement*>::size_type idx) const {
+    return outputs_[idx];
+  }
+
+  void addInput(Statement* input) {
+    register_callback(input);
+    inputs_.push_back(input);
+  }
+  void addOutput(Statement* output) {
+    register_callback(output);
+    outputs_.push_back(output);
+  }
+
+  void addInputAt(const std::deque<Statement*>::size_type pos, Statement* input) {
+    register_callback(input);
+    inputs_.insert(inputs_.begin() + pos, input);
+  }
+  void addOutputAt(const std::deque<Statement*>::size_type pos, Statement* output) {
+    register_callback(output);
+    outputs_.insert(outputs_.begin() + pos, output);
+  }
+
+  std::deque<Statement*>::size_type nInputs() const noexcept { return inputs_.size(); }
+  std::deque<Statement*>::size_type nOutputs() const noexcept { return outputs_.size(); }
+
+protected:
+  std::deque<Statement*> inputs_;
+  std::deque<Statement*> outputs_;
+
+  virtual void register_callback(Statement* stmt) { }
+};
+
+struct Expr;
+
+struct TORCH_API Region : public IRInputOutput {
+  ~Region() = default;
+
+  std::deque<Expr*>& exprs() noexcept { return exprs_; }
+  const std::deque<Expr*>& exprs() const noexcept { return exprs_; }
+
+  Fusion* fusion() const noexcept { return fusion_; }
+  Expr* parent() const noexcept {return parent_; }
+
+  void setFusion(Fusion* fusion) noexcept {
+    TORCH_CHECK(fusion_ == nullptr);
+    fusion_ = fusion;
+  }
+  void setParent(Expr* parent) noexcept {
+    TORCH_CHECK(parent_ == nullptr);
+    parent_ = parent;
+  }
+
+  bool inRegion(const Statement* stmt) {
+    return (stmt->region() == this);
+  }
+
+  void insertAtStart(Expr* expr) {
+    exprs_.push_front(expr);
+  }
+  void insertAtEnd(Expr* expr) { exprs_.push_back(expr); };
+
+  void insertLeftBeforeRight(Expr* left, Expr* right);
+  void insertLeftAfterRight(Expr* left, Expr* right);
+
+  std::deque<Expr*>::size_type indexOf(const Expr* expr) {
+    for (auto i = decltype(exprs_.size()){0}; i < exprs_.size(); ++i) {
+      if (expr == exprs_[i]) {
+        return i;
+      }
+    }
+
+    return -1; // TODO: return a named marker value or throw an error?
+  }
+
+  StmtNameType registerStatement(Statement* stmt);
+
+private:
+  Fusion* fusion_ = nullptr;
+  Expr* parent_ = nullptr;
+  std::deque<Expr*> exprs_;
+
+  void register_callback(Statement* stmt) override;
+  StmtNameType registerVal(Val* val);
+  StmtNameType registerExpr(Expr* expr);
 };
 
 // TODO: improve input/output model to track dataflow
 // TODO: add regions (e.g. loop exprs have bodies)
-struct TORCH_API Expr : public Statement {
+/*
+* A Expr represents a "computation." These are functions that may take inputs
+* and produce outputs.
+*
+* Exprs are unique and mutable. Conceptually, Exprs could always be manipulated
+* using unique pointers.
+*/
+struct TORCH_API Expr : public Statement, IRInputOutput {
 public:
+  virtual ~Expr() = 0;
   Expr() = delete;
+  Expr(
+    const ExprType _type)
+  : type_{_type} { }
 
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
-
   ExprType type() const noexcept { return type_; }
 
-  const Statement* getInput(const std::vector<Statement*>::size_type idx) const {
-    return inputs_[idx];
-  }
+  std::vector<Region*>& regions() noexcept { return regions_; }
+  const std::vector<Region*>& regions() const noexcept { return regions_; }
 
-  const Statement* getOutput(const std::vector<Statement*>::size_type idx) const {
-    return outputs_[idx];
-  }
-
-  std::vector<Statement*>::size_type n_inputs() const {return inputs_.size();}
-  std::vector<Statement*>::size_type n_outputs() const {return outputs_.size();}
-
-protected:
-
-  Expr(
-    const ExprType _type,
-    Fusion& fusion);
-
-  void addInput(const Statement* input) {
-    inputs_.push_back(input);
-  }
-
-  void addOutput(const Statement* output) {
-    outputs_.push_back(output);
-  }
+  void addRegion(Region* region);
 
 private:
-
   ExprType type_;
+  std::vector<Region*> regions_;
 
-  std::vector<const Statement*> inputs_;
-  std::vector<const Statement*> outputs_;
+  void register_callback(Statement* stmt) override;
 };
 
 struct TORCH_API Add : public Expr {
-  Add(const Statement* _lhs, const Statement* _rhs, Fusion& fusion )
-  : Expr(ExprType::Add, fusion)
-  , lhs_(_lhs)
-  , rhs_(_rhs) 
-  {
+  ~Add() = default;
+  Add(
+    Statement* _lhs
+  , Statement* _rhs)
+  : Expr(ExprType::Add)
+  , lhs_{_lhs}
+  , rhs_{_rhs} {
     addInput(_lhs);
     addInput(_rhs);
   }
 
-  const Statement* const lhs_;
-  const Statement* const rhs_;
-
-  Add(const Add& other) = delete;
-  Add& operator=(const Add& other) = delete;
-
-  Add(Add&& other) = delete;
-  Add& operator=(Add&& other) = delete;
-
-  protected:
-  virtual ~Add() = default;
-};
-
-/*
-struct TORCH_API Region : public Expr {
-  Region(const Statement* _lhs, Fusion& fusion )
-  : Expr(ExprType::Add, fusion)
-  , lhs_(_lhs)
-  , rhs_(_rhs) 
-  {
-    addInput(_lhs);
-    addInput(_rhs);
-  }
-
-  const Statement* const lhs_;
-  const Statement* const rhs_;
-
-  Region(const Region& other) = default;
-  Region& operator=(const Region& other) = delete;
+  Add(const Add& other) = default;
+  Add& operator=(const Add& other) = default;
 
   Add(Add&& other) = default;
   Add& operator=(Add&& other) = default;
 
-  virtual ~Add() = default;
+  Statement* lhs() noexcept { return lhs_; }
+  Statement* rhs() noexcept { return rhs_; }
+
+  const Statement* lhs() const noexcept { return lhs_; }
+  const Statement* rhs() const noexcept { return rhs_; }
+
+private:
+  Statement* lhs_;
+  Statement* rhs_;
 };
-*/
 
 } // namespace fuser
 } // namespace jit

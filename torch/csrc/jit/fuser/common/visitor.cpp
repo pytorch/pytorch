@@ -32,9 +32,9 @@ int IRPrinter::handle(const Float* f){
 }
 int IRPrinter::handle(const Add* add){
   std::cout << "( ";
-  add->lhs_->dispatch(this);
+  add->lhs()->dispatch(this);
   std::cout << " + ";
-  add->rhs_->dispatch(this);
+  add->rhs()->dispatch(this);
   std::cout<<" )"<<std::endl;
   return 0;
 }

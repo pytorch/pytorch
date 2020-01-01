@@ -14,7 +14,6 @@ static std::unordered_map<ExprType, std::string> expr_type_string_map {
   {ExprType::Add, "Add"}
 };
 
-
 std::string stringify(const ValType valtype) {
   return val_type_string_map[valtype];
 }
@@ -30,24 +29,6 @@ std::ostream& operator<<(std::ostream& out, const ValType valtype) {
 std::ostream& operator<<(std::ostream& out, const ExprType exprtype) {
   return out << stringify(exprtype);
 }
-
-//   std::ostream& operator<<(std::ostream& os, const DType& dtype){
-
-//   switch(dtype.ctype()){
-//     case(CType::kInt32):
-//     os<<"int32";
-//     break;
-//     case(CType::kFloat32):
-//     os<<"float32";
-//     break;
-//     case(CType::kStatement):
-//     break;
-//     case(CType::kNull):
-//     break;
-//     }
-//     return os;
-//   }
-
 
 // bool is_scalar(const CType& type){
 //   if(type<CType::kStatement)
