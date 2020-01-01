@@ -12,11 +12,14 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// TODO: add regions (lists of exprs)
-// TODO: functions for inserting expressions at, moving them
-// TODO: replaceAllUsesWith for values
+// TODO: replaceAllUsesOfLeftWithRight(Val, Val) for values
+// TODO: hasUses(Val)
+// TODO: val->uses mapping? expr->location mapping?
+// TODO: plumb through helpers, ex. Val.replaceAllUsesWith(Val)
+//          (registration's make this easy)
 // TODO: DCE pass
-struct TORCH_API Fusion {
+// TODO: printFusion (allow mem location inlining)
+struct TORCH_API Fusion : public IRInputOutput {
   Fusion() {
     region_ = new Region{};
     region_->setFusion(this);
@@ -46,7 +49,7 @@ struct TORCH_API Fusion {
   };
 
   void insertAtStart(Expr* expr) { region_->insertAtStart(expr); }
-  void insertAtEnd(Expr* expr) { region_->insertAtEnd(expr) };
+  void insertAtEnd(Expr* expr) { region_->insertAtEnd(expr); }
   void insertLeftBeforeRight(Expr* left, Expr* right) {
     region_->insertLeftBeforeRight(left, right);
   }
@@ -136,6 +139,10 @@ private:
 
   StmtNameType getValName() { return val_name_counter_++; }
   StmtNameType getExprName() { return expr_name_counter_++; }
+
+  void register_callback(Statement* stmt) override {
+    registerStatement(stmt);
+  }
 };
 
 }}} // torch::jit::fuser

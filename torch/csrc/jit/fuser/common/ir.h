@@ -17,19 +17,14 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// IR Requirements & Goals:
-// clear, easy, extensible way to add new vals, new exprs
-// nice pretty printing
-// validating by lowering TorchScript IR and pretty printing
-// supports visitor pattern
-// allows for easy ~manipulation/~ querying
-// Immutable, when a node changes it must be recreated
+// TODO: add comment explaining structure
 
 using StmtNameType = unsigned int;
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned int>::max();
 
 struct Fusion;
 struct Region;
+struct Expr;
 
 struct TORCH_API Statement {
   virtual ~Statement() = 0;
@@ -115,6 +110,7 @@ private:
   const float value_;
 };
 
+// TODO: comment
 struct TORCH_API IRInputOutput {
   virtual ~IRInputOutput() = 0;
 
@@ -166,8 +162,7 @@ protected:
   virtual void register_callback(Statement* stmt) { }
 };
 
-struct Expr;
-
+// TOOD: comment
 struct TORCH_API Region : public IRInputOutput {
   ~Region() = default;
 
@@ -252,6 +247,7 @@ private:
   void register_callback(Statement* stmt) override;
 };
 
+// TODO: comment
 struct TORCH_API Add : public Expr {
   ~Add() = default;
   Add(
