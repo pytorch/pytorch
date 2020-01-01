@@ -27,7 +27,7 @@ set(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR} CACHE PATH "Folder containing NVID
 
 find_path(CUDNN_INCLUDE_PATH cudnn.h
   HINTS ${CUDNN_INCLUDE_DIR}
-  PATH_SUFFIXES cuda/include include)
+  PATH_SUFFIXES cuda/include cuda include)
 
 option(CUDNN_STATIC "Look for static CUDNN" OFF)
 if (CUDNN_STATIC)
