@@ -7,7 +7,7 @@
   * [Building documentation](#building-documentation)
     + [Tips](#tips)
   * [Adding documentation tests](#adding-documentation-tests)
-- [Profiling with `py-spy`](#profiling-with--py-spy-)
+- [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c---development-tips)
   * [Build only what you need](#build-only-what-you-need)
