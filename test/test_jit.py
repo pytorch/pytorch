@@ -2634,7 +2634,7 @@ graph(%Ra, %Rb):
 
         @torch.jit.script
         def func4(x, a):
-            # type: (Tensor, List[Optional[str]]) -> Tensor
+            # type: (Tensor, List[str]) -> Tensor
             if len(a) == 2:
                 return x + 2
             else:
@@ -3153,28 +3153,6 @@ graph(%Ra, %Rb):
         graph = constant_prop.graph
         self.run_pass('constant_propagation', graph)
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
-
-    def test_constant_insertion(self):
-        def foo():
-            a = [1.0, 2.0, 3.0]
-            b = ["ab", "cd", "ef"]
-            return a, b
-
-        scripted_foo = torch.jit.script(foo)
-        graph = scripted_foo.graph
-        FileCheck().check_count("ListConstruct", 2).run(graph)
-        self.run_pass('constant_propagation', graph)
-        FileCheck().check_not("ListConstruct").run(graph)
-        FileCheck().check_dag("float[] =").check_dag("str[] =").run(graph)
-        imported = self.getExportImportCopy(scripted_foo)
-        self.assertEqual(foo(), scripted_foo())
-        self.assertEqual(imported(), scripted_foo())
-
-        @torch.jit.script
-        def test_empty():
-            return torch.jit.annotate(List[str], [])
-        imported = self.getExportImportCopy(test_empty)
-        FileCheck().check("str[]").run(imported.graph)
 
     def test_trace_detach(self):
         def foo(x, w):
