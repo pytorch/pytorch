@@ -19,6 +19,4 @@ struct TORCH_API IRPrinter {
   int handle(const Add* add);
 };
 
-
-
 }}} // torch::jit::fuser
