@@ -777,17 +777,13 @@ struct PythonPrintImpl {
     }
   }
 
-  void printAnnotatedConstantList(std::ostream& stmt, const char* the_type) {
-    stmt << "annotate(List[" << the_type << "], [])";
-  }
-
   void printMaybeAnnotatedConstantList(
       std::ostream& stmt,
       const char* the_type,
       size_t list_size,
       const IValue& the_list) {
     if (list_size == 0) {
-      printAnnotatedConstantList(stmt, the_type);
+      stmt << "annotate(List[" << the_type << "], [])";
     } else {
       stmt << the_list;
     }
@@ -820,20 +816,6 @@ struct PythonPrintImpl {
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
           ss, "float", v.toDoubleListRef().size(), v);
-    } else if (v.type()->isSubtypeOf(ListType::ofStrings())) {
-      const char* delim = "";
-      const auto& list = v.toGenericListRef();
-      if (list.size() == 0) {
-        printAnnotatedConstantList(ss, "str");
-      } else {
-        ss << "[";
-        for (const IValue& str : list) {
-          ss << delim;
-          c10::printQuotedString(ss, str.toStringRef());
-          delim = ", ";
-        }
-        ss << "]";
-      }
     } else {
       ss << v;
     }
@@ -1251,7 +1233,7 @@ struct PythonPrintImpl {
 
     for (size_t i = 0; i < numAttrs; i++) {
       const auto& name = moduleType->getAttributeName(i);
-      const auto& type = moduleType->getAttribute(name);
+      const auto& type = moduleType->getAttribute(i);
       registerClassDependencies(type);
 
       indent();
