@@ -18,6 +18,8 @@ namespace jit {
 namespace fuser {
 
 // TODO: add comment explaining structure
+// TODO: automatic casting (check type for binary ops, cast inputs to common type)
+
 
 using StmtNameType = unsigned int;
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned int>::max();

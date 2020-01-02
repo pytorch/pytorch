@@ -4,6 +4,4 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-
-
 }}} // torch::jit::fuser

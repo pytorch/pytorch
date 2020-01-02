@@ -10,6 +10,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+//TODO: Type promotion
+
 enum class TORCH_API ValType {
   Float
 //   Expr
