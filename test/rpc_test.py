@@ -1287,7 +1287,7 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(clean_shutdown=False)
     def test_sender_exceptions(self):
@@ -1307,7 +1307,7 @@ class RpcTest(RpcAgentTestFixture):
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
                 else "(Request aborted during client shutdown)|"
-                    "(worker.: Error in reponse from worker.: server shutting down)")
+                     "(worker.: Error in reponse from worker.: server shutting down)")
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         else:
