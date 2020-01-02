@@ -3623,12 +3623,12 @@ class TestNN(NNTestCase):
         ref_out.backward(grad)
         format_list = [
             [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.contiguous_format],
+            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.channels_last],
             [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
             [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
             [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
             [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous_format]]
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
 
 
 
