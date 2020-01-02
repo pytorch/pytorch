@@ -3607,7 +3607,7 @@ class TestNN(NNTestCase):
         grad = grad.contiguous(memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
-        self.assertTrue(out.is_contiguous(memory_format=output_format), message + ' {} {} {} {}'.format(conv.weight.shape, conv.weight.stride(), input.shape, input.stride()))
+        self.assertTrue(out.is_contiguous(memory_format=output_format), message + ' {} {} {} {}'.format(conv.weight.shape, conv.weight.stride(), input.shape, input.stride(), output.shape, output.stride()))
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
