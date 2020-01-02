@@ -50,7 +50,9 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ClassType)              \
   _(CapsuleType)            \
   _(InterfaceType)          \
-  _(QSchemeType)
+  _(QSchemeType)            \
+  _(LayoutType)             \
+  _(ScalarTypeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1433,8 +1435,8 @@ struct CAFFE2_API ClassType : public NamedType {
 
   const std::vector<Function*>& methods() const;
 
-  TypePtr getAttribute(const std::string& name) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+  TypePtr findAttribute(const std::string& name) const {
+    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
     for (const auto& attr : attributeNames_) {
       if (name == attr) {
@@ -1447,6 +1449,17 @@ struct CAFFE2_API ClassType : public NamedType {
       return nullptr;
     }
     return attributeTypes_[pos];
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    auto type = findAttribute(name);
+    TORCH_CHECK(
+        type,
+        python_str(),
+        " does not have an attribute with name '",
+        name,
+        "'");
+    return type;
   }
 
   size_t numAttributes() const {
@@ -1489,7 +1502,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have a field with the name '",
+        " does not have an attribute with name '",
         name,
         "'");
   }
@@ -1708,6 +1721,56 @@ struct CAFFE2_API InterfaceType : public NamedType {
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
+};
+
+template <TypeKind K>
+struct EnumerationType : public Type {
+static const TypeKind Kind = K;
+
+bool operator==(const Type& rhs) const override {
+  return rhs.kind() == kind();
+}
+
+protected:
+EnumerationType() : Type(Kind) {}
+};
+
+struct LayoutType;
+using LayoutTypePtr = std::shared_ptr<LayoutType>;
+// This type represents a Generator
+struct CAFFE2_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+static LayoutTypePtr create() {
+return LayoutTypePtr(
+    new LayoutType()); // NOLINT(modernize-make-shared)
+}
+std::string str() const override {
+return "Layout";
+}
+static const TypeKind Kind = TypeKind::LayoutType;
+// global singleton
+static LayoutTypePtr get();
+
+private:
+LayoutType() : EnumerationType() {}
+};
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
+// This type represents a Generator
+struct CAFFE2_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
+static ScalarTypeTypePtr create() {
+return ScalarTypeTypePtr(
+    new ScalarTypeType()); // NOLINT(modernize-make-shared)
+}
+std::string str() const override {
+return "ScalarType";
+}
+static const TypeKind Kind = TypeKind::ScalarTypeType;
+// global singleton
+static ScalarTypeTypePtr get();
+
+private:
+ScalarTypeType() : EnumerationType() {}
 };
 
 } // namespace c10
