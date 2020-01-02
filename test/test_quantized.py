@@ -10,7 +10,7 @@ from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
-from hypothesis_utils import no_deadline
+hu.assert_deadline_disabled()
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
@@ -144,8 +144,34 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::clamp op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           min_val=st.floats(-1e6, 1e6, allow_nan=False),
+           max_val=st.floats(-1e6, 1e6, allow_nan=False))
+    def test_qclamp(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
+
     """Tests the correctness of the scalar addition."""
-    @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
@@ -506,7 +532,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
@@ -556,7 +581,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -619,7 +643,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
@@ -662,7 +685,6 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -708,7 +730,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           X_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -733,7 +754,6 @@ class TestQuantizedOps(TestCase):
         torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
         torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -818,7 +838,6 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
@@ -874,7 +893,6 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -999,7 +1017,6 @@ class TestQuantizedOps(TestCase):
                      " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
-    @no_deadline
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -1112,7 +1129,6 @@ class TestDynamicQuantizedLinear(TestCase):
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
     """Tests the correctness of the legacy dynamic quantized linear op."""
-    @no_deadline
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -1189,7 +1205,6 @@ class TestDynamicQuantizedLinear(TestCase):
 
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
-    @no_deadline
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
@@ -1475,7 +1490,7 @@ class TestQuantizedConv(unittest.TestCase):
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
 
-        # Quantize reference results for comparision
+        # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)

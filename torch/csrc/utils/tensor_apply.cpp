@@ -54,7 +54,7 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
 }
 
 Tensor & apply_(Tensor & self, PyObject* fn) {
-  if (self.type().backend() != Backend::CPU) {
+  if (self.options().backend() != Backend::CPU) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
   auto scalarType = self.scalar_type();
@@ -63,12 +63,12 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
 }
 
 Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
-  if (self.type().backend() != Backend::CPU) {
+  if (self.options().backend() != Backend::CPU) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
-  if (other_.type() != self.type()) {
+  if (!other_.options().type_equal(self.options())) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
-        self.type().toString().c_str(), other_.type().toString().c_str());
+        self.toString().c_str(), other_.toString().c_str());
   }
   Tensor other;
   std::tie(other) = expand_inplace(self, other_, "map_");
@@ -78,16 +78,16 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
 }
 
 Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
-  if (self.type().backend() != Backend::CPU || x_.type().backend() != Backend::CPU || y_.type().backend() != Backend::CPU) {
+  if (self.options().backend() != Backend::CPU || x_.options().backend() != Backend::CPU || y_.options().backend() != Backend::CPU) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
-  if (x_.type() != self.type()) {
+  if (!x_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
-        self.type().toString().c_str(), x_.type().toString().c_str());
+        self.toString().c_str(), x_.toString().c_str());
   }
-  if (y_.type() != self.type()) {
+  if (!y_.options().type_equal(self.options())) {
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
-        self.type().toString().c_str(), y_.type().toString().c_str());
+        self.toString().c_str(), y_.toString().c_str());
   }
   Tensor other1, other2;
   std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");

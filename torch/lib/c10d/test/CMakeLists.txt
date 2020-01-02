@@ -15,7 +15,7 @@ endfunction()
 
 c10d_add_test(FileStoreTest.cpp c10d)
 c10d_add_test(HashStoreTest.cpp c10d)
-c10d_add_test(TCPStoreTest.cpp c10d)
+c10d_add_test(TCPStoreTest.cpp c10d gtest_main)
 
 if(USE_CUDA)
   if(USE_C10D_GLOO)

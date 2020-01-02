@@ -6,6 +6,7 @@
 
 #include <caffe2/core/net.h>
 #include <caffe2/core/workspace.h>
+#include <caffe2/opt/shape_info.h>
 #include <caffe2/proto/caffe2_pb.h>
 
 C10_DECLARE_string(onnxifi_blacklist);
@@ -26,10 +27,11 @@ void onnxifi(
     const std::vector<std::string>& output_names,
     const std::vector<std::string>& weight_names,
     const std::unordered_set<int>& blacklist,
-    const std::unordered_map<std::string, TensorShape>& shape_hints,
+    const ShapeInfoMap& shape_hints,
     bool use_onnx,
     size_t max_batch_size = 0,
-    size_t max_seq_size = 0);
+    size_t max_seq_size = 0,
+    bool load_model_by_blob = false);
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
 std::unordered_set<std::string> ParseBlackListOps(const std::string& str);

@@ -174,7 +174,7 @@ class TaskGroup(object):
     will finish execution when the last task of the group finishes.
 
     Example:
-        # supose that s1 ... s5 are execution steps or nets.
+        # suppose that s1 ... s5 are execution steps or nets.
         with TaskGroup() as tg:
             # these tasks go to default node 'local'
             Task(step=s1)

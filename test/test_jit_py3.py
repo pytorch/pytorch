@@ -65,6 +65,13 @@ class TestScriptPy3(JitTestCase):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
+
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
             float_features: float

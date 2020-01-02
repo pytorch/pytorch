@@ -137,31 +137,34 @@ static struct PyGetSetDef metaclass_properties[] = {
   {nullptr}
 };
 
-static PyTypeObject metaclass;
+static PyTypeObject metaclass = {
+  PyVarObject_HEAD_INIT(nullptr, 0)
+  "torch.tensortype",                          /* tp_name */
+  sizeof(PyTypeObject)                         /* tp_basicsize */
+};
 
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
-  ((PyObject*)&metaclass)->ob_refcnt = 1;
-  metaclass.tp_basicsize = sizeof(PyTypeObject);
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
   metaclass.tp_getset = metaclass_properties;
-  metaclass.tp_name = "torch.tensortype";
   metaclass.tp_base = &PyType_Type;
   if (PyType_Ready(&metaclass) < 0) {
     throw python_error();
   }
 }
 
+static PyTypeObject tensor_type_prototype = {
+  PyVarObject_HEAD_INIT(&metaclass, 0)
+  nullptr,                                     /* tp_name */
+  sizeof(PyTensorType)                         /* tp_basicsize */
+};
+
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
-  // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
-  // documentation: it initializes the refcnt to 1 and the other object header
-  // fields to zero.
-  memset(&type, 0, sizeof(PyTypeObject));
-  ((PyObject*)&type)->ob_refcnt = 1;
-  ((PyObject*)&type)->ob_type = &metaclass;
-  type.tp_basicsize = sizeof(PyTensorType);
+  // We copy the basic object fields from a prototype definition and initialize
+  // the remaining fields below.
+  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;

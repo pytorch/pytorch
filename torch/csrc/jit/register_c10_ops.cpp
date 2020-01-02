@@ -44,8 +44,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               node->addInput(none);
               continue;
             } else {
-              type =
-                  reinterpret_cast<OptionalType*>(type.get())->getElementType();
+              type = type->expect<OptionalType>()->getElementType();
             }
           }
           if (type->isSubtypeOf(TensorType::get())) {
@@ -65,8 +64,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             tracer::addInputs(
                 node, args[i].name().c_str(), iter->toStringRef());
           } else if (type->kind() == TypeKind::ListType) {
-            const auto& elem_type =
-                reinterpret_cast<ListType*>(type.get())->getElementType();
+            const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               auto list = iter->toTensorListRef();
@@ -124,8 +122,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
           } else if (type->kind() == TypeKind::ListType) {
-            const auto& elem_type =
-                reinterpret_cast<ListType*>(type.get())->getElementType();
+            const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               tracer::addOutput(node, iter->toTensorList());
@@ -165,14 +162,24 @@ struct Registerer final {
     // this immediately calls the listener on all existing ops,
     // and calls it in future whenever a new op is registered
     c10::Dispatcher::singleton().addRegistrationListener(
-      c10::guts::make_unique<RegistrationListener>()
+      std::make_unique<RegistrationListener>()
     );
   }
 };
 
-// global instance to run its constructor on startup
-Registerer registerer;
+Registerer& registerer() {
+  static Registerer registerer;
+  return registerer;
+}
 
+// global instance to run its constructor on startup
+Registerer& dummy = registerer();
+
+} // namespace
+
+void ensure_c10_registerer_defined() {
+  registerer();
 }
-}
+
+} // namespace jit
 }

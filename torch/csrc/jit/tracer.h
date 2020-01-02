@@ -5,7 +5,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dimname.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <torch/csrc/utils/variadic.h>
 
@@ -227,6 +226,10 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
     Node* n,
@@ -259,10 +262,16 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
-#ifdef BUILD_NAMEDTENSOR
 TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
-#endif
 TORCH_API void addInputs(
     Node* n,
     const char* name,

@@ -2,7 +2,7 @@
 #define THC_TENSOR_TOPK_CUH
 
 #include <c10/macros/Macros.h>
-#include <aten/src/ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/cuda/SortingRadixSelect.cuh>
 
 using namespace at::native;
 
@@ -87,7 +87,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
@@ -104,7 +104,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
-  assert(outputSliceSize >= writeIndexStart);
+  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
   IndexType topKRemaining = (outputSliceSize - writeIndexStart);
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
@@ -119,7 +119,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
-      assert(writeIndex < outputSliceSize);
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
