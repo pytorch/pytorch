@@ -22,7 +22,7 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerState state = ProfilerState::Disabled;
 uint16_t next_thread_id = 0;
-std::mutex all_event_lists_mutex;
+std::mutex all_event_lists_map_mutex;
 std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
     all_event_lists_map;
 thread_local std::shared_ptr<RangeEventList> event_list;
@@ -36,7 +36,7 @@ ProfilerConfig::~ProfilerConfig() = default;
 
 RangeEventList& getEventList() {
   if (!event_list) {
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+    std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
     thread_id = ++next_thread_id;
     all_event_lists_map.emplace(thread_id, event_list);
@@ -170,7 +170,7 @@ void enableProfiler(ProfilerConfig config) {
           if (state == ProfilerState::Disabled) {
             return;
           } else {
-            std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+            std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
             const auto& eventListIter =
                 all_event_lists_map.find(fn.getThreadId());
             TORCH_INTERNAL_ASSERT(
@@ -226,7 +226,7 @@ thread_event_lists disableProfiler() {
     return thread_event_lists();
   } else {
     thread_event_lists result;
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+    std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     for (auto it = all_event_lists_map.begin(); it != all_event_lists_map.end();) {
       auto & list = it->second;
       result.emplace_back(list->consolidate());

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/autograd/profiler.h>
 
 namespace torch {
 
@@ -10,7 +9,7 @@ namespace utils {
 // FutureError inherits from std::exception, it can return const char* or
 // std::string error message
 class TORCH_API FutureError final : public std::exception {
- public:
+public:
   FutureError(std::string errorMsg) : errorMsg_(std::move(errorMsg)) {}
 
   FutureError() = default;
@@ -19,7 +18,7 @@ class TORCH_API FutureError final : public std::exception {
     return errorMsg_.c_str();
   }
 
- private:
+private:
   std::string errorMsg_;
 };
 
@@ -34,7 +33,8 @@ class TORCH_API Future final {
 
   Future() = default;
 
-  Future(T value) : completed_(true), value_(std::move(value)), rf_(nullptr) {}
+  Future(T value)
+  : completed_(true), value_(std::move(value)) {}
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -69,10 +69,6 @@ class TORCH_API Future final {
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
-    // if recording, run end callbacks.
-    if (rf_) {
-      rf_->end();
-    }
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
@@ -135,8 +131,7 @@ class TORCH_API Future final {
   std::vector<Callback> callbacks_;
   T value_;
   c10::optional<FutureError> error_;
-  std::shared_ptr<torch::autograd::profiler::RecordFunction> rf_;
 };
 
-} // namespace utils
-} // namespace torch
+}
+} // namespace torch::utils
