@@ -10541,28 +10541,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(aRes, torch.tensor([[1, 0, 0],
                                              [0, 0, 0],
                                              [1, 1, 1]]))
-    def test_cummax(self, device):
-        x = torch.rand(100, 100, device=device)
-        out1 = torch.cummax(x, 1)
-        res2 = torch.Tensor().to(device)
-        indices2 = torch.LongTensor().to(device)
-        torch.cummax(x, 1, out=tuple([res2, indices2]))
-        self.assertEqual(out1[0], res2)
-        self.assertEqual(out1[1], indices2)
-
-        a = torch.tensor([[True, False, True],
-                         [False, False, False],
-                         [True, True, True]], dtype=torch.bool, device=device)
-        b = a.byte()
-        aRes = torch.cummax(a, 0)
-        bRes = torch.cummax(b, 0)
-        self.assertEqual(aRes[0], bRes[0])
-        self.assertEqual(aRes[0], torch.tensor([[1, 0, 1],
-                                             [1, 0, 1],
-                                             [1, 1, 1]]))
-        self.assertEqual(aRes[1], torch.tensor([[0, 0, 0],
-                                             [0, 1, 0],
-                                             [2, 2, 2]]))
 
         # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
@@ -10583,6 +10561,58 @@ class TestTorchDeviceType(TestCase):
         integrated = raw_tensor.cumprod(dim=-1)
         # Check that backward does not crash
         integrated.sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+    def test_cummax(self, device):
+        x = torch.rand(100, 100, device=device)
+        out1 = torch.cummax(x, 1)
+        res2 = torch.Tensor().to(device)
+        indices2 = torch.LongTensor().to(device)
+        torch.cummax(x, 1, out=(res2, indices2))
+        self.assertEqual(out1[0], res2)
+        self.assertEqual(out1[1], indices2)
+
+        a = torch.tensor([[True, False, True],
+                         [False, False, False],
+                         [True, True, True]], dtype=torch.bool, device=device)
+        b = a.byte()
+        aRes = torch.cummax(a, 0)
+        bRes = torch.cummax(b, 0)
+        self.assertEqual(aRes[0], bRes[0])
+        self.assertEqual(aRes[0], torch.tensor([[1, 0, 1],
+                                                [1, 0, 1],
+                                                [1, 1, 1]]))
+
+        # cummax doesn't support values, indices with a dtype, device type or layout
+        # different from that of input tensor
+        t = torch.randn(10)
+        values = torch.ShortTensor()
+        indices = torch.LongTensor()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'expected scalar_type Float but found Short'):
+            torch.cummax(t, 0, out=(values, indices))
+
+        # Check that cummulative max over a zero length dimension doesn't crash on backprop.
+        # Also check that cummax over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cummax(dim=dim)
+                # Check that backward does not crash
+                integrated[0].sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cummax(dim=-1)
+        # Check that backward does not crash
+        integrated[0].sum().backward()
         # Check that output maintained correct shape
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
