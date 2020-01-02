@@ -3,7 +3,6 @@
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 using at::NameType;
 using at::Symbol;

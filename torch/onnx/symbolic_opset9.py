@@ -789,7 +789,7 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, use_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
@@ -1795,7 +1795,9 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
     if not input.isCompleteTensor():
-        return _unimplemented("flatten", "input size not accessible")
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     input_dims = input.type().sizes()
     output_dims = []
     for i in range(0, dim):

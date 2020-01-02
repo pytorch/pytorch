@@ -3,11 +3,12 @@
 
 #include "ThreadPoolCommon.h"
 
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
+#include <atomic>
+
 #include "caffe2/core/common.h"
 
 //

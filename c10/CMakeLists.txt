@@ -79,6 +79,7 @@ target_include_directories(
     $<INSTALL_INTERFACE:include>)
 
 add_subdirectory(test)
+add_subdirectory(benchmark)
 
 if(USE_CUDA)
   add_subdirectory(cuda)

@@ -74,7 +74,7 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
     }
   }
   LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
-  return caffe2::make_unique<ThreadPool>(numThreads);
+  return std::make_unique<ThreadPool>(numThreads);
 }
 
 ThreadPool::ThreadPool(int numThreads)
@@ -100,7 +100,7 @@ void ThreadPool::setMinWorkSize(size_t size) {
 }
 
 void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
-  const auto numThreads = numThreads_.load(std::memory_order_relaxed);
+  const auto numThreads = numThreads_.load(std::memory_order_relaxed); 
 
   std::lock_guard<std::mutex> guard(executionMutex_);
   // If there are no worker threads, or if the range is too small (too
