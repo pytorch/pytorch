@@ -427,7 +427,7 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 }
 
 Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
-  if (input.dim() == 0) {
+  if (input.numel() == 0) {
     return input;
   }
   auto result = at::zeros(input.sizes());
