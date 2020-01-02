@@ -71,7 +71,7 @@ struct TORCH_API Function {
   // The enable_if check is to ensure that the user doesn't explicitly provide
   // the parameter X.
   template<typename X=T, typename... Args>
-  static auto apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
+  static auto apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
 };
 
 // Context to save information during forward that can be accessed in backward
@@ -175,7 +175,7 @@ typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_typ
 
 template<class T>
 template<typename X, typename... Args>
-auto Function<T>::apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
+auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 

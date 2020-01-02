@@ -18,7 +18,8 @@ class TestQuantizedOps(unittest.TestCase):
 
         pytorch_res = q_model(*pt_inputs)
         f = io.BytesIO()
-        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        torch.onnx.export(q_model, pt_inputs, f, input_names=input_names,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
         onnx_model = onnx.load(f)
         caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
@@ -68,7 +69,8 @@ class TestQuantizedOps(unittest.TestCase):
 
         model = torch.jit.load(buf)
         f = io.BytesIO()
-        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         f.seek(0)
 
         onnx_model = onnx.load(f)
@@ -186,6 +188,21 @@ class TestQuantizedOps(unittest.TestCase):
 
         x = np.random.rand(1, 2, 3, 4).astype("float32")
         self.generic_test(QSliceModule(), (x,), input_names=["x"])
+
+    def test_cat(self):
+        class QConcatModule(torch.nn.Module):
+            def __init__(self):
+                super(QConcatModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x, y):
+                res = torch.ops.quantized.cat([self.quant1(x), self.quant1(y)], dim=1, scale=1.0, zero_point=0)
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        y = np.random.rand(1, 4, 3, 4).astype("float32")
+        self.generic_test(QConcatModule(), (x, y,), input_names=["x", "y"])
 
 if __name__ == '__main__':
     unittest.main()

@@ -29,6 +29,7 @@ executors:
 
   windows-cpu-with-nvidia-cuda:
     machine:
+      # we will change to CPU host when it's ready
       resource_class: windows.xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
@@ -451,6 +452,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VS2017
+          command: |
+            powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Install Cuda
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
@@ -460,8 +465,6 @@ jobs:
           name: Install Cudnn
           command : |
             cd c:/
-            choco install -y 7zip curl
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
             cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
@@ -489,6 +492,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VS2017
+          command: |
+            powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Test
           no_output_timeout: "30m"
           command: |
@@ -497,8 +504,6 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            choco install -y 7zip curl
             .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
@@ -743,6 +748,16 @@ jobs:
         no_output_timeout: "1h"
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -1615,6 +1630,51 @@ jobs:
               export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
               set -x
               cd .circleci/docker && ./build_docker.sh
+  docker_for_ecr_gc_build_job:
+      machine:
+        image: ubuntu-1604:201903-01
+      steps:
+        - checkout
+        - run:
+            name: build_docker_image_for_ecr_gc
+            no_output_timeout: "1h"
+            command: |
+              cd .circleci/ecr_gc_docker
+              docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              set -x
+              docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+  ecr_gc_job:
+      parameters:
+        project:
+          type: string
+          default: "pytorch"
+        tags_to_keep:  # comma separate values
+          type: string
+      environment:
+        PROJECT: << parameters.project >>
+        IMAGE_TAG: << parameters.tags_to_keep >>
+      docker:
+        - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+          aws_auth:
+            aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+            aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+
+      steps:
+        - run:
+            name: garbage collecting for ecr images
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              set -x
+              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG}
+
+
 
 ##############################################################################
 ##############################################################################
@@ -5635,6 +5695,7 @@ workflows:
               only:
                 - master
     jobs:
+      - docker_for_ecr_gc_build_job
       - docker_build_job:
           name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
           image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
@@ -5692,3 +5753,30 @@ workflows:
       - docker_build_job:
           name: "pytorch-linux-xenial-pynightly"
           image_name: "pytorch-linux-xenial-pynightly"
+  ecr_gc:
+    triggers:
+      - schedule:
+          cron: "45 * * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - ecr_gc_job:
+            name: ecr_gc_job_for_pytorch
+            project: pytorch
+            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_caffe2
+            project: caffe2
+            tags_to_keep: "348,345,336,325,324,315,306,301,287,283,276,273,266,253,248,238,230,213"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_translate
+            project: translate
+            tags_to_keep: "8"
+      - ecr_gc_job:
+            name: ecr_gc_job_for_tensorcomp
+            project: tensorcomp
+            tags_to_keep: "34"
+
+

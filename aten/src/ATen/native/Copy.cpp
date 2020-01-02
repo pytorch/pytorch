@@ -8,7 +8,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 namespace {
 
@@ -122,6 +122,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     self.set_quantizer_(src.quantizer());
   }
 
+  if (!self.is_quantized() && src.is_quantized()) {
+    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
+  }
+
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(self);
@@ -150,18 +154,21 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
     NoNamesGuard guard;
-#endif
     copy_impl(self, src, non_blocking);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
-#endif
   return self;
 }
+
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyCatchAllKernel<decltype(copy_), &copy_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
 DEFINE_DISPATCH(copy_stub);
 

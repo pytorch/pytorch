@@ -5,7 +5,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -239,7 +238,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       }
       return false;
     }
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
       if (THPUtils_checkDimnameList(obj)) {
@@ -248,7 +246,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -291,10 +288,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
-#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -736,9 +731,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  }else if (PyComplex_Check(obj)) {
+  } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  }else if (THPUtils_checkDouble(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,

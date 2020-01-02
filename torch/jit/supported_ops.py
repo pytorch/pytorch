@@ -290,10 +290,13 @@ def _list_supported_ops():
     )
     for fn in op_gathering_fns:
         header, items = fn()
+        link_target = header.replace('`', '').replace('-', '').lower().replace(' ', '-')
         if isinstance(items, str):
-            body += "{}\n{}\n{}\n".format(header, '~' * len(header), items)
+            section = "{}\n{}\n{}\n".format(header, '~' * len(header), items)
         else:
-            body += "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
+            section = "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
+        section = '.. _{}:'.format(link_target) + '\n\n' + section
+        body += section
 
     return body
 
