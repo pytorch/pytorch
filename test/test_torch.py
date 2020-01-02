@@ -1828,13 +1828,6 @@ class _TestTorchMixin(object):
         x = torch.tensor(2., requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
-    # FIXME: get rid of this once we have actual ops using optional floats
-    def test_optional_floats(self):
-        x = torch.randn(())
-        self.assertEqual(torch._test_optional_float(x), torch.empty((0,)))
-        self.assertEqual(torch._test_optional_float(x, scale=None), torch.empty((0,)))
-        self.assertEqual(torch._test_optional_float(x, scale=2.5), torch.full((), 2.5))
-
     def test_copy_broadcast(self):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))

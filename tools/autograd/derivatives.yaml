@@ -1114,26 +1114,26 @@
 - name: replication_pad3d(Tensor self, int[6] padding) -> Tensor
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float scales_1=-1.0) -> Tensor
-  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales_1)
+- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float? scales=None) -> Tensor
+  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales)
 
-- name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2)
+- name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
-- name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2)
+- name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2, scales_3)
+- name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d(Tensor self, int[1] output_size, float scales_1=-1.0) -> Tensor
-  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales_1)
+- name: upsample_nearest1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
+  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales)
 
-- name: upsample_nearest2d(Tensor self, int[2] output_size, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_1, scales_2)
+- name: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
 
-- name: upsample_nearest3d(Tensor self, int[3] output_size, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_1, scales_2, scales_3)
+- name: upsample_nearest3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
@@ -1374,26 +1374,26 @@
   grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float scales_1=-1.0) -> Tensor
-  grad_output: upsample_linear1d(grad, output_size, align_corners, scales_1)
+- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
+  grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
 
-- name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_1, scales_2)
+- name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_h, scales_w)
 
-- name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_1, scales_2)
+- name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_1, scales_2, scales_3)
+- name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float scales_1=-1.0) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scales_1)
+- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
+  grad_output: upsample_nearest1d(grad, output_size, scales)
 
-- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scales_1, scales_2)
+- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest2d(grad, output_size, scales_h, scales_w)
 
-- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scales_1, scales_2, scales_3)
+- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest3d(grad, output_size, scales_d, scales_h, scales_w)
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: sigmoid_backward(grad, output)

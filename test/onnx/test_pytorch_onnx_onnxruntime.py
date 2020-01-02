@@ -945,13 +945,13 @@ class TestONNXRuntime(unittest.TestCase):
                         torch.nn.functional.interpolate(x, mode=mode, size=size_array)
                 if align_corners:
                     return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
-                                                           align_corners=True, use_scale_factor=True), \
+                                                           align_corners=True, recompute_scale_factor=False), \
                         torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
-                                                        align_corners=True, use_scale_factor=True)
+                                                        align_corners=True, recompute_scale_factor=False)
                 return torch.nn.functional.interpolate(x, mode=mode,
-                                                       scale_factor=scale, use_scale_factor=True), \
+                                                       scale_factor=scale, recompute_scale_factor=False), \
                     torch.nn.functional.interpolate(x, mode=mode,
-                                                    scale_factor=scale_array, use_scale_factor=True)
+                                                    scale_factor=scale_array, recompute_scale_factor=False)
 
         self.run_test(MyModel(), x)
 
@@ -988,13 +988,13 @@ class TestONNXRuntime(unittest.TestCase):
                         torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
                 if self.align_corners:
                     return torch.nn.functional.interpolate(x, mode=self.mode,
-                                                           scale_factor=self.scale, use_scale_factor=True), \
+                                                           scale_factor=self.scale, recompute_scale_factor=False), \
                         torch.nn.functional.interpolate(x, mode=self.mode,
-                                                        scale_factor=self.scale_array, use_scale_factor=True)
+                                                        scale_factor=self.scale_array, recompute_scale_factor=False)
                 return torch.nn.functional.interpolate(x, mode=self.mode,
-                                                       scale_factor=self.scale, use_scale_factor=True), \
+                                                       scale_factor=self.scale, recompute_scale_factor=False), \
                     torch.nn.functional.interpolate(x, mode=self.mode,
-                                                    scale_factor=self.scale_array, use_scale_factor=True)
+                                                    scale_factor=self.scale_array, recompute_scale_factor=False)
 
         model = MyModel(mode, use_size, is_upsample, align_corners)
         self.run_test(model, x, atol=1e-6)

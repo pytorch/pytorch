@@ -1226,9 +1226,9 @@ const std::vector<std::string> functions = {
 
         def AD_interpolate_scales_list(input,
                                        scale_factor: Optional[List[float]],
-                                       use_scale_factor: bool):
+                                       recompute_scale_factor: bool):
             input_dim = len(input.size())
-            if scale_factor is None or not use_scale_factor:
+            if scale_factor is None or recompute_scale_factor:
                 scales = [-1.0 for i in range(input_dim-2)]
             else:
                 scales = [scale_factor[i] for i in range(input_dim-2)]
@@ -1236,9 +1236,9 @@ const std::vector<std::string> functions = {
 
         def AD_interpolate_scales_float(input,
                                         scale_factor: Optional[float],
-                                        use_scale_factor: bool):
+                                        recompute_scale_factor: bool):
             input_dim = len(input.size())
-            if scale_factor is None or not use_scale_factor:
+            if scale_factor is None or recompute_scale_factor:
                 scales = [-1.0 for i in range(input_dim-2)]
             else:
                 scales = [scale_factor for i in range(input_dim-2)]
@@ -1291,13 +1291,13 @@ const std::vector<std::string> functions = {
                             scale_factor: Optional[List[float]],
                             mode: str,
                             align_corners: Optional[bool],
-                            use_scale_factor: Optional[bool]):
+                            recompute_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                if use_scale_factor is None:
-                    use_scale_factor = False
-                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
+                if recompute_scale_factor is None:
+                    recompute_scale_factor = True
+                scales = AD_interpolate_scales_list(input, scale_factor, recompute_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1308,13 +1308,13 @@ const std::vector<std::string> functions = {
                             scale_factor: Optional[List[float]],
                             mode: str,
                             align_corners: Optional[bool],
-                            use_scale_factor: Optional[bool]):
+                            recompute_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                if use_scale_factor is None:
-                    use_scale_factor = False
-                scales = AD_interpolate_scales_list(input, scale_factor, use_scale_factor)
+                if recompute_scale_factor is None:
+                    recompute_scale_factor = True
+                scales = AD_interpolate_scales_list(input, scale_factor, recompute_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1325,13 +1325,13 @@ const std::vector<std::string> functions = {
                             scale_factor: Optional[float],
                             mode: str,
                             align_corners: Optional[bool],
-                            use_scale_factor: Optional[bool]):
+                            recompute_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                if use_scale_factor is None:
-                    use_scale_factor = False
-                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
+                if recompute_scale_factor is None:
+                    recompute_scale_factor = True
+                scales = AD_interpolate_scales_float(input, scale_factor, recompute_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 
@@ -1342,13 +1342,13 @@ const std::vector<std::string> functions = {
                             scale_factor: Optional[float],
                             mode: str,
                             align_corners: Optional[bool],
-                            use_scale_factor: Optional[bool]):
+                            recompute_scale_factor: Optional[bool]):
             def backward(grad_output):
                 if align_corners is None:
                     align_corners = False
-                if use_scale_factor is None:
-                    use_scale_factor = False
-                scales = AD_interpolate_scales_float(input, scale_factor, use_scale_factor)
+                if recompute_scale_factor is None:
+                    recompute_scale_factor = True
+                scales = AD_interpolate_scales_float(input, scale_factor, recompute_scale_factor)
                 grad_self = AD_interpolate_backward(grad_output, input, mode, align_corners, scales)
                 return grad_self, None, None, None, None, None
 

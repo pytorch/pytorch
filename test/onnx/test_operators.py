@@ -572,7 +572,7 @@ class TestOperators(TestCase):
     def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
-                        mode='nearest', use_scale_factor=True), x)
+                        mode='nearest', recompute_scale_factor=False), x)
 
     def test_upsample_nearest_scale_default_scale_factor(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)

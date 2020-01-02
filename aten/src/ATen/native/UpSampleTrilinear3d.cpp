@@ -22,9 +22,9 @@ static void upsample_trilinear3d_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -55,11 +55,11 @@ static void upsample_trilinear3d_out_frame(
     return;
   }
   const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
-      input_depth, output_depth, align_corners, scales_1);
+      input_depth, output_depth, align_corners, scales_d);
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners, scales_2);
+      input_height, output_height, align_corners, scales_h);
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners, scales_3);
+      input_width, output_width, align_corners, scales_w);
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
         rdepth, t2, align_corners, /*cubic=*/false);
@@ -132,9 +132,9 @@ static void upsample_trilinear3d_backward_out_frame(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: same-size matching grids
@@ -165,13 +165,13 @@ static void upsample_trilinear3d_backward_out_frame(
     return;
   }
   const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
-      input_depth, output_depth, align_corners, scales_1);
+      input_depth, output_depth, align_corners, scales_d);
 
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners, scales_2);
+      input_height, output_height, align_corners, scales_h);
 
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners, scales_3);
+      input_width, output_width, align_corners, scales_w);
 
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
@@ -228,9 +228,9 @@ static void upsample_trilinear3d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -284,9 +284,9 @@ static void upsample_trilinear3d_out_cpu_template(
             nbatch,
             channels,
             align_corners,
-            scales_1,
-            scales_2,
-            scales_3);
+            scales_d,
+            scales_h,
+            scales_w);
       });
 }
 
@@ -296,9 +296,9 @@ static void upsample_trilinear3d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -354,9 +354,9 @@ static void upsample_trilinear3d_backward_out_cpu_template(
             nbatch,
             channels,
             align_corners,
-            scales_1,
-            scales_2,
-            scales_3);
+            scales_d,
+            scales_h,
+            scales_w);
       });
 }
 } // namespace
@@ -366,11 +366,11 @@ Tensor& upsample_trilinear3d_out_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_out_cpu_template(
-      output, input, output_size, align_corners, scales_1, scales_2, scales_3);
+      output, input, output_size, align_corners, scales_d, scales_h, scales_w);
   return output;
 }
 
@@ -378,12 +378,12 @@ Tensor upsample_trilinear3d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_trilinear3d_out_cpu_template(
-      output, input, output_size, align_corners, scales_1, scales_2, scales_3);
+      output, input, output_size, align_corners, scales_d, scales_h, scales_w);
   return output;
 }
 
@@ -393,11 +393,11 @@ Tensor& upsample_trilinear3d_backward_out_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2, scales_3);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
   return grad_input;
 }
 
@@ -406,12 +406,12 @@ Tensor upsample_trilinear3d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_trilinear3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2, scales_3);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
   return grad_input;
 }
 

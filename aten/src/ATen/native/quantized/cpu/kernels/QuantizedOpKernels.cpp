@@ -690,17 +690,17 @@ void qupsample_bilinear2d_nhwc_kernel(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    float scales_1,
-    float scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(
       input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
         auto* idata = static_cast<scalar_t*>(input.data_ptr());
         auto* odata = static_cast<scalar_t*>(output.data_ptr());
         float inverse_scale = output.q_scale() / input.q_scale();
         const auto rheight = area_pixel_compute_scale<float>(
-            input_height, output_height, align_corners, scales_1);
+            input_height, output_height, align_corners, scales_h);
         const auto rwidth = area_pixel_compute_scale<float>(
-            input_width, output_width, align_corners, scales_2);
+            input_width, output_width, align_corners, scales_w);
 
         for (int64_t b = 0; b < nbatch; ++b) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(

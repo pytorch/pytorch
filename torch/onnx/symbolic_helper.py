@@ -273,7 +273,7 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
 
 
 def _interpolate_get_scales_if_available(g, scales):
-    available_scales = _maybe_get_const(scales[0], 'f') != -1
+    available_scales = _maybe_get_const(scales[0], 'f') != -1 and not _is_none(scales[0])
 
     if not available_scales:
         return None

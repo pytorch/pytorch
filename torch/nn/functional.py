@@ -2424,7 +2424,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, use_scale_factor=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2457,14 +2457,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
-        use_scale_factor (bool, optional): When scale_factor is passed as a parameter, it can be
-            directly used in the output computation, or can be used to compute the output size which
-            will later be used to infer new scales values. In the second case, the value of the scales
-            used in the interpolation can be different than the ones specified by the user for non integer
-            values of scale_factor (due to floating point precision).
-            If set to ``True``, scale_factor is used in the interpolation.
-            If set to ``False``, the output_size is computed and new scales are infered for the interpolation.
-            Default: ``False``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
+            to compute the `output_size`.  If `recompute_scale_factor` is ```True`` or not specified,
+            a new `scale_factor` will be computed based on the output and input sizes for use in the
+            interpolation computation (i.e. the computation will be identical to if the computed
+            `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
+            be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+            the recomputed scale_factor may differ from the one passed in due to rounding and precision
+            issues.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -2481,11 +2482,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
-        When scale_factor is specified, if use_scale_factor=False,
+    .. warning::
+        When scale_factor is specified, if recompute_scale_factor=True,
         scale_factor is used to compute the output_size which will then
         be used to infer new scales for the interpolation. This is the current
-        default behavior when use_scale_factor is not specified.
-        The default behavior for use_scale_factor will change to True
+        default behavior when recompute_scale_factor is not specified.
+        The default behavior for recompute_scale_factor will change to False
         in 1.5.0, and scale_factor will be used in the interpolation
         calculation.
 
@@ -2502,15 +2504,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 and len(scale_factor) != dim:
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
-        if scale_factor is not None and use_scale_factor is None:
+        if scale_factor is not None and recompute_scale_factor is None:
             # only warn when the scales have floating values since
-            # the result for ints is the same with/without use_scale_factor
+            # the result for ints is the same with/without recompute_scale_factor
             is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
             if is_float_scale_factor:
                 warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
                               "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
                               "instead of relying on the computed output size. "
-                              "If you wish to keep the old behavior, please set use_scale_factor=False. "
+                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")
 
     def _output_size(dim):
@@ -2529,8 +2531,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     def _scale_factors(dim):
         scale_factor_len = dim - 2
-        scale_factor_list = _ntuple(scale_factor_len)(-1)
-        if scale_factor is not None and use_scale_factor:
+        scale_factor_list = _ntuple(scale_factor_len)(None)
+        if scale_factor is not None and recompute_scale_factor is False:
             scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
         return scale_factor_list
 
