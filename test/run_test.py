@@ -75,18 +75,6 @@ if PY33:
         'dist_optimizer_spawn',
     ])
 
-# For tests not in the test/ directory.
-DIR_FOR_TESTS = {
-    "c10d": "distributed",
-    "c10d_spawn": "distributed",
-    "data_parallel": "distributed",
-    "distributed": "distributed",
-    "nccl": "distributed",
-    "rpc_spawn": "distributed/rpc",
-    "dist_autograd_spawn": "distributed/rpc",
-    "dist_optimizer_spawn": "distributed/rpc",
-}
-
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.extend([
@@ -427,6 +415,16 @@ def get_selected_tests(options):
 
     return selected_tests
 
+def find_test_file(test_name, test_directory):
+    test_file_name = '{}.py'.format(test_name)
+    for root, dirs, files in os.walk(test_directory):
+        for file in files:
+            if file == test_file_name:
+                abspath = os.path.join(root, file)
+                return os.path.relpath(abspath, test_directory)
+
+    raise Exception('Could not find test file for: {}'.format(test_name))
+
 
 def main():
     options = parse_args()
@@ -446,17 +444,14 @@ def main():
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
+        test_file = find_test_file(test_name, test_directory)
 
-        # Build the appropriate test path.
-        if test in DIR_FOR_TESTS:
-            test_name = os.path.join(DIR_FOR_TESTS[test], test_name)
-
-        test_module = parse_test_module(test)
+        test_module = parse_test_module(test_file)
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(executable, test_name, test_directory, options)
+        return_code = handler(executable, test_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
