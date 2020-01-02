@@ -146,10 +146,10 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
-                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
-           min_val=st.floats(-1e6, 1e6, allow_nan=False),
-           max_val=st.floats(-1e6, 1e6, allow_nan=False))
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False))
     def test_qclamp(self, X, min_val, max_val):
         X, (scale, zero_point, torch_type) = X
 
@@ -173,7 +173,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
-                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
            b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
@@ -1548,11 +1548,11 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           X_scale=st.floats(1.2, 1.6),
+           X_scale=hu.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_scale=st.lists(hu.floats(0.2, 1.6), min_size=1, max_size=2),
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
+           Y_scale=hu.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
@@ -1674,11 +1674,11 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           X_scale=st.floats(1.2, 1.6),
+           X_scale=hu.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_scale=st.lists(hu.floats(0.2, 1.6), min_size=1, max_size=2),
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
+           Y_scale=hu.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
@@ -1925,7 +1925,7 @@ class TestQNNPackOps(TestCase):
            kernel=st.integers(2, 5),
            stride=st.integers(1, 2),
            padding=st.integers(1, 2),
-           scale=st.floats(0.2, 1.6),
+           scale=hu.floats(0.2, 1.6),
            zero_point=st.integers(0, 25)
            )
     def test_avg_pool2d(
@@ -1979,7 +1979,7 @@ class TestQNNPackOps(TestCase):
            channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
            height=st.integers(4, 10),
            width=st.integers(4, 10),
-           scale=st.floats(0.02, 2.6),
+           scale=hu.floats(0.02, 2.6),
            zero_point=st.integers(0, 25))
     def test_mean(self, batch_size, channels, height, width, scale, zero_point):
         with override_quantized_engine('qnnpack'):
@@ -2031,7 +2031,7 @@ class TestComparatorOps(TestCase):
     @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
-           b=st.floats(allow_infinity=False, allow_nan=False))
+           b=hu.floats(allow_infinity=False, allow_nan=False))
     def test_compare_tensor_scalar(self, A, b):
         A, (scale_a, zero_point_a, dtype_a) = A
         tA = torch.from_numpy(A)
