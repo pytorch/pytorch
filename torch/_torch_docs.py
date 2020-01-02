@@ -1380,7 +1380,7 @@ Example::
 
 add_docstr(torch.cummax,
            r"""
-cummax(input, dim, out=None) -> (Tensor, Tensor)
+cummax(input, dim, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
