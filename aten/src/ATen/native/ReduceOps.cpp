@@ -225,8 +225,10 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
       indices.resize_({}).fill_(0);
     }
     else {
-      // update out_ and indices_ for the first values along the dimension dim
+      // update out and indices for the first values along the dimension dim
+      out.resize_(self.sizes());
       out.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
+      indices.resize_(self.sizes());
       indices = integer_upcast(indices.fill_(0), at::kLong);
       for(int64_t i=1; i<self.size(dim); i++) {
         auto res_at_i = at::max(at::cat({out.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
