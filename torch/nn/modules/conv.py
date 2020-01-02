@@ -37,10 +37,7 @@ class _ConvNd(Module):
                 "padding_mode must be one of {{'zeros', 'reflect', 'replicate', 'circular'}}, "
                 "but got padding_mode='{}'".format(padding_mode))
         self.padding_mode = padding_mode
-        if padding_mode == 'zeros':
-            self._padding_repeated_twice = _repeat_tuple(self.padding, 2)
-        else:
-            self._padding_repeated_twice = None
+        self._padding_repeated_twice = _repeat_tuple(self.padding, 2)
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
