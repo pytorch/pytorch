@@ -282,8 +282,28 @@ class TestNamedTensor(TestCase):
         self.assertEqual(named_tensor_3d.names, F.max_pool3d(named_tensor_3d, [2, 2, 2]).names)
 
         self.assertEqual(named_tensor_1d.names, F.max_pool1d_with_indices(named_tensor_1d, 2)[0].names)
+        self.assertEqual(named_tensor_1d.names, F.max_pool1d_with_indices(named_tensor_1d, 2)[1].names)
         self.assertEqual(named_tensor_2d.names, F.max_pool2d_with_indices(named_tensor_2d, [2, 2])[0].names)
+        self.assertEqual(named_tensor_2d.names, F.max_pool2d_with_indices(named_tensor_2d, [2, 2])[1].names)
         self.assertEqual(named_tensor_3d.names, F.max_pool3d_with_indices(named_tensor_3d, [2, 2, 2])[0].names)
+        self.assertEqual(named_tensor_3d.names, F.max_pool3d_with_indices(named_tensor_3d, [2, 2, 2])[1].names)
+
+    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
+    def test_max_polling_gpu(self):
+        named_tensor_1d = torch.zeros(2, 3, 5, device='cuda:0', names=list('ABC'))
+        named_tensor_2d = torch.zeros(2, 3, 5, 7, device='cuda:0', names=list('ABCD'))
+        named_tensor_3d = torch.zeros(2, 3, 5, 7, 9, device='cuda:0', names=list('ABCDE'))
+
+        self.assertEqual(named_tensor_1d.names, F.max_pool1d(named_tensor_1d, 2).names)
+        self.assertEqual(named_tensor_2d.names, F.max_pool2d(named_tensor_2d, [2, 2]).names)
+        self.assertEqual(named_tensor_3d.names, F.max_pool3d(named_tensor_3d, [2, 2, 2]).names)
+
+        self.assertEqual(named_tensor_1d.names, F.max_pool1d_with_indices(named_tensor_1d, 2)[0].names)
+        self.assertEqual(named_tensor_1d.names, F.max_pool1d_with_indices(named_tensor_1d, 2)[1].names)
+        self.assertEqual(named_tensor_2d.names, F.max_pool2d_with_indices(named_tensor_2d, [2, 2])[0].names)
+        self.assertEqual(named_tensor_2d.names, F.max_pool2d_with_indices(named_tensor_2d, [2, 2])[1].names)
+        self.assertEqual(named_tensor_3d.names, F.max_pool3d_with_indices(named_tensor_3d, [2, 2, 2])[0].names)
+        self.assertEqual(named_tensor_3d.names, F.max_pool3d_with_indices(named_tensor_3d, [2, 2, 2])[1].names)
 
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))

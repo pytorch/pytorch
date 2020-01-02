@@ -74,6 +74,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
 
   guard.reset();
   namedinference::propagate_names(output, self);
+  namedinference::propagate_names(indices, self);
 
   return std::make_tuple(output, indices);
 }
