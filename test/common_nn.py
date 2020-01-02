@@ -2523,6 +2523,10 @@ for padding_mode in ['reflect', 'circular', 'replicate', 'zeros']:
     #     padding=0, dilation=1, groups=1,
     #     bias=True, padding_mode='zeros'
     for d in (1, 2, 3):
+        if d == 3 and padding_mode == 'reflect':
+            # FIXME: remove after implementing reflection pad 3d
+            #        https://github.com/pytorch/pytorch/issues/27655
+            continue
         new_module_tests.append(
             dict(
                 module_name='Conv{}d'.format(d),
