@@ -36,7 +36,18 @@ void ConstantPooling(
     auto subit = constants.insert(node);
     if (!subit.second) {
       auto existing = *subit.first;
-      if (!aliasDb.safeToChangeAliasingRelationship(
+
+      auto old_ivalue = toIValue(existing->output());
+      auto new_ivalue = toIValue(node->output());
+
+      // if both values are the same object, we do not need to worry about
+      // changing the aliasing relationship
+      bool same_idenity =
+          (old_ivalue && new_ivalue &&
+           (old_ivalue->isSameIdentity(new_ivalue)));
+
+      if (!same_idenity &&
+          !aliasDb.safeToChangeAliasingRelationship(
               node->outputs(), existing->outputs())) {
         continue;
       }
