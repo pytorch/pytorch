@@ -208,7 +208,6 @@ struct CAFFE2_API IValue final {
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), is_intrusive_ptr(false) {
-    std::cout << "constructing an int iValue" << std::endl;
     payload.as_int = i;
   }
 
