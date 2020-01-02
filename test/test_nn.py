@@ -3598,8 +3598,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
-                  input_format, weight_format, grad_format, output_format,
-                  message):
+                  input_format, weight_format, grad_format, output_format):
         conv = layer(inp.size(1), grad.size(1),
                      ref_conv.weight.size(2)).float().to(device)
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
@@ -3611,9 +3610,9 @@ class TestNN(NNTestCase):
         out.backward(grad)
         self.assertFalse(
             input.is_contiguous()
-            and input.is_contiguous(memory_format=channels_last)
+            and input.is_contiguous(memory_format=torch.channels_last)
             and conv.weight.is_contiguous()
-            and conv.weight.is_contiguous(memory_format=channels_last),
+            and conv.weight.is_contiguous(memory_format=torch.channels_last),
             'Bad test, neither input {} nor weight {} carry memory format information'.
             format(input.shape, conv.weight.shape))
         self.assertTrue(out.is_contiguous(memory_format=output_format))
@@ -3624,7 +3623,6 @@ class TestNN(NNTestCase):
 
     def _test_conv_cudnn_nhwc_nchw(self, layer, n, c, h, w, k, filter_size, device):
         data = torch.randint(1, 10, (n, c, h, w), dtype=torch.float32, device=device)
-
         ref_input = data.clone().contiguous().requires_grad_(True)
         ref_conv = layer(c, k, filter_size).float().to(device)
         ref_out = ref_conv(ref_input)
@@ -3640,7 +3638,7 @@ class TestNN(NNTestCase):
             [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
 
         for i_f, w_f, g_f, o_f in format_list:
-            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f, str((n, c, h, w, k, filter_size)) + str([i_f, w_f, g_f, o_f ]))
+            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
@@ -3656,6 +3654,7 @@ class TestNN(NNTestCase):
             [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
+            print(n, c, h, w, k, filter_size)
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, 'cuda')
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, 'cuda')
 
