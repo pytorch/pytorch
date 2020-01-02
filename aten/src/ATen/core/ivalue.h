@@ -60,7 +60,7 @@ struct Object;
   _(Capsule)
 
 struct CAFFE2_API IValue final {
-  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) { std::cout << "constructing a None iValue" << std::endl; }
+  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr) {
