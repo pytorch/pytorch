@@ -424,7 +424,6 @@ def get_op_args(declaration, argmap):
         # assume missing keys are constants
         return [argmap.get(k, k) for k in keys]
     else:
-        # error on missing keys
         return [argmap[k] for k in keys]
 
 
@@ -562,13 +561,13 @@ def handle_python_binding_args(declaration, output_gap):
 
     args = pa['input_args'] + pa['input_kwargs'] + pa['output_args']
     binding_arg_base = len(args) + output_gap
-    binding_arg_ixs = {arg['name']: i for i, arg in enumerate(python_binding_args)}
+    binding_arg_offsets = {arg['name']: i for i, arg in enumerate(python_binding_args)}
 
     def binding_arg_index(name):
-        return binding_arg_base + binding_arg_ixs[name]
+        return binding_arg_base + binding_arg_offsets[name]
 
     def parse_binding_arg(name):
-        binding_arg = python_binding_args[binding_arg_ixs[name]]
+        binding_arg = python_binding_args[binding_arg_offsets[name]]
         expr, _ = parse_arg(binding_arg, binding_arg_index(name))
         return expr
 
@@ -614,13 +613,13 @@ def handle_python_binding_args(declaration, output_gap):
 
     else:
         # not the scattered fields of a tensor options - sort of a grab bag
-        if 'dtype' in binding_arg_ixs:
+        if 'dtype' in binding_arg_offsets:
             # we're an output-arg variant, check these args against output tensor
             if not has_output:
                 raise RuntimeError(
                     '{}: dtype in python_binding_args without output arg'.
                     format(declaration['name']))
-            if not all([name in binding_arg_ixs for name in ['layout', 'device']]):
+            if not all([name in binding_arg_offsets for name in ['layout', 'device']]):
                 raise RuntimeError(
                     '{}: incomplete tensor options for output check'.
                     format(declaration['name']))
@@ -632,7 +631,7 @@ def handle_python_binding_args(declaration, output_gap):
             )
             inits.append(check_type)
         # we'll set requires_grad on outgoing tensor
-        if 'requires_grad' not in binding_arg_ixs:
+        if 'requires_grad' not in binding_arg_offsets:
             raise RuntimeError(
                 '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]'.
                 format(declaration['name'], [arg['name'] for arg in python_binding_args]))
