@@ -101,3 +101,7 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
   * :class:`torch._C.Generator`
+
+Additionally, TorchScript is unable to compile almost all `nn.Module` APIs. The only
+supported methods are ``forward``, and ``__iter__`` of classes inheriting from ``nn.ModuleList``,
+``nn.Sequential``, and ``nn.ModuleDict``.
