@@ -944,6 +944,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
+
+    @dist_init
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1115,9 +1125,13 @@ class RpcTest(RpcAgentTestFixture):
             "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
         )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/30988")
     @dist_init
     def test_rref_context_debug_info(self):
+        # This test checks local states that are modified by remote workers.
+        # This means that we would need barrier before and after every check.
+        # The barrier before the check makes sure that all previous states are
+        # cleared globally, the barrier after ensures that no following states
+        # change gets into the current check.
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",
@@ -1127,11 +1141,22 @@ class RpcTest(RpcAgentTestFixture):
             )
 
         from torch.distributed.rpc import _rref_context_get_debug_info
+        # Check 1: local RRef does not update owners_ map
+        #################################################
+
         rref1 = RRef(self.rank)
+
+        # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         # RRef on local value is not added to context until shared across RPC
-        self.assertEqual("0", info["num_owner_rrefs"])
+        self.assertEqual(0, int(info["num_owner_rrefs"]))
+
+        # barrier after the check 1
+        dist.barrier()
+
+        # Check 2: Sharing RRef as an arg should update owners_ map
+        ###########################################################
 
         dst_rank = (self.rank + 1) % self.world_size
         rpc.rpc_sync(
@@ -1139,12 +1164,22 @@ class RpcTest(RpcAgentTestFixture):
             set_global_rref,
             args=(rref1,)
         )
+
+        # barrier before check 2
+        dist.barrier()
+
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
-        self.assertEqual("1", info["num_owner_rrefs"])
+        self.assertEqual(1, int(info["num_owner_rrefs"]))
+
+        # barrier after check 2
+        dist.barrier()
+
+        # clear states for check 2
         rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
 
-
+        # Check 3: rpc.remote call should update owners_ map
+        ####################################################
         rref2 = rpc.remote(
             "worker{}".format(dst_rank),
             torch.add,
@@ -1158,21 +1193,27 @@ class RpcTest(RpcAgentTestFixture):
         rref2.to_here()
         rref3.to_here()
 
-        # Use a barrier to make sure that OwnerRRefs are created on this worker
-        # before checking debug info
+        # barrier before check 3
         dist.barrier()
+
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
-        self.assertEqual("2", info["num_owner_rrefs"])
+        self.assertEqual(2, int(info["num_owner_rrefs"]))
 
-        # Use another barrier to make sure that UserRRefs are only deleted after
-        # checking debug info
+        # barrier after check 3
         dist.barrier()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
@@ -1183,7 +1224,10 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["num_pending_requests"]), 0)
         self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
-
+        # for the above check, add a barrier to ensure that another worker
+        # cannot send a request before we check num_idle_threads, since we'd
+        # use up an idle thread if we start processing that request.
+        dist.barrier()
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
             "worker{}".format(dst_rank),
@@ -1203,14 +1247,6 @@ class RpcTest(RpcAgentTestFixture):
         # as we cannot know for sure whether the send thread has returned, there
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
-
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
 
         # add a barrier to make sure the request is not finished before checking
         # num_pending_requests
@@ -1282,7 +1318,7 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")

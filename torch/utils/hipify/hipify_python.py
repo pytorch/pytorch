@@ -632,6 +632,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
             if (
                 f.startswith("ATen/cuda")
                 or f.startswith("ATen/native/cuda")
+                or f.startswith("ATen/native/quantized/cuda")
                 or f.startswith("ATen/native/sparse/cuda")
                 or f.startswith("THC/")
                 or f.startswith("THCUNN/")

@@ -5,7 +5,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -732,9 +731,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  }else if (PyComplex_Check(obj)) {
+  } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  }else if (THPUtils_checkDouble(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,

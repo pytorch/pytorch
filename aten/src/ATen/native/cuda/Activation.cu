@@ -293,6 +293,29 @@ static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar valu
   });
 }
 
+void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_cuda", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a <= scalar_t(0) ? (static_cast<scalar_t>(std::exp(a * negiptcoef))
+          - scalar_t(1.)) * negcoef : a * poscoef;
+    });
+  });
+}
+
+void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "elu_backward_cuda", [&]() {
+    auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+    auto poscoef = scale.to<scalar_t>();
+    auto negiptcoef = input_scale.to<scalar_t>();
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    });
+  });
+}
+
 namespace {
 
 void GeluCUDAKernelImpl(TensorIterator& it) {
@@ -319,6 +342,24 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
           return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
         });
       });
+}
+
+void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_cuda", [&]() {
+    auto negval = negval_.to<scalar_t>();
+    gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a > scalar_t(0) ? a : a * negval;
+    });
+  });
+}
+
+void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_backward_cuda", [&]() {
+    auto negval = negval_.to<scalar_t>();
+    gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a > scalar_t(0) ? b : b * negval;
+    });
+  });
 }
 
 } // namespace
@@ -373,5 +414,9 @@ REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
+REGISTER_DISPATCH(elu_stub, &elu_kernel);
+REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
+REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 
 }}  // namespace at::native

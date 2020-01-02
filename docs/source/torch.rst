@@ -103,6 +103,7 @@ Random sampling
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
+.. autofunction:: poisson
 .. autofunction:: rand
 .. autofunction:: rand_like
 .. autofunction:: randint
@@ -240,6 +241,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
@@ -376,4 +378,3 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
-.. autofunction:: export_opnames

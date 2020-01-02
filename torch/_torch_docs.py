@@ -3144,6 +3144,12 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each maximum value found
 (argmax).
 
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    maximal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
+
 If ``keepdim`` is ``True``, the output tensors are of the same size
 as ``input`` except in the dimension ``dim`` where they are of size 1.
 Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
@@ -3364,6 +3370,12 @@ Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
 value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each minimum value found
 (argmin).
+
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    minimal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -4083,6 +4095,31 @@ Args:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)
+
+add_docstr(torch.poisson,
+           r"""
+poisson(input *, generator=None) -> Tensor
+
+Returns a tensor of the same size as :attr:`input` with each element
+sampled from a Poisson distribution with rate parameter given by the corresponding
+element in :attr:`input` i.e.,
+
+.. math::
+    \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
+
+Args:
+    input (Tensor): the input tensor containing the rates of the Poisson distribution
+    {generator}
+
+Example::
+
+    >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
+    >>> torch.poisson(rates)
+    tensor([[9., 1., 3., 5.],
+            [8., 6., 6., 0.],
+            [0., 4., 5., 3.],
+            [2., 1., 4., 2.]])    
+""".format(**common_args))
 
 add_docstr(torch.polygamma,
            r"""
@@ -5078,6 +5115,25 @@ Example::
     tensor([    nan,  1.0112,  0.2883,  0.6933])
 """.format(**common_args))
 
+add_docstr(torch.square,
+           r"""
+square(input, out=None) -> Tensor
+
+Returns a new tensor with the square of the elements of :attr:`input`.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    >>> torch.square(a)
+    tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
+""".format(**common_args))
+
 add_docstr(torch.squeeze,
            r"""
 squeeze(input, dim=None, out=None) -> Tensor
@@ -5139,7 +5195,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5153,8 +5209,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
     {out}
 
 Example::
@@ -5190,7 +5246,7 @@ Example::
     >>> torch.std_mean(a)
     (tensor(0.3457), tensor(0.5472))
 
-.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+.. function:: std_mean(input, dim, unbiased=True, keepdim=False) -> (Tensor, Tensor)
 
 Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5204,8 +5260,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
 
 Example::
 

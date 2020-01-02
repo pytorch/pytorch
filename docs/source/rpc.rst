@@ -94,6 +94,10 @@ functions as well as create (RRefs) to remote data objects.
 .. autofunction:: remote
 .. autofunction:: get_worker_info
 .. autofunction:: shutdown
+.. autoclass:: WorkerInfo
+    :members:
+.. autoclass:: RpcBackendOptions
+    :members:
 
 
 .. _rref:

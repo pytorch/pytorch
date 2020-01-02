@@ -56,7 +56,7 @@ def fused_rowwise_8bit_quantize_dequantize_reference(data):
 
 
 class TestFused8BitRowwiseQuantizationConversion(hu.HypothesisTestCase):
-    @given(input_data=hu.tensor(min_dim=2, max_dim=2))
+    @given(input_data=hu.tensor(min_dim=2, max_dim=2, max_value=33))
     def test_quantize_op(self, input_data):
         quantize = core.CreateOperator(
             'FloatToFused8BitRowwiseQuantized',
@@ -73,7 +73,7 @@ class TestFused8BitRowwiseQuantizationConversion(hu.HypothesisTestCase):
         )
         np.testing.assert_array_almost_equal(quantized_data, reference)
 
-    @given(input_data=hu.tensor(min_dim=2, max_dim=2))
+    @given(input_data=hu.tensor(min_dim=2, max_dim=2, max_value=33))
     def test_quantize_and_dequantize_op(self, input_data):
         quantize = core.CreateOperator(
             'FloatToFused8BitRowwiseQuantized',
