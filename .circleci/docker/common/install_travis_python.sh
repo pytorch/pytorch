@@ -75,7 +75,7 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
       hypothesis \
       protobuf \
       pytest \
-      pillow==6.2.1 \
+      pillow \
       typing
 
   as_jenkins pip install mkl mkl-devel

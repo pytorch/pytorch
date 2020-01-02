@@ -1478,7 +1478,7 @@ jobs:
           no_output_timeout: "2h"
           command: |
             set -e
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
             fi
@@ -1486,6 +1486,7 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
             #install the latest version of PyTorch and TorchVision
+            pip install pillow==6.2.1
             pip install torch torchvision
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
@@ -3952,7 +3953,7 @@ workflows:
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
@@ -3963,7 +3964,7 @@ workflows:
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
-          requires: 
+          requires:
             - setup
           filters:
             branches:
@@ -5778,5 +5779,3 @@ workflows:
             name: ecr_gc_job_for_tensorcomp
             project: tensorcomp
             tags_to_keep: "34"
-
-
