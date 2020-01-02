@@ -3598,7 +3598,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
-                  input_format, weight_format, grad_format, output_format):
+                  input_format, weight_format, grad_format, output_format, message):
         conv = layer(inp.size(1), grad.size(1), ref_conv.weight.size(2)).float().to(device)
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
         conv.load_state_dict(ref_conv.state_dict())
@@ -3607,7 +3607,7 @@ class TestNN(NNTestCase):
         grad = grad.contiguous(memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
-        self.assertTrue(out.is_contiguous(memory_format=output_format))
+        self.assertTrue(out.is_contiguous(memory_format=output_format), message)
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
@@ -3630,8 +3630,10 @@ class TestNN(NNTestCase):
             [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
             [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
 
+
+
         for i_f, w_f, g_f, o_f in format_list:
-            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f, str([i_f, w_f, g_f, o_f ]))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
@@ -7336,7 +7338,7 @@ class TestNN(NNTestCase):
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-    def test_upsampling_not_recompute_scale_factor(self):
+    def test_upsampling_use_scale_factor(self):
         # test output against known input: result must match opencv
         in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
@@ -7349,7 +7351,7 @@ class TestNN(NNTestCase):
               [4.15039, 4.38921, 4.85697, 5.27508],
               [5.08591, 5.32473, 5.79249, 6.21060],
               [5.92213, 6.16095, 6.62871, 7.04682]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
+        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, use_scale_factor=True)
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
