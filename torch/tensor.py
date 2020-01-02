@@ -433,7 +433,7 @@ class Tensor(torch._C._TensorBase):
         return result
 
     __neg__ = _C._TensorBase.neg
-    
+
     __add__ = _wrap_type_error_to_not_implemented(_C._TensorBase.add)
     __radd__ = _wrap_type_error_to_not_implemented(_C._TensorBase.radd)
 
