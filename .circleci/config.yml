@@ -1495,6 +1495,7 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -3953,7 +3954,7 @@ workflows:
           context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
-          requires:
+          requires: 
             - setup
           filters:
             branches:
@@ -3964,7 +3965,7 @@ workflows:
           context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
-          requires:
+          requires: 
             - setup
           filters:
             branches:
@@ -5779,3 +5780,5 @@ workflows:
             name: ecr_gc_job_for_tensorcomp
             project: tensorcomp
             tags_to_keep: "34"
+
+

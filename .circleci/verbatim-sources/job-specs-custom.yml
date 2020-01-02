@@ -464,7 +464,7 @@
           no_output_timeout: "2h"
           command: |
             set -e
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
             fi
@@ -472,7 +472,7 @@
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
             #install the latest version of PyTorch and TorchVision
-            pip install pillow=6.2.1
+            pip install pillow==6.2.1
             pip install torch torchvision
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
