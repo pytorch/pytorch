@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 
 /*
-* Statement member definitions
+* Statement member definitions & related functions
 */
 
 Statement::~Statement() { }
@@ -51,6 +51,12 @@ template int Statement::dispatch(SimpleHandler) const;
 template int Statement::dispatch(SimpleHandler*) const;
 template int Statement::dispatch(IRPrinter) const;
 template int Statement::dispatch(IRPrinter*) const;
+
+std::ostream& operator<<(std::ostream& out, const Statement* const stmt) {
+  IRPrinter printer{out};
+  stmt->dispatch(printer);
+  return out;
+}
 
 /*
 * Val member definitions

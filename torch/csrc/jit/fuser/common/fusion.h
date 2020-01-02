@@ -7,6 +7,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -19,7 +20,9 @@ namespace fuser {
 //          (registration's make this easy)
 // TODO: DCE pass
 // TODO: printFusion (allow mem location inlining)
-struct TORCH_API Fusion : public IRInputOutput {
+// TODO:
+// TODO: comment
+struct TORCH_API Fusion {
   Fusion() {
     region_ = new Region{};
     region_->setFusion(this);
@@ -48,6 +51,7 @@ struct TORCH_API Fusion : public IRInputOutput {
     }
   };
 
+  // Functions for inserting expressions
   void insertAtStart(Expr* expr) { region_->insertAtStart(expr); }
   void insertAtEnd(Expr* expr) { region_->insertAtEnd(expr); }
   void insertLeftBeforeRight(Expr* left, Expr* right) {
@@ -57,6 +61,29 @@ struct TORCH_API Fusion : public IRInputOutput {
     region_->insertLeftAfterRight(left, right);
   }
 
+  // Functions for adding inputs and outputs
+  void addInput(Statement* input) { region_->addInput(input); }
+  void addOutput(Statement* output) { region_->addOutput(output); }
+
+  // Functions for querying / enumerating IR objets
+  bool inFusion(const Statement* stmt){
+    return (stmt->fusion() == this);
+  }
+  std::deque<Statement*>& inputs() noexcept { return region_->inputs(); }
+  std::deque<Statement*>& outputs() noexcept { return region_->outputs(); }
+
+
+  void print(std::ostream& os) {
+    os << "Fusion{Inputs(" << std::endl;
+    for (auto* input : inputs()) {
+      os << input << std::endl;
+    }
+    os << ")->Body(" << std::endl;
+
+  }
+
+
+  // Functions for registering IR objects
   StmtNameType registerStatement(Statement* stmt) {
     if (stmt->isVal()) {
       return registerVal(static_cast<Val*>(stmt));
@@ -124,10 +151,6 @@ struct TORCH_API Fusion : public IRInputOutput {
     return expr->name();
   }
 
-  bool inFusion(const Statement* stmt){
-    return (stmt->fusion() == this);
-  }
-
 private:
   Region* region_ = nullptr;
 
@@ -139,10 +162,6 @@ private:
 
   StmtNameType getValName() { return val_name_counter_++; }
   StmtNameType getExprName() { return expr_name_counter_++; }
-
-  void register_callback(Statement* stmt) override {
-    registerStatement(stmt);
-  }
 };
 
 }}} // torch::jit::fuser

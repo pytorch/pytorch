@@ -22,20 +22,20 @@ int SimpleHandler::handle(const Float* f){
 * IRPrinter definitions
 */
 
-int IRPrinter::handle(const Statement* statement){
-  std::cout << "Unknown statement" << std::endl;
+int IRPrinter::handle(const Statement* const statement){
+  out_ << "Unknown statement" << std::endl;
   return 0;
 }
-int IRPrinter::handle(const Float* f){
-  std::cout << "f" << f->value();
+int IRPrinter::handle(const Float* const f){
+  out_ << "%" << f->name() << ":f" << f->value();
   return 0;
 }
-int IRPrinter::handle(const Add* add){
-  std::cout << "( ";
+int IRPrinter::handle(const Add* const add){
+  out_ << "( ";
   add->lhs()->dispatch(this);
-  std::cout << " + ";
+  out_ << " + ";
   add->rhs()->dispatch(this);
-  std::cout<<" )"<<std::endl;
+  out_ <<" )"<<std::endl;
   return 0;
 }
 
