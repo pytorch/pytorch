@@ -3628,7 +3628,7 @@ class TestNN(NNTestCase):
             [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
             [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
             [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous]]
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous_format]]
 
         for i_f, w_f, g_f, o_f in format_list:
             self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
