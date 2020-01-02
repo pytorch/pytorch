@@ -175,7 +175,7 @@ class TestQuantizedOps(TestCase):
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
-           b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
         import copy
         add_scalar = torch.ops.quantized.add_scalar
