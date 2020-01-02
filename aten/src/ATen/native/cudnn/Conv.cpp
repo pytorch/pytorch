@@ -130,13 +130,17 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   return t.narrow(dim, group_idx * group_size, group_size);
 }
 
-bool support_channels_last(const Tensor& input, const Tensor& weight, int groups) {
+bool support_channels_last(
+    const Tensor& input,
+    const Tensor& weight,
+    int groups) {
   if (!detail::getCUDAHooks().compiledWithCuDNN()) {
     return false;
   }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
   return (cudnn_version >= 7603) &&
-      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+      (input.is_contiguous(at::MemoryFormat::ChannelsLast) ||
+       input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 // ---------------------------------------------------------------------
