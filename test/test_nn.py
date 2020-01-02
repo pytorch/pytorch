@@ -3628,7 +3628,7 @@ class TestNN(NNTestCase):
             [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
             [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
             [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous]]
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous_format]]
 
 
 
