@@ -30,28 +30,4 @@ std::ostream& operator<<(std::ostream& out, const ExprType exprtype) {
   return out << stringify(exprtype);
 }
 
-// bool is_scalar(const CType& type){
-//   if(type<CType::kStatement)
-//     return true;
-//   return false;
-// }
-
-// CType promote(const CType& t1, const CType& t2){
-//   assert(
-//     (t1 < CType::kStatement && t2 < CType::kStatement) ||
-//     (t1 > CType::kStatement && t2 > CType::kStatement)
-//   );
-//   return(t1 < t2 ? t1 : t2);
-// }
-
-// bool is_scalar(const DType& type){
-//   return is_scalar(type.ctype());
-// }
-
-// DType promote(const DType& t1, const DType& t2){
-//   assert(t1.lanes() == t2.lanes());
-//   return DType(promote(t1.ctype(), t2.ctype()), t1.lanes());
-// }
-
-
 }}} // torch::jit::fuser
