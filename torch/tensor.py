@@ -434,8 +434,8 @@ class Tensor(torch._C._TensorBase):
 
     __neg__ = _C._TensorBase.neg
     
-    __add__ = _wrap_type_error_to_not_implemented(_C.TensorBase.add)
-    __radd__ = _wrap_type_error_to_not_implemented(_C.TensorBase.radd)
+    __add__ = _wrap_type_error_to_not_implemented(_C._TensorBase.add)
+    __radd__ = _wrap_type_error_to_not_implemented(_C._TensorBase.radd)
 
     __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
     __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
