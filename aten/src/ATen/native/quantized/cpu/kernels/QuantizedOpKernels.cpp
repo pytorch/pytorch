@@ -888,11 +888,8 @@ void qtopk_kernel(Tensor& values,
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-<<<<<<< HEAD
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-=======
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
->>>>>>> Quantized H Tangent function
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
