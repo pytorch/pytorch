@@ -546,6 +546,15 @@ class TestAvgPool(TestCase):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
                                lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
+class TestPaillier(TestCase):
+    def test_encrypt_decrypt(self):
+        net = nn.Paillier(17, 11)
+        tensor = torch.tensor([[5., 4.], [2., 7.]])
+        encrypted = net.forward(tensor)
+        decrypted = net.backward(encrypted)
+        self.assertEqual(tensor, decrypted)
+
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
