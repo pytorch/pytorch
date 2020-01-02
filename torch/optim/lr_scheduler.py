@@ -946,12 +946,12 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             >>> for epoch in range(20):
             >>>     for i, sample in enumerate(dataloader):
             >>>         inputs, labels = sample['inputs'], sample['labels']
-            >>>         scheduler.step(epoch + i / iters)
             >>>         optimizer.zero_grad()
             >>>         outputs = net(inputs)
             >>>         loss = criterion(outputs, labels)
             >>>         loss.backward()
             >>>         optimizer.step()
+            >>>         scheduler.step(epoch + i / iters)
 
         This function can be called in an interleaved way.
 
