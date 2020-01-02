@@ -17,9 +17,13 @@ namespace native {
 DEFINE_DISPATCH(qtanh_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
+// This ALWAYS outputs scale=2.0/256, zp=128, dtype=quint8
 Tensor qnnpack_tanh(Tensor input) {
-  Tensor qy;
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_tanh(): Got empty input tensor");
+
+  Tensor qy;
+  constexpr float output_scale = 2.0f / 256.0f;
+  constexpr int32_t output_zero_point = 128;
 
   initQNNPACK();
 
@@ -34,9 +38,9 @@ Tensor qnnpack_tanh(Tensor input) {
     num_elems /* channels */,
     zero_point /* input zero point */,
     scale /* input scale */,
-    0 /* output zero point */,
-    1.0f / 256 /* output scale */,
-    zero_point /* output min */,
+    output_zero_point /* output zero point */,
+    output_scale /* output scale */,
+    std::numeric_limits<uint8_t>::min() /* output min */,
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
     &tanh_op);
@@ -45,8 +49,8 @@ Tensor qnnpack_tanh(Tensor input) {
   qy = at::_empty_affine_quantized(
     input_contig.sizes(),
     input.options(),
-    input_contig.q_scale(),
-    input_contig.q_zero_point());
+    output_scale,
+    output_zero_point);
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
     tanh_op,
@@ -71,15 +75,12 @@ Tensor qnnpack_tanh(Tensor input) {
 #endif  // USE_PYTORCH_QNNPACK
 
 Tensor quantized_tanh(const Tensor& qx) {
-  #ifdef USE_PYTORCH_QNNPACK
+#ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    auto qy = qnnpack_tanh(qx);
-    qy.set_quantizer_(make_per_tensor_affine_quantizer(
-          1.0f / 256.0f, 0, qx.scalar_type()));
-    return qy;
+    return qnnpack_tanh(qx);
   }
-  #endif  // USE_PYTORCH_QNNPACK
+#endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
   qtanh_stub(qx.device().type(), qx, qy);
   return qy;

@@ -144,28 +144,6 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
-    """Tests the correctness of the quantized::relu op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qtanh(self, X):
-        X, (scale, zero_point, torch_type) = X
-
-        Y = np.tanh(X)
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-
-        ops_under_test = {
-            'native': torch.tanh,
-            'nn.functional': torch.nn.functional.tanh,
-        }
-
-        for name, op in ops_under_test.items():
-            qY_hat = op(qX)
-            self.assertEqual(qY, qY_hat, message="{} tanh failed".format(name))
-
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=st.floats(-1e6, 1e6, allow_nan=False),
@@ -1783,7 +1761,7 @@ class TestQuantizedConv(unittest.TestCase):
 @unittest.skipIf(TEST_WITH_UBSAN,
                  "QNNPACK does not play well with UBSAN at the moment,"
                  " so we skip the test if we are in a UBSAN environment.")
-# @unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
+@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1812,16 +1790,18 @@ class TestQNNPackOps(TestCase):
         #       1.0/256, 0 respectively, because it uses an LUT with 256 bins.
         with override_quantized_engine('qnnpack'):
             X, (scale, zero_point, torch_type) = X
-            tanh = torch.tanh
 
             X = torch.from_numpy(X)
-            Y = tanh(X)
+            Y = torch.tanh(X)
 
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch_type)
-            qY = torch.quantize_per_tensor(Y, scale=1.0/256, zero_point=0, dtype=torch_type)
-            qY_hat = tanh(qX)
+            qX = torch.quantize_per_tensor(X, scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type)
+            qY = torch.quantize_per_tensor(Y, scale=1.0/128, zero_point=128,
+                                           dtype=torch.quint8)
+            qY_hat = torch.tanh(qX)
 
-            self.assertEqual(qY, qY_hat)
+            self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed!")
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @settings(suppress_health_check=(HealthCheck.filter_too_much,))
