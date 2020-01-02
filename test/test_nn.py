@@ -3647,7 +3647,7 @@ class TestNN(NNTestCase):
     def test_conv_cudnn_mismatch_memory_format(self):
         configs = [
             [4, 2, 8, 8, 4, 2],
-            [4, 1, 8, 8, 4, 2],
+            # [4, 1, 8, 8, 4, 2],
             [1, 1, 8, 8, 4, 2],
             [4, 2, 1, 8, 4, 1],
             [4, 2, 8, 8, 4, 1],
