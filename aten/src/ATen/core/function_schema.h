@@ -176,9 +176,9 @@ struct FunctionSchema {
   //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not=nullptr) const;
+      std::ostream* why_not = nullptr) const;
 
-private:
+ private:
   OperatorName name_;
   std::vector<Argument> arguments_;
   std::vector<Argument> returns_;
@@ -257,6 +257,15 @@ public:
         overload_name(),
         std::move(new_arguments),
         returns(),
+        is_vararg(),
+        is_varret());
+  }
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        arguments(),
+        std::move(new_returns),
         is_vararg(),
         is_varret());
   }

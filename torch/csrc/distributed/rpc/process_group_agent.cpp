@@ -70,7 +70,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          c10::guts::make_unique<RequestCallbackImpl>(),
+          std::make_unique<RequestCallbackImpl>(),
           rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
@@ -275,20 +275,19 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     }
     message.setId(requestId);
   } else {
-    future->markCompleted();
+    future->markCompleted(Message());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
-    TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(
         [this](const Message& message) {
           sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function. It's shared_ptr<> due
           // to c++11 lambda capture limitations with unique_ptr<>.
-          auto payload = c10::guts::make_unique<std::string>(
+          auto payload = std::make_unique<std::string>(
               wireSerialize(message.payload(), message.tensors()));
           const char* data = payload->data();
           size_t len = payload->length();
@@ -338,29 +337,20 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         // the lock
         std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
         const auto dst = work.to_.id_;
-        if (work.message_.isShutdown()) {
-          pendingSends.reserve(1);
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-          }
-        } else {
-          std::vector<torch::Tensor> payload = {torch::from_blob(
-              (void*)serializedPayload.c_str(),
-              serializedPayload.length(),
-              {torch::kChar})};
-          pendingSends.reserve(2);
+        std::vector<torch::Tensor> payload = {torch::from_blob(
+            (void*)serializedPayload.c_str(),
+            serializedPayload.length(),
+            {torch::kChar})};
+        pendingSends.reserve(2);
 
-          sendCounts_.increment(dst);
+        sendCounts_.increment(dst);
 
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-            pendingSends.emplace_back(
-                pg_->send(payload, dst, dst /* channelTag */));
-          }
+        {
+          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+          pendingSends.emplace_back(
+              pg_->send(preamble, dst, dst /* channelTag */));
+          pendingSends.emplace_back(
+              pg_->send(payload, dst, dst /* channelTag */));
         }
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
@@ -382,14 +372,35 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           auto futureResponse = cb_->operator()(message);
           if (futureResponse->completed()) {
-            send(work.from_, std::move(*futureResponse).moveMessage());
+            if (!futureResponse->hasError()) {
+              send(work.from_, std::move(*futureResponse).moveValue());
+            } else {
+              send(
+                  work.from_,
+                  createExceptionResponse(
+                      message, futureResponse->error()->what()));
+            }
           } else {
             auto fromId = work.from_.id_;
+            auto requestId = work.id_;
             futureResponse->addCallback(
-                [this, fromId, futureResponse](const Message&) {
-                  send(
-                      getWorkerInfo(fromId),
-                      std::move(*futureResponse).moveMessage());
+                [this, fromId, requestId, futureResponse](
+                    const Message& /* unused */,
+                    const c10::optional<utils::FutureError>& err) {
+                  if (!err) {
+                    send(
+                        getWorkerInfo(fromId),
+                        std::move(*futureResponse).moveValue());
+                  } else {
+                    std::string errStr = err->what();
+                    std::vector<char> payload(errStr.begin(), errStr.end());
+                    Message m(
+                        std::move(payload),
+                        {},
+                        MessageType::EXCEPTION,
+                        requestId);
+                    send(getWorkerInfo(fromId), std::move(m));
+                  }
                 });
           }
         } else if (message.isResponse()) {
@@ -422,7 +433,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             }
           }
           futureCV_.notify_all();
-          fm->markCompleted(std::move(message));
+          if (message.type() == MessageType::EXCEPTION) {
+            fm->setError(std::string(
+                message.payload().begin(), message.payload().end()));
+          } else {
+            fm->markCompleted(std::move(message));
+          }
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -454,15 +470,6 @@ void ProcessGroupAgent::listenLoop() {
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
     int64_t id = preamble_items[3];
-
-    if (type == MessageType::SHUTDOWN) {
-      // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
-      // before logging, but it is not appropriate to call InitGoogleLogging()
-      // here either.
-      LOG(INFO) << "Shutting down ProcessGroupAgent " << workerInfo_.name_
-                << std::endl;
-      return;
-    }
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
@@ -526,7 +533,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->markCompleted(exceptionMsg);
+      timedOutFuture.future_->setError(std::string(
+          exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);
