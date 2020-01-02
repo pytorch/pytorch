@@ -114,6 +114,27 @@ class TestQuantizedOps(TestCase):
             op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qtanh(self, X):
+        # QNNPACK is tested separately in TestQNNPackOps
+        if torch.backends.quantized.engine == 'qnnpack':
+            return
+
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        Y = torch.tanh(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+        qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        qY_hat = torch.tanh(qX)
+        self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed!")
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
