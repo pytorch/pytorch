@@ -3630,8 +3630,6 @@ class TestNN(NNTestCase):
             [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
             [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
 
-
-
         for i_f, w_f, g_f, o_f in format_list:
             self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f, str([i_f, w_f, g_f, o_f ]))
 
@@ -3646,7 +3644,7 @@ class TestNN(NNTestCase):
             [1, 1, 8, 8, 4, 2],
             [4, 2, 1, 8, 4, 1],
             [4, 2, 8, 8, 4, 1],
-            [4, 1, 8, 8, 4, 1],
+            # [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, 'cuda')
