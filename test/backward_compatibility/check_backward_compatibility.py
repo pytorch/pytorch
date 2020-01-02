@@ -17,6 +17,7 @@ from torch._C import parse_schema
 #
 # Whitelist entries can be removed after the date listed on them passes.
 white_list = [
+<<<<<<< HEAD
     ("aten::append", datetime.date(9999, 1, 1)),
     ("prim::AutogradAnyNonZero", datetime.date(9999, 1, 1)),
     ("aten::grad", datetime.date(9999, 1, 1)),
@@ -34,6 +35,34 @@ white_list = [
     ("aten::softmax", datetime.date(9999, 1, 1)),
     ("aten::thnn_conv3d_forward", datetime.date(9999, 1, 1)),
     ("aten::thnn_conv3d_backward.output_mask", datetime.date(9999, 1, 1)),
+    ('upsample_linear1d.out', datetime.date(9999, 1, 1)),
+    ('upsample_linear1d', datetime.date(9999, 1, 1)),
+    ('upsample_linear1d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_linear1d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_bilinear2d.out', datetime.date(9999, 1, 1)),
+    ('upsample_bilinear2d', datetime.date(9999, 1, 1)),
+    ('upsample_bilinear2d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_bilinear2d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_bicubic2d.out', datetime.date(9999, 1, 1)),
+    ('upsample_bicubic2d', datetime.date(9999, 1, 1)),
+    ('upsample_bicubic2d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_bicubic2d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_trilinear3d.out', datetime.date(9999, 1, 1)),
+    ('upsample_trilinear3d', datetime.date(9999, 1, 1)),
+    ('upsample_trilinear3d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_trilinear3d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_nearest1d.out', datetime.date(9999, 1, 1)),
+    ('upsample_nearest1d', datetime.date(9999, 1, 1)),
+    ('upsample_nearest1d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_nearest1d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_nearest2d.out', datetime.date(9999, 1, 1)),
+    ('upsample_nearest2d', datetime.date(9999, 1, 1)),
+    ('upsample_nearest2d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_nearest2d_backward', datetime.date(9999, 1, 1)),
+    ('upsample_nearest3d.out', datetime.date(9999, 1, 1)),
+    ('upsample_nearest3d', datetime.date(9999, 1, 1)),
+    ('upsample_nearest3d_backward.grad_input', datetime.date(9999, 1, 1)),
+    ('upsample_nearest3d_backward', datetime.date(9999, 1, 1)),
 ]
 
 
