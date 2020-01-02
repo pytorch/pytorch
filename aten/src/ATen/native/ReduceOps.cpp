@@ -46,7 +46,9 @@ static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
     mask.flip();
   } else {
     for (int64_t dim : dims) {
-      mask.set(maybe_wrap_dim(dim, ndim));
+      int64_t pos_dim = maybe_wrap_dim(dim, ndim);
+      TORCH_CHECK(pos_dim < 64, "PyTorch doesn't support reduction operations for dim>=64");
+      mask.set(pos_dim);
     }
   }
   return mask;
@@ -168,7 +170,7 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
     NoNamesGuard guard;
     return at::_cumsum(integer_upcast(self, dtype), dim);
   }();
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -185,7 +187,7 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
     NoNamesGuard guard;
     at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
   }
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -194,7 +196,7 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
     NoNamesGuard guard;
     return at::_cumprod(integer_upcast(self, dtype), dim);
   }();
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -211,7 +213,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
     NoNamesGuard guard;
     at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
   }
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
