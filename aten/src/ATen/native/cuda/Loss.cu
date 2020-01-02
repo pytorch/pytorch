@@ -34,15 +34,19 @@ void binary_cross_entropy_out_kernel(Tensor& loss, const Tensor& input, const Te
       const scalar_t& input_val,
       const scalar_t& target_val
     ) {
-      CUDA_KERNEL_ASSERT(input_val >= 0. && input_val <= 1.);
+      const scalar_t zero = 0;
+      const scalar_t one = 1;
+      const scalar_t neg_100 = -100;
+
+      CUDA_KERNEL_ASSERT(input_val >= zero && input_val <= one);
 
       scalar_t log_input_val = log(input_val);
-      scalar_t log_1_minus_input_val = log(1 - input_val);
+      scalar_t log_1_minus_input_val = log(one - input_val);
 
-      log_input_val = max(log_input_val, -100.0);
-      log_1_minus_input_val = max(log_1_minus_input_val, -100.0);
+      log_input_val = max(log_input_val, neg_100);
+      log_1_minus_input_val = max(log_1_minus_input_val, neg_100);
 
-      loss_val = ((target_val - 1) * log_1_minus_input_val) - (target_val * log_input_val);
+      loss_val = ((target_val - one) * log_1_minus_input_val) - (target_val * log_input_val);
     }
   );
 }
@@ -60,10 +64,15 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
       const scalar_t& input_val,
       const scalar_t& target_val
     ) {
-      grad_input_val = (input_val - target_val) / (
-        max((1 - input_val) * input_val, EPSILON)
+      const scalar_t one = 1;
+      const scalar_t epsilon = EPSILON;
+
+      scalar_t grad_input_denominator = max(
+        (one - input_val) * input_val,
+        epsilon
       );
-      grad_input_val *= grad_val;
+
+      grad_input_val = grad_val * (input_val - target_val) / grad_input_denominator;
     }
   );
 }
