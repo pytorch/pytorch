@@ -58,6 +58,8 @@ protected:
   StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
 };
 
+TORCH_API std::ostream& operator<<(std::ostream& out, const Statement* const stmt);
+
 /*
 * A Val represents a "value." These are objects, like tensors, scalars, and
 * memory locations, that are inputs and outputs of computations (represented
@@ -172,11 +174,11 @@ struct TORCH_API Region : public IRInputOutput {
   Fusion* fusion() const noexcept { return fusion_; }
   Expr* parent() const noexcept {return parent_; }
 
-  void setFusion(Fusion* fusion) noexcept {
+  void setFusion(Fusion* fusion) {
     TORCH_CHECK(fusion_ == nullptr);
     fusion_ = fusion;
   }
-  void setParent(Expr* parent) noexcept {
+  void setParent(Expr* parent) {
     TORCH_CHECK(parent_ == nullptr);
     parent_ = parent;
   }
