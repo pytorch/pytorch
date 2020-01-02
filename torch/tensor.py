@@ -404,7 +404,7 @@ class Tensor(torch._C._TensorBase):
         else:
             return (self.double().reciprocal() * other).type_as(self)
 
-    __rtruediv__ = _wrap_type_error_to_not_implemented(__rdiv__)
+    __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _C._TensorBase.pow
