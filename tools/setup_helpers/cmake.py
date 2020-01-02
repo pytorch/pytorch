@@ -168,6 +168,8 @@ class CMake:
 
         args = []
         if USE_NINJA:
+            # Avoid conflicts in '-G' and the `CMAKE_GENERATOR`
+            os.environ['CMAKE_GENERATOR'] = 'Ninja'
             args.append('-GNinja')
         elif IS_WINDOWS:
             generator = os.getenv('CMAKE_GENERATOR', 'Visual Studio 15 2017')
@@ -267,6 +269,8 @@ class CMake:
             # are automatically passed to CMake; For other options you can add to additional_options above.
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
+            # Most library detection should go to CMake script, except this one, which Python can do a much better job
+            # due to NumPy's inherent Pythonic nature.
             'USE_NUMPY': USE_NUMPY,
         })
 

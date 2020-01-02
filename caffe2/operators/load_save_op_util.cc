@@ -42,7 +42,7 @@ void ProcessBlob(
         blob_states[key]
             .seen_chunks_ids.insert(proto.content_chunk_id())
             .second,
-        "Chunk with the same id has occured twice for: ",
+        "Chunk with the same id has occurred twice for: ",
         key);
     CAFFE_ENFORCE(
         proto.content_chunk_id() >= 0 &&

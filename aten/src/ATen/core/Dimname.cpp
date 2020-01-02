@@ -1,9 +1,7 @@
 #include <ATen/core/Dimname.h>
 #include <c10/util/Exception.h>
 #include <cctype>
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 static Symbol kWildcard = Symbol::dimname("*");
@@ -69,4 +67,3 @@ bool Dimname::matches(Dimname other) const {
 }
 
 } // namespace at
-#endif

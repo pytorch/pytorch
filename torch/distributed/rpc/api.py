@@ -21,7 +21,16 @@ import torch.distributed as dist
 
 
 _agent = None
-
+# NB: Ignoring RRef leaks during shutdown. Without this, applications have to
+# make sure there is no references to any RRef in the application code and
+# Python GC has done its job to delete those RRefs. This is could result in bad
+# debugging experiences especially when for large applications. Therefore, by
+# default, we are going to ignore RRef leaks during shutdown. This is usually
+# fine as shutdown means applications have done training and no longer care
+# about states.
+#
+# To enable RRef leak checking, set this _ignore_rref_leak to False
+_ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
 
 @contextlib.contextmanager
@@ -36,6 +45,7 @@ def _use_rpc_pickler(rpc_pickler):
     finally:
         _default_pickler = _internal_rpc_pickler
 
+
 def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -48,42 +58,74 @@ def _require_initialized(func):
     return wrapper
 
 
-def wait_all_workers():
+def _wait_all_workers():
     r"""
-    Block until all local and remote RPC processes reach this method, and then
-    destroy local the RPC agent. Every RPC process must call this method before
-    exit. This should be used to terminate the RPC framework, and there is no
-    guarantee that the RPC framework will work after this method returns.
-
-    Example::
-
-        On worker 0:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> # do some work
-        >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
-        >>> # ready to shutdown
-        >>> rpc.wait_all_workers()
-
-        On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> # wait for worker 0 to finish work, and then shutdown.
-        >>> rpc.wait_all_workers()
+    Block until all local and remote RPC processes reach this method and wait
+    for all outstanding work to complete. Every RPC process must call this
+    method before exit to perform a graceful shutdown. This should be used to
+    terminate the RPC framework, and there is no guarantee that the RPC
+    framework will work after this method returns.
     """
     global _agent
 
     if _agent:
         _agent.join()
-        _agent = None
-        _destroy_rref_context()
-        # clean up python rpc handler in wait_all_workers(), see comments in
+
+def shutdown(graceful=True):
+    r"""
+    Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
+    stops the local agent from  accepting outstanding requests, and shuts
+    down the RPC framework by terminating all RPC threads. If graceful=True,
+    then this will block until all local and remote RPC processes reach this
+    method and wait for all outstanding work to complete. Otherwise, if
+    graceful=False, then this is a local shutdown, and it does not wait for
+    other RPC processes to reach this method.
+
+    Arguments:
+        graceful (bool): Whether to do a graceful shutdown or not. If True,
+                         this will block until all local and remote RPC
+                         processes have reached this method and wait for all
+                         outstanding work to complete.
+
+    Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
+
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> # do some work
+        >>> result = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(1), 1))
+        >>> # ready to shutdown
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> # wait for worker 0 to finish work, and then shutdown.
+        >>> rpc.shutdown()
+    """
+    global _agent
+    if _agent:
+        if graceful:
+            _wait_all_workers()
+        _destroy_rref_context(_ignore_rref_leak)
+        _agent.shutdown()
+        # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
         # interpreter exists
         _cleanup_python_rpc_handler()
+        _agent = None
 
-# TODO: add a context manager to wrap _init_rpc_backend and wait_all_workers
+# TODO: add a context manager to wrap _init_rpc_backend and shutdown
 def _init_rpc_backend(
     backend=backend_registry.BackendType.PROCESS_GROUP,
     store=None,
@@ -188,19 +230,28 @@ def remote(to, func, args=None, kwargs=None):
         to retrieve the result value locally.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
 
@@ -259,17 +310,26 @@ def rpc_sync(to, func, args=None, kwargs=None):
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut.wait()
@@ -281,7 +341,7 @@ def rpc_async(to, func, args=None, kwargs=None):
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
-    ``torch.distributed.FutureMessage`` that can be awaited on.
+    Future that can be awaited on.
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
@@ -292,24 +352,33 @@ def rpc_async(to, func, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns a ``torch.distributed.FutureMessage`` object that can be waited
+        Returns a Future object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the ``FutureMessage`` object.
+        ``kwargs`` can be retrieved from the Future object.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> fut1 = rpc.rpc_async("worker1", torch.add, args=(torch.ones(2), 3))
         >>> fut2 = rpc.rpc_async("worker1", min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
 
-        On worker 1:
+        >>> # On worker 1:
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.wait_all_workers()
+        >>> rpc.shutdown()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut

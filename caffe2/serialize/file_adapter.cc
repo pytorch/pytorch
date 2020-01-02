@@ -10,7 +10,7 @@ FileAdapter::FileAdapter(const std::string& file_name) {
   if (!file_stream_) {
     AT_ERROR("open file failed, file path: ", file_name);
   }
-  istream_adapter_ = caffe2::make_unique<IStreamAdapter>(&file_stream_);
+  istream_adapter_ = std::make_unique<IStreamAdapter>(&file_stream_);
 }
 
 size_t FileAdapter::size() const {

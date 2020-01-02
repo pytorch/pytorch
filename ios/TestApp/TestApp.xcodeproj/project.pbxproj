@@ -3,7 +3,7 @@
     archiveVersion = 1;
     classes = {
     };
-    objectVersion = 50;
+    objectVersion = 52;
     objects = {
 
 /* Begin PBXBuildFile section */
@@ -14,7 +14,7 @@
         A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
         A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
         A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
-        A0EA3B0A237FCB72007CEA34 /* TestAppTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = A0EA3B09237FCB72007CEA34 /* TestAppTests.mm */; };
+        A0EA3B0A237FCB72007CEA34 /* TestAppTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = A0EA3B09237FCB72007CEA34 /* TestAppTests.mm */; platformFilter = ios; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -404,7 +404,9 @@
         A0EA3B06237FCB08007CEA34 /* Debug */ = {
             isa = XCBuildConfiguration;
             buildSettings = {
-                CODE_SIGN_STYLE = Automatic;
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                CODE_SIGN_STYLE = Manual;
+                DEVELOPMENT_TEAM = "";
                 INFOPLIST_FILE = TestAppTests/Info.plist;
                 IPHONEOS_DEPLOYMENT_TARGET = 12.4;
                 LD_RUNPATH_SEARCH_PATHS = (
@@ -414,6 +416,8 @@
                 );
                 PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
                 PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
                 TARGETED_DEVICE_FAMILY = "1,2";
             };
             name = Debug;

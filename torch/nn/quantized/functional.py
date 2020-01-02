@@ -94,17 +94,22 @@ def conv2d(input, weight, bias,
         >>> from torch.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
-        >>> bias = torch.randn(4, dtype=torch.float)
+        >>> bias = torch.randn(8, dtype=torch.float)
         >>>
         >>> scale, zero_point = 1.0, 0
-        >>> dtype = torch.quint8
+        >>> dtype_inputs = torch.quint8
+        >>> dtype_filters = torch.qint8
         >>>
-        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype)
-        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype)
-        >>> qF.conv2d(q_inputs, q_filters, bias, scale, zero_point, padding=1)
+        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
+        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
+        >>> qF.conv2d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
     """  # noqa: E501
     if padding_mode != 'zeros':
         raise NotImplementedError("Only zero-padding is supported!")
+    if input.dtype != torch.quint8:
+        raise NotImplementedError("Only torch.quint8 is supported for activation tensor!")
+    if weight.dtype != torch.qint8:
+        raise NotImplementedError("Only torch.qint8 is supported for weight tensor!")
     if input.ndim != 4:
         raise ValueError("Input shape must be `(N, C, H, W)`!")
     stride = _pair(stride)
@@ -152,17 +157,22 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
         >>> from torch.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)
-        >>> bias = torch.randn(4, dtype=torch.float)
+        >>> bias = torch.randn(8, dtype=torch.float)
         >>>
         >>> scale, zero_point = 1.0, 0
-        >>> dtype = torch.quint8
+        >>> dtype_inputs = torch.quint8
+        >>> dtype_filters = torch.qint8
         >>>
-        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype)
-        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype)
-        >>> qF.conv3d(q_inputs, q_filters, bias, scale, zero_point, padding=1)
+        >>> q_filters = torch.quantize_per_tensor(filters, scale, zero_point, dtype_filters)
+        >>> q_inputs = torch.quantize_per_tensor(inputs, scale, zero_point, dtype_inputs)
+        >>> qF.conv3d(q_inputs, q_filters, bias, padding=1, scale=scale, zero_point=zero_point)
     """  # noqa: E501
     if padding_mode != 'zeros':
         raise NotImplementedError("Only zero-padding is supported!")
+    if input.dtype != torch.quint8:
+        raise NotImplementedError("Only torch.quint8 is supported for activation tensor!")
+    if weight.dtype != torch.qint8:
+        raise NotImplementedError("Only torch.qint8 is supported for weight tensor!")
     if input.ndim != 5:
         raise ValueError("Input shape must be `(N, C, D, H, W)`!")
     stride = _triple(stride)
@@ -282,6 +292,22 @@ def relu(input, inplace=False):
         return torch.relu_(input)
     else:
         return torch.relu(input)
+
+def clamp(input, min_, max_):
+    # type: (Tensor, float, float) -> Tensor
+    r"""float(input, min_, max_) -> Tensor
+
+    Applies the clamp function element-wise.
+    See :class:`~torch.nn.quantized.clamp` for more details.
+
+    Args:
+        input: quantized input
+        min_: minimum value for clamping
+        max_: maximum value for clamping
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.clamp' must be quantized!")
+    return torch.clamp(input, min_, max_)
 
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Upsamples the input to either the given :attr:`size` or the given

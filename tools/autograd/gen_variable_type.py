@@ -27,12 +27,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-# These functions are written manually in templates/VariableType.cpp
-MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
-}
-
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
 # of proper scopes, where subsequent compilation passes can ask for the unfolding
@@ -512,7 +506,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'einsum'):
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
 
     env = {
@@ -531,17 +525,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
-        if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
+        if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        if declaration['use_c10_dispatcher'] == 'full':
-            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
-        else:
-            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
+            if declaration['use_c10_dispatcher'] == 'full':
+                wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,

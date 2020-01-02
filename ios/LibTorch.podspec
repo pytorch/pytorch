@@ -18,19 +18,19 @@ Pod::Spec.new do |s|
     end
     s.subspec 'Torch' do |ss|
         ss.header_mappings_dir = 'install/include/'
-        ss.preserve_paths = 'install/include/**/*.{h,cpp,cc,c}' 
+        ss.preserve_paths = 'install/include/**/*.{h,cpp,cc,c}'
         ss.vendored_libraries = 'install/lib/*.a'
         ss.libraries = ['c++', 'stdc++']
     end
     s.user_target_xcconfig = {
-        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
-        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch.a"',
-        'CLANG_CXX_LANGUAGE_STANDARD' => 'c++11',
+        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"',
+        'OTHER_LDFLAGS' => '-force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch.a" -force_load "$(PODS_ROOT)/LibTorch/install/lib/libtorch_cpu.a"',
+        'CLANG_CXX_LANGUAGE_STANDARD' => 'c++14',
         'CLANG_CXX_LIBRARY' => 'libc++'
     }
-    s.pod_target_xcconfig = { 
-        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"', 
-        'VALID_ARCHS' => 'x86_64 arm64' 
+    s.pod_target_xcconfig = {
+        'HEADER_SEARCH_PATHS' => '$(inherited) "$(PODS_ROOT)/LibTorch/install/include/"',
+        'VALID_ARCHS' => 'x86_64 arm64'
     }
     s.library = ['c++', 'stdc++']
 end
