@@ -116,9 +116,6 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     success = context_id_to_raised == known_context_ids
     return success
 
-def noop():
-    pass
-
 
 # This function creates a dis atugorad context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.

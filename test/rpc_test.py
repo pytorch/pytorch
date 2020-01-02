@@ -1298,7 +1298,6 @@ class RpcTest(RpcAgentTestFixture):
 
         if self.rank == 0:
             dst_rank = (self.rank + 1) % self.world_size
-            self_worker = "worker{}".format(self.rank)
             dst_worker = "worker{}".format(dst_rank)
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)

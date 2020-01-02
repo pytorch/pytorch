@@ -143,6 +143,9 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
     num_send_recv_threads=16,
 )
 
+def noop():
+    pass
+
 def wait_until_node_failure(rank):
     '''
     Loops until an RPC to the given rank fails. This is used to
