@@ -207,6 +207,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("Test failed. See https://github.com/pytorch/pytorch/issues/31774")
     def test_forward_per_channel(self, device, X):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
         """
@@ -226,6 +227,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("Test failed. See https://github.com/pytorch/pytorch/issues/31774")
     def test_backward_per_channel(self, device, X):
         r"""Tests the backward method.
         """
@@ -270,6 +272,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
+    @unittest.skip("Test failed. See https://github.com/pytorch/pytorch/issues/31774")
     def test_fq_module(self, device, X):
         np.random.seed(NP_RANDOM_SEED)
         X, (scale, zero_point, axis, torch_type) = X
