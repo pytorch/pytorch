@@ -220,16 +220,16 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tensor& self, int64_t dim) {
    {
     NoNamesGuard guard;
+    out.resize_(self.sizes());
+    indices = integer_upcast(indices.resize_(self.sizes()), at::kLong);
     if(self.dim() == 0) {
-      out.resize_({}).fill_(self.item());
-      indices.resize_({}).fill_(0);
+      out.fill_(self.item());
+      indices.fill_(0);
     }
-    else {
+    else if(self.numel() != 0){
       // update out and indices for the first values along the dimension dim
-      out.resize_(self.sizes());
       out.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
-      indices.resize_(self.sizes());
-      indices = integer_upcast(indices.fill_(0), at::kLong);
+      indices.narrow(dim, 0, 1).fill_(0);
       for(int64_t i=1; i<self.size(dim); i++) {
         auto res_at_i = at::max(at::cat({out.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
         // output at index i

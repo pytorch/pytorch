@@ -10564,6 +10564,11 @@ class TestTorchDeviceType(TestCase):
                                              [0, 1, 0],
                                              [2, 2, 2]]))
 
+        # Check that cummulative maximum over a zero length dimension doesn't crash on backprop
+        zeroNumelTensor = torch.zeros(2, 0, requires_grad=True)
+        integrated = zeroNumelTensor.cummax(dim=-1)[0].sum()
+        integrated.backward()
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
