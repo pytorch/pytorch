@@ -1268,6 +1268,7 @@ struct PythonPrintImpl {
       indent();
       body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
       auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      std::cout << "trying to save " << name << " " << ss->str() << std::endl;
       printConstant(*ss, v);
       body_ << ss->str() << "\n";
       std::cout << "Saving constant " << name << "=" << ss->str() << std::endl;
