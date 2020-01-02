@@ -178,7 +178,7 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
         elements = floats(min_value, max_value, allow_infinity=False,
-                                   allow_nan=False, width=32)
+                          allow_nan=False, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
@@ -203,7 +203,7 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
         elements = floats(min_value, max_value, allow_infinity=False,
-                                   allow_nan=False, width=32)
+                          allow_nan=False, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_per_channel_qparams(X, qparams[2])
