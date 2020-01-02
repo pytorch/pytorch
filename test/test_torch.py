@@ -10420,7 +10420,7 @@ class TestTorchDeviceType(TestCase):
         # Also check that cumsum over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
-        shapes = [[2,0], [2,1,4], [0,2,3], [1], [5]]
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
         for shape in shapes:
             for dim in range(len(shape)):
                 raw_tensor = torch.zeros(*shape, requires_grad=True)
