@@ -17,7 +17,6 @@ from torch._C import parse_schema
 #
 # Whitelist entries can be removed after the date listed on them passes.
 white_list = [
-<<<<<<< HEAD
     ("aten::append", datetime.date(9999, 1, 1)),
     ("prim::AutogradAnyNonZero", datetime.date(9999, 1, 1)),
     ("aten::grad", datetime.date(9999, 1, 1)),
