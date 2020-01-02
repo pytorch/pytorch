@@ -393,16 +393,18 @@ class Tensor(torch._C._TensorBase):
         """
         return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
+    @_wrap_type_error_to_not_implemented
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
             return self.reciprocal() * other
         else:
             return (self.double().reciprocal() * other).type_as(self)
 
-    __rtruediv__ = __rdiv__
+    __rtruediv__ = _wrap_type_error_to_not_implemented(__rdiv__)
     __itruediv__ = _C._TensorBase.__idiv__
 
     __pow__ = _C._TensorBase.pow
@@ -431,6 +433,9 @@ class Tensor(torch._C._TensorBase):
         return result
 
     __neg__ = _C._TensorBase.neg
+    
+    __add__ = _wrap_type_error_to_not_implemented(_C.TensorBase.add)
+    __radd__ = _wrap_type_error_to_not_implemented(_C.TensorBase.radd)
 
     __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
     __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
