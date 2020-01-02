@@ -3631,7 +3631,7 @@ class TestNN(NNTestCase):
             [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
 
         for i_f, w_f, g_f, o_f in format_list:
-            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f, str([i_f, w_f, g_f, o_f ]))
+            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f, str((n, c, h, w, k, filter_size)) + str([i_f, w_f, g_f, o_f ]))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
@@ -3640,11 +3640,11 @@ class TestNN(NNTestCase):
     def test_conv_cudnn_mismatch_memory_format(self):
         configs = [
             [4, 2, 8, 8, 4, 2],
-            [4, 1, 8, 8, 4, 2],
+            # [4, 1, 8, 8, 4, 2],
             [1, 1, 8, 8, 4, 2],
             [4, 2, 1, 8, 4, 1],
             [4, 2, 8, 8, 4, 1],
-            # [4, 1, 8, 8, 4, 1],
+            [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, 'cuda')
