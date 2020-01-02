@@ -3597,6 +3597,59 @@ class TestNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+    def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
+                  input_format, weight_format, grad_format, output_format):
+        conv = layer(inp.size(1), grad.size(1), ref_conv.weight.size(2)).float().to(device)
+        # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
+        conv.load_state_dict(ref_conv.state_dict())
+        conv.weight.data = conv.weight.contiguous(memory_format=weight_format)
+        input = inp.clone().contiguous(memory_format=input_format).requires_grad_()
+        grad = grad.contiguous(memory_format=grad_format)
+        out = conv(input)
+        out.backward(grad)
+        self.assertTrue(out.is_contiguous(memory_format=output_format))
+        self.assertEqual(out, ref_out)
+        self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
+        self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    def _test_conv_cudnn_nhwc_nchw(self, layer, n, c, h, w, k, filter_size, device):
+        data = torch.randint(1, 10, (n, c, h, w), dtype=torch.float32, device=device)
+
+        ref_input = data.clone().contiguous().requires_grad_(True)
+        ref_conv = layer(c, k, filter_size).float().to(device)
+        ref_out = ref_conv(ref_input)
+        grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
+        ref_out.backward(grad)
+        format_list = [
+            [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
+            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.channels_last],
+            [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
+            [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
+            [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.channels_last]]
+
+        for i_f, w_f, g_f, o_f in format_list:
+            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @unittest.skipIf(torch.backends.cudnn.version() < 7603, "needs cudnn 7.6")
+    @skipIfRocm
+    def test_conv_cudnn_mismatch_memory_format(self):
+        configs = [
+            [4, 2, 8, 8, 4, 2],
+            [4, 1, 8, 8, 4, 2],
+            [1, 1, 8, 8, 4, 2],
+            [4, 2, 1, 8, 4, 1],
+            [4, 2, 8, 8, 4, 1],
+            [4, 1, 8, 8, 4, 1],
+        ]
+        for n, c, h, w, k, filter_size in configs:
+            self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, 'cuda')
+            self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, 'cuda')
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
@@ -7526,6 +7579,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @unittest.skipIf(torch.backends.cudnn.version() < 7603, "needs cudnn 7.6")
     @skipIfRocm
     def test_conv_cudnn_nhwc(self):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device="cuda", requires_grad=True)
