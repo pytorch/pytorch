@@ -128,6 +128,7 @@ void Region::insertLeftBeforeRight(Expr* left, Expr* right) {
     return;
   }
 
+  registerExpr(left);
   exprs_.insert(exprs_.begin() + right_idx, left);
 }
 
@@ -140,6 +141,7 @@ void Region::insertLeftAfterRight(Expr* left, Expr* right) {
     return;
   }
 
+  registerExpr(left);
   exprs_.insert(exprs_.begin() + right_idx + 1, left);
 }
 

@@ -92,13 +92,15 @@ protected:
 // TODO: support symbolic floats vs literal (const) floats (make value an optional)
 struct TORCH_API Float : public Val {
   ~Float() = default;
-  Float() = delete;
+
+  Float()
+  : Val(ValType::Float)
+  , maybe_value_{c10::nullopt} { }
 
   Float(
     const float _value)
   : Val(ValType::Float)
-  , value_{_value} { }
-
+  , maybe_value_{_value} { }
 
   Float(const Float& other) = default;
   Float& operator=(const Float& other) = default;
@@ -106,10 +108,12 @@ struct TORCH_API Float : public Val {
   Float(Float&& other) = default;
   Float& operator=(Float&& other) = default;
 
-  float value() const noexcept { return value_; }
+  bool isSymbolic() const { return !(maybe_value_.has_value()); }
+  bool isConst() const { return maybe_value_.has_value(); }
+  c10::optional<float> value() const noexcept { return maybe_value_; }
 
 private:
-  const float value_;
+  c10::optional<float> maybe_value_;
 };
 
 // TODO: comment
@@ -188,9 +192,13 @@ struct TORCH_API Region : public IRInputOutput {
   }
 
   void insertAtStart(Expr* expr) {
+    registerExpr(expr);
     exprs_.push_front(expr);
   }
-  void insertAtEnd(Expr* expr) { exprs_.push_back(expr); };
+  void insertAtEnd(Expr* expr) {
+    registerExpr(expr);
+    exprs_.push_back(expr);
+  };
 
   void insertLeftBeforeRight(Expr* left, Expr* right);
   void insertLeftAfterRight(Expr* left, Expr* right);
@@ -253,11 +261,14 @@ private:
 struct TORCH_API Add : public Expr {
   ~Add() = default;
   Add(
-    Statement* _lhs
+    Val* _out
+  , Statement* _lhs
   , Statement* _rhs)
   : Expr(ExprType::Add)
+  , out_{_out}
   , lhs_{_lhs}
   , rhs_{_rhs} {
+    addOutput(_out);
     addInput(_lhs);
     addInput(_rhs);
   }
@@ -268,13 +279,16 @@ struct TORCH_API Add : public Expr {
   Add(Add&& other) = default;
   Add& operator=(Add&& other) = default;
 
+  Val* out() noexcept { return out_; }
   Statement* lhs() noexcept { return lhs_; }
   Statement* rhs() noexcept { return rhs_; }
 
+  const Val* out() const noexcept { return out_; }
   const Statement* lhs() const noexcept { return lhs_; }
   const Statement* rhs() const noexcept { return rhs_; }
 
 private:
+  Val* out_;
   Statement* lhs_;
   Statement* rhs_;
 };
