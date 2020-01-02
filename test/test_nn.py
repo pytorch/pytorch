@@ -3608,11 +3608,6 @@ class TestNN(NNTestCase):
         grad = grad.contiguous(memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
-        self.assertFalse(
-            input.is_contiguous()
-            and input.is_contiguous(memory_format=torch.channels_last)
-            'Bad test, input {} does not carry memory format information'.
-            format(input.shape))
         self.assertTrue(out.is_contiguous(memory_format=output_format))
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
@@ -3627,29 +3622,37 @@ class TestNN(NNTestCase):
         grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
         ref_out.backward(grad)
         format_list = [
-            [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.contiguous_format],
-            [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
-            [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
-            [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous_format]]
+            [torch.channels_last, torch.channels_last, torch.channels_last],
+            [torch.contiguous_format, torch.channels_last, torch.channels_last],
+            [torch.channels_last, torch.contiguous_format, torch.channels_last],
+            [torch.channels_last, torch.channels_last, torch.contiguous_format],
+            [torch.contiguous_format, torch.contiguous_format, torch.channels_last],
+            [torch.channels_last, torch.contiguous_format, torch.contiguous_format],
+            [torch.contiguous_format, torch.channels_last, torch.contiguous_format]]
 
-        for i_f, w_f, g_f, o_f in format_list:
-            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+        for input_format, w_f, g_f in format_list:
+            output_format = input_format
+            # Older versions of CudNN have Channels Last support disabled
+            if torch.backends.cudnn.version() < 7603:
+                output_format = torch.contiguous_format
+            # Can't derrive desired format because of the input shape, rolling back to contiguous
+            if ref_input.is_contiguous() and ref_input.is_contiguous(
+                    memory_format=torch.channels_last):
+                output_format = torch.contiguous_format
+            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out,
+                           input_format, w_f, g_f, output_format)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @unittest.skipIf(torch.backends.cudnn.version() < 7603, "needs cudnn 7.6")
     @skipIfRocm
     def test_conv_cudnn_mismatch_memory_format(self):
         configs = [
             [4, 2, 8, 8, 4, 2],
-            # [4, 1, 8, 8, 4, 2],
-            # [1, 1, 8, 8, 4, 2],
+            [4, 1, 8, 8, 4, 2],
+            [1, 1, 8, 8, 4, 2],
             [4, 2, 1, 8, 4, 1],
             [4, 2, 8, 8, 4, 1],
-            # [4, 1, 8, 8, 4, 1],
+            [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
             print(n, c, h, w, k, filter_size)
