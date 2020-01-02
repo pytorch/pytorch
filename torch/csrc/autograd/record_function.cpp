@@ -140,7 +140,8 @@ bool hasNonSampledCallbacks() {
 
 void runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
   TORCH_INTERNAL_ASSERT(
-      rf != nullptr, "Passed in RecordFunction cannot be null.");
+      rf != nullptr,
+      "The RecordFunction passed to before callbacks should not be null.");
   if (hasCallbacks()) {
     auto run_samples = shouldRunSampledCallbacks();
     if (run_samples || hasNonSampledCallbacks()) {
@@ -225,7 +226,7 @@ void RecordFunction::end() {
         (thread_local_func_ == this) ||
             (thread_local_func_ == nullptr && threadId_ != 0),
         name_,
-        ": must be top of stack");
+        ": must be top of stack. If you are calling RecordFunction::end in a separate thread, call RecordFunction::setThreadId() in the creating thread.");
     thread_local_func_ = parent_;
     initialized_ = false;
   }

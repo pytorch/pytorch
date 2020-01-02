@@ -2545,7 +2545,6 @@ class TestAutograd(TestCase):
             # ensure that we run destructor for RecordFunction, which invokes
             # end callbacks
             del rf
-            gc.collect()
         function_events = p.function_events
         foo_event = [event for event in function_events if "foo" in event.name][0]
         self.assertEqual(foo_event.count, 1)

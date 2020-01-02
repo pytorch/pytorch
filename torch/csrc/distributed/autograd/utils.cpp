@@ -128,9 +128,17 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     // save the local threadId so that end() callbacks can be correctly invoked
     // from a different thread.
     rf->setThreadId();
-    // attach the recordFunction object to the future, so callbacks can be
-    // invoked when the future finishes.
-    fut->attachRecordFunction(std::move(rf));
+    // Add a callback to
+    // the future that captures the RecordFunction to persist it for the
+    // lifetime of the future. When the future is completed, this will run the
+    // end() callbacks associated with the RecordFunction, so that async RPCs
+    // can be profiled correctly.
+    fut->addCallback(
+        [rf](
+            const Message& /* unused */,
+            const c10::optional<utils::FutureError>& /* unused */) {
+          rf->end();
+        });
   }
   return fut;
 }
