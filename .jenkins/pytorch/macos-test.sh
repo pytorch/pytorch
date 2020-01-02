@@ -102,7 +102,6 @@ test_custom_script_ops() {
 
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
-  python test_custom_classes.py -v
   python model.py --export-script-module=model.pt
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt
