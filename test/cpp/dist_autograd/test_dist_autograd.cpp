@@ -35,7 +35,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   std::vector<torch::Tensor> tensors = {in1, in2};
   rpc::worker_id_t worker_id = 1;
   addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
+      autogradContext, AutogradMetadata(1, 1), tensors);
   autogradContext->addKnownWorkerId(worker_id);
   auto send_function = autogradContext->sendFunctions()[1];
 
@@ -84,7 +84,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   auto t = torch::ones({1}, options);
   auto tensors = std::vector<torch::Tensor>{t};
   addSendRpcBackward(
-      context, AutogradMetadata(context->contextId(), 0), tensors, 0);
+      context, AutogradMetadata(context->contextId(), 0), tensors);
 
   auto sendFunction = context->retrieveSendFunction(0);
   sendFunction->setGrads({t});
