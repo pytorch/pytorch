@@ -3598,8 +3598,10 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
-                  input_format, weight_format, grad_format, output_format, message):
-        conv = layer(inp.size(1), grad.size(1), ref_conv.weight.size(2)).float().to(device)
+                  input_format, weight_format, grad_format, output_format,
+                  message):
+        conv = layer(inp.size(1), grad.size(1),
+                     ref_conv.weight.size(2)).float().to(device)
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
         conv.load_state_dict(ref_conv.state_dict())
         conv.weight.data = conv.weight.contiguous(memory_format=weight_format)
@@ -3607,7 +3609,14 @@ class TestNN(NNTestCase):
         grad = grad.contiguous(memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
-        self.assertTrue(out.is_contiguous(memory_format=output_format), message + ' {} {} {} {} {} {}'.format(conv.weight.shape, conv.weight.stride(), input.shape, input.stride(), out.shape, out.stride()))
+        self.assertFalse(
+            input.is_contiguous()
+            and input.is_contiguous(memory_format=channels_last)
+            and conv.weight.is_contiguous()
+            and conv.weight.is_contiguous(memory_format=channels_last),
+            'Bad test, neither input {} nor weight {} carry memory format information'.
+            format(input.shape, conv.weight.shape))
+        self.assertTrue(out.is_contiguous(memory_format=output_format))
         self.assertEqual(out, ref_out)
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
@@ -3640,7 +3649,7 @@ class TestNN(NNTestCase):
     def test_conv_cudnn_mismatch_memory_format(self):
         configs = [
             [4, 2, 8, 8, 4, 2],
-            # [4, 1, 8, 8, 4, 2],
+            [4, 1, 8, 8, 4, 2],
             [1, 1, 8, 8, 4, 2],
             [4, 2, 1, 8, 4, 1],
             [4, 2, 8, 8, 4, 1],
