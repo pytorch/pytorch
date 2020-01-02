@@ -15,27 +15,37 @@ int SimpleHandler::handle(const Statement* statement){
 }
 
 int SimpleHandler::handle(const Float* f){
-  return f->value();
+  return 0;
 }
 
 /*
 * IRPrinter definitions
 */
 
+std::ostream& IRPrinter::printValPreamble(std::ostream& out, const Val* const v) {
+  return out << "%" << v->name() << ":";
+}
+
 int IRPrinter::handle(const Statement* const statement){
-  out_ << "Unknown statement" << std::endl;
+  out_ << "Unknown statement";
   return 0;
 }
 int IRPrinter::handle(const Float* const f){
-  out_ << "%" << f->name() << ":f" << f->value();
+  printValPreamble(out_, f) << "f";
+  if (f->isSymbolic()) {
+    out_ << "?";
+  } else {
+    out_ << *(f->value());
+  }
   return 0;
 }
+
 int IRPrinter::handle(const Add* const add){
-  out_ << "( ";
+  add->out()->dispatch(this);
+  out_ << " = ";
   add->lhs()->dispatch(this);
   out_ << " + ";
   add->rhs()->dispatch(this);
-  out_ <<" )"<<std::endl;
   return 0;
 }
 

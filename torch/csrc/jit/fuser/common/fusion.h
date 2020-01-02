@@ -72,13 +72,21 @@ struct TORCH_API Fusion {
   std::deque<Statement*>& inputs() noexcept { return region_->inputs(); }
   std::deque<Statement*>& outputs() noexcept { return region_->outputs(); }
 
+  std::deque<Expr*>& exprs() noexcept { return region_->exprs(); }
 
   void print(std::ostream& os) {
     os << "Fusion{Inputs(" << std::endl;
     for (auto* input : inputs()) {
       os << input << std::endl;
     }
+
     os << ")->Body(" << std::endl;
+
+    for (auto* expr : exprs()) {
+      os << expr << std::endl;
+    }
+
+    // TODO: print outputs
 
   }
 

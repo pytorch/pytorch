@@ -28,12 +28,14 @@ struct TORCH_API IRPrinter {
   IRPrinter(IRPrinter&& other) = default;
   IRPrinter& operator=(IRPrinter&& other) = default;
 
-  int handle(const Statement* statement);
-  int handle(const Float* f);
-  int handle(const Add* add);
+  int handle(const Statement* const statement);
+  int handle(const Float* const f);
+  int handle(const Add* const add);
 
 private:
   std::ostream& out_;
+
+  static std::ostream& printValPreamble(std::ostream&, const Val* const);
 };
 
 }}} // torch::jit::fuser
