@@ -1318,7 +1318,7 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
