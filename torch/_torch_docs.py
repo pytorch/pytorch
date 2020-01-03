@@ -4216,6 +4216,7 @@ Example::
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
             [2., 1., 4., 2.]])
+
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
