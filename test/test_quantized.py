@@ -1858,9 +1858,9 @@ class TestQNNPackOps(TestCase):
             qYfbgemm = torch.tanh(qX)
         with override_quantized_engine('qnnpack'):
             qY_hat = torch.tanh(qX)
-            qYfbgemm_hat = torch.tanh(qX)
-            self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed (FP ref)!")
-            self.assertEqual(qYfbgemm, qYfbgemm_hat,
+            self.assertEqual(qY, qY_hat,
+                             message="QNNPACK TanH failed (FP ref)!")
+            self.assertEqual(qYfbgemm, qY_hat,
                              message="QNNPACK TanH failed (FBGEMM ref)!")
 
 
