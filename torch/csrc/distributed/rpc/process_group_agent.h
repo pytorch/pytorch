@@ -198,10 +198,11 @@ class ProcessGroupAgent : public RpcAgent {
   // A map to keep track of when futures time out. The map is keyed by the time
   // (millisecond level precision) the future will expire. This is so that timed
   // out futures can be efficiently cleaned up, and we can quickly exit if we
-  // find a future that has not timed out. The values correspond to a vector of
-  // future ids that started at that time. This map must be kept in sync with
-  // the above futures_ map.
-  std::map<steady_clock_time_point, std::vector<int64_t>> futureTimeouts_;
+  // find a future that has not timed out. The values correspond to an
+  // unordered_set of future ids that started at that time. This map must be
+  // kept in sync with the above futures_ map.
+  std::map<steady_clock_time_point, std::unordered_set<int64_t>>
+      futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
   // CV to wake up watchdog thread that watches for timed out futures.
