@@ -790,7 +790,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         update = torch.arange(2 * 5).to(torch.float).view(2, 5)
-        self.run_test(IndexPutModel6(), (x, update))
+        self.run_test(IndexPutModel7(), (x, update))
 
         class IndexPutModel8(torch.nn.Module):
             def forward(self, x, update):
@@ -798,8 +798,8 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(3, 4, 5)
-        update = torch.arange(2 * 5).to(torch.float).view(3, 5)
-        self.run_test(IndexPutModel6(), (x, update))
+        update = torch.arange(3 * 5).to(torch.float).view(3, 5)
+        self.run_test(IndexPutModel8(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_ellipsis(self):
