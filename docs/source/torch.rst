@@ -198,6 +198,7 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: bitwise_not
+.. autofunction:: bitwise_and
 .. autofunction:: bitwise_xor
 .. autofunction:: ceil
 .. autofunction:: clamp

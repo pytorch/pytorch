@@ -18,6 +18,24 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void bitwise_and_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    gpu_kernel_with_scalars(
+          iter,
+          []GPU_LAMBDA(bool a, bool b) {
+            return a && b;
+          });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_and_cuda", [&]() {
+      gpu_kernel_with_scalars(
+          iter,
+          []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            return a & b;
+      });
+    });
+  }
+}
+
 void bitwise_xor_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
@@ -97,6 +115,7 @@ void mse_kernel_cuda(TensorIterator& iter) {
 }
 
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
+REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel_cuda);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);

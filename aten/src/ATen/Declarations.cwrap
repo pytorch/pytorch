@@ -305,50 +305,6 @@
     - THTensor* other
 ]]
 [[
-  name: _th_and
-  cpu_bool: True
-  cuda_bool: True
-  cname: __and__
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitand
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: cbitand
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
-  name: _th_iand_
-  cname: __iand__
-  cpu_bool: True
-  cuda_bool: True
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: bitand
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - real other
-    - cname: cbitand
-      arguments:
-        - THTensor* self
-        - arg: THTensor* self
-          broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
   name: _th_or
   cname: __or__
   cpu_bool: True
