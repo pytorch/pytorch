@@ -231,11 +231,11 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
       indices.resize_(self.sizes());
       indices = integer_upcast(indices.fill_(0), at::kLong);
       for(int64_t i=1; i<self.size(dim); i++) {
-        auto res_at_i = at::max(at::cat({out.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim);
+        auto res_at_i = at::max(at::cat({out.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
         // output at index i
-        out.narrow(dim, i, 1) = (std::get<0>(res_at_i)).unsqueeze(dim);
+        out.narrow(dim, i, 1) = std::get<0>(res_at_i);
         // output indices at index i
-        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i)).unsqueeze(dim)));
+        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
        }
    }
    out=integer_upcast(out, self.scalar_type());
