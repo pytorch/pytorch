@@ -789,19 +789,23 @@ struct PythonPrintImpl {
     }
   }
 
-  void printConstant(TaggedStringStream& stmt, const IValue& v) {
+  void printConstant(TaggedStringStream& stmt, IValue v) {
     std::stringstream ss;
     if (v.isTensor()) {
+      std::cout << "printConstant Tensor" << std::endl;
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
+      std::cout << "printConstant String" << std::endl;
       c10::printQuotedString(ss, v.toStringRef());
     } else if (v.isDevice()) {
+      std::cout << "printConstant Device" << std::endl;
       std::stringstream device_stream;
       device_stream << v.toDevice();
       ss << "torch.device(";
       c10::printQuotedString(ss, device_stream.str());
       ss << ")";
     } else if (v.isTensorList()) {
+      std::cout << "printConstant TensorList" << std::endl;
       ss << "[";
       const char* delim = "";
       for (const at::Tensor& t : v.toTensorListRef()) {
@@ -810,15 +814,18 @@ struct PythonPrintImpl {
       }
       ss << "]";
     } else if (v.isBoolList()) {
+      std::cout << "printConstant BoolList" << std::endl;
       printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
+      std::cout << "printConstant IntList" << std::endl;
       printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
+      std::cout << "printConstant DoubleList" << std::endl;
       printMaybeAnnotatedConstantList(
           ss, "float", v.toDoubleListRef().size(), v);
     } else {
+      std::cout << "printConstant operator<<" << std::endl;
       ss << v;
-      std::cout << "ss << v" << std::endl;
       std::cout << "isNone:" << v.isNone() << "isInt: " << v.isInt() << " isString: " << v.isString() << " isBool:" << v.isBool() << " isDouble:" << v.isDouble() << std::endl;
       std::cout << "ss.str():" << ss.str() << std::endl;
     }
