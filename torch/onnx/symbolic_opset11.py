@@ -137,7 +137,7 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
