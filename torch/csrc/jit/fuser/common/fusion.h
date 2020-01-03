@@ -83,7 +83,14 @@ struct TORCH_API Fusion {
 
   // Functions for querying / enumerating IR objets
   bool inFusion(const Statement* stmt){
-    return (stmt->fusion() == this);
+    bool infusion = stmt->fusion() == this;
+
+    if(stmt->isExpr())
+      infusion &= expr_map_.find(static_cast<const Expr*>(stmt)) != expr_map_.end();
+    if(stmt->isVal())
+      infusion &= val_map_.find(static_cast<const Val*>(stmt)) != val_map_.end();
+
+    return infusion;
   }
   std::deque<Val*>& inputs() noexcept { return region_->inputs(); }
   std::deque<Val*>& outputs() noexcept { return region_->outputs(); }
@@ -117,7 +124,7 @@ struct TORCH_API Fusion {
   }
 
   StmtNameType registerVal(Val* val) {
-    if (val->fusion() == this) {
+    if (val->fusion()) {
       TORCH_CHECK(inFusion(val));
       return val->name();
     }
@@ -179,8 +186,8 @@ struct TORCH_API Fusion {
 private:
   Region* region_ = nullptr;
 
-  std::unordered_map<Val*, StmtNameType> val_map_;
-  std::unordered_map<Expr*, StmtNameType> expr_map_;
+  std::unordered_map<const Val*, StmtNameType> val_map_;
+  std::unordered_map<const Expr*, StmtNameType> expr_map_;
 
   StmtNameType val_name_counter_ = 0;
   StmtNameType expr_name_counter_ = 0;
