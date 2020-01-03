@@ -200,7 +200,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     value = FutureType::create(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
-    L.next(); // Future
+    L.next(); // RRef
     L.expect('(');
     auto p = parseType();
     auto subtype = std::move(p.first);
