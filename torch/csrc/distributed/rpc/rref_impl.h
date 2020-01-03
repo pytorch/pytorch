@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -184,18 +185,18 @@ struct RRefForkData {
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef {
+class RRef : public RRefInterface {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
-  RRef(const RRef& other) = delete;
-  RRef(RRef&& other) = delete;
+  explicit RRef(const RRef& other) = delete;
+  explicit RRef(RRef&& other) = delete;
   RRef& operator=(RRef&& other) = delete;
 
   virtual ~RRef() = default;
 
   // returns the worker id of the owner
-  inline worker_id_t owner() const {
+  inline worker_id_t owner() const override {
     return ownerId_;
   }
 
@@ -203,9 +204,6 @@ class RRef {
   inline const RRefId& rrefId() const {
     return rrefId_;
   }
-
-  // Returns true if this is the ``OwnerRRef``
-  virtual bool isOwner() const = 0;
 
   inline bool isPyObj() {
     return type_ == PyObjectType::get();

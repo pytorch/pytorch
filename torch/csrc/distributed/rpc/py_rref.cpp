@@ -102,8 +102,7 @@ py::tuple PyRRef::pickle() const {
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
   auto rfd = ctx.prepareChildFork(rref_);
-  py::tuple rfd_py = rfd.toPyTuple();
-  return rfd_py;
+  return rfd.toPyTuple();
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {

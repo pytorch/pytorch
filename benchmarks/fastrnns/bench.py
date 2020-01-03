@@ -85,9 +85,12 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         return fwd_time, bwd_time
 
     assert device == 'cuda'
-    creator_args = dict(seqLength=seqLength, numLayers=numLayers,
-                        inputSize=inputSize, hiddenSize=hiddenSize,
-                        miniBatch=miniBatch, device=device, seed=seed)
+    creator_args = creator_args = {
+        'seqLength': seqLength, 'numLayers': numLayers,
+        'inputSize': inputSize, 'hiddenSize': hiddenSize,
+        'miniBatch': miniBatch, 'device': device, 'seed': seed
+    }
+
     modeldef = rnn_creator(**creator_args)
 
     [train_batch(modeldef) for _ in range(warmup)]
@@ -217,7 +220,7 @@ if __name__ == '__main__':
     del bench_args['cnns']
     del bench_args['variable_lstms']
 
-    results = dict()
+    results = {}
     if should_bench_varlen_lstms:
         if args.nloops + args.warmup > 30:
             print_stderr(

@@ -6,6 +6,7 @@
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>
+#include <c10/util/Deprecated.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/DeviceGuard.h>
 #include <c10/core/TensorOptions.h>
