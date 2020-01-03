@@ -1135,6 +1135,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                     if rank % 2 != 0:
                         wait_until_node_failure(rank)
 
+                # Shutdown sequence is not very well defined and as a result
+                # we might see either of the exception messages below.
                 with self.assertRaisesRegex(RuntimeError,
                                             "(Request aborted during client shutdown)|"
                                             "(worker.: Error in reponse from worker.: server shutting down)"):
@@ -1316,6 +1318,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for rank 2 to die.
                 wait_until_node_failure(2)
 
+                # Shutdown sequence is not very well defined and as a result
+                # we might see either of the exception messages below.
                 with self.assertRaisesRegex(RuntimeError,
                                             "(Request aborted during client shutdown)|"
                                             "(worker.: Error in reponse from worker.: server shutting down)"):
@@ -1570,6 +1574,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         debug_info = dist_autograd._get_debug_info()
         self.assertEqual(0, int(debug_info['num_autograd_contexts']))
 
+    @staticmethod
     def _workload_thread():
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
