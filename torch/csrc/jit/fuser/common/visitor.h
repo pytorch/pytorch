@@ -11,8 +11,9 @@ namespace jit {
 namespace fuser {
 
 struct TORCH_API SimpleHandler {
-  int handle(const Statement* statement);
-  int handle(const Float* f);
+  int handle(const Statement* const statement);
+  int handle(const Float* const f);
+  int handle(const Int* const i);
 };
 
 struct TORCH_API IRPrinter {
@@ -30,6 +31,7 @@ struct TORCH_API IRPrinter {
 
   int handle(const Statement* const statement);
   int handle(const Float* const f);
+  int handle(const Int* const i);
   int handle(const Add* const add);
 
 private:

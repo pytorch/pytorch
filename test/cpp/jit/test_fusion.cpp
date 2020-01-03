@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/visitor.h>
+#include <torch/csrc/jit/fuser/common/arith.h>
 
 #include <iostream>
 
@@ -36,16 +37,15 @@ void testCPUFusion() {
   
   Float* f1 = static_cast<Float*>(v);
 
-  Fusion fusion;
-
   Float* f3 = new Float();
   Float* f2 = new Float{3.f};
-  Add* add = new Add(f3, f, f2);
+  Add* an_add = new Add(f3, f1, f2);
+  std::cout<<"Explicit add construction: "<<an_add<<std::endl;
 
-  std::cout<<add<<std::endl;
+  Int* i1 = new Int{3};
+  auto f4 = add(f1, i1);
+  std::cout<<"Implicit add construction (f + i): "<<f4<<std::endl;
 
-  //add->dispatch(printer);
-  
 }
 
 void testGPUFusion() {
