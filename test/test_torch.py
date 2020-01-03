@@ -10541,12 +10541,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(aRes, torch.tensor([[1, 0, 0],
                                              [0, 0, 0],
                                              [1, 1, 1]]))
+
     def test_cummax(self, device):
         x = torch.rand(100, 100, device=device)
         out1 = torch.cummax(x, 1)
         res2 = torch.Tensor().to(device)
         indices2 = torch.LongTensor().to(device)
-        torch.cummax(x, 1, out=tuple([res2, indices2]))
+        torch.cummax(x, 1, out=(res2, indices2))
         self.assertEqual(out1[0], res2)
         self.assertEqual(out1[1], indices2)
 
@@ -10558,11 +10559,11 @@ class TestTorchDeviceType(TestCase):
         bRes = torch.cummax(b, 0)
         self.assertEqual(aRes[0], bRes[0])
         self.assertEqual(aRes[0], torch.tensor([[1, 0, 1],
-                                             [1, 0, 1],
-                                             [1, 1, 1]]))
+                                                [1, 0, 1],
+                                                [1, 1, 1]]))
         self.assertEqual(aRes[1], torch.tensor([[0, 0, 0],
-                                             [0, 1, 0],
-                                             [2, 2, 2]]))
+                                                [0, 1, 0],
+                                                [2, 2, 2]]))
 
         # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
