@@ -174,7 +174,7 @@ class TestTensorBoardUtils(BaseTestCase):
     def test_convert_to_HWC_dtype_remains_same(self):
         # test to ensure convert_to_HWC restores the dtype of input np array and
         # thus the scale_factor calculated for the image is 1
-        test_image=torch.tensor([[[[1, 2, 3], [4, 5, 6]]]], dtype=torch.uint8)
+        test_image = torch.tensor([[[[1, 2, 3], [4, 5, 6]]]], dtype=torch.uint8)
         tensor = make_np(test_image)
         tensor = convert_to_HWC(tensor, 'NCHW')
         scale_factor = summary._calc_scale_factor(tensor)
