@@ -789,7 +789,7 @@ struct PythonPrintImpl {
     }
   }
 
-  void printConstant(TaggedStringStream& stmt, IValue v) {
+  void printConstant(TaggedStringStream& stmt, const IValue& v) {
     std::stringstream ss;
     if (v.isTensor()) {
       std::cout << "printConstant Tensor" << std::endl;
@@ -1270,7 +1270,7 @@ struct PythonPrintImpl {
     size_t numConstants = moduleType->numConstants();
     for (size_t i = 0; i < numConstants; i++) {
       const auto& name = moduleType->getConstantName(i);
-      const auto& v = moduleType->getConstant(i);
+      IValue v = moduleType->getConstant(i);
 
       indent();
       body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
