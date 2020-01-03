@@ -173,8 +173,8 @@ RegisterOperators reg({
             for (const auto& str : ss) {
               vals.push_back(str);
             }
-            return [ss](Stack& stack) {
-              push(stack, ss);
+            return [vals](Stack& stack) {
+              push(stack, vals);
               return 0;
             };
           } else if (type == StringType::get()) {

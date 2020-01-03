@@ -3158,7 +3158,7 @@ graph(%Ra, %Rb):
         def foo():
             a = [1.0, 2.0, 3.0]
             b = ["ab", "cd", "ef"]
-            return a, b
+            return a, b, a[0], b[0]
 
         scripted_foo = torch.jit.script(foo)
         graph = scripted_foo.graph
