@@ -42,11 +42,11 @@ void ConstantPooling(
 
       // if both values are the same object, we do not need to worry about
       // changing the aliasing relationship
-      bool same_idenity =
+      bool same_identity =
           (old_ivalue && new_ivalue &&
            (old_ivalue->isSameIdentity(new_ivalue)));
 
-      if (!same_idenity &&
+      if (!same_identity &&
           !aliasDb.safeToChangeAliasingRelationship(
               node->outputs(), existing->outputs())) {
         continue;

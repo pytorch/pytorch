@@ -5745,6 +5745,18 @@ a")
         FileCheck().check_count("prim::Constant", 1, exactly=True).run(foo_script.graph)
         self.assertEqual(foo(), foo_script())
 
+    def test_constant_pooling_introduce_aliasing(self):
+        @torch.jit.script
+        def foo():
+            a = torch.tensor(1)
+            b = torch.tensor(2)
+            return a, b
+
+        self.run_pass('constant_propagation', foo.graph)
+        self.run_pass('constant_pooling', foo.graph)
+        # dont pool constants bc it would introduce observable alias relationship changing
+        FileCheck().check_count("prim::Constant", 2, exactly=True).run(foo.graph)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
