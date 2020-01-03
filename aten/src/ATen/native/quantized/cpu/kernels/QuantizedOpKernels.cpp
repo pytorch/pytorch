@@ -239,11 +239,24 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // - Output scale is set to 2.0 / 2^(BIT_NUM)
+    // - For signed types output zero point is set to 0
+    // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
+    float output_scale = 0x2.0p-8;
+    int64_t output_zero_point = 0;
+    if (SCALAR_TYPE == at::kQInt32) {
+      output_scale = 0x2.0p-32;
+    } else if (SCALAR_TYPE == at::kQUInt8) {
+      output_zero_point = 128;
+    }
+    float inv_output_scale = 1.0 / output_scale;
+
     qy = at::_empty_affine_quantized(
         qx.sizes(),
         at::device(kCPU).dtype(SCALAR_TYPE),
-        qx.q_scale(),
-        qx.q_zero_point(),
+        output_scale,
+        output_zero_point,
         qx.suggest_memory_format());
     auto iter = TensorIterator::unary_op(qy, qx);
 
@@ -252,15 +265,18 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
       iter,
       [&](scalar_t value_qx) -> scalar_t {
         const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
-        return at::quantize_val<scalar_t>(scale, zero_point, std::tanh(value_dx));
+        return at::quantize_val<scalar_t>(output_scale, output_zero_point,
+                                          std::tanh(value_dx));
       },
       [&](Vec value_qx) -> Vec {
-        const auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+        const auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
+                                                  scale_neg_zp_premul_vec);
         Vec::float_vec_return_type retvals;
         for (int idx = 0; idx < Vec::float_num_vecs(); ++idx) {
           retvals[idx] = value_dx[idx].tanh();
         }
-        return Vec::quantize(retvals, scale, zero_point, inv_scale);
+        return Vec::quantize(retvals, output_scale, output_zero_point,
+                             inv_output_scale);
       }
     );
   });

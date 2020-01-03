@@ -127,10 +127,21 @@ class TestQuantizedOps(TestCase):
         qX = torch.quantize_per_tensor(X, scale=scale,
                                        zero_point=zero_point,
                                        dtype=torch_type)
-        qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point,
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 2.0/2^BITS
+        # in the implementations.
+        f_min, f_max = -1.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1)
+        output_zero_point = round((q_max + q_min) / 2)
+        qY = torch.quantize_per_tensor(Y, scale=output_scale,
+                                       zero_point=output_zero_point,
                                        dtype=torch_type)
+
         qY_hat = torch.tanh(qX)
-        self.assertEqual(qY, qY_hat, message="TanH failed!")
+        self.assertEqual(qY, qY_hat,
+                         message="TanH failed: {} vs. {}".format(Y, qY_hat))
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1800,13 +1811,13 @@ class TestQuantizedConv(unittest.TestCase):
                 (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
                 channelwise)
 
-@unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
-                     "This Pytorch Build has not been built with QNNPACK")
-@unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
-@unittest.skipIf(TEST_WITH_UBSAN,
-                 "QNNPACK does not play well with UBSAN at the moment,"
-                 " so we skip the test if we are in a UBSAN environment.")
-@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
+# @unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
+#                      "This Pytorch Build has not been built with QNNPACK")
+# @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
+# @unittest.skipIf(TEST_WITH_UBSAN,
+#                  "QNNPACK does not play well with UBSAN at the moment,"
+#                  " so we skip the test if we are in a UBSAN environment.")
+# @unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1831,22 +1842,27 @@ class TestQNNPackOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_tanh(self, X):
-        # Note: In QNNPACK the output scale and zero_point can be only
-        #       2.0/256, 0 respectively, because it uses an LUT with 256 bins.
+        # Note: In QNNPACK the output scale and zero_point can only be
+        #       2.0/256, 128 respectively, as it uses a LUT with 256 bins.
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Floating point reference
+        Y = torch.tanh(X)
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
+                                       dtype=torch.quint8)
+        with override_quantized_engine('fbgemm'):
+            qYfbgemm = torch.tanh(qX)
         with override_quantized_engine('qnnpack'):
-            X, (scale, zero_point, torch_type) = X
-
-            X = torch.from_numpy(X)
-            Y = torch.tanh(X)
-
-            qX = torch.quantize_per_tensor(X, scale=scale,
-                                           zero_point=zero_point,
-                                           dtype=torch_type)
-            qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
-                                           dtype=torch.quint8)
             qY_hat = torch.tanh(qX)
+            qYfbgemm_hat = torch.tanh(qX)
+            self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed (FP ref)!")
+            self.assertEqual(qYfbgemm, qYfbgemm_hat,
+                             message="QNNPACK TanH failed (FBGEMM ref)!")
 
-            self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed!")
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @settings(suppress_health_check=(HealthCheck.filter_too_much,))
