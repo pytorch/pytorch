@@ -23,7 +23,7 @@ int SimpleHandler::handle(const Float* f){
 */
 
 std::ostream& IRPrinter::printValPreamble(std::ostream& out, const Val* const v) {
-  return out << "%" << v->name() << ":";
+  return out /*<< "%" << v->name() << ":"*/;
 }
 
 int IRPrinter::handle(const Statement* const statement){

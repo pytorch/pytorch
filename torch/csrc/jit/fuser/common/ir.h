@@ -133,50 +133,50 @@ private:
 struct TORCH_API IRInputOutput {
   virtual ~IRInputOutput() = 0;
 
-  std::deque<Statement*>& inputs() noexcept { return inputs_; }
-  std::deque<Statement*>& outputs() noexcept { return outputs_; }
+  std::deque<Val*>& inputs() noexcept { return inputs_; }
+  std::deque<Val*>& outputs() noexcept { return outputs_; }
 
-  const std::deque<Statement*>& inputs() const noexcept { return inputs_; }
-  const std::deque<Statement*>& outputs() const noexcept { return outputs_; }
+  const std::deque<Val*>& inputs() const noexcept { return inputs_; }
+  const std::deque<Val*>& outputs() const noexcept { return outputs_; }
 
-  Statement* getInput(const std::deque<Statement*>::size_type idx) {
+  Val* getInput(const std::deque<Val*>::size_type idx) {
     return inputs_[idx];
   }
-  Statement* getOutput(const std::deque<Statement*>::size_type idx) {
+  Val* getOutput(const std::deque<Val*>::size_type idx) {
     return outputs_[idx];
   }
 
-  const Statement* getInput(const std::deque<Statement*>::size_type idx) const {
+  const Val* getInput(const std::deque<Val*>::size_type idx) const {
     return inputs_[idx];
   }
-  const Statement* getOutput(const std::deque<Statement*>::size_type idx) const {
+  const Val* getOutput(const std::deque<Val*>::size_type idx) const {
     return outputs_[idx];
   }
 
-  void addInput(Statement* input) {
+  void addInput(Val* input) {
     register_callback(input);
     inputs_.push_back(input);
   }
-  void addOutput(Statement* output) {
+  void addOutput(Val* output) {
     register_callback(output);
     outputs_.push_back(output);
   }
 
-  void addInputAt(const std::deque<Statement*>::size_type pos, Statement* input) {
+  void addInputAt(const std::deque<Val*>::size_type pos, Val* input) {
     register_callback(input);
     inputs_.insert(inputs_.begin() + pos, input);
   }
-  void addOutputAt(const std::deque<Statement*>::size_type pos, Statement* output) {
+  void addOutputAt(const std::deque<Val*>::size_type pos, Val* output) {
     register_callback(output);
     outputs_.insert(outputs_.begin() + pos, output);
   }
 
-  std::deque<Statement*>::size_type nInputs() const noexcept { return inputs_.size(); }
-  std::deque<Statement*>::size_type nOutputs() const noexcept { return outputs_.size(); }
+  std::deque<Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
+  std::deque<Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
 
 protected:
-  std::deque<Statement*> inputs_;
-  std::deque<Statement*> outputs_;
+  std::deque<Val*> inputs_;
+  std::deque<Val*> outputs_;
 
   virtual void register_callback(Statement* stmt) { }
 };
@@ -275,8 +275,8 @@ struct TORCH_API Add : public Expr {
   ~Add() = default;
   Add(
     Val* _out
-  , Statement* _lhs
-  , Statement* _rhs)
+  , Val* _lhs
+  , Val* _rhs)
   : Expr(ExprType::Add)
   , out_{_out}
   , lhs_{_lhs}
@@ -293,17 +293,17 @@ struct TORCH_API Add : public Expr {
   Add& operator=(Add&& other) = default;
 
   Val* out() noexcept { return out_; }
-  Statement* lhs() noexcept { return lhs_; }
-  Statement* rhs() noexcept { return rhs_; }
+  Val* lhs() noexcept { return lhs_; }
+  Val* rhs() noexcept { return rhs_; }
 
   const Val* out() const noexcept { return out_; }
-  const Statement* lhs() const noexcept { return lhs_; }
-  const Statement* rhs() const noexcept { return rhs_; }
+  const Val* lhs() const noexcept { return lhs_; }
+  const Val* rhs() const noexcept { return rhs_; }
 
 private:
   Val* out_;
-  Statement* lhs_;
-  Statement* rhs_;
+  Val* lhs_;
+  Val* rhs_;
 };
 
 }}} //torch::jit::fuser
