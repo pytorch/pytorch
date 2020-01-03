@@ -118,10 +118,7 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
     def test_qtanh(self, X):
-        # QNNPACK is tested separately in TestQNNPackOps
-        if torch.backends.quantized.engine == 'qnnpack':
-            return
-
+        # Note: QNNPACK is tested separately in TestQNNPackOps
         X, (scale, zero_point, torch_type) = X
 
         X = torch.from_numpy(X)
@@ -133,7 +130,7 @@ class TestQuantizedOps(TestCase):
         qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
         qY_hat = torch.tanh(qX)
-        self.assertEqual(qY, qY_hat, message="QNNPACK TanH failed!")
+        self.assertEqual(qY, qY_hat, message="TanH failed!")
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1835,7 +1832,7 @@ class TestQNNPackOps(TestCase):
                        qparams=hu.qparams(dtypes=torch.quint8)))
     def test_qnnpack_tanh(self, X):
         # Note: In QNNPACK the output scale and zero_point can be only
-        #       1.0/256, 0 respectively, because it uses an LUT with 256 bins.
+        #       2.0/256, 0 respectively, because it uses an LUT with 256 bins.
         with override_quantized_engine('qnnpack'):
             X, (scale, zero_point, torch_type) = X
 
