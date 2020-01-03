@@ -308,11 +308,14 @@ def tensor_conv(
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
-settings._profiles[settings._current_profile].__dict__['deadline'] = None
-settings._profiles[settings._current_profile].__dict__['timeout'] = hypothesis.unlimited
+hypothesis_version = hypothesis.version.__version_info__
+current_settings = settings._profiles[settings._current_profile].__dict__
+current_settings['deadline'] = None
+if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
+    current_settings['timeout'] = hypothesis.unlimited
 def assert_deadline_disabled():
     assert settings().deadline is None
-    if hypothesis.version.__version_info__ < (3, 27, 0):
+    if hypothesis_version < (3, 27, 0):
         import warnings
         warning_message = (
             "Your version of hypothesis is outdated. "
