@@ -58,6 +58,9 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
+    # Enables int[]? by translating to legacy IntArrayRef.
+    elif t == 'int[]?':
+        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -87,6 +90,11 @@ def type_argument_translations(arg):
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntArrayRef'
+        size = int(match.group(1))
+    # Enables int[x]? by translating to legacy IntArrayRef[x]. See [temp translations]
+    elif re.match(r'int\[(\d+)\]\?', t):
+        match = re.match(r'int\[(\d+)\]\?', t)
+        t = 'IntArrayRef?'
         size = int(match.group(1))
     # Enables bool[x] by translating to legacy std::array<bool,x>. See [temp translations]
     elif re.match(r'bool\[(\d+)\]', t):

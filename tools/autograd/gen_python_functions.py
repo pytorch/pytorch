@@ -195,6 +195,7 @@ SUPPORTED_RETURN_TYPES = {
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
     'IntArrayRef',
+    'c10::optional<IntArrayRef>',
     'ScalarType'
 }
 
@@ -340,6 +341,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
+        'c10::optional<IntArrayRef>': 'toIntListOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
@@ -403,6 +405,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 """.format(name=name, expr=unpack_expr, typ='DimnameList')
                 return [line.strip() for line in result.split('\n')]
 
+            if typename == 'c10::optional<IntArrayRef>':
+                result = """\
+                    auto __{name} = {expr};
+                    c10::optional<{typ}> {name} = __{name} ? c10::make_optional({typ}(__{name}.value())) : c10::nullopt;
+                """.format(name=name, expr=unpack_expr, typ='IntArrayRef')
+                return [line.strip() for line in result.split('\n')]
+
             return ['auto {} = {};'.format(name, unpack_expr)]
 
         def parse_arg(arg, arg_index, unpack_args=False):
@@ -413,6 +422,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
             if typename == 'c10::optional<DimnameList>':
+                unpack_args = True
+            if typename == 'c10::optional<IntArrayRef>':
                 unpack_args = True
 
             if arg.get('python_default_init'):

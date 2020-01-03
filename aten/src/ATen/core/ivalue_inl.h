@@ -588,6 +588,12 @@ inline c10::ArrayRef<int64_t> IValue::toIntListRef() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<int64_t>*>(payload.as_intrusive_ptr)->list;
 }
+inline c10::optional<c10::ArrayRef<int64_t>> IValue::toOptionalIntListRef() const {
+  if (this->isNone()) {
+    return nullopt;
+  }
+  return this->toIntListRef();
+}
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl<double>>());

@@ -133,6 +133,7 @@ struct PythonArgs {
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline c10::optional<std::vector<int64_t>> toIntListOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline at::Storage storage(int i);
@@ -298,6 +299,11 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
+  return intlistWithDefault(i, signature.params[i].default_intlist);
+}
+
+inline c10::optional<std::vector<int64_t>> PythonArgs::toIntListOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 

@@ -2514,7 +2514,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -2522,7 +2522,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[]? dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)

@@ -181,8 +181,9 @@ Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
     return res;
 }
 
-Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
+Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, c10::optional<IntArrayRef> opt_dims, bool keepdim) {
+  if (!keepdim && sizes.size() > 0 && opt_dims.has_value()) {
+    IntArrayRef& dims = opt_dims.value();
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
     } else {

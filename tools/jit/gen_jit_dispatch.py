@@ -54,6 +54,7 @@ TYPE_MAP = {
     # in returns
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
+    'IntArrayRef?': 'int[]?',
     'Layout': 'Layout',
     'Layout?': 'Layout?',
     'Device': 'Device',
@@ -88,6 +89,8 @@ def jit_type_of(arg):
     typ = TYPE_MAP[arg['simple_type']]
     if is_sized_intlist_arg(arg):
         typ = 'int[{}]'.format(arg['size'])
+    if is_sized_intlist_optional_arg(arg):
+        typ = 'int[{}]?'.format(arg['size'])
 
     typ = optional_type_of(arg, typ)
     return typ
@@ -99,6 +102,7 @@ FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntListRef()',
+    'IntArrayRef?': '{}.toOptionalIntListRef()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -227,6 +231,9 @@ def is_sized_intlist_arg(arg):
     """Returns True for arguments declared as IntArrayRef[k], but False for IntArrayRef."""
     return (arg['simple_type'] == 'IntArrayRef') and ('size' in arg)
 
+def is_sized_intlist_optional_arg(arg):
+    """Returns True for arguments declared as IntArrayRef[k]?, but False for IntArrayRef?."""
+    return (arg['simple_type'] == 'IntArrayRef?') and ('size' in arg)
 
 def base_name(decl):
     name = decl['name']

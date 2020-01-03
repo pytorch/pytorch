@@ -265,9 +265,9 @@ static Tensor& sum_out_impl(Tensor& result, const Tensor& self, c10::optional<In
   return result;
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
+Tensor& sum_out(Tensor& result, const Tensor& self, c10::optional<IntArrayRef> opt_dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
-  return sum_out_impl(result, self, dim, keepdim, opt_dtype);
+  return sum_out_impl(result, self, opt_dim, keepdim, opt_dtype);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, c10::optional<ScalarType> opt_dtype) {
@@ -278,9 +278,9 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   Tensor result;
   return at::native::sum_out(result, self, dtype);
 }
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, c10::optional<IntArrayRef> opt_dim, bool keepdim, c10::optional<ScalarType> dtype) {
   Tensor result;
-  return at::native::sum_out(result, self, dim, keepdim, dtype);
+  return at::native::sum_out(result, self, opt_dim, keepdim, dtype);
 }
 #ifdef BUILD_NAMEDTENSOR
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
