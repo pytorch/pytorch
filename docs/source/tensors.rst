@@ -193,6 +193,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bincount
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_
+   .. automethod:: bitwise_and
+   .. automethod:: bitwise_and_ 
    .. automethod:: bitwise_xor
    .. automethod:: bitwise_xor_
    .. automethod:: bmm

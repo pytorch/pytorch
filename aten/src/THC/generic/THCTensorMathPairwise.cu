@@ -39,27 +39,6 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_) {
   return THCTensor_(equalImpl)(state, self_, src_);
 }
 
-void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  return THError("bitand only supported for integer type tensors");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitAndConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitAndConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
-
 void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
