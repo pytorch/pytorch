@@ -1048,13 +1048,11 @@ def _get_build_directory(name, verbose):
             root_extensions_directory))
 
     build_directory = os.path.join(root_extensions_directory, name)
-    try:
-        os.makedirs(build_directory)
+    if not os.path.exists(build_directory):
         if verbose:
             print('Creating extension directory {}...'.format(build_directory))
-    except FileExistsError:
-        if verbose:
-            print('Using existing directory {}...'.format(build_directory))
+        # This is like mkdir -p, i.e. will also create parent directories.
+        os.makedirs(build_directory)
 
     return build_directory
 
