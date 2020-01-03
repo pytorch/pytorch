@@ -32,6 +32,7 @@ DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(binary_fn, mul_stub);
 DECLARE_DISPATCH(binary_fn, div_stub);
 DECLARE_DISPATCH(binary_fn, atan2_stub);
+DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_xor_stub);
 DECLARE_DISPATCH(binary_fn, logical_xor_stub);
 DECLARE_DISPATCH(binary_fn, logical_and_stub);
