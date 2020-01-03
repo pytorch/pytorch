@@ -40,6 +40,117 @@ bool typeListEqual(
   return true;
 }
 
+template <typename attribute_type> // int64_t, bool, double
+bool attributesEqual(attribute_type a1, attribute_type a2) {
+  return a1 == a2;
+}
+
+bool attributesEqual(const at::Tensor& a1, const at::Tensor& a2) {
+  return tensorEqual(a1, a2);
+}
+
+bool attributesEqual(
+    const std::vector<at::Tensor>& a1,
+    const std::vector<at::Tensor>& a2) {
+  return tensorListEqual(a1, a2);
+}
+
+// todo: merge with tensorLists Equal above
+bool attributesEqual(
+    const c10::List<at::Tensor>& lhs,
+    const c10::List<at::Tensor>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
+}
+
+// c10::List<bool> == c10::List<bool> does not compile
+bool attributesEqual(const c10::List<bool>& lhs, const c10::List<bool>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool attributesEqual(
+    const c10::List<double>& lhs,
+    const c10::List<double>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool attributesEqual(
+    const c10::List<int64_t>& lhs,
+    const c10::List<int64_t>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool ivaluesEqual(const IValue& a1, const IValue& a2);
+
+std::vector<std::string> toStringList(const IValue& val) {
+  std::vector<std::string> ss;
+  auto generic_list = val.toGenericListRef();
+  for (const IValue& ival : generic_list) {
+    ss.push_back(ival.toStringRef());
+  }
+  return ss;
+}
+
+bool attributesEqual(
+    const c10::intrusive_ptr<at::ivalue::Tuple> a1,
+    const c10::intrusive_ptr<at::ivalue::Tuple> a2) {
+  if (a1->elements().size() != a2->elements().size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a1->elements().size(); ++i) {
+    const auto& elem_1 = a1->elements().at(i);
+    const auto& elem_2 = a2->elements().at(i);
+    if (!ivaluesEqual(elem_1, elem_2)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// this is not a general-purpose comparison of IValues, it only covers the
+// ivalues that are allowed as attributes.
+bool ivaluesEqual(const IValue& a1, const IValue& a2) {
+  if (a1.tagKind() != a2.tagKind()) {
+    return false;
+  }
+#define COMPARE_IVALUE(type)                              \
+  if (a1.is##type()) {                                    \
+    return attributesEqual(a1.to##type(), a2.to##type()); \
+  };
+  // primitive IValue types
+  COMPARE_IVALUE(Int)
+  COMPARE_IVALUE(IntList)
+  COMPARE_IVALUE(Bool)
+  COMPARE_IVALUE(BoolList)
+  COMPARE_IVALUE(Double)
+  COMPARE_IVALUE(DoubleList)
+  COMPARE_IVALUE(Tensor)
+  COMPARE_IVALUE(TensorList)
+  COMPARE_IVALUE(None)
+  COMPARE_IVALUE(Tuple)
+  if (a1.isString()) {
+    return attributesEqual(a1.toStringRef(), a2.toStringRef());
+  }
+
+  if (!a1.type()->isSubtypeOf(a2.type()) ||
+      !a2.type()->isSubtypeOf(a1.type())) {
+    return false;
+  }
+
+  if (a1.type()->isSubtypeOf(ListType::ofStrings())) {
+    return attributesEqual(toStringList(a1), toStringList(a2));
+  }
+
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 // Check whether two nodes have the same attributes in CSE.
 // This function may be too conservative for general use.
 // Do NOT support g/gs attributes.
@@ -64,10 +175,10 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
     if (lhs->kindOf(name) != rhs->kindOf(name))
       return false;
 
-#define COMPARE_ATTRIBUTEVALUE(selector)            \
-  case AttributeKind::selector: {                   \
-    if (lhs->selector(name) != rhs->selector(name)) \
-      return false;                                 \
+#define COMPARE_ATTRIBUTEVALUE(selector)                            \
+  case AttributeKind::selector: {                                   \
+    if (!attributesEqual(lhs->selector(name), rhs->selector(name))) \
+      return false;                                                 \
   } break;
 
     switch (lhs->kindOf(name)) {
@@ -77,16 +188,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
-      case AttributeKind::t: {
-        if (!tensorEqual(lhs->t(name), rhs->t(name)))
-          return false;
-        break;
-      }
-      case AttributeKind::ts: {
-        if (!tensorListEqual(lhs->ts(name), rhs->ts(name)))
-          return false;
-        break;
-      }
+      COMPARE_ATTRIBUTEVALUE(t)
+      COMPARE_ATTRIBUTEVALUE(ts)
+      COMPARE_ATTRIBUTEVALUE(tup)
       case AttributeKind::ty:
         if (*lhs->ty(name) != *rhs->ty(name)) {
           return false;
