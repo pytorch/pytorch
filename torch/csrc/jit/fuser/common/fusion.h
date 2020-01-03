@@ -118,9 +118,10 @@ struct TORCH_API Fusion {
   StmtNameType registerStatement(Statement* stmt) {
     if (stmt->isVal()) {
       return registerVal(static_cast<Val*>(stmt));
+    }else if(stmt->isExpr()){
+      return registerExpr(static_cast<Expr*>(stmt));
     }
-
-    return registerExpr(static_cast<Expr*>(stmt));
+    std::runtime_error("Could not register statement.");
   }
 
   StmtNameType registerVal(Val* val) {
