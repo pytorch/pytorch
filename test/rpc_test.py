@@ -1141,7 +1141,7 @@ class RpcTest(RpcAgentTestFixture):
             )
 
         from torch.distributed.rpc import _rref_context_get_debug_info
-        # Check 1: local RRef does not update owners_ map
+        # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
         rref1 = RRef(self.rank)
@@ -1149,9 +1149,10 @@ class RpcTest(RpcAgentTestFixture):
         # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
+        self.assertIn("num_pending_users", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual(0, int(info["num_owner_rrefs"]))
-
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after the check 1
         dist.barrier()
 
@@ -1171,7 +1172,8 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
-
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after check 2
         dist.barrier()
 
@@ -1199,6 +1201,8 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
 
         # barrier after check 3
         dist.barrier()

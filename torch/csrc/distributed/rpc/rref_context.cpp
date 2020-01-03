@@ -7,6 +7,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Keys for RRef-related debug information.
+const std::string kNumOwnerRRefs = "num_owner_rrefs";
+const std::string kNumPendingUsers = "num_pending_users";
+
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
   static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
@@ -43,8 +47,12 @@ RRefContext::~RRefContext() {
 
 std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
   std::unordered_map<std::string, std::string> info;
-  std::lock_guard<std::mutex> lock(mutex_);
-  info["num_owner_rrefs"] = c10::to_string(owners_.size());
+  std::unique_lock<std::mutex> lock(mutex_);
+  auto ownerSize = owners_.size();
+  auto numPendingUsers = pendingUsers_.size();
+  lock.unlock();
+  info[kNumOwnerRRefs] = c10::to_string(ownerSize);
+  info[kNumPendingUsers] = c10::to_string(numPendingUsers);
   return info;
 }
 
