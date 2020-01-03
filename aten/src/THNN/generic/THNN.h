@@ -48,27 +48,6 @@ TH_API void THNN_(LogSigmoid_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *buffer);           // [BUFFER]
 
-TH_API void THNN_(RReLU_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *noise,
-          accreal lower,
-          accreal upper,
-          bool train,
-          bool inplace,
-          at::Generator *generator);
-TH_API void THNN_(RReLU_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *noise,
-          accreal lower,
-          accreal upper,
-          bool train,
-          bool inplace);
-
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input, THTensor *output,
