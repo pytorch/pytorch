@@ -57,7 +57,7 @@ RRefForkData::RRefForkData(
     const ForkId& forkId,
     worker_id_t parent,
     const std::string& type_str)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent), type_str_(type_str) {}
+    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent), type_str_(std::move(type_str)) {}
 
 py::tuple RRefForkData::toPyTuple() const {
   return py::make_tuple(
