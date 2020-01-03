@@ -5585,32 +5585,29 @@
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_out
+    CPU: rrelu_with_noise_out_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward
+    CPU: rrelu_with_noise_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
 
 - func: rrelu_with_noise_backward.grad_input(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_rrelu_with_noise_backward_out
-    CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward_out
+    CPU: rrelu_with_noise_backward_out
+    CUDA: rrelu_with_noise_backward_out
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_rrelu_with_noise_backward
-    CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_
+    CPU: rrelu_with_noise_cpu_
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_
 
 - func: softplus.out(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
