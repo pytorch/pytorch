@@ -66,7 +66,7 @@ void ArgumentSpecCreator::scan(
   }
 };
 
-// this is a coarse-grained guarentee that the slots of a class will not be
+// this is a coarse-grained guarantee that the slots of a class will not be
 // modified by the function. It works fine for things that used be read-only
 // modules, but will be overly conservative when some classes are written to.
 // Doing alias analysis and looking for writes to the class would be more
@@ -215,8 +215,7 @@ void ArgumentSpecCreator::specializeTypes(
         input_stack.back()++;
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!arg.defined()) {
-          result_stack.back().emplace_back(
-              TensorType::get()->withAutogradZero());
+          result_stack.back().emplace_back(TensorType::get()->withUndefined());
         } else {
           result_stack.back().emplace_back(arg.toType());
         }
@@ -270,7 +269,7 @@ void ArgumentSpecCreator::specializeTypes(
       // so we disconnect the input here and replace its uses with
       // a constant
       WithInsertPoint guard(*graph.nodes().begin());
-      auto c = graph.insertConstant({}, ot);
+      auto c = graph.insertConstant({});
       inputs[i]->replaceAllUsesWith(c);
     } else {
       inputs[i]->setType(t);

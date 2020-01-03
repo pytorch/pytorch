@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-#include <torch/utils.h>
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
@@ -350,8 +349,6 @@ TEST(CustomAutogradTest, InvalidGradients) {
   ASSERT_THROWS_WITH(
     MyFunction::apply(input1).sum().backward(), "expected shape");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
-  ASSERT_THROWS_WITH(
-    MyFunction::apply(input2).sum().backward(), "expected type");
 }
 
 TEST(CustomAutogradTest, NoGradInput) {
@@ -481,7 +478,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(8193, torch::requires_grad());
+  auto v = torch::tensor({8193}, torch::dtype(torch::kFloat).requires_grad(true));
   DeepReenter::apply(v).sum().backward();
 }
 
@@ -521,8 +518,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
+  auto a = MyFunction::apply(torch::tensor({6}, torch::dtype(torch::kFloat).requires_grad(true)));
+  auto b = Reenter::apply(torch::tensor({9}, torch::dtype(torch::kFloat).requires_grad(true)));
   auto v = a*b;
   v.backward();
 

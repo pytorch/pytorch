@@ -63,7 +63,7 @@ if (NOT INTERN_BUILD_MOBILE)
   # ---[ Check if certain std functions are supported. Sometimes
   # _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
   CHECK_CXX_SOURCE_COMPILES("
   #include <cmath>
   #include <string>
@@ -90,7 +90,7 @@ endif()
 
 # ---[ Check if std::exception_ptr is supported.
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+set(CMAKE_REQUIRED_FLAGS "-std=c++14")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <string>
     #include <exception>
@@ -114,7 +114,7 @@ cmake_pop_check_state()
 # ---[ Check for NUMA support
 if (USE_NUMA)
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
   CHECK_CXX_SOURCE_COMPILES(
     "#include <numa.h>
     #include <numaif.h>
@@ -139,7 +139,7 @@ endif()
 # are building under. If yes, we will turn off deprecation warning for a
 # cleaner build output.
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+set(CMAKE_REQUIRED_FLAGS "-std=c++14")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <glog/stl_logging.h>
     int main(int argc, char** argv) {
@@ -154,31 +154,32 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
-cmake_push_check_state(RESET)
-if (MSVC)
-  set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
-else()
-  set(CMAKE_REQUIRED_FLAGS "-mavx2")
+if (NOT INTERN_BUILD_MOBILE)
+  cmake_push_check_state(RESET)
+  if (MSVC)
+    set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
+  else()
+    set(CMAKE_REQUIRED_FLAGS "-mavx2")
+  endif()
+  CHECK_CXX_SOURCE_COMPILES(
+      "#include <immintrin.h>
+      int main() {
+        __m256i a, b;
+        a = _mm256_set1_epi8 (1);
+        b = a;
+        _mm256_add_epi8 (a,a);
+        __m256i x;
+        _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
+        return 0;
+      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+    message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
+    # Also see CMakeLists.txt under caffe2/perfkernels.
+    set(CAFFE2_PERF_WITH_AVX 1)
+    set(CAFFE2_PERF_WITH_AVX2 1)
+  endif()
+  cmake_pop_check_state()
 endif()
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <immintrin.h>
-     int main() {
-       __m256i a, b;
-       a = _mm256_set1_epi8 (1);
-       b = a;
-       _mm256_add_epi8 (a,a);
-       __m256i x;
-       _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
-       return 0;
-     }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
-  # Also see CMakeLists.txt under caffe2/perfkernels.
-  set(CAFFE2_PERF_WITH_AVX 1)
-  set(CAFFE2_PERF_WITH_AVX2 1)
-endif()
-cmake_pop_check_state()
-
 # ---[ Check if the compiler has AVX512 support.
 cmake_push_check_state(RESET)
 if (MSVC)

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 project(c10 CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
@@ -28,6 +28,7 @@ configure_file(
 file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
+        core/boxing/*.cpp
         core/dispatch/*.cpp
         core/op_registration/*.cpp
         core/impl/*.cpp
@@ -78,6 +79,7 @@ target_include_directories(
     $<INSTALL_INTERFACE:include>)
 
 add_subdirectory(test)
+add_subdirectory(benchmark)
 
 if(USE_CUDA)
   add_subdirectory(cuda)

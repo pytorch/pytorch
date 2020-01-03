@@ -103,6 +103,13 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream getStream(Device) const noexcept = 0;
 
   /**
+   * Get the default stream for a given device.
+   */
+  virtual Stream getDefaultStream(Device) const {
+    TORCH_CHECK(false, "Backend doesn't support acquiring a default stream.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
@@ -203,7 +210,10 @@ public:
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
-  AT_ASSERTM(p, "DeviceGuardImpl for ", type, " is not available");
+  // This seems to be the first place where you make use of a device
+  // when you pass devices to factory functions.  Give a nicer error
+  // message in this case.
+  TORCH_CHECK(p, "PyTorch is not linked with support for ", type, " devices");
   return p;
 }
 

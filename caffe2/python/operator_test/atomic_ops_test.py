@@ -5,8 +5,11 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 
+import unittest
+
 
 class TestAtomicOps(TestCase):
+    @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/28179")
     def test_atomic_ops(self):
         """
         Test that both countdown and checksum are update atomically by having
@@ -46,5 +49,4 @@ class TestAtomicOps(TestCase):
         self.assertEquals(workspace.FetchBlob(checksum), 200010000)
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

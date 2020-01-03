@@ -21,7 +21,8 @@ namespace tcputil {
 
 namespace {
 
-constexpr int LISTEN_QUEUE_SIZE = 64;
+constexpr int LISTEN_QUEUE_SIZE = 2048;
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -130,6 +131,69 @@ std::pair<int, PortType> listen(PortType port) {
   return {socket, getSocketPort(socket)};
 }
 
+void handleConnectException(
+    struct ::addrinfo** nextAddr,
+    int error_code,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  // ECONNREFUSED happens if the server is not yet listening.
+  if (error_code == ECONNREFUSED) {
+    *anyRefused = true;
+  }
+  // ECONNRESET happens if the server's listen backlog is exhausted.
+  if (error_code == ECONNRESET) {
+    *anyReset = true;
+  }
+
+  // We need to move to the next address because this was not available
+  // to connect or to create a socket.
+  *nextAddr = (*nextAddr)->ai_next;
+
+  // We have tried all addresses but could not connect to any of them.
+  if (!*nextAddr) {
+    if (!wait || (!anyRefused && !anyReset)) {
+      throw;
+    }
+
+    // if a timeout is specified, check time elapsed to see if we need to
+    // timeout. A timeout is specified if timeout != kNoTimeout.
+    if (timeout != kNoTimeout) {
+      const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+      if (elapsed > timeout) {
+        throw std::runtime_error(kConnectTimeoutMsg);
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    *anyRefused = false;
+    *anyReset = false;
+    *nextAddr = addresses.get();
+  }
+}
+
+void handleConnectSystemError(
+    struct ::addrinfo** nextAddr,
+    std::system_error& e,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  handleConnectException(
+      nextAddr,
+      e.code().value(),
+      anyRefused,
+      anyReset,
+      wait,
+      start,
+      addresses,
+      timeout);
+}
+
 int connect(
     const std::string& address,
     PortType port,
@@ -156,9 +220,13 @@ int connect(
 
   struct ::addrinfo* nextAddr = addresses.get();
   int socket;
-  // we'll loop over the addresses only if at least of them gave us ECONNREFUSED
-  // Maybe the host was up, but the server wasn't running.
+
+  // Loop over the addresses if at least one of them gave us ECONNREFUSED
+  // or ECONNRESET. This may happen if the server hasn't started listening
+  // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
+  bool anyReset = false;
+  const auto start = std::chrono::high_resolution_clock::now();
   while (true) {
     try {
       SYSCHECK_ERR_RETURN_NEG1(
@@ -182,12 +250,22 @@ int connect(
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      int numReady = ::poll(&pfd, 1, timeout.count());
+      int64_t pollTimeout = -1;
+      if (timeout != kNoTimeout) {
+        // calculate remaining time and use that as timeout for poll()
+        const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+        pollTimeout = std::max(
+            static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
+      }
+      int numReady = ::poll(&pfd, 1, pollTimeout);
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
         errno = 0;
-        throw std::runtime_error("connect() timed out");
+        throw std::runtime_error(kConnectTimeoutMsg);
       }
 
       socklen_t errLen = sizeof(errno);
@@ -209,24 +287,26 @@ int connect(
       socketGuard.release();
       break;
 
+    } catch (std::system_error& e) {
+      handleConnectSystemError(
+          &nextAddr,
+          e,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     } catch (std::exception& e) {
-      if (errno == ECONNREFUSED) {
-        anyRefused = true;
-      }
-
-      // We need to move to the next address because this was not available
-      // to connect or to create a socket.
-      nextAddr = nextAddr->ai_next;
-
-      // We have tried all addresses but could not connect to any of them.
-      if (!nextAddr) {
-        if (!wait || !anyRefused) {
-          throw;
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        anyRefused = false;
-        nextAddr = addresses.get();
-      }
+      handleConnectException(
+          &nextAddr,
+          errno,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     }
   }
 

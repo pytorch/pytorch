@@ -96,7 +96,9 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -111,7 +113,9 @@ class ProcessGroupGloo : public ProcessGroup {
 
     int sourceRank() const override;
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     at::Tensor tensor_;
@@ -126,6 +130,24 @@ class ProcessGroupGloo : public ProcessGroup {
     std::chrono::milliseconds timeout;
     int threads;
   };
+
+  // Helper functions to create a new device object.
+  // They are static functions on this class to keep them logically
+  // separate from the rest of the code base (e.g. torch/csrc/distributed).
+
+  // Create new device instance for specific interface.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+      const std::string& interface);
+
+  // Create new device instance for specific hostname or address.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
+      const std::string& hostname);
+
+  // Create new device instance.
+  // It tries to resolve this machine's hostname and bind to that address.
+  // If that fails (i.e. the hostname doesn't resolve to an address), it
+  // falls back to binding to the loopback address.
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
 
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
@@ -155,6 +177,11 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& output_lists,
+      std::vector<at::Tensor>& input_list,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(

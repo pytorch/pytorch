@@ -17,13 +17,13 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense())
+        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor]) -> None
         self.weight = state[0].to_mkldnn()
         self.bias = state[1].to_mkldnn()
+        self.training = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
@@ -55,11 +55,10 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense())
+        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor]) -> None
         self.weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
             state[0].to_mkldnn(),
             self.padding,
@@ -67,6 +66,7 @@ class MkldnnConv2d(torch.jit.ScriptModule):
             self.dilation,
             self.groups)
         self.bias = state[1].to_mkldnn()
+        self.training = state[2]
 
     @torch.jit.script_method
     def forward(self, x):
@@ -107,15 +107,15 @@ class MkldnnBatchNorm2d(torch.jit.ScriptModule):
         bias = self.bias.to_dense()
         running_mean = self.running_mean.to_dense()
         running_var = self.running_var.to_dense()
-        return (weight, bias, running_mean, running_var)
+        return (weight, bias, running_mean, running_var, self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
-        # type: (Tuple[Tensor, Tensor, Tensor, Tensor]) -> None
         self.weight = state[0].to_mkldnn()
         self.bias = state[1].to_mkldnn()
         self.running_mean = state[2].to_mkldnn()
         self.running_var = state[3].to_mkldnn()
+        self.training = state[4]
 
     @torch.jit.script_method
     def forward(self, x):
@@ -150,19 +150,3 @@ def to_mkldnn(module):
         return new_m
 
     return m_fn_rec(module)
-
-
-# **** WARNING: This is used to temporarily disable MKL-DNN convolution due
-# to a bug: https://github.com/pytorch/pytorch/issues/23825
-# Once this bug is fixed, this context manager as well as its callsites
-# should be removed!
-
-from contextlib import contextmanager
-
-@contextmanager
-def disable_mkldnn_conv():
-    torch._C._disable_mkldnn_conv()
-    try:
-        yield
-    finally:
-        torch._C._enable_mkldnn_conv()

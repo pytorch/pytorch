@@ -11,8 +11,6 @@ void testGraphExecutor() {
 
   int hidden_size = 2 * input_size;
 
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-
   auto input = at::randn({batch_size, input_size}, at::kCUDA);
   auto hx = at::randn({batch_size, hidden_size}, at::kCUDA);
   auto cx = at::randn({batch_size, hidden_size}, at::kCUDA);
@@ -21,13 +19,13 @@ void testGraphExecutor() {
 
   auto g = build_lstm();
   GraphExecutor executor(g);
-  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  auto stack = createStack({input, hx, cx, w_ih, w_hh});
   executor.run(stack);
   ASSERT_EQ(stack.size(), 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  ASSERT_TRUE(almostEqual(stack[0].toTensor(), v(r0)));
-  ASSERT_TRUE(almostEqual(stack[1].toTensor(), v(r1)));
+  ASSERT_TRUE(almostEqual(stack[0].toTensor(), r0));
+  ASSERT_TRUE(almostEqual(stack[1].toTensor(), r1));
 }
 
 } // namespace jit

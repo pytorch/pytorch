@@ -170,7 +170,7 @@ auto reg_str_ops_2 =
                   bool is_upper = true;
                   for (size_t i = 0; i < string.size() && is_upper; ++i) {
                     char c = string[i];
-                    found_alpha |= ::isalpha(c);
+                    found_alpha |= static_cast<bool>(::isalpha(c));
                     is_upper &= (!::isalpha(c) || ::isupper(c));
                   }
                   return found_alpha && is_upper;
@@ -183,7 +183,7 @@ auto reg_str_ops_2 =
                   bool is_lower = true;
                   for (size_t i = 0; i < string.size() && is_lower; ++i) {
                     char c = string[i];
-                    found_alpha |= ::isalpha(c);
+                    found_alpha |= static_cast<bool>(::isalpha(c));
                     is_lower &= (!::isalpha(c) || ::islower(c));
                   }
                   return found_alpha && is_lower;
@@ -389,7 +389,7 @@ auto reg_str_ops_2 =
                   return stringFindImpl(string, substr, start, end, true);
                 }))
 
-        .op("aten::index(str self, str substr, int start=0, int end=-1) -> int",
+        .op("aten::index.str(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel([](std::string string,

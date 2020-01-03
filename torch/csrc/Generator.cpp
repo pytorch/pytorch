@@ -74,7 +74,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_getState(THPGenerator *self)
+static PyObject * THPGenerator_getState(THPGenerator *self, PyObject *noargs)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
@@ -102,7 +102,7 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
   }
   auto& tensor = ((THPVariable*)_new_state)->cdata;
   if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
-    auto type_name = torch::utils::type_to_string(tensor.type());
+    auto type_name = torch::utils::options_to_string(tensor.options());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }
   if (self->cdata->device().type() == at::kCPU) {
@@ -134,7 +134,7 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_seed(THPGenerator *self)
+static PyObject * THPGenerator_seed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
@@ -144,14 +144,14 @@ static PyObject * THPGenerator_seed(THPGenerator *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_initialSeed(THPGenerator *self)
+static PyObject * THPGenerator_initialSeed(THPGenerator *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packUInt64(self->cdata->current_seed());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPGenerator_get_device(THPGenerator *self) {
+static PyObject * THPGenerator_get_device(THPGenerator *self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata->device());
   END_HANDLE_TH_ERRORS
@@ -182,7 +182,7 @@ PyTypeObject THPGeneratorType = {
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   (destructor)THPGenerator_dealloc,            /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */

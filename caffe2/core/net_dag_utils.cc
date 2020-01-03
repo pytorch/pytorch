@@ -304,7 +304,7 @@ ExecutionChains computeGroups(std::vector<OperatorNode>& orig_nodes) {
     }
   }
 
-  // We check sync ops on the froniter first and then async ops. This gives us a
+  // We check sync ops on the frontier first and then async ops. This gives us a
   // head start to execute sync ops locally while waiting for async ops to
   // finish.
   std::queue<int> q;
@@ -381,9 +381,13 @@ std::vector<OperatorNode> prepareOperatorNodes(
     const OperatorDef& op_def = net_def->op(idx);
     VLOG(1) << "Creating operator #" << idx << ": " << op_def.name() << ": "
             << op_def.type();
-    if (!op_def.has_device_option() && net_def_has_device_option) {
+    if (net_def_has_device_option) {
       OperatorDef temp_def(op_def);
-      temp_def.mutable_device_option()->CopyFrom(net_def->device_option());
+
+      DeviceOption temp_dev(net_def->device_option());
+      temp_dev.MergeFrom(op_def.device_option());
+
+      temp_def.mutable_device_option()->CopyFrom(temp_dev);
       operator_nodes[idx].operator_ = CreateOperator(temp_def, ws, idx);
     } else {
       auto op = CreateOperator(op_def, ws, idx);

@@ -1,5 +1,7 @@
+import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
+from torch.nn import Parameter
 
 
 def _is_script_module(module):
@@ -59,16 +61,6 @@ def _replicatable_module(module, memo=None):
 
     return True
 
-
-def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    for i, module in enumerate(modules):
-        if not _is_script_module(module):
-            continue
-        replica = module_copies[i]
-        for method_name in module._c._method_names():
-            replica._c.clone_method(module._c, method_name)
-
-
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
     if detach:
@@ -121,24 +113,12 @@ def replicate(network, devices, detach=False):
             if _is_script_module(module):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
-                replica = _init_script_module()
-
-                attribute_names = set(entry[0] for entry in module._c._get_attributes())
-
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
-                for key in keys:
-                    if not _is_script_method(module.__dict__[key]):
-                        replica.__dict__[key] = module.__dict__[key]
-                for name, the_type, value in module._c._get_attributes():
-                    if name in module._buffers.keys():
-                        continue
-                    replica._c._register_attribute(name, the_type, value)
+                def init_fn(script_module):
+                    # Don't do anything here, we'll initialize the ScriptModule below
+                    return
+                replica = torch.jit.RecursiveScriptModule._construct(module._c._replicate_for_data_parallel(), init_fn)
             else:
-                replica = module.__new__(type(module))
-                replica.__dict__ = module.__dict__.copy()
-                replica._parameters = replica._parameters.copy()
-                replica._buffers = replica._buffers.copy()
-                replica._modules = replica._modules.copy()
+                replica = module._replicate_for_data_parallel()
 
             module_copies[j].append(replica)
 
@@ -152,7 +132,7 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._modules[key] = module_copies[j][module_idx]
+                    setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -162,7 +142,13 @@ def replicate(network, devices, detach=False):
                 param_idx = param_indices[param]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._parameters[key] = param_copies[j][param_idx]
+                    param = param_copies[j][param_idx]
+                    setattr(replica, key, Parameter(param))
+                    # TODO: We need to manually set _parameters with a bare
+                    # non-parameter Tensor, otherwise gradients don't
+                    # accumulate in the original parameters when you call
+                    # backwards() on the DataParallel module.
+                    replica._parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -177,9 +163,6 @@ def replicate(network, devices, detach=False):
                     buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    replica._buffers[key] = buffer_copies[j][buffer_idx]
-
-    for j in range(num_replicas):
-        _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
+                    setattr(replica, key, buffer_copies[j][buffer_idx])
 
     return [module_copies[j][0] for j in range(num_replicas)]

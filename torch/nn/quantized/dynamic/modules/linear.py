@@ -2,8 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
-
-from torch._jit_internal import Optional
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Linear(nnq.Linear):
     r"""
@@ -19,8 +18,6 @@ class Linear(nnq.Linear):
                          shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        scale: `scale` parameter of weight Quantized Tensor, type: double
-        zero_point: `zero_point` parameter for weight Quantized Tensor, type: long
 
     Examples::
 
@@ -31,26 +28,26 @@ class Linear(nnq.Linear):
         torch.Size([128, 30])
     """
 
-    __annotations__ = {'bias' : Optional[torch.Tensor]}
-
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__(in_features, out_features, bias_)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
         # deserialization modules
-        if bias_:
-            del self.bias
-            self.bias = torch.Tensor(out_features).float()
-        else:
-            self.bias = None
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
-        Y = torch.ops.quantized.fbgemm_linear_dynamic(
-            x, self._packed_weight,
-            self.bias)
+        Y = torch.ops.quantized.linear_dynamic(
+            x, self._packed_params._packed_params)
         return Y.to(x.dtype)
+
+    def _get_name(self):
+        return 'DynamicQuantizedLinear'
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, qscheme={}'.format(
+            self.in_features, self.out_features, self.weight().qscheme()
+        )
 
     @classmethod
     def from_float(cls, mod):
@@ -62,19 +59,17 @@ class Linear(nnq.Linear):
         """
         assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        if mod.qconfig is not None and mod.qconfig.weight() is not None:
+        if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.QConfig import default_dynamic_qconfig
+            from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear.set_weight(qweight)
-        qlinear.bias = mod.bias
+        qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

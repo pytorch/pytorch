@@ -47,10 +47,8 @@
 #define THPQInt32Storage_CData(obj)   (obj)->cdata
 #define THPBFloat16Storage_CData(obj)   (obj)->cdata
 
-#ifdef _THP_CORE
 #define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
-#endif
 
 #include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateAllTypes.h>

@@ -1,4 +1,3 @@
-#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -99,4 +98,3 @@ at::Dimname THPDimname_parse(PyObject* obj) {
   return dimname;
 }
 
-#endif

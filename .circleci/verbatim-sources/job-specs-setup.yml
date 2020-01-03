@@ -1,13 +1,9 @@
-  
+
   setup:
     docker:
       - image: circleci/python:3.7.3
     steps:
       - checkout
-      - run:
-          name: Ensure config is up to date
-          command: ./ensure-consistency.py
-          working_directory: .circleci
       - run:
           name: Save commit message
           command: git log --format='%B' -n 1 HEAD > .circleci/scripts/COMMIT_MSG

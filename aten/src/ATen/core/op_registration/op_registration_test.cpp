@@ -10,15 +10,17 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
+using c10::OperatorHandle;
 using c10::Dispatcher;
 using c10::IValue;
+using c10::TensorTypeId;
 using at::Tensor;
 
 namespace {
@@ -36,6 +38,102 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
+
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithAliasAnalysisAfterRegisteringWithoutAliasAnalysis_thenCanBeCalled) {
+  {
+    auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));
+    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+
+    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    ASSERT_TRUE(op.has_value());
+    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+  }
+  {
+    auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));
+
+    auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+    ASSERT_TRUE(op.has_value());
+    EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+  }
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithSameAliasAnalysis_thenCanBeCalled) {
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::PURE_FUNCTION);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithNoAliasAnalysis_thenCanBeCalled) {
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::XLATensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_TRUE(op->options().isDefaultAliasAnalysisKind());
+  EXPECT_EQ(op->options().aliasAnalysis(), at::AliasAnalysisKind::CONSERVATIVE);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringSameSchemaWithDifferentAliasAnalysis_thenShouldThrow) {
+  expectThrows<c10::Error>([] {
+    auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId).aliasAnalysis(at::AliasAnalysisKind::PURE_FUNCTION));
+    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::XLATensorId).aliasAnalysis(at::AliasAnalysisKind::CONSERVATIVE));
+  }, "Tried to register multiple operators with the same schema but different options:");
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithSchemaBeforeKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy(Tensor dummy) -> ()").catchAllKernel<MockKernel>(&called));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithSchemaAfterKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy(Tensor dummy) -> ()"));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithNameBeforeKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().schema("_test::dummy").catchAllKernel<MockKernel>(&called));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithNameAfterKernelInOptionsObject_thenCanBeCalled) {
+  bool called = false;
+  auto registrar = c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called).schema("_test::dummy"));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  EXPECT_FALSE(called);
+  callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringWithoutSchema_thenFails) {
+  expectThrows<c10::Error>([] {
+    c10::RegisterOperators().op(c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
+  }, "In operator registration: Tried to register an operator without specifying a schema or operator name.");
+}
+
 TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(c10::TensorTypeId::CPUTensorId));
 
@@ -43,7 +141,9 @@ TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CUDATensorId'. Registered dispatch keys are: [CPUTensorId]");
+  }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
+  " backend. '_test::dummy' is only available for these backends:"
+  " [CPUTensorId].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCallsCatchallKernel) {
@@ -57,22 +157,23 @@ TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCalls
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
-  bool called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  }, "for an operator which already has a catch-all kernel registered");
-}
+// TODO Rewrite (since this is now allowed) and reenable
+// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernel_thenFails) {
+//   bool called = false;
+//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+//   expectThrows<c10::Error>([&] {
+//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   }, "for an operator which already has a catch-all kernel registered");
+// }
 
-TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
-  bool called = false;
-  expectThrows<c10::Error>([&] {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .catchAllKernel<MockKernel>(&called)
-      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  }, "for an operator which already has a catch-all kernel registered");
-}
+// TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenRegisteringDispatchedKernelInSameOpCall_thenFails) {
+//   bool called = false;
+//   expectThrows<c10::Error>([&] {
+//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+//       .catchAllKernel<MockKernel>(&called)
+//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   }, "for an operator which already has a catch-all kernel registered");
+// }
 
 TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegisteringCatchallKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
@@ -89,22 +190,23 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernelOutOfScope_whenRegiste
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
-  bool called = false;
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-}
-
-TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
-  bool called = false;
-  expectThrows<c10::Error>([&] {
-    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-      .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
-      .catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
-}
+// TODO Rewrite (since this is now allowed) and reenable
+// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernel_thenFails) {
+//   bool called = false;
+//   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called));
+//   expectThrows<c10::Error>([&] {
+//     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
+//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+// }
+//
+// TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
+//   bool called = false;
+//   expectThrows<c10::Error>([&] {
+//     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+//       .kernel<MockKernel>(c10::TensorTypeId::CPUTensorId, &called)
+//       .catchAllKernel<MockKernel>(&called));
+//   }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys CPUTensorId. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
+// }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
   bool called = false;
@@ -128,7 +230,8 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_t
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithoutSchema_thenFails) {
@@ -178,7 +281,8 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
@@ -340,7 +444,8 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlder
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
@@ -358,7 +463,8 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewe
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -376,7 +482,8 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewer
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -394,7 +501,8 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlde
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
@@ -419,7 +527,8 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'XLATensorId'. Registered dispatch keys are: [");
+  }, "Could not run '_test::dummy' with arguments from the 'XLATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [");
 
   // also assert that the error message contains the available tensor type ids, but don't assert their order
   expectThrows<c10::Error>([&] {
@@ -445,42 +554,41 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CPUTensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'CUDATensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'XLATensorId'. Registered dispatch keys are: []");
+  }, "Could not run '_test::dummy' with arguments from the 'XLATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(c10::Stack* stack, c10::KernelCache* cache) {
+void stackBasedKernel(const OperatorHandle&, c10::Stack* stack) {
   called_stackbased_kernel = true;
-}
-
-std::unique_ptr<c10::KernelCache> noCache() {
-  return nullptr;
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndNoneCanInferSchema_thenFails) {
   bool called_kernel = false;
   expectThrows<c10::Error>([&] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-      .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
-      .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel, &noCache)
-      .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::CUDATensorId)
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
-    .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel, &noCache)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CUDATensorId)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -504,9 +612,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanI
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -530,9 +638,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCan
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -566,37 +674,175 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
   }, "Tried to register kernels for same operator that infer a different function schema");
 }
 
-int64_t increment_kernel(int64_t a) {
-  return a + 1;
+void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
+  (*stack)[1] = (*stack)[1].toString()->string() + op.schema().name();
 }
 
-int64_t decrement_kernel(int64_t a) {
-  return a - 1;
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId), "hello ");
+  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBackend_thenCannotBeCalled) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CUDATensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+  expectThrows<c10::Error>([&] {
+    auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId), "hello ");
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId' backend. '_test::dummy' is only available for these backends: [].");
+}
+
+bool called = false;
+
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenRegularKernelCanBeCalled) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
+      .kernel(c10::TensorTypeId::CUDATensorId, [] (Tensor, std::string) {
+        called = true;
+      }));
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId), "hello ");
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenFallbackKernelCanBeCalled) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
+      .kernel(c10::TensorTypeId::CUDATensorId, [] (Tensor, std::string) {
+        called = true;
+      }));
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId), "hello ");
+  EXPECT_FALSE(called);
+  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForSameBackend_thenCallsRegularKernel) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
+      .kernel(c10::TensorTypeId::CPUTensorId, [] (Tensor, std::string) {
+        called = true;
+      }));
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId), "hello ");
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
+      .catchAllKernel([] (Tensor, std::string) {
+        called = true;
+      }));
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId), "hello ");
+  EXPECT_FALSE(called);
+  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+}
+
+bool called_autograd = false;
+bool called_nonautograd = false;
+
+void nonautograd_kernel(Tensor a) {
+  called_nonautograd = true;
+}
+
+void autograd_kernel(Tensor a) {
+  called_autograd = true;
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
-  EXPECT_EQ(5, result);
+
+  called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(TensorTypeId::CPUTensorId)); // note: all tensors have VariableTypeId set
+  EXPECT_TRUE(called_autograd);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(int dummy) -> int", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(decrement_kernel), &decrement_kernel>()
-    .impl_unboxedAutogradKernel(&increment_kernel));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), nonautograd_kernel>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = c10::Dispatcher::singleton().callUnboxedAutogradKernel<int64_t, int64_t>(*op, 4);
-  EXPECT_EQ(5, result);
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(TensorTypeId::CPUTensorId)); // note: all tensors have VariableTypeId set
+  EXPECT_FALSE(called_nonautograd);
+  EXPECT_TRUE(called_autograd);
 }
 
-// TODO Test cases that adding multiple autograd kernels, removing some, and so on works
-//      (similar to test cases above for regular kernels "_whenNewerAndThenOlderKernelDeletedAndOpCalled")
+TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), nonautograd_kernel>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  at::AutoNonVariableTypeMode _var_guard(true);
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(TensorTypeId::CPUTensorId));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallAutogradKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyCatchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(TensorTypeId::CPUTensorId));  // note: all tensors have VariableTypeId set
+  EXPECT_FALSE(called_nonautograd);
+  EXPECT_TRUE(called_autograd);
+}
+
+TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyCatchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(TensorTypeId::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  at::AutoNonVariableTypeMode _var_guard(true);
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(TensorTypeId::CPUTensorId));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+}
 
 /**
  * This is used to check that a given type works correctly when passed as input
@@ -725,8 +971,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
     "(str a) -> str");
   testArgTypes<Tensor>::test(
-    dummyTensor(c10::TensorTypeId::CPUTensorId), [] (const Tensor& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.type_id());},
-    dummyTensor(c10::TensorTypeId::CUDATensorId), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.toTensor().type_id());},
+    dummyTensor(c10::TensorTypeId::CPUTensorId), [] (const Tensor& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v));},
+    dummyTensor(c10::TensorTypeId::CUDATensorId), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.toTensor()));},
     "(Tensor a) -> Tensor");
 
 
@@ -752,35 +998,35 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
     "(str? a) -> str?");
   testArgTypes<c10::optional<Tensor>>::test(
-    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CPUTensorId)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.value().type_id());},
-    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CUDATensorId)), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.toTensor().type_id());},
+    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CPUTensorId)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.value()));},
+    c10::optional<Tensor>(dummyTensor(c10::TensorTypeId::CUDATensorId)), [] (const IValue& v) {EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.toTensor()));},
     "(Tensor? a) -> Tensor?");
 
 
   // optional types (with has_value() == false)
   testArgTypes<c10::optional<double>>::test(
-    c10::optional<double>(), [] (const c10::optional<double>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<double>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<double>(c10::nullopt), [] (const c10::optional<double>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<double>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(float? a) -> float?");
   testArgTypes<c10::optional<int64_t>>::test(
-    c10::optional<int64_t>(), [] (const c10::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<int64_t>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<int64_t>(c10::nullopt), [] (const c10::optional<int64_t>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<int64_t>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int? a) -> int?");
   testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<bool>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<bool>(c10::nullopt), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
   testArgTypes<c10::optional<bool>>::test(
-    c10::optional<bool>(), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<bool>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<bool>(c10::nullopt), [] (const c10::optional<bool>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<bool>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(bool? a) -> bool?");
   testArgTypes<c10::optional<std::string>>::test(
-    c10::optional<std::string>(), [] (const c10::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<std::string>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<std::string>(c10::nullopt), [] (const c10::optional<std::string>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<std::string>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(str? a) -> str?");
   testArgTypes<c10::optional<Tensor>>::test(
-    c10::optional<Tensor>(), [] (const c10::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<Tensor>(), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+    c10::optional<Tensor>(c10::nullopt), [] (const c10::optional<Tensor>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<Tensor>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(Tensor? a) -> Tensor?");
 
 
@@ -801,10 +1047,6 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::List<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
     c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
-  testArgTypes<c10::List<Tensor>>::test(
-    c10::List<Tensor>({}), [] (const c10::List<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
-    "(Tensor[] a) -> Tensor[]");
 
 
   // list types (with non-empty list)
@@ -831,13 +1073,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::List<Tensor>>::test(
     c10::List<Tensor>({dummyTensor(c10::TensorTypeId::CPUTensorId), dummyTensor(c10::TensorTypeId::CUDATensorId)}), [] (const c10::List<Tensor>& v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.get(1)));
     },
     c10::List<Tensor>({dummyTensor(c10::TensorTypeId::CUDATensorId), dummyTensor(c10::TensorTypeId::CPUTensorId)}), [] (const IValue& v) {
       EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.to<c10::List<at::Tensor>>().get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.to<c10::List<at::Tensor>>().get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(1)));
     },
     "(Tensor[] a) -> Tensor[]");
 
@@ -855,10 +1097,6 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
     std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
-  testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
-    std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<at::Tensor>>().size());},
-    "(Tensor[] a) -> Tensor[]");
 
 
   // deprecated list types (with non-empty list)
@@ -882,13 +1120,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
     std::vector<Tensor>({dummyTensor(c10::TensorTypeId::CPUTensorId), dummyTensor(c10::TensorTypeId::CUDATensorId)}), [] (const std::vector<Tensor>& v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(0)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(1)));
     },
     std::vector<Tensor>({dummyTensor(c10::TensorTypeId::CUDATensorId), dummyTensor(c10::TensorTypeId::CPUTensorId)}), [] (const IValue& v) {
       EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.to<c10::List<at::Tensor>>().get(0).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.to<c10::List<at::Tensor>>().get(1).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.to<c10::List<at::Tensor>>().get(1)));
     },
     "(Tensor[] a) -> Tensor[]");
 
@@ -945,14 +1183,14 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::Dict<int64_t, Tensor>>::test(
     tensor_dict, [] (c10::Dict<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(2)));
     },
     tensor_dict, [] (const IValue& v) {
       c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, dict.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, dict.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(dict.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(dict.at(2)));
     },
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
 
@@ -979,14 +1217,14 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::unordered_map<int64_t, Tensor>>::test<TestLegacyAPI>(
     tensor_map, [] (std::unordered_map<int64_t, Tensor> v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, v.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, v.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(v.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(v.at(2)));
     },
     tensor_map, [] (const IValue& v) {
       c10::Dict<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
-      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, dict.at(1).type_id());
-      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, dict.at(2).type_id());
+      EXPECT_EQ(c10::TensorTypeId::CPUTensorId, extractTypeId(dict.at(1)));
+      EXPECT_EQ(c10::TensorTypeId::CUDATensorId, extractTypeId(dict.at(2)));
     },
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
 

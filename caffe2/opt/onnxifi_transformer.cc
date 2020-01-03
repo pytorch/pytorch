@@ -276,7 +276,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
       CAFFE_ENFORCE(
           it != shape_hints.end(), "Input shape for ", input, " not found");
       const auto& info = it->second;
-      if (info.dim_type == ShapeInfo::DimType::BATCH &&
+      if (info.getDimType(0) == TensorBoundShape_DimType_BATCH &&
           getBlob1stDimSize(info) == max_batch_size) {
         nominal_batch_idx = idx;
         break;
@@ -458,13 +458,15 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
           std::piecewise_construct,
           std::forward_as_tuple(ret.first->first),
           std::forward_as_tuple(
-              ShapeInfo::DimType::CONSTANT, ret.first->second));
+              std::vector<TensorBoundShape::DimType>(
+                  shape.dims_size(), TensorBoundShape_DimType_CONSTANT),
+              ret.first->second));
 
       // Feed into workspace as CPU Tensors
       auto* blob = ws->CreateBlob(t.name());
       auto* cpu_tensor = BlobGetMutableTensor(blob, CPU);
       std::vector<int64_t> dims;
-      for(const auto& d : t.dims()) {
+      for (const auto& d : t.dims()) {
         dims.push_back(d);
       }
       cpu_tensor->Resize(dims);
@@ -782,7 +784,7 @@ void OnnxifiTransformer::getBackendId() {
     return;
   }
   // Try to find a backend that support Caffe2 proto. Note that this is quite
-  // opportunistic as we don't offcially support Caffe2 proto.
+  // opportunistic as we don't officially support Caffe2 proto.
   char buf[kBufferSize];
   for (int i = 0; i < backend_ids_.size(); ++i) {
     size_t len = kBufferSize;
@@ -851,7 +853,7 @@ void OnnxifiTransformer::transform(
     Workspace* ws,
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
-    const std::unordered_map<std::string, TensorShape>& input_shape_hints,
+    const ShapeInfoMap& input_shape_hints,
     const std::unordered_set<int>& blacklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");

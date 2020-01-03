@@ -17,6 +17,7 @@
 #include <c10/util/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <cstddef>
 #include <functional>
@@ -28,9 +29,23 @@ $extra_cuda_headers
 
 namespace at {
 
+namespace ${Type} {
+#ifndef USE_STATIC_DISPATCH
+namespace {
+#endif
+
 ${type_derived_method_definitions}
 
-static auto& registerer = globalATenDispatch()
+#ifndef USE_STATIC_DISPATCH
+}
+#endif
+}  // namespace ${Type}
+
+#ifndef USE_STATIC_DISPATCH
+namespace {
+static auto registerer = torch::RegisterOperators()
   ${function_registrations};
+}
+#endif
 
 }

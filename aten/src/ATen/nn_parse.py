@@ -42,11 +42,7 @@ def argument_to_declaration(param, func=None):
     arg['name'] = name
 
     if func is not None:
-        default_inits = func.get('default_init', {})
         wrap_dims = func.get('wrap_dim', {})
-        if name in default_inits:
-            # non constexpr defaults
-            arg['default_init'] = default_inits[name]
         if name in wrap_dims:
             arg['wrap_dim'] = wrap_dims[name]
 
@@ -225,7 +221,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check, backend_types):
+def function_info(name, arguments, cimpls, buffers, backends, inplace, backend_types):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -235,13 +231,14 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,
         'cimpls': cimpls,
-        'scalar_check': scalar_check,
         'variants': ['function'],
     }
 
@@ -257,7 +254,7 @@ def base_declaration(func, thnn_function, backends, backend_types, inplace=False
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'), backend_types)
+    return function_info(name, arguments, None, buffers, backends, inplace, backend_types)
 
 def forward_declaration(base, thnn_function, backend_types, inplace=False):
     name = '{}_forward'.format(base['name'])
@@ -277,12 +274,7 @@ def forward_declaration(base, thnn_function, backend_types, inplace=False):
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    scalar_check = base['scalar_check']
-    if scalar_check is not None:
-        output_arg_names = [arg['name'] for arg in arguments if arg.get('output', False)]
-        scalar_check = {k: v for (k, v) in scalar_check.items() if k in output_arg_names}
-
-    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check, backend_types)
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, backend_types)
 
 def backward_declaration(base, thnn_functions, backend_types):
     name = '{}_backward'.format(base['name'])
@@ -358,22 +350,8 @@ def backward_declaration(base, thnn_functions, backend_types):
         cimpls.append(cimpl)
 
     output_args = [arg for arg in arguments if arg.get('output', False)]
-    scalar_check_arg = base['scalar_check'] if base['scalar_check'] is not None else dict()
-    scalar_check = {k: v for (k, v) in scalar_check_arg.items() if k in (a['name'] for a in output_args)}
-    for arg in output_args:
-        # resize automatically sets scalar_check
-        if scalar_check.get(arg['name']) is not None or arg.get('resize', False):
-            pass
-        else:
-            base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in (a['name'] for a in arguments):
-                scalar_check[arg['name']] = base_name + '_->dim() == 0'
-            else:
-                raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
-                                  "does not exist.  Please explicitly specify scalar_check."
-                                  .format(arg['name'], name, base_name)))
 
-    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check, backend_types)
+    return function_info(name, arguments, cimpls, [], base['backends'], False, backend_types)
 
 
 def parse_nn_yaml(filename):

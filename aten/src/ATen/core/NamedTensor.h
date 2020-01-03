@@ -1,5 +1,4 @@
 #pragma once
-#ifdef BUILD_NAMEDTENSOR
 
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
@@ -27,11 +26,16 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     : names_(std::move(names)) {}
 
   std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
-    return c10::guts::make_unique<NamedTensorMeta>(names_);
+    return std::make_unique<NamedTensorMeta>(names_);
   }
 
   bool has_names() const;
   DimnameList names() const { return names_; }
+
+  // Used for an assertion in TensorImpl.h
+  int64_t slow_dim() const override {
+    return names_.size();
+  }
 
   void set_names(DimnameList new_names) {
     TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
@@ -58,16 +62,25 @@ struct CAFFE2_API NamesMode {
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
 struct CAFFE2_API NoNamesGuard {
-  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()), initialized(true) {
     NamesMode::set_enabled(false);
   }
   ~NoNamesGuard() {
+    if (initialized) {
+      reset();
+    }
+  }
+  void reset() {
+    TORCH_INTERNAL_ASSERT(initialized);
     NamesMode::set_enabled(prev_mode);
   }
  private:
   bool prev_mode;
+  bool initialized;
 };
 
+void check_names_valid_for(const Tensor& tensor, DimnameList names);
+void check_names_valid_for(int64_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
@@ -81,8 +94,10 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
+CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, bool validate_names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
+
+void check_names_valid_for(TensorImpl* impl, DimnameList names);
 
 // Returns true if the tensor's names exist and are not all 'None'.
 // Returns false if the tensor's names don't exist (were not allocated),
@@ -106,4 +121,3 @@ CAFFE2_API optional<DimnameList> get_opt_names(const TensorImpl* impl);
 } // namespace impl
 
 } // namespace at
-#endif

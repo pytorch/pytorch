@@ -6,9 +6,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {
@@ -36,7 +34,7 @@ Tensor& addcmul_out(
     const Tensor& tensor1,
     const Tensor& tensor2,
     Scalar value) {
-  checkBackend("addcmul_cpu", result, self.type().backend());
+  checkBackend("addcmul_cpu", result, self.options().backend());
   auto iter = at::TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(result);
@@ -45,9 +43,6 @@ Tensor& addcmul_out(
   iter.add_input(tensor2);
   iter.build();
   addcmul_stub(iter.device_type(), iter, value);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -74,7 +69,7 @@ Tensor& addcdiv_out(
     const Tensor& tensor1,
     const Tensor& tensor2,
     Scalar value) {
-  checkBackend("addcdiv_cpu", result, self.type().backend());
+  checkBackend("addcdiv_cpu", result, self.options().backend());
   auto iter = at::TensorIterator();
   iter.set_check_mem_overlap(true);
   iter.add_output(result);
@@ -83,9 +78,6 @@ Tensor& addcdiv_out(
   iter.add_input(tensor2);
   iter.build();
   addcdiv_stub(iter.device_type(), iter, value);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 

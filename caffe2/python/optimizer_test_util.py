@@ -231,7 +231,7 @@ class LRModificationTestBase(object):
         optimizer.set_lr_injection(0)
         self.assertEqual(optimizer.get_lr_injection(), 0)
 
-        # Test that setting the lr_injector properly propogates to the
+        # Test that setting the lr_injector properly propagates to the
         # lr_multiplier. Here, we have both lr_injector and norm_ratio that
         # affect the lr_multiplier
         workspace.RunNet(model.net.Proto().name)

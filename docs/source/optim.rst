@@ -100,6 +100,8 @@ Example::
             return loss
         optimizer.step(closure)
 
+.. _optimizer-algorithms:
+
 Algorithms
 ----------
 
@@ -128,7 +130,7 @@ Algorithms
 .. autoclass:: SGD
     :members:
 
-How to adjust Learning Rate
+How to adjust learning rate
 ---------------------------
 
 :mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
@@ -155,6 +157,8 @@ should write your code this way:
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:
+.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
+    :members:
 .. autoclass:: torch.optim.lr_scheduler.StepLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.MultiStepLR
@@ -168,4 +172,6 @@ should write your code this way:
 .. autoclass:: torch.optim.lr_scheduler.CyclicLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.OneCycleLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
     :members:

@@ -11,7 +11,9 @@ class Tensor;
 }
 namespace c10 {
 struct IValue;
-}
+struct OperatorName;
+} // namespace c10
+
 namespace torch {
 namespace jit {
 
@@ -25,6 +27,7 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
+struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
 
@@ -40,6 +43,10 @@ struct TORCH_API Code {
   }
   size_t num_inputs() const;
   size_t num_outputs() const;
+  const std::vector<c10::IValue>& constant_table() const;
+  const std::vector<Instruction>& instructions() const;
+  const std::vector<Node*>& instructions_source() const;
+  size_t register_size() const;
 
  private:
   std::shared_ptr<CodeImpl> pImpl;
@@ -91,6 +98,12 @@ struct InterpreterContinuation {
   Stack stack;
   bool grad_mode_enabled;
 };
+
+// what is the tensors type, including state from the current execution context
+// that modifies how the tensor behaves. For instance if no_grad is enabled
+// this will cause the TensorType to have requires_grad=False.
+TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
+    const at::Tensor& t);
 
 } // namespace jit
 } // namespace torch

@@ -33,6 +33,8 @@ class TestNamedTupleAPI(unittest.TestCase):
                 continue
             if not ret.startswith('('):
                 continue
+            if ret == '()':
+                continue
             ret = ret[1:-1].split(',')
             for r in ret:
                 r = r.strip()

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/hip/HIPConfig.h>
+#include <aten/src/ATen/hip/HIPConfig.h>
 
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>
@@ -44,7 +44,7 @@ namespace c10 { namespace hip {
 // we switch PyTorch to calling a HIP a HIP.
 //
 // When you add a new MasqueradingAsCUDA class/function, you need to
-// also update the rewrite rules in tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py
+// also update the rewrite rules in torch/utils/hipify/cuda_to_hip_mappings.py
 //
 //
 //
@@ -82,7 +82,10 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
   }
   Stream getStream(Device d) const noexcept override {
-    return getCurrentHIPStreamMasqueradingAsCUDA().unwrap();
+    return getCurrentHIPStreamMasqueradingAsCUDA(d.index()).unwrap();
+  }
+  Stream getDefaultStream(Device d) const override {
+    return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
   }
   Stream exchangeStream(Stream s) const noexcept override {
     HIPStreamMasqueradingAsCUDA cs(s);

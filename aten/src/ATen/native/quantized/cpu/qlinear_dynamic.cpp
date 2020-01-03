@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -14,10 +15,7 @@ template <bool ReluFused>
 class QLinearDynamicInt8 final : public torch::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  at::Tensor operator()(
-      at::Tensor input,
-      at::Tensor packed_weight,
-      c10::optional<Tensor> bias) {
+  at::Tensor operator()(at::Tensor input, at::Tensor packed_weight) {
     // fp32 * int8 -> fp32 (with quantization on activation, and dequantization
     // on the result).
 
@@ -76,42 +74,16 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     q_params.precision = precision;
 
-    // This operation does the following:
-    // 1) Quantizes the input matrix given the statistics we've calculated above
-    // 2) Creates a "row buffer" vector with offset values that must be added
-    //    to the integer matrix multiplication operation to ensure correctness.
-    //    This "row buffer" is also called the row offset, and it is needed when
-    //    we use affine quantization for weights.
-    // 3) Packs the resulting quantized matrix into vector-register and cache
-    //    friendly tiles.
-    //
-    //  Note this is not executed eagerly, but rather within the fbgemmPacked
-    //  call below.
-
-    fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
-        /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-        /*nRow=*/M,
-        /*nCol=*/K,
-        /*smat=*/input_ptr,
-        /*ld=*/K,
-        /*pmat=*/nullptr, // Currently, packA manages ownership of `pmat`.
-        /*scale=*/q_params.scale,
-        /*zero_pt=*/q_params.zero_point);
-    // TODO: Consider a way to pre-allocate and reuse
-    // pmat buffer.
-
     // ReQuantizeForFloat requires pointers to the zero point values,
     // since in the case of rowwise quantization these will be arrays rather
     // than scalars. But in this case, we're doing whole-tensor quantization so
     // we just pass a pointer to the scale values (and internally
     // ReQuantizeForFloat won't index past 0.
 
-    // This is the end of the pipeline, pass the resulting matrix through.
-    fbgemm::DoNothing<float, float> doNothingObj{};
-
     const float* bias_ptr = nullptr;
-    if (bias.has_value()) {
-      Tensor bias_vec = bias.value();
+    at::Tensor bias_vec;
+    if (pack_ptr.bias.has_value()) {
+      bias_vec = pack_ptr.bias.value();
       TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           bias_vec.size(0) == N,
@@ -120,7 +92,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
       auto bias_contig = bias_vec.contiguous();
       bias_ptr = bias_contig.data_ptr<float>();
     }
-
     // The resulting matrix here is 2-D, let's view it with the original
     // left hand dimensions of the input. Here are two examples:
     // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
@@ -128,51 +99,51 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     std::vector<int64_t> out_sizes = input.sizes().vec();
     out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
-    auto output = at::zeros(out_sizes, input.options().dtype(at::kFloat));
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
+    auto buffer = at::empty_like(output, output.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-    if (pack_ptr.q_scheme == kPerTensorAffine) {
-      // Process the per tensor quantization.
+    int num_tasks = at::get_num_threads();
+    at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+      // This operation does the following:
+      // 1) Quantizes the input matrix given the statistics we've calculated
+      // above
+      // 2) Creates a "row buffer" vector with offset values that must be
+      // added
+      //    to the integer matrix multiplication operation to ensure
+      //    correctness. This "row buffer" is also called the row offset, and it
+      //    is needed when we use affine quantization for weights.
+      // 3) Packs the resulting quantized matrix into vector-register and cache
+      //    friendly tiles.
       //
-      // After the uint8 * int8 matrix multiplication is performed, this
-      // operation does:
-      //  1) Add in row and column offsets to the rows and columns, respectively
-      //  2) Dequantize the results into floating point
-      //  3) Add in the bias term.
-      fbgemm::ReQuantizeForFloat<ReluFused> outputProcObj(
-          /*nextop=*/doNothingObj,
-          /*Aq_scale=*/q_params.scale,
-          /*Bq_scale=*/pack_ptr.w_scale.data(),
-          /*Aq_zero_point=*/q_params.zero_point,
-          /*Bq_zero_point=*/pack_ptr.w_zp.data(),
-          /*row_offsets=*/packA.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data(),
-          /*bias=*/bias_ptr,
-          /*nCol=*/N);
+      //  Note this is not executed eagerly, but rather within the fbgemmPacked
+      //  call below.
 
-      // Do the GEMM
-      fbgemm::fbgemmPacked(
-          /*packA=*/packA,
-          /*packB=*/*packB,
-          /*C=*/output.data_ptr<float>(),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
-          /*ldc=*/N,
-          /*outProcess=*/outputProcObj,
-          /*thread_id=*/0,
-          /*num_threads=*/1);
+      fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
+          /*trans=*/fbgemm::matrix_op_t::NoTranspose,
+          /*nRow=*/M,
+          /*nCol=*/K,
+          /*smat=*/input_ptr,
+          /*ld=*/K,
+          /*pmat=*/nullptr, // Currently, packA manages ownership of `pmat`.
+          /*scale=*/q_params.scale,
+          /*zero_pt=*/q_params.zero_point);
+      // TODO: Consider a way to pre-allocate and reuse
+      // pmat buffer.
 
-    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-      // Process the per channel quantization.
-      //
-      // After the uint8 * int8 matrix multiplication is performed, this
-      // operation does:
-      //  1) Add in row and column offsets to the rows and columns, respectively
-      //  2) Dequantize the results into floating point
-      //  3) Add in the bias term.
-      fbgemm::ReQuantizeForFloat<
-          ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL>
-          outputProcObj(
+      // This is the end of the pipeline, pass the resulting matrix through.
+      fbgemm::DoNothing<float, float> doNothingObj{};
+
+      for (int task_id = begin; task_id < end; ++task_id) {
+        if (pack_ptr.q_scheme == kPerTensorAffine) {
+          // Process the per tensor quantization.
+          //
+          // After the uint8 * int8 matrix multiplication is performed, this
+          // operation does:
+          //  1) Add in row and column offsets to the rows and columns,
+          //  respectively.
+          //  2) Dequantize the results into floating point.
+          //  3) Add in the bias term.
+          fbgemm::ReQuantizeForFloat<ReluFused> outputProcObj(
               /*nextop=*/doNothingObj,
               /*Aq_scale=*/q_params.scale,
               /*Bq_scale=*/pack_ptr.w_scale.data(),
@@ -183,25 +154,60 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
               /*bias=*/bias_ptr,
               /*nCol=*/N);
 
-      // Do the GEMM
-      fbgemm::fbgemmPacked(
-          /*packA=*/packA,
-          /*packB=*/*packB,
-          /*C=*/output.data_ptr<float>(),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
-          /*ldc=*/N,
-          /*outProcess=*/outputProcObj,
-          /*thread_id=*/0,
-          /*num_threads=*/1);
-    }
+          // Do the GEMM
+          fbgemm::fbgemmPacked(
+              /*packA=*/packA,
+              /*packB=*/*packB,
+              /*C=*/output.data_ptr<float>(),
+              /*C_buffer=*/buffer.data_ptr<int32_t>(),
+              /*ldc=*/N,
+              /*outProcess=*/outputProcObj,
+              /*thread_id=*/task_id,
+              /*num_threads=*/num_tasks);
+
+        } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+          // Process the per channel quantization.
+          //
+          // After the uint8 * int8 matrix multiplication is performed, this
+          // operation does:
+          //  1) Add in row and column offsets to the rows and columns,
+          //  respectively.
+          //  2) Dequantize the results into floating point.
+          //  3) Add in the bias term.
+          fbgemm::ReQuantizeForFloat<
+              ReluFused,
+              fbgemm::QuantizationGranularity::OUT_CHANNEL>
+              outputProcObj(
+                  /*nextop=*/doNothingObj,
+                  /*Aq_scale=*/q_params.scale,
+                  /*Bq_scale=*/pack_ptr.w_scale.data(),
+                  /*Aq_zero_point=*/q_params.zero_point,
+                  /*Bq_zero_point=*/pack_ptr.w_zp.data(),
+                  /*row_offsets=*/packA.getRowOffsetBuffer(),
+                  /*col_offsets=*/col_offsets.data(),
+                  /*bias=*/bias_ptr,
+                  /*nCol=*/N);
+
+          // Do the GEMM
+          fbgemm::fbgemmPacked(
+              /*packA=*/packA,
+              /*packB=*/*packB,
+              /*C=*/output.data_ptr<float>(),
+              /*C_buffer=*/buffer.data_ptr<int32_t>(),
+              /*ldc=*/N,
+              /*outProcess=*/outputProcObj,
+              /*thread_id=*/task_id,
+              /*num_threads=*/num_tasks);
+        }
+      }
+    });
 
     return output;
   }
 #else // USE_FBGEMM
   at::Tensor operator()(
       at::Tensor /* input */,
-      at::Tensor /* packed_weight */,
-      c10::optional<Tensor> /* bias */) {
+      at::Tensor /* packed_weight */) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -213,10 +219,10 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
 static auto registry =
     torch::RegisterOperators()
-        .op("quantized::fbgemm_linear_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
+        .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
-        .op("quantized::fbgemm_linear_relu_dynamic(Tensor X, Tensor W_prepack, Tensor? b) -> Tensor Y",
+        .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
 } // namespace

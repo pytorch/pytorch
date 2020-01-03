@@ -52,18 +52,18 @@ class BucketWeighted(ModelLayer):
 
     def add_ops(self, net):
         if self.bucket_boundaries is not None:
-            buckets = net.Bucketize(
+            buckets_int = net.Bucketize(
                 self.input_record.values(),
-                "buckets",
+                "buckets_int",
                 boundaries=self.bucket_boundaries
             )
         else:
             buckets = self.input_record.values()
-        buckets_int = net.Cast(
-            buckets,
-            "buckets_int",
-            to=core.DataType.INT32
-        )
+            buckets_int = net.Cast(
+                buckets,
+                "buckets_int",
+                to=core.DataType.INT32
+            )
         if self.hash_buckets:
             buckets_int = net.IndexHash(
                 buckets_int, "hashed_buckets_int", seed=0, modulo=self.shape

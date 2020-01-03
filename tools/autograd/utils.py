@@ -30,7 +30,7 @@ GENERATED_COMMENT = CodeTemplate(
     "@" + "generated from ${filename}")
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
-# occurence of a parameter in the derivative formula
+# occurrence of a parameter in the derivative formula
 IDENT_REGEX = r'(^|\W){}($|\W)'
 
 

@@ -1,12 +1,13 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 #include <stdint.h>
 #include <cstddef>
 
 namespace at {
 
-// The PtrTraits argument to the TensorAccessor/PackedTensorAccessor
+// The PtrTraits argument to the TensorAccessor/GenericPackedTensorAccessor
 // is used to enable the __restrict__ keyword/modifier for the data
 // passed to cuda.
 template <typename T>
@@ -62,7 +63,7 @@ protected:
 
 // The `TensorAccessor` is typically instantiated for CPU `Tensor`s using
 // `Tensor.accessor<T, N>()`.
-// For CUDA `Tensor`s, `PackedTensorAccessor` is used on the host and only
+// For CUDA `Tensor`s, `GenericPackedTensorAccessor` is used on the host and only
 // indexing on the device uses `TensorAccessor`s.
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 class TensorAccessor : public TensorAccessorBase<T,N,PtrTraits,index_t> {
@@ -103,7 +104,7 @@ public:
 };
 
 
-// PackedTensorAccessorBase and PackedTensorAccessor are used on for CUDA `Tensor`s on the host
+// GenericPackedTensorAccessorBase and GenericPackedTensorAccessor are used on for CUDA `Tensor`s on the host
 // and as
 // In contrast to `TensorAccessor`s, they copy the strides and sizes on instantiation (on the host)
 // in order to transfer them on the device when calling kernels.
@@ -112,10 +113,10 @@ public:
 // Instantiation from data, sizes, strides is only needed on the host and std::copy isn't available
 // on the device, so those functions are host only.
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-class PackedTensorAccessorBase {
+class GenericPackedTensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  C10_HOST PackedTensorAccessorBase(
+  C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
@@ -126,7 +127,7 @@ public:
 
   // if index_t is not int64_t, we want to have an int64_t constructor
   template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
-  C10_HOST PackedTensorAccessorBase(
+  C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const source_index_t* sizes_,
       const source_index_t* strides_)
@@ -156,23 +157,23 @@ protected:
 };
 
 template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-class PackedTensorAccessor : public PackedTensorAccessorBase<T,N,PtrTraits,index_t> {
+class GenericPackedTensorAccessor : public GenericPackedTensorAccessorBase<T,N,PtrTraits,index_t> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  C10_HOST PackedTensorAccessor(
+  C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
-      : PackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
+      : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   // if index_t is not int64_t, we want to have an int64_t constructor
   template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
-  C10_HOST PackedTensorAccessor(
+  C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const source_index_t* sizes_,
       const source_index_t* strides_)
-      : PackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
+      : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   C10_DEVICE TensorAccessor<T, N - 1, PtrTraits, index_t> operator[](index_t i) {
     index_t* new_sizes = this->sizes_ + 1;
@@ -188,22 +189,22 @@ public:
 };
 
 template<typename T, template <typename U> class PtrTraits, typename index_t>
-class PackedTensorAccessor<T,1,PtrTraits,index_t> : public PackedTensorAccessorBase<T,1,PtrTraits,index_t> {
+class GenericPackedTensorAccessor<T,1,PtrTraits,index_t> : public GenericPackedTensorAccessorBase<T,1,PtrTraits,index_t> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  C10_HOST PackedTensorAccessor(
+  C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const index_t* sizes_,
       const index_t* strides_)
-      : PackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
+      : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   // if index_t is not int64_t, we want to have an int64_t constructor
   template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
-  C10_HOST PackedTensorAccessor(
+  C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const source_index_t* sizes_,
       const source_index_t* strides_)
-      : PackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
+      : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   C10_DEVICE T & operator[](index_t i) {
     return this->data_[this->strides_[0] * i];
@@ -213,4 +214,19 @@ public:
   }
 };
 
-}
+
+// Can't put this directly into the macro function args because of commas
+#define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
+
+// Old name for `GenericPackedTensorAccessor`
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+C10_DEFINE_DEPRECATED_USING(PackedTensorAccessor, AT_X)
+
+#undef AT_X
+
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+using PackedTensorAccessor32 = GenericPackedTensorAccessor<T, N, PtrTraits, int32_t>;
+
+template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+using PackedTensorAccessor64 = GenericPackedTensorAccessor<T, N, PtrTraits, int64_t>;
+} // namespace at

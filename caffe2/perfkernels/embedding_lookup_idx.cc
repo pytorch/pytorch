@@ -1,6 +1,8 @@
 #include "caffe2/perfkernels/embedding_lookup_idx.h"
 
-#include "caffe2/core/types.h"
+#include <c10/util/Half.h>
+#include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/perfkernels/common.h"
 
 namespace caffe2 {
@@ -73,7 +75,7 @@ static bool EmbeddingLookupGenericSlowIdx(
 }
 
 // Proxy back to generic implementation
-#define EMBEDDING_SPECIALIZATION(                                                                     \
+#define EMBEDDING_IDX_SPECIALIZATION(                                                                 \
     IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                     \
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
@@ -207,20 +209,20 @@ static bool EmbeddingLookupGenericSlowIdx(
         "the size of the indices tensor, but it appears not.");                                       \
   }
 
-EMBEDDING_SPECIALIZATION(int32_t, float, float, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, float, float, float, false);
-EMBEDDING_SPECIALIZATION(int32_t, half, at::Half, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, half, at::Half, float, false);
-EMBEDDING_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
 
-EMBEDDING_SPECIALIZATION(int32_t, float, float, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, float, float, float, true);
-EMBEDDING_SPECIALIZATION(int32_t, half, at::Half, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, half, at::Half, float, true);
-EMBEDDING_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
 
-#undef EMBEDDING_SPECIALIZATION
+#undef EMBEDDING_IDX_SPECIALIZATION
 
 } // namespace caffe2

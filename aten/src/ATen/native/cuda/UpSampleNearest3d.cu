@@ -26,9 +26,12 @@ __global__ void upsample_nearest3d_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* output) {
+    scalar_t* output,
+    float depth_scale,
+    float height_scale,
+    float width_scale) {
 
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
@@ -37,19 +40,15 @@ __global__ void upsample_nearest3d_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
-  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
-
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  int src_z = nearest_neighbor_compute_source_index(depth_scale, dst_z, src_dim_d);
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+  int src_y = nearest_neighbor_compute_source_index(height_scale, dst_y, src_dim_h);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x = nearest_neighbor_compute_source_index(width_scale, dst_x, src_dim_w);
 
-  size_t src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
+  int src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
       src_y * src_dim_w + src_x;
   for (int b = 0; b < dim_b; b++) {
     output[dst_idx] = input[src_idx];
@@ -71,9 +70,12 @@ __global__ void upsample_nearest3d_backward_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* grad_i) {
+    scalar_t* grad_i,
+    float depth_scale,
+    float height_scale,
+    float width_scale) {
 
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
     return;
 
@@ -82,27 +84,24 @@ __global__ void upsample_nearest3d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
-  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
-  int src_z_up = nearest_neighbor_compute_source_index(scale_factor, dst_z+1, src_dim_d+1);
+  int src_z = nearest_neighbor_compute_source_index(depth_scale, dst_z, src_dim_d);
+  int src_z_up = nearest_neighbor_compute_source_index(depth_scale, dst_z+1, src_dim_d+1);
 
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
+  int src_y = nearest_neighbor_compute_source_index(height_scale, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_compute_source_index(height_scale, dst_y+1, src_dim_h+1);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+  int src_x = nearest_neighbor_compute_source_index(width_scale, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(width_scale, dst_x+1, src_dim_w+1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
     for (int z = src_z; z < src_z_up; z++) {
       for (int y = src_y; y < src_y_up; y++) {
         for (int x = src_x; x < src_x_up; x++) {
-          size_t src_idx = b * dim_c * src_c_stride + c * src_c_stride +
+          int src_idx = b * dim_c * src_c_stride + c * src_c_stride +
               z * src_dim_h * src_dim_w + y * src_dim_w + x;
           grad += grad_o[src_idx];
         }
@@ -116,7 +115,10 @@ __global__ void upsample_nearest3d_backward_out_frame(
 static void upsample_nearest3d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
 
@@ -163,6 +165,9 @@ static void upsample_nearest3d_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
+
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
@@ -170,6 +175,10 @@ static void upsample_nearest3d_out_cuda_template(
 
         auto idata = input.data_ptr<scalar_t>();
         auto odata = output.data_ptr<scalar_t>();
+
+        const float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
+        const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
+        const float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
         upsample_nearest3d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
             idata,
@@ -181,7 +190,10 @@ static void upsample_nearest3d_out_cuda_template(
             output_depth,
             output_height,
             output_width,
-            odata);
+            odata,
+            depth_scale,
+            height_scale,
+            width_scale);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -191,7 +203,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -239,6 +254,9 @@ static void upsample_nearest3d_backward_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
+
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
@@ -246,6 +264,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
 
         auto idata = grad_input.data_ptr<scalar_t>();
         auto odata = grad_output.data_ptr<scalar_t>();
+
+        float depth_scale = compute_scales_value_backwards<float>(scales_d, output_depth, input_depth);
+        float height_scale = compute_scales_value_backwards<float>(scales_h, output_height, input_height);
+        float width_scale = compute_scales_value_backwards<float>(scales_w, output_width, input_width);
 
         upsample_nearest3d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
@@ -258,7 +280,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
                 input_depth,
                 input_height,
                 input_width,
-                idata);
+                idata,
+                depth_scale,
+                height_scale,
+                width_scale);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -269,14 +294,18 @@ static void upsample_nearest3d_backward_out_cuda_template(
 Tensor& upsample_nearest3d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size) {
-  upsample_nearest3d_out_cuda_template(output, input, output_size);
+    IntArrayRef output_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  upsample_nearest3d_out_cuda_template(output, input, output_size, scales_d, scales_h, scales_w);
   return output;
 }
 
-Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size) {
-  Tensor output = at::empty_like(input);
-  upsample_nearest3d_out_cuda_template(output, input, output_size);
+Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size,
+                               c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w) {
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_nearest3d_out_cuda_template(output, input, output_size, scales_d, scales_h, scales_w);
   return output;
 }
 
@@ -284,19 +313,25 @@ Tensor& upsample_nearest3d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
   return grad_input;
 }
 
 Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    IntArrayRef input_size) {
-  Tensor grad_input = at::empty_like(grad_output);
+    IntArrayRef input_size,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
   return grad_input;
 }
 

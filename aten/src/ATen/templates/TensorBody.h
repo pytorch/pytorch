@@ -11,14 +11,12 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/core/NamedTensor.h>
-#endif
 
 namespace caffe2 {
 class Tensor;
@@ -33,6 +31,12 @@ class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
+namespace torch { namespace autograd {
+
+struct Node;
+
+}} // namespace torch::autograd
+
 namespace at {
 
 class Tensor;
@@ -42,7 +46,14 @@ struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
+using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+
+namespace impl {
+inline bool variable_excluded_from_dispatch() {
+  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+}
+}
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -173,7 +184,6 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef BUILD_NAMEDTENSOR
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
   optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
@@ -182,16 +192,20 @@ class CAFFE2_API Tensor {
   DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
-#endif
   int64_t ndimension() const {
     return dim();
   }
+
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
   }
 
+  bool is_non_overlapping_and_dense() const {
+    return impl_->is_non_overlapping_and_dense();
+  }
+
   at::MemoryFormat suggest_memory_format() const {
-    if (impl_->is_strides_like_channels_last()) {
+    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;
@@ -206,6 +220,10 @@ class CAFFE2_API Tensor {
     return impl_->numel() * impl_->itemsize();
   }
 
+  int64_t numel() const {
+    return impl_->numel();
+  }
+
   // Length of one array element in bytes.  This is the traditional
   // Numpy naming.
   size_t itemsize() const {
@@ -217,14 +235,14 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
+  C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()),
-        scalar_type(),
-        is_variable());
+        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
+        scalar_type());
   }
-  TensorTypeId type_id() const {
-    return impl_->type_id();
+  TensorTypeSet type_set() const {
+    return impl_->type_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -241,10 +259,9 @@ class CAFFE2_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
-  /// Defined in Type.h because of include order issues.
+  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
-    return impl_->is_variable();
+    return !at::impl::variable_excluded_from_dispatch();
   }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
@@ -274,14 +291,16 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
-#ifdef BUILD_NAMEDTENSOR
+  /// If a tensor is a quantized tensor, returns its quantizer
+  /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
+  QuantizerPtr quantizer() const;
+
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
   NamedTensorMeta* get_named_tensor_meta();
-#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -317,19 +336,42 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
-  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // Return a `GenericPackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
   // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
   // cast the data pointer to a __restrict__ pointer.
-  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // In order to use this, your CUDA kernel has to take a corresponding GenericPackedTensorAccessor
   // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> generic_packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
-    return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
+    return GenericPackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data_ptr<T>()),sizes().data(),strides().data());
   }
-  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  GenericPackedTensorAccessor<T,N> generic_packed_accessor() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int32_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() const& {
+    return generic_packed_accessor<T,N,PtrTraits,int64_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
+
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
+    return generic_packed_accessor<T,N,PtrTraits,index_t>();
+  }
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
+  GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -389,6 +431,80 @@ class CAFFE2_API Tensor {
     return func(*this, std::forward<Args>(params)...);
   }
 
+  /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
+  /// to be used from functions that need to access the `Variable`'s equivalent `Tensor`
+  /// (i.e. `Tensor` that shares the same storage and tensor metadata with the `Variable`).
+  ///
+  /// One notable difference with the legacy `.data()` function is that changes to the
+  /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
+  /// will not update the original `Variable`, due to the fact that this function
+  /// shallow-copies the `Variable`'s underlying TensorImpl.
+  at::Tensor tensor_data() const;
+
+  /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
+  /// in Python, which create a new `Variable` that shares the same storage and
+  /// tensor metadata with the original `Variable`, but with a completely new
+  /// autograd history.
+  ///
+  /// NOTE: If we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a variable created from `var.variable_data()`, those
+  /// changes will not update the original variable `var`. In `.variable_data()`, we set
+  /// `allow_tensor_metadata_change_` to false to make such changes explicitly illegal,
+  /// in order to prevent users from changing metadata of `var.variable_data()`
+  /// and expecting the original variable `var` to also be updated.
+  at::Tensor variable_data() const;
+
+  // Gradient Node and Edges
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Gets the gradient function of the `Variable`. If this is a leaf variable,
+  /// the pointer returned will be null.
+  ///
+  /// For View Variables:
+  /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
+  /// re-create the grad_fn to express the up-to-date view relationship between
+  /// this and the base Variable.
+  const std::shared_ptr<torch::autograd::Node>& grad_fn() const;
+
+  // Hooks
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  template <typename T>
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+
+  // Returns the index of the hook in the list which can be used to remove hook
+  // Register a hook with no return value
+  template <typename T>
+  hook_return_void_t<T> register_hook(T&& hook) const;
+  // Register a hook with variable return value
+  template <typename T>
+  hook_return_var_t<T> register_hook(T&& hook) const;
+
+private:
+  unsigned _register_hook(std::function<Tensor(const Tensor&)> hook) const;
+
+public:
+
+  // Remove hook at given position
+  void remove_hook(unsigned pos) const;
+
+  // View Variables
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Returns true if this `Variable` is a view of another `Variable`.
+  bool is_view() const;
+
+  /// Returns the `Variable` that this `Variable` is a view of. If this
+  /// `Variable` is not a view, throw a `std::runtime_error`.
+  const Tensor& base() const;
+
+  // Miscellaneous
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  const std::string& name() const;
+
 protected:
   friend class ::caffe2::Tensor;
 
@@ -397,7 +513,7 @@ protected:
 };
 
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
+// Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
 // requested intrusive_ptr type.
 template <typename T, typename... Args>
@@ -405,23 +521,10 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 
-inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
-}
-inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
 } // namespace detail
+
+static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+  return legacyExtractTypeId(t.type_set());
+}
 
 } // namespace at

@@ -1,6 +1,6 @@
 import torch
 import torch.utils.hooks
-from torch.namedtensor import _check_serializing_named_tensor
+from torch._namedtensor_internals import check_serializing_named_tensor
 import os
 import threading
 import errno
@@ -138,7 +138,7 @@ def reduce_tensor(tensor):
                            "If you just want to transfer the data, call detach() on the tensor "
                            "before serializing (e.g., putting it on the queue).")
 
-    _check_serializing_named_tensor(tensor)
+    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
@@ -208,7 +208,7 @@ def reduce_tensor(tensor):
     # On receiver side:
     #   1. Get the devPtr of the MemHandle to access the memory, reconstruct a storage
     #      of the same type using (basePtr, offset, size).
-    #   2. we can reconstruct the tensor on top of the recontructed storage
+    #   2. we can reconstruct the tensor on top of the reconstructed storage
     #   Tensor(size=0x040, offset=0x020, storage=Storage(data=basePtr+0xA100, size=0x0100))
     #
     # This strategy has a few implications:

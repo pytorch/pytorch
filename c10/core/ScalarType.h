@@ -166,6 +166,10 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   _(c10::quint8, QUInt8)         \
   _(c10::qint32, QInt32)
 
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
+
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
   case ScalarType::name:         \
@@ -307,8 +311,56 @@ static inline ScalarType toUnderlying(ScalarType t) {
   }
 }
 
+static inline bool isSignedType(ScalarType t) {
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
+  #define CASE_SIGNED(ctype, name) \
+    case ScalarType::name:                       \
+      return std::numeric_limits<ctype>::is_signed;
+
+  switch (t) {
+    AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
+  #undef CASE_SIGNED
+}
+
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
+}
+
+static inline ScalarType toValueType(ScalarType t) {
+  switch (t) {
+    case ScalarType::ComplexFloat:
+      return ScalarType::Float;
+    case ScalarType::ComplexDouble:
+      return ScalarType::Double;
+    default:
+      return t;
+  }
+}
+
+// see tensor_attributes.rst for detailed explanation and examples
+// of casting rules.
+static inline bool canCast(const ScalarType from, const ScalarType to) {
+  // We disallow float -> integral, e.g., int_tensor *= float is disallowed.
+  if (isFloatingType(from) && isIntegralType(to, false)) {
+    return false;
+  }
+
+  // Treat bool as a distinct "category," to be consistent with type promotion
+  // rules (e.g. `bool_tensor + 5 -> int64_tensor`). If `5` was in the same category
+  // as `bool_tensor`, we would not promote.
+  // Differing categories implies `bool_tensor += 5` is disallowed.
+  //
+  // NB: numpy distinguishes "unsigned" as a category to get the desired
+  // `bool_tensor + 5 -> int64_tensor` behavior. We don't, because:
+  // * We don't want the performance hit of checking the runtime sign of Scalars.
+  // * `uint8_tensor + 5 -> int64_tensor` would be undesirable.
+  if (from != ScalarType::Bool && to == ScalarType::Bool) {
+    return false;
+  }
+  return true;
 }
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
@@ -321,15 +373,14 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto c2 = ScalarType::ComplexHalf;
+  constexpr auto c4 = ScalarType::ComplexFloat;
+  constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto b1 = ScalarType::Bool;
   constexpr auto bf = ScalarType::BFloat16;
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
-  }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
 
   // For QInt types, we only allow exact match
@@ -339,7 +390,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 
   if (isQIntType(a) || isQIntType(b)) {
     AT_ERROR(
-        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
+        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be, offending types: ",
+        toString(a),
+        " ",
+        toString(b));
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
@@ -348,21 +402,21 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
         /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
-        /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1, ud, ud, ud, ud},
-        /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1, ud, ud, ud, ud},
-        /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2, ud, ud, ud, ud},
-        /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, ud, ud, i4, ud, ud, ud, ud},
-        /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, ud, ud, i8, ud, ud, ud, ud},
-        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2, ud, ud, ud, ud},
-        /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4, ud, ud, ud, ud},
-        /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8, ud, ud, ud, ud},
-        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* c4 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* c8 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+        /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, ud},
+        /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, ud},
+        /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, ud},
+        /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, ud},
+        /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, ud},
+        /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
+        /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
+        /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
+        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
+        /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
+        /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
         /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+        /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* bf */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];

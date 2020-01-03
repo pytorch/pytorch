@@ -82,25 +82,30 @@ class C10_API Error : public std::exception {
   }
 };
 
-class C10_API Warning {
-  using handler_t =
-      void (*)(const SourceLocation& source_location, const char* msg);
-
- public:
-  /// Issue a warning with a given message. Dispatched to the current
-  /// warning handler.
-  static void warn(SourceLocation source_location, std::string msg);
-  /// Sets the global warning handler. This is not thread-safe, so it should
-  /// generally be called once during initialization.
-  static void set_warning_handler(handler_t handler);
+class C10_API WarningHandler {
+  public:
+  virtual ~WarningHandler() noexcept(false) {}
   /// The default warning handler. Prints the message to stderr.
-  static void print_warning(
+  virtual void process(
       const SourceLocation& source_location,
-      const char* msg);
-
- private:
-  static handler_t warning_handler_;
+      const std::string& msg);
 };
+
+namespace Warning {
+
+/// Issue a warning with a given message. Dispatched to the current
+/// warning handler.
+C10_API void warn(SourceLocation source_location, const std::string& msg);
+/// Sets the global warning handler. This is not thread-safe, so it should
+/// generally be called once during initialization or while holding the GIL
+/// for programs that use python.
+/// User is responsible for keeping the WarningHandler alive until
+/// it is not needed.
+C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
+/// Gets the global warning handler.
+C10_API WarningHandler* get_warning_handler() noexcept(true);
+
+} // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
@@ -137,6 +142,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
 // error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
 // Here the static cast is used to pass the build.
+// if this is used inside a lambda the __func__ macro expands to operator(),
+// which isn't very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
@@ -189,7 +196,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -231,7 +238,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -252,11 +259,23 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+
+// Debug only version of TORCH_CHECK. This macro only checks in debug
+// build, and does nothing in release build.
+#ifdef NDEBUG
+// Optimized version - generates no code.
+#define TORCH_DCHECK(...) \
+  while (false)           \
+  TORCH_CHECK(__VA_ARGS__)
+#else
+#define TORCH_DCHECK(...) TORCH_CHECK(__VA_ARGS__)
+#endif
+
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_INDEX(cond, ...)          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -289,7 +308,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // arguments which are concatenated into the warning message using operator<<
 //
 #define TORCH_WARN_ONCE(...) \
-  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [] { \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
     ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
     return true; \
   }()
