@@ -145,18 +145,9 @@ void PyWarningHandler::process(
 };
 
 PyWarningHandler::PyWarningHandler() noexcept(true):
-      prev_handler_(c10::Warning::get_warning_handler()) {
+      prev_handler_(c10::Warning::get_warning_handler()),
+      in_exception_(false) {
   c10::Warning::set_warning_handler(this);
-}
-
-static bool _in_uncaught_exception() {
-  // std::uncaught_exception was deprecated in C++17 and replaced with
-  // std::uncaught_exceptions
-#if __cplusplus >= 201703L
-  return std::uncaught_exceptions() > 0;
-#else
-  return std::uncaught_exception();
-#endif
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
@@ -165,12 +156,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
   if(warning_buffer_.size() > 0) {
-    pybind11::gil_scoped_acquire gil;
-
-    PyObject *ptype, *pvalue, *ptraceback;
-    PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-
-    if(ptype || _in_uncaught_exception()) {
+    if(in_exception_) {
       // An error happened after the warning
       // Simply handle with the previous handler
       for(const auto& warning: warning_buffer_) {
@@ -179,11 +165,8 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         c10::Warning::warn(source_location, msg);
       }
       warning_buffer_.clear();
-      // The parent function already returns an error
-      // We only restore the error and exit the
-      // destructor normally
-      PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
+      pybind11::gil_scoped_acquire gil;
       auto result = 0;
       for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
@@ -216,4 +199,3 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
 
 
 } // namespace torch
-

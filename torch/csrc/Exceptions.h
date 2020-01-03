@@ -40,7 +40,8 @@
 /// cpp warnings.
 #define HANDLE_TH_ERRORS                                             \
   try {                                                              \
-    torch::PyWarningHandler __enforce_warning_buffer;
+    torch::PyWarningHandler __enforce_warning_buffer;                \
+    try {
 
 // Only catch torch-specific exceptions
 #define CATCH_TH_ERRORS(retstmnt)                                    \
@@ -73,6 +74,11 @@
     }
 
 #define END_HANDLE_TH_ERRORS_PYBIND                                      \
+    }                                                                    \
+    catch(...) {                                                         \
+      __enforce_warning_buffer.set_in_exception();                       \
+      throw;                                                             \
+    }                                                                    \
   }                                                                      \
   catch (py::error_already_set & e) {                                    \
     throw;                                                               \
@@ -86,6 +92,11 @@
   CATCH_ALL_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
+    }                                                                \
+    catch(...) {                                                     \
+      __enforce_warning_buffer.set_in_exception();                   \
+      throw;                                                         \
+    }                                                                \
   }                                                                  \
   CATCH_ALL_ERRORS(return retval)
 
@@ -249,6 +260,16 @@ public:
   void process(const at::SourceLocation &source_location,
                const std::string &msg) override;
 
+  /** Call if an exception has been thrown
+
+   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  std::uncaught_exception is buggy on some platforms and generally
+   *  unreliable across dynamic library calls.
+   */
+  void set_in_exception() {
+    in_exception_ = true;
+  }
+
 private:
   using warning_buffer_t =
     std::vector<std::pair<c10::SourceLocation, std::string>>;
@@ -256,6 +277,7 @@ private:
   warning_buffer_t warning_buffer_;
 
   at::WarningHandler* prev_handler_;
+  bool in_exception_;
 };
 
 } // namespace torch
