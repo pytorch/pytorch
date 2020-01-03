@@ -265,7 +265,7 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
   // (marked by the 0x80 0x02 bytes at the start)
-  char first_short[2];
+  char first_short[3];
   rai->read(
       /*pos=*/0,
       /*buf=*/&first_short,
