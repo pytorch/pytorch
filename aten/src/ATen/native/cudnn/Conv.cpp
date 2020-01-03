@@ -139,9 +139,7 @@ bool support_channels_last(
   }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
   return (cudnn_version >= 7603) &&
-  (
-   // weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
-   input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+  (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 // ---------------------------------------------------------------------
