@@ -1,5 +1,5 @@
 from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests, onlyCUDA
+from common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
 import torch
 from torch import tensor
 import unittest
@@ -104,6 +104,28 @@ class TestIndexing(TestCase):
         self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
         self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
         self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bool, torch.bfloat16)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bool)
+    def test_index_put_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        indices = (torch.tensor([0, 2, 1]),)
+        res = src.index_put_(indices, vals, accumulate=True)
+        self.assertEqual(res.shape, src.shape)
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
+    def test_index_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        # test index
+        res = src[[0, 2, 1], :, :]
+        self.assertEqual(res.shape, src.shape)
+        # test index_put, no accum
+        src[[0, 2, 1], :, :] = res
+        self.assertEqual(res.shape, src.shape)
 
     def test_int_indices2d(self, device):
         # From the NumPy indexing example

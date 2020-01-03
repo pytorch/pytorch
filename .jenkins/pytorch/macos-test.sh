@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
-pip install -q hypothesis "librosa>=0.6.2" psutil
+pip install -q hypothesis==4.57.1 "librosa>=0.6.2" psutil
 
 # TODO move this to docker
 pip install unittest-xml-reporting
@@ -102,7 +102,6 @@ test_custom_script_ops() {
 
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
-  python test_custom_classes.py -v
   python model.py --export-script-module=model.pt
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt

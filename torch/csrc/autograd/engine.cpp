@@ -738,7 +738,6 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     return graph_task->future_result_;
   } else {
     graph_task->owner_ = worker_device;
-    ++total_depth;
     if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
@@ -747,21 +746,26 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       // completed in mark_graph_task_completed.
       return graph_task->future_result_;
     } else {
+      // Total depth needs to be updated only in this codepath, since it is
+      // not used in the block above (when we call add_thread_pool_task).
+      ++total_depth;
+
       // Get back to work while we wait for our new graph_task to
       // complete!
       ++current_depth;
       lock.unlock();
       thread_main(graph_task, /* reentrant_thread */ true);
       --current_depth;
-    }
-    --total_depth;
-  }
+      --total_depth;
 
-  // Check for errors, call callbacks and sync streams. We return a completed
-  // future here since 'thread_main' above is a call blocking an autograd engine
-  // thread and not the thread the user called 'execute_with_graph_task' from.
-  return std::make_shared<FutureVariableList>(
-      graph_task_exec_post_processing(graph_task));
+      // Check for errors, call callbacks and sync streams. We return a
+      // completed future here since 'thread_main' above is a call blocking an
+      // autograd engine thread and not the thread the user called
+      // 'execute_with_graph_task' from.
+      return std::make_shared<FutureVariableList>(
+          graph_task_exec_post_processing(graph_task));
+    }
+  }
 }
 
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
