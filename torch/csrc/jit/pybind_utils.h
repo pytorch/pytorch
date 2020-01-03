@@ -10,11 +10,8 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
-<<<<<<< HEAD
 #include <torch/csrc/jit/python_custom_class.h>
-=======
 #include <torch/csrc/jit/python_ivalue.h>
->>>>>>> 2716a191c8... [jit] Enable IValue to hold a PyObject
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
