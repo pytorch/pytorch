@@ -17,9 +17,7 @@ using namespace torch::jit::fuser;
 // 2. They start with the prefix `test`
 void testCPUFusion() {
 
-  /*
-  Fusion container;
-  torch::jit::fuser::Float* f = new Float{2.f, container};
+  torch::jit::fuser::Float* f = new Float{2.f};
   
   const auto val_type = f->type();
   std::cout << "val type: " << val_type << std::endl;
@@ -39,13 +37,15 @@ void testCPUFusion() {
   Float* f1 = static_cast<Float*>(v);
 
   Fusion fusion;
-  torch::jit::fuser::Float* f2 = new Float{3.f, container};
-  Add* add = new Add{f, f2, container};
 
+  Float* f3 = new Float();
+  Float* f2 = new Float{3.f};
+  Add* add = new Add(f3, f, f2);
 
-  IRPrinter* printer = new IRPrinter{};
-  add->dispatch(printer);
-  */
+  std::cout<<add<<std::endl;
+
+  //add->dispatch(printer);
+  
 }
 
 void testGPUFusion() {
