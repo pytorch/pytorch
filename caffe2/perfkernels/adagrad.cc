@@ -72,7 +72,7 @@ void rowwise_adagrad_update__base(
 }
 
 // version without prefetching
-decltype(adagrad_update__base) adagrad_update__avx_f16c;
+decltype(adagrad_update__base) adagrad_update__avx2_fma;
 void adagrad_update(
     int N,
     const float* w,
@@ -83,11 +83,11 @@ void adagrad_update(
     float epsilon,
     float decay,
     float lr) {
-  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
+  AVX2_FMA_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
   BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
 }
 
-decltype(adagrad_update_prefetch__base) adagrad_update_prefetch__avx_f16c;
+decltype(adagrad_update_prefetch__base) adagrad_update_prefetch__avx2_fma;
 void adagrad_update_prefetch(
     int N,
     const float* w,
@@ -106,7 +106,7 @@ void adagrad_update_prefetch(
 
     float epsilon,
     float lr) {
-  AVX_F16C_DO(
+  AVX2_FMA_DO(
       adagrad_update_prefetch,
       N,
       w,
@@ -139,7 +139,7 @@ void adagrad_update_prefetch(
 // Version with prefetching for embeddings and
 // momentum using fp16
 decltype(
-    adagrad_fp16_update_prefetch__base) adagrad_fp16_update_prefetch__avx_f16c;
+    adagrad_fp16_update_prefetch__base) adagrad_fp16_update_prefetch__avx2_fma;
 void adagrad_fp16_update_prefetch(
     int N,
     const at::Half* w,
@@ -153,7 +153,7 @@ void adagrad_fp16_update_prefetch(
     at::Half* nh_n, // prefetch ptr
     float epsilon,
     float lr) {
-  AVX_F16C_DO(
+  AVX2_FMA_DO(
       adagrad_fp16_update_prefetch,
       N,
       w,
@@ -183,7 +183,7 @@ void adagrad_fp16_update_prefetch(
       lr);
 }
 
-decltype(rowwise_adagrad_update__base) rowwise_adagrad_update__avx_f16c;
+decltype(rowwise_adagrad_update__base) rowwise_adagrad_update__avx2_fma;
 void rowwise_adagrad_update(
     int N,
     float* w,
@@ -196,13 +196,13 @@ void rowwise_adagrad_update(
 
     float epsilon,
     float lr) {
-  AVX_F16C_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
+  AVX2_FMA_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
   BASE_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
 }
 
 SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
 
-decltype(sparse_adagrad_int32_t__base) sparse_adagrad_int32_t__avx_f16c;
+decltype(sparse_adagrad_int32_t__base) sparse_adagrad_int32_t__avx2_fma;
 template <>
 int sparse_adagrad(
     int num_rows,
@@ -216,7 +216,7 @@ int sparse_adagrad(
     float* nh,
     float epsilon,
     float lr) {
-  AVX_F16C_DO(
+  AVX2_FMA_DO(
       sparse_adagrad_int32_t,
       num_rows,
       block_size,
@@ -246,7 +246,7 @@ int sparse_adagrad(
 
 SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
 
-decltype(sparse_adagrad_int64_t__base) sparse_adagrad_int64_t__avx_f16c;
+decltype(sparse_adagrad_int64_t__base) sparse_adagrad_int64_t__avx2_fma;
 template <>
 int sparse_adagrad(
     int num_rows,
@@ -260,7 +260,7 @@ int sparse_adagrad(
     float* nh,
     float epsilon,
     float lr) {
-  AVX_F16C_DO(
+  AVX2_FMA_DO(
       sparse_adagrad_int64_t,
       num_rows,
       block_size,

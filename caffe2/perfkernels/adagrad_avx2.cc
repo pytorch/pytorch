@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 // version without prefetching
-void adagrad_update__avx_f16c(
+void adagrad_update__avx2_fma(
     int N,
     const float* w,
     const float* g,
@@ -24,23 +24,23 @@ void adagrad_update__avx_f16c(
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
 
-    __m256 nhi = _mm256_add_ps(
-        _mm256_mul_ps(_mm256_set1_ps(decay), hi), _mm256_mul_ps(gi, gi));
+    __m256 nhi =
+        _mm256_fmadd_ps(gi, gi, _mm256_mul_ps(_mm256_set1_ps(decay), hi));
     _mm256_storeu_ps(nh + i, nhi);
-    __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    _mm256_storeu_ps(
-        nw + i, _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp)));
+    __m256 eff_lr = _mm256_div_ps(
+        _mm256_set1_ps(lr),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    _mm256_storeu_ps(nw + i, _mm256_fmadd_ps(gi, eff_lr, wi));
   }
 
   for (; i < N; ++i) {
     float gi = g[i];
-    float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
+    float hi = nh[i] = std::fma(gi, gi, decay * h[i]);
+    nw[i] = std::fma(lr / (std::sqrt(hi) + epsilon), gi, w[i]);
   }
 }
 
-void adagrad_update_prefetch__avx_f16c(
+void adagrad_update_prefetch__avx2_fma(
     int N,
     const float* w,
     const float* w_n, // prefetch ptr
@@ -63,7 +63,7 @@ void adagrad_update_prefetch__avx_f16c(
 }
 
 // Compute adagrad sparse, assumes embedding and momentum are at::Half
-void adagrad_fp16_update_prefetch__avx_f16c(
+void adagrad_fp16_update_prefetch__avx2_fma(
     int N,
     const at::Half* w,
     const at::Half* w_n, // prefetch ptr
@@ -91,29 +91,32 @@ void adagrad_fp16_update_prefetch__avx_f16c(
     __m128i whi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(w + i));
     __m256 wi = _mm256_cvtph_ps(whi);
 
-    __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
+    __m256 nhi = _mm256_fmadd_ps(gi, gi, hi);
     __m128i nhhi = _mm256_cvtps_ph(nhi, 0);
     _mm_storeu_si128(reinterpret_cast<__m128i*>(nh + i), nhhi);
 
-    __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    __m256 nwi = _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp));
+    __m256 eff_lr = _mm256_div_ps(
+        _mm256_set1_ps(lr),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    __m256 nwi = _mm256_fmadd_ps(gi, eff_lr, wi);
     __m128i nhwi = _mm256_cvtps_ph(nwi, 0);
     _mm_storeu_si128(reinterpret_cast<__m128i*>(nw + i), nhwi);
   }
 
   for (; i < N; ++i) {
     float gi = g[i];
-    float nhi =
-        _cvtsh_ss(reinterpret_cast<const unsigned short*>(h)[i]) + gi * gi;
+    float nhi = std::fma(
+        gi, gi, _cvtsh_ss(reinterpret_cast<const unsigned short*>(h)[i]));
     reinterpret_cast<unsigned short*>(nh)[i] = _cvtss_sh(nhi, 0);
-    float nwi = _cvtsh_ss(reinterpret_cast<const unsigned short*>(w)[i]) +
-        lr * gi / (std::sqrt(nhi) + epsilon);
+    float nwi = std::fma(
+        lr / (std::sqrt(nhi) + epsilon),
+        gi,
+        _cvtsh_ss(reinterpret_cast<const unsigned short*>(w)[i]));
     reinterpret_cast<unsigned short*>(nw)[i] = _cvtss_sh(nwi, 0);
   }
 }
 
-void rowwise_adagrad_update__avx_f16c(
+void rowwise_adagrad_update__avx2_fma(
     int N,
     float* w,
     float* w_n, // prefetch ptr
@@ -128,7 +131,7 @@ void rowwise_adagrad_update__avx_f16c(
   internal::rowwise_adagrad_update_inlined(N, w, w_n, g, h, h_n, epsilon, lr);
 }
 
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, avx_f16c);
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, avx_f16c);
+SPARSE_ADAGRAD_SPECIALIZATION(int32_t, avx2_fma);
+SPARSE_ADAGRAD_SPECIALIZATION(int64_t, avx2_fma);
 
 } // namespace caffe2

@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(__AVX__) && !defined(__NVCC__) && \
+#if defined(__AVX2__) && !defined(__NVCC__) && \
     (defined(__x86_64__) || defined(_M_X64) || defined(__i386__))
 #define CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
 #include <immintrin.h>
@@ -27,9 +27,9 @@ static inline void adagrad_update_base_inlined(
     float lr) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
-    float hi = decay * h[i] + gi * gi;
+    float hi = std::fma(gi, gi, decay * h[i]);
     nh[i] = hi;
-    nw[i] = w[i] + lr * gi / (std::sqrt(hi) + epsilon);
+    nw[i] = std::fma(lr / (std::sqrt(hi) + epsilon), gi, w[i]);
   }
 }
 
@@ -98,12 +98,12 @@ inline void adagrad_update_prefetch_inlined(
     __m256 hi = _mm256_loadu_ps(h + i);
     __m256 wi = _mm256_loadu_ps(w + i);
 
-    __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
+    __m256 nhi = _mm256_fmadd_ps(gi, gi, hi);
     _mm256_storeu_ps(nh + i, nhi);
-    __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    _mm256_storeu_ps(
-        nw + i, _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp)));
+    __m256 eff_lr = _mm256_div_ps(
+        _mm256_set1_ps(lr),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    _mm256_storeu_ps(nw + i, _mm256_fmadd_ps(eff_lr, gi, wi));
   }
 #endif
 
@@ -139,7 +139,7 @@ inline void rowwise_adagrad_update_inlined(
   __m256 partial_sum = _mm256_setzero_ps();
   for (; i + kSize <= N; i += kSize) {
     __m256 gi = _mm256_loadu_ps(g + i);
-    partial_sum = _mm256_add_ps(partial_sum, _mm256_mul_ps(gi, gi));
+    partial_sum = _mm256_fmadd_ps(gi, gi, partial_sum);
   }
   // Reduce sum to 1 value
   __m256 partial_sum_2 = _mm256_hadd_ps(partial_sum, partial_sum);
@@ -151,7 +151,7 @@ inline void rowwise_adagrad_update_inlined(
 #endif
 
   for (; i < N; ++i) {
-    final_sum += g[i] * g[i];
+    final_sum = std::fma(g[i], g[i], final_sum);
   }
   final_sum /= N;
 
@@ -168,13 +168,13 @@ inline void rowwise_adagrad_update_inlined(
     __m256 gi = _mm256_loadu_ps(g + i);
     __m256 wi = _mm256_loadu_ps(w + i);
 
-    _mm256_storeu_ps(w + i, _mm256_add_ps(wi, _mm256_mul_ps(gi, step)));
+    _mm256_storeu_ps(w + i, _mm256_fmadd_ps(step, gi, wi));
   }
 #endif
 
   for (; i < N; ++i) {
     float gi = g[i];
-    w[i] = w[i] + gi * float_step;
+    w[i] = std::fma(float_step, gi, w[i]);
   }
 }
 
@@ -299,8 +299,8 @@ int sparse_adagrad(
                                                                          \
       if (block_size == 1) {                                             \
         float gi = g[i];                                                 \
-        float hi = nh[idx] = h[idx] + gi * gi;                           \
-        nw[idx] = w[idx] + lr * gi / (std::sqrt(hi) + epsilon);          \
+        float hi = nh[idx] = std::fma(gi, gi, h[idx]);                   \
+        nw[idx] = std::fma(lr / (std::sqrt(hi) + epsilon), gi, w[idx]);  \
       } else {                                                           \
         const int prefdist_T0 = 16;                                      \
         int i_pref = (i < num_rows - prefdist_T0) ? i + prefdist_T0 : i; \

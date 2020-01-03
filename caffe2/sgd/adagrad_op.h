@@ -190,7 +190,7 @@ class SparseAdagradOp final : public Operator<Context> {
       if (block_size == 1) {
         float gi = gradIn[i];
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
+        paramOut[idx] = paramIn[idx] + lr[0] / (std::sqrt(hi) + epsilon_) * gi;
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -279,7 +279,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
       if (block_size == 1) {
         float gi = gradIn[i];
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
+        paramOut[idx] = paramIn[idx] + lr[0] / (std::sqrt(hi) + epsilon_) * gi;
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -330,4 +330,4 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
-}
+} // namespace caffe2
