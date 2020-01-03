@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import collections
+from collections import OrderedDict
 import weakref
 import warnings
 
@@ -25,7 +25,7 @@ class RemovableHandle(object):
     def __setstate__(self, state):
         if state[0] is None:
             # create a dead reference
-            self.hooks_dict_ref = weakref.ref(collections.OrderedDict())
+            self.hooks_dict_ref = weakref.ref(OrderedDict())
         else:
             self.hooks_dict_ref = weakref.ref(state[0])
         self.id = state[1]
