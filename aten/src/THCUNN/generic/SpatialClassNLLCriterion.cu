@@ -34,7 +34,7 @@ static void THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
            THCIndexTensor *target)
 {
   TORCH_CHECK(THCTensor_(nDimensionLegacyNoScalars)(state, gradOutput) == 3, 2,
-    "grad_output must have same dimension as target (3) but got dimension: ", gradOutput->sizes());
+    "gradOutput must have same dimension as target (3) but got dimension: ", gradOutput->sizes());
   if (THCTensor_(size)(state, gradOutput, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, gradOutput, 1) != THCIndexTensor_(size)(state, target, 1) ||
       THCTensor_(size)(state, gradOutput, 2) != THCIndexTensor_(size)(state, target, 2)) {
@@ -72,23 +72,25 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
 
     THCTensor_(resize3d)(state, output, batch_size, H, W);
 
-    if (count != 0) {
-      if (weights) {
-        weights = THCTensor_(newContiguous)(state, weights);
-      }
+    if (count == 0) {
+      // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
+      return;
+    }
+    if (weights) {
+      weights = THCTensor_(newContiguous)(state, weights);
+    }
 
-      SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
-        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
-          count,
-          toDeviceTensor<scalar_t, 4>(state, input),
-          toDeviceTensor<THCIndex_t, 3>(state, target),
-          toDeviceTensor<scalar_t, 3>(state, output),
-          weights ? THCTensor_(data)(state, weights) : NULL,
-          ignore_index);
+    SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
+      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        count,
+        toDeviceTensor<scalar_t, 4>(state, input),
+        toDeviceTensor<THCIndex_t, 3>(state, target),
+        toDeviceTensor<scalar_t, 3>(state, output),
+        weights ? THCTensor_(data)(state, weights) : NULL,
+        ignore_index);
 
-      if (weights) {
-        THCTensor_(free)(state, weights);
-      }
+    if (weights) {
+      THCTensor_(free)(state, weights);
     }
     return;
   }
@@ -104,7 +106,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
-  if (batch_size != 0) {
+  if (batch_size != 0) { // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
     THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
     int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
     blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
@@ -207,7 +209,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
-  if (batch_size != 0) {
+  if (batch_size != 0) { // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
     THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
     int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
     blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;

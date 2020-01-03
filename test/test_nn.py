@@ -7270,7 +7270,7 @@ class TestNN(NNTestCase):
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-    def test_upsampling_use_scale_factor(self):
+    def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
         in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
@@ -7283,7 +7283,7 @@ class TestNN(NNTestCase):
               [4.15039, 4.38921, 4.85697, 5.27508],
               [5.08591, 5.32473, 5.79249, 6.21060],
               [5.92213, 6.16095, 6.62871, 7.04682]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, use_scale_factor=True)
+        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
@@ -7540,6 +7540,17 @@ class TestNN(NNTestCase):
         self.assertEqual(conv.weight.grad, ref_conv.weight.grad)
         self.assertEqual(conv.bias.grad, ref_conv.bias.grad)
         self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_grouped_conv_cudnn_nhwc_support(self):
+        # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
+        input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
+        weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
+        out = torch.cudnn_convolution(input, weight, None, (1, 1), (1, 1), (1, 1), 4, False, False)
+        input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
+        out = torch.cudnn_convolution_transpose(input, weight, None, (1, 1), (0, 0), (1, 1), (1, 1), 4, False, False)
 
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -9301,6 +9312,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    @unittest.skipIf(sys.platform == "win32", "See https://github.com/pytorch/pytorch/issues/31650")
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -10414,33 +10426,40 @@ class TestNNDeviceType(NNTestCase):
         for reduction in ['mean', 'none']:
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
-    def test_nll_loss(self, device):
-        C = 10
-        for N in [0, 10]:
-            x = torch.rand(N, C, requires_grad=True, device=device)
-            target = torch.randint(C, (N,), device=device)
-            for reduction in ['none', 'mean', 'sum']:
-                y = F.nll_loss(x, target, reduction=reduction)
-                if reduction == 'none':
-                    self.assertTrue(y.size() == target.size())
-                else:
-                    self.assertEqual(y.dim(), 0)
-                y.sum().backward()
+    def test_nll_loss_empty_tensor(self, device):
 
-    def test_nll_loss_2d(self, device):
-        C = 10
-        H = 10
-        W = 10
-        for N in [0, 10]:
-            x = torch.rand(N, C, H, W, requires_grad=True, device=device)
-            target = torch.randint(C, (N, H, W), device=device)
+        def test_nll_loss(x, target):
             for reduction in ['none', 'mean', 'sum']:
                 y = F.nll_loss(x, target, reduction=reduction)
                 if reduction == 'none':
                     self.assertTrue(y.size() == target.size())
                 else:
                     self.assertEqual(y.dim(), 0)
+                    if reduction == 'sum':
+                        self.assertEqual(y.item(), 0)
+                    else: # reduction == 'mean':
+                        math.isnan(y.item())
                 y.sum().backward()
+                self.assertEqual(x.grad.size(), x.size())
+
+        C = 10
+
+        N = 0
+        x = torch.rand(N, C, requires_grad=True, device=device)
+        target = torch.randint(C, (N,), device=device)
+        test_nll_loss(x, target)
+
+        # 2-D scenarios
+        for N in [0, 10]:
+            for H in [0, 10]:
+                for W in [0, 10]:
+                    if (N * C * H * W == 0): # If input is empty
+                        x = torch.rand(N, C, H, W, requires_grad=True, device=device)
+                        if C != 0:
+                            target = torch.randint(C, (N, H, W), device=device)
+                        else:
+                            target = torch.empty((N, H, W), dtype=torch.int64, device=device)
+                        test_nll_loss(x, target)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
