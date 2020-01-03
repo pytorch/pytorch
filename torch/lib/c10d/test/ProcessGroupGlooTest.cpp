@@ -39,8 +39,9 @@ class SignalTest {
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
-    // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
+    // Set a timeout that is small enough to make this test run fast, but also
+    // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
     options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
