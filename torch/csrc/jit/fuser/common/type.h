@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Exception.h>
 
 #include <cstdint>
 #include <iostream>
@@ -10,23 +11,31 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-//TODO: Type promotion
-
+//Order on strength
 enum class TORCH_API ValType {
-  Float
-//   Expr
+  Float,
+  Int,
+  Scalar_Count //DON'T USE, except as a counter of scalar types for type promotion
 // , TensorLike
 // , Addr
-// , Float
 // , Range
 };
 
 enum class TORCH_API ExprType {
   Add
-//   Loop  // swap, merge, split
+// , Sub
+// , Mul
+// , Div
+// , Mod
+// , Loop
+// , Swap
+// , Merge
+// , Split
 // , Index
 // , Add
 };
+
+ValType promote_scalar(const ValType& t1, const ValType& t2);
 
 TORCH_API std::string stringify(const ValType);
 TORCH_API std::string stringify(const ExprType);

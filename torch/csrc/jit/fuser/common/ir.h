@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Optional.h>
@@ -29,6 +29,7 @@ constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned
 struct Fusion;
 struct Region;
 struct Expr;
+struct Add;
 
 struct TORCH_API Statement {
   virtual ~Statement() = 0;
@@ -128,6 +129,33 @@ struct TORCH_API Float : public Val {
 private:
   c10::optional<float> maybe_value_;
 };
+
+struct TORCH_API Int : public Val {
+  ~Int() = default;
+
+  Int()
+  : Val(ValType::Int)
+  , maybe_value_{c10::nullopt} { }
+
+  Int(
+    const float _value)
+  : Val(ValType::Int)
+  , maybe_value_{_value} { }
+
+  Int(const Int& other) = default;
+  Int& operator=(const Int& other) = default;
+
+  Int(Int&& other) = default;
+  Int& operator=(Int&& other) = default;
+
+  bool isSymbolic() const { return !(maybe_value_.has_value()); }
+  bool isConst() const { return maybe_value_.has_value(); }
+  c10::optional<int> value() const noexcept { return maybe_value_; }
+
+private:
+  c10::optional<int> maybe_value_;
+};
+
 
 // TODO: comment
 struct TORCH_API IRInputOutput {

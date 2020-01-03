@@ -18,6 +18,10 @@ int SimpleHandler::handle(const Float* f){
   return 0;
 }
 
+int SimpleHandler::handle(const Int* i){
+  return 0;
+}
+
 /*
 * IRPrinter definitions
 */
@@ -36,6 +40,16 @@ int IRPrinter::handle(const Float* const f){
     out_ << "?";
   } else {
     out_ << *(f->value());
+  }
+  return 0;
+}
+
+int IRPrinter::handle(const Int* const i){
+  printValPreamble(out_, i) << "i";
+  if (i->isSymbolic()) {
+    out_ << "?";
+  } else {
+    out_ << *(i->value());
   }
   return 0;
 }

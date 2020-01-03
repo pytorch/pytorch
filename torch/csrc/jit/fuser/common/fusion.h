@@ -122,6 +122,7 @@ struct TORCH_API Fusion {
       return registerExpr(static_cast<Expr*>(stmt));
     }
     std::runtime_error("Could not register statement.");
+    return UNINITIALIZED_STMTNAMETYPE;
   }
 
   StmtNameType registerVal(Val* val) {
