@@ -10,15 +10,15 @@ class _DecoratorContextManager:
             return self._wrap_generator(func)
 
         @functools.wraps(func)
-        def decorate_no_grad(*args, **kwargs):
+        def decorate_context(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
-        return decorate_no_grad
+        return decorate_context
 
     def _wrap_generator(self, func):
         """Wrap each generator invocation with the context manager"""
         @functools.wraps(func)
-        def generator_no_grad(*args, **kwargs):
+        def generator_context(*args, **kwargs):
             gen = func(*args, **kwargs)
             while True:
                 try:
@@ -27,7 +27,7 @@ class _DecoratorContextManager:
                     yield x
                 except StopIteration:
                     break
-        return generator_no_grad
+        return generator_context
 
 
 class no_grad(_DecoratorContextManager):
