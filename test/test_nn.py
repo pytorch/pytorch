@@ -3599,7 +3599,8 @@ class TestNN(NNTestCase):
 
     def _run_conv(self, layer, device, inp, grad, ref_conv, ref_input, ref_out,
                   input_format, weight_format, grad_format, output_format):
-        conv = layer(inp.size(1), grad.size(1), ref_conv.weight.size(2)).float().to(device)
+        conv = layer(inp.size(1), grad.size(1),
+                     ref_conv.weight.size(2)).float().to(device)
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
         conv.load_state_dict(ref_conv.state_dict())
         conv.weight.data = conv.weight.contiguous(memory_format=weight_format)
@@ -3615,27 +3616,28 @@ class TestNN(NNTestCase):
 
     def _test_conv_cudnn_nhwc_nchw(self, layer, n, c, h, w, k, filter_size, device):
         data = torch.randint(1, 10, (n, c, h, w), dtype=torch.float32, device=device)
-
         ref_input = data.clone().contiguous().requires_grad_(True)
         ref_conv = layer(c, k, filter_size).float().to(device)
         ref_out = ref_conv(ref_input)
         grad = torch.randint(1, 10, ref_out.size(), dtype=torch.float32, device="cuda")
         ref_out.backward(grad)
-        format_list = [
-            [torch.channels_last, torch.channels_last, torch.channels_last, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.channels_last, torch.contiguous_format],
-            [torch.channels_last, torch.contiguous_format, torch.channels_last, torch.channels_last],
-            [torch.channels_last, torch.channels_last, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.contiguous_format, torch.channels_last, torch.contiguous_format],
-            [torch.channels_last, torch.contiguous_format, torch.contiguous_format, torch.channels_last],
-            [torch.contiguous_format, torch.channels_last, torch.contiguous_format, torch.contiguous_format]]
 
-        for i_f, w_f, g_f, o_f in format_list:
-            self._run_conv(layer, device, data, grad, ref_conv, ref_input, ref_out, i_f, w_f, g_f, o_f)
+        for w_f in [torch.contiguous_format, torch.channels_last]:
+            for g_f in [torch.contiguous_format, torch.channels_last]:
+                for input_format in [torch.contiguous_format, torch.channels_last]:
+                    output_format = input_format
+                    # Older versions of CudNN have Channels Last support disabled
+                    if torch.backends.cudnn.version() < 7603:
+                        output_format = torch.contiguous_format
+                    # Can't derrive desired format because of the input shape, rolling back to contiguous
+                    if ref_input.is_contiguous() and ref_input.is_contiguous(
+                            memory_format=torch.channels_last):
+                        output_format = torch.contiguous_format
+                    self._run_conv(layer, device, data, grad, ref_conv, ref_input,
+                                   ref_out, input_format, w_f, g_f, output_format)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @unittest.skipIf(torch.backends.cudnn.version() < 7603, "needs cudnn 7.6")
     @skipIfRocm
     def test_conv_cudnn_mismatch_memory_format(self):
         configs = [
@@ -3647,6 +3649,7 @@ class TestNN(NNTestCase):
             [4, 1, 8, 8, 4, 1],
         ]
         for n, c, h, w, k, filter_size in configs:
+            print(n, c, h, w, k, filter_size)
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, 'cuda')
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, 'cuda')
 
@@ -7336,7 +7339,7 @@ class TestNN(NNTestCase):
                     input = torch.randn(2, 2, 2, 2, requires_grad=True)
                     gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-    def test_upsampling_not_recompute_scale_factor(self):
+    def test_upsampling_use_scale_factor(self):
         # test output against known input: result must match opencv
         in_t = torch.arange(8).view(1, 2, 2, 2).type(torch.FloatTensor)
         expected_out_t = torch.Tensor(
@@ -7349,7 +7352,7 @@ class TestNN(NNTestCase):
               [4.15039, 4.38921, 4.85697, 5.27508],
               [5.08591, 5.32473, 5.79249, 6.21060],
               [5.92213, 6.16095, 6.62871, 7.04682]]]])
-        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, recompute_scale_factor=False)
+        out_t = F.interpolate(in_t, scale_factor=2.3, mode='bicubic', align_corners=False, use_scale_factor=True)
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t)
 
