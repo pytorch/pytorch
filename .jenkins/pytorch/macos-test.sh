@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
-pip install -q hypothesis==4.57.1 "librosa>=0.6.2" psutil
+pip install -q hypothesis "librosa>=0.6.2" psutil
 
 # TODO move this to docker
 pip install unittest-xml-reporting
