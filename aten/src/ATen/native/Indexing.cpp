@@ -56,6 +56,8 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Copy.h>
+#include <ATen/Parallel.h>
 
 #include <algorithm>
 #include <functional>
@@ -369,6 +371,105 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
+}
+
+Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  auto numel = index.numel();
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_select(): Expected dtype int64 for index");
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+              "index_select(): self and result must have the same scalar type");
+  TORCH_CHECK(dim == 0 || dim < self.dim(),
+              "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+
+  auto result_size = self.sizes().vec();
+  if (self.dim() > 0) {
+    result_size[dim] = numel;
+  }
+  result.resize_(result_size);
+
+  auto index_contig = index.contiguous();
+  auto index_data = index_contig.data_ptr<int64_t>();
+
+  if (self.dim() > 1) {
+    if (numel == 0 || self.numel() == 0) {
+      return result;
+    }
+
+    auto selfSlice = self.select(dim, 0);
+    auto resultSlice = result.select(dim, 0);
+    auto selfSlice_data = selfSlice.data_ptr();
+    auto resultSlice_data = resultSlice.data_ptr();
+    auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
+    auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+    auto self_dim_size = self.size(dim);
+    auto slice_size = selfSlice.numel();
+
+    auto iter = TensorIterator();
+    iter.dont_compute_common_dtype();
+    iter.dont_resize_outputs();
+    iter.add_output(resultSlice);
+    iter.add_input(selfSlice);
+    iter.build();
+
+    auto grain_size = at::internal::GRAIN_SIZE;
+    auto outer_loop = [&](int64_t start, int64_t end) {
+      auto sub_iter = TensorIterator(iter);
+      for (int64_t i = start; i < end; i++) {
+        auto self_i = index_data[i];
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+        auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+        auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
+        sub_iter.unsafe_replace_operand(0, result_data);
+        sub_iter.unsafe_replace_operand(1, self_data);
+        copy_stub(sub_iter.device_type(), sub_iter, false);
+      }
+    };
+
+    // parallel on inner loop in case the slice is large enough;
+    // otherwise parallel on outer loop
+    if (slice_size >= grain_size) {
+      outer_loop(0, numel);
+    } else {
+      // use a fast loop when self and result are contiguous and of the same data type
+      if (iter.is_contiguous() && self.scalar_type() == result.scalar_type()) {
+        auto slice_size_bytes = slice_size * elementSize(self.scalar_type());
+        at::parallel_for(0, numel, grain_size / slice_size, [&](int64_t start, int64_t end) {
+          for (int64_t i = start; i < end; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
+            auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+            auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
+            memcpy(result_data, self_data, slice_size_bytes);
+          }
+        });
+      } else {
+        at::parallel_for(0, numel, grain_size / slice_size, outer_loop);
+      }
+    }
+  } else {
+    TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
+
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "index_select", [&] {
+      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+      for (auto i = 0; i < numel; i++) {
+        auto self_i = index_data[i];
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
+        scalar_t *self_ip = self.data_ptr<scalar_t>() + self_i * self_stride;
+        *(result.data_ptr<scalar_t>() + i * result_stride) = *self_ip;
+      }
+    });
+  }
+
+  return result;
+}
+
+Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
+  Tensor result = at::empty({0}, self.options());
+  return index_select_out_cpu_(result, self, dim, index);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
