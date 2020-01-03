@@ -67,7 +67,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
+# if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
@@ -77,9 +77,9 @@ if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
   sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
   sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-else
-  pip install --user --no-cache-dir hypothesis==3.59.0
-fi
+# else
+#   pip install --user --no-cache-dir hypothesis==3.59.0
+# fi
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()

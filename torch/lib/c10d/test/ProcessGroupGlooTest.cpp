@@ -9,7 +9,7 @@
 #include <sstream>
 #include <thread>
 
-#include <ATen/cuda/CUDAContext.h>
+#include <torch/cuda.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -370,7 +370,7 @@ void testRecv(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-  if (!at::cuda::is_available()) {
+  if (torch::cuda::is_available()) {
     LOG(INFO) << "Skipping test since CUDA is not available.";
     return EXIT_SUCCESS;
   }

@@ -890,6 +890,29 @@ struct to_ir {
     graph->insertNode(continue_node);
   }
 
+  void emitDelete(const Delete& stmt) {
+    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+      throw ErrorReport(stmt.range())
+          << "del statements are only supported for list"
+             " and dict item deletion";
+    }
+    Subscript subscript(stmt.expr());
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      throw ErrorReport(stmt.range())
+          << "del statements only support deletion at a single index, "
+             "slicing is not supported"
+             " (see https://github.com/pytorch/pytorch/issues/31430)";
+    }
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const SourceRange& val_range = subscript.value().range();
+    Value* idx = emitExpr(subscript_exprs[0]);
+    Value* val = sv->asValue(val_range, method);
+    auto node = graph->create(aten::Delete, {val, idx}, 0)
+                    ->setSourceRange(stmt.range());
+    graph->insertNode(node);
+  }
+
   void emitReturn(const Return& stmt) {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
@@ -981,6 +1004,9 @@ struct to_ir {
           break;
         case TK_DEF:
           emitClosure(Def(stmt));
+          break;
+        case TK_DELETE:
+          emitDelete(Delete(stmt));
           break;
         default:
           throw ErrorReport(stmt)
@@ -2809,6 +2835,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
+
         for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
@@ -2821,14 +2848,33 @@ struct to_ir {
           auto dict_type = type_hint->expect<DictType>();
           key_type = dict_type->getKeyType();
           value_type = dict_type->getValueType();
-        } else if (!keys.empty()) {
-          key_type = keys.at(0)->type();
-          value_type = values.at(0)->type();
-        } else {
+        } else if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
+        } else {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        auto checkTypeOfValues = [](const TypePtr& type,
+                                    const char* what,
+                                    const std::vector<Value*>& values,
+                                    TreeList trees) {
+          for (size_t i = 0, N = values.size(); i < N; ++i) {
+            std::stringstream ss;
+            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+              throw ErrorReport(trees[i])
+                  << "Dict " << what
+                  << " must contain only a single type, expected: "
+                  << type->python_str() << " but found "
+                  << values[i]->type()->python_str() << " instead.\n"
+                  << ss.str();
+            }
+          }
+        };
+        checkTypeOfValues(key_type, "keys", keys, key_trees);
+        checkTypeOfValues(value_type, "values", values, value_trees);
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
