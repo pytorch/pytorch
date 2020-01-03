@@ -2,7 +2,7 @@
 
 #include <c10/util/Optional.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/RRef.h>
+#include <ATen/core/rref_interface.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -14,7 +14,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class RRefBase;
+class RRef;
 class RRefContext;
 class UserRRef;
 
@@ -30,7 +30,7 @@ struct RRefForkData {
   const std::string type_str_;
 
  private:
-  friend class RRefBase;
+  friend class RRef;
   friend class RRefContext;
   friend class UserRRef;
 
@@ -185,18 +185,18 @@ struct RRefForkData {
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRefBase : public c10::RRef {
+class RRef : public RRefInterface {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
-  RRefBase(const c10::RRef& other) = delete;
-  RRefBase(c10::RRef&& other) = delete;
-  RRefBase& operator=(c10::RRef&& other) = delete;
+  explicit RRef(const RRef& other) = delete;
+  explicit RRef(RRef&& other) = delete;
+  RRef& operator=(RRef&& other) = delete;
 
-  virtual ~RRefBase() = default;
+  virtual ~RRef() = default;
 
   // returns the worker id of the owner
-  inline worker_id_t owner() const {
+  inline worker_id_t owner() const override {
     return ownerId_;
   }
 
@@ -205,25 +205,17 @@ class RRefBase : public c10::RRef {
     return rrefId_;
   }
 
-  // Returns true if this is the ``OwnerRRef``
-  virtual bool isOwner() const = 0;
-
-  // Return the type of the holding value
-  inline TypePtr type() const {
-    return type_;
-  }
-
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
-  inline const TypePtr type() {
+  inline TypePtr type() const override{
     return type_;
   }
 
  protected:
   friend class RRefContext;
 
-  RRefBase(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type);
+  RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type);
 
   RRefForkData fork() const;
 
@@ -239,12 +231,14 @@ class RRefBase : public c10::RRef {
 // also has a globally unique ``ForkId`` to identify this user. ``UserRRef``
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
-class UserRRef final : public RRefBase {
+class UserRRef final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
   UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
+
+  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, const TypePtr& type);
 
   inline bool isOwner() const override {
     return false;
@@ -263,19 +257,26 @@ class UserRRef final : public RRefBase {
  private:
   friend class RRefContext;
 
-  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, const TypePtr& type);
-
   const ForkId forkId_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
-class OwnerRRef final : public RRefBase {
+class OwnerRRef final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
+      : OwnerRRef(ownerId, rrefId, type, {}) {}
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type, c10::optional<IValue> value)
+      : RRef(ownerId, rrefId, type) {
+    value_ = std::move(value);
+  }
+
 
   inline bool isOwner() const override {
     return true;
@@ -297,14 +298,6 @@ class OwnerRRef final : public RRefBase {
 
  private:
   friend class RRefContext;
-
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
-      : OwnerRRef(ownerId, rrefId, type, {}) {}
-
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type, c10::optional<IValue> value)
-      : RRefBase(ownerId, rrefId, type) {
-    value_ = std::move(value);
-  }
 
   c10::optional<IValue> value_;
   mutable std::mutex mutex_;

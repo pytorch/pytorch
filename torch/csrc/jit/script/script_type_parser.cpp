@@ -57,6 +57,14 @@ TypePtr ScriptTypeParser::subscriptToType(
     }
     auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
+  } else if (typeName == "RRef") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+    return RRefType::create(elem_type);
   } else if (typeName == "Dict") {
     if (subscript.subscript_exprs().size() != 2) {
       throw ErrorReport(subscript)

@@ -1203,11 +1203,17 @@ class RpcTest(RpcAgentTestFixture):
         # barrier after check 3
         dist.barrier()
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/31112")
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
@@ -1218,7 +1224,10 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["num_pending_requests"]), 0)
         self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
-
+        # for the above check, add a barrier to ensure that another worker
+        # cannot send a request before we check num_idle_threads, since we'd
+        # use up an idle thread if we start processing that request.
+        dist.barrier()
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
             "worker{}".format(dst_rank),
@@ -1238,14 +1247,6 @@ class RpcTest(RpcAgentTestFixture):
         # as we cannot know for sure whether the send thread has returned, there
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
-
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
 
         # add a barrier to make sure the request is not finished before checking
         # num_pending_requests
@@ -1317,7 +1318,7 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1449,3 +1450,22 @@ class RpcTest(RpcAgentTestFixture):
         with _use_rpc_pickler(test_pickler):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+
+@unittest.skipIf(
+    sys.version_info < (3, 0),
+    "Pytorch distributed rpc package " "does not support python2",
+)
+class RpcJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_rref_as_arg(self):
+        n = self.rank + 1
+        dst_rank1 = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank1))
+
+        @torch.jit.script
+        def rref_to_here(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_var.to_here()
+
+        res = rref_to_here(rref_var)

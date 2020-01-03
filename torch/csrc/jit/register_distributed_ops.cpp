@@ -1,12 +1,17 @@
 #include <ATen/ATen.h>
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 #include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 
+#include <torch/csrc/distributed/rpc/rref_impl.h>
+
 using at::Scalar;
 using at::Tensor;
 namespace dist_autograd = torch::distributed::autograd;
+namespace dist_rpc = torch::distributed::rpc;
 
 namespace torch {
 namespace jit {
@@ -22,6 +27,29 @@ at::Tensor toOptionalTensor(const c10::IValue& v) {
 at::Tensor optional_to_tensor(c10::optional<at::Tensor> v) {
   return v.has_value() ? *v : at::Tensor();
 }
+
+c10::OperatorOptions aliasAnalysisFromSchema() {
+  c10::OperatorOptions result;
+  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  return result;
+}
+
+RegisterOperators reg_rpc_ops(
+    {Operator(
+         "aten::to_here(RRef(t) self) -> t",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           IValue res;
+           if (rref->isOwner()) {
+              res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)->getValue();
+           } else {
+              res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)->toHere();
+           }
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+    });
 
 auto reg_distributed_ops =
     torch::RegisterOperators()

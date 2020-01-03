@@ -38,8 +38,10 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 
   if (!myPoolWindow)
     myPoolWindow.reset(pool.newPoolWindow());
-
-  return myPoolWindow->reserve(device);
+  auto handle = myPoolWindow->reserve(device);
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+  return handle;
 }
 
 }} // namespace at::cuda

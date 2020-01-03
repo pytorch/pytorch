@@ -10,6 +10,7 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -20,6 +21,9 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -539,6 +543,13 @@ inline IValue toIValue(
         return py::cast<double>(obj);
       }
     }
+    case TypeKind::RRefType: {
+#ifdef USE_DISTRIBUTED
+      return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
+#else
+      AT_ERROR("RRef is only supported with the distributed package")
+#endif
+    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
@@ -547,7 +558,6 @@ inline IValue toIValue(
     case TypeKind::PyObjectType:
       // convert a py::handle to the IValue that holds the py::object
       return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
-    case TypeKind::RRefType:
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
     case TypeKind::CapsuleType:
@@ -621,17 +631,6 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline c10::optional<py::object> tryToConvertToCustomClass(
-    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
-  if (obj->name().find("__torch__.torch.classes") == 0) {
-    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
-    auto classConverter = c10::getClassConverter()[obj->name()];
-    py::handle rawPyObj = classConverter(objPtr);
-    auto o = py::reinterpret_steal<py::object>(rawPyObj);
-    return o;
-  }
-  return c10::nullopt;
-}
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -704,9 +703,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    auto res = tryToConvertToCustomClass(obj);
-    if (res.has_value()) {
-      return res.value();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);

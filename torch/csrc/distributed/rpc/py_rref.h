@@ -13,7 +13,7 @@ namespace rpc {
 class PyRRef {
  public:
   explicit PyRRef(const py::object& value);
-  explicit PyRRef(std::shared_ptr<RRefBase> rref);
+  explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
   bool isOwner() const;
   WorkerInfo owner() const;
@@ -22,9 +22,10 @@ class PyRRef {
   std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
+  c10::IValue toIValue();
 
  private:
-  std::shared_ptr<RRefBase> rref_;
+  c10::intrusive_ptr<RRef> rref_;
 };
 
 } // namespace rpc

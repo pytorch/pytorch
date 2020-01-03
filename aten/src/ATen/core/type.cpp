@@ -345,6 +345,19 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a future to " << actual->python_str();
       return ss.str();
     }
+  } else if (auto lt_formal = formal->cast<RRefType>()) {
+    if (auto lt_actual = actual->cast<RRefType>()) {
+      const auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match a rref to " << actual->python_str();
+      return ss.str();
+    }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
       const auto optionedMatch = matchTypeVariables(

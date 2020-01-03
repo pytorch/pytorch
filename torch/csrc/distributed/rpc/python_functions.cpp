@@ -84,8 +84,8 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     RpcAgent& agent,
     const WorkerInfo& dst,
     SerializedPyObj serializedPyObj,
-    IValue rrefId,
-    IValue forkId) {
+    const IValue& rrefId,
+    const IValue& forkId) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -184,8 +184,7 @@ PyRRef pyRemoteBuiltin(
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
-  auto py_rref = PyRRef(userRRef);
-  return py_rref;
+  return PyRRef(userRRef);
 }
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(

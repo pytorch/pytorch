@@ -11,7 +11,7 @@ namespace distributed {
 namespace rpc {
 ///////////////////////////  PyRRef  //////////////////////////////////
 
-PyRRef::PyRRef(std::shared_ptr<RRefBase> rref) : rref_(std::move(rref)) {
+PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
@@ -40,10 +40,10 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      return jit::toPyObject(std::static_pointer_cast<UserRRef>(rref_)->toHere());
+      return jit::toPyObject(c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere());
     } else {
       IValue value =
-          std::static_pointer_cast<UserRRef>(rref_)->toHere();
+          c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere();
 
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object
@@ -63,7 +63,7 @@ py::object PyRRef::localValue() {
 
   if (rref_->isPyObj()) {
     const py::object& value =
-        jit::toPyObject(std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue());
+        jit::toPyObject(c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue());
     PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
@@ -73,7 +73,7 @@ py::object PyRRef::localValue() {
     }
   } else {
     auto value =
-        std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
+        c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue();
     {
       // acquiring GIL as torch::jit::toPyObject creates new py::object without
       // grabbing the GIL.
@@ -89,7 +89,7 @@ std::string PyRRef::str() const {
     ss << "OwnerRRef(" << rref_->rrefId() << ")";
   } else {
     ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << std::static_pointer_cast<UserRRef>(rref_)->forkId()
+       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId()
        << ")";
   }
   return ss.str();
@@ -102,21 +102,26 @@ py::tuple PyRRef::pickle() const {
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
   auto rfd = ctx.prepareChildFork(rref_);
-  py::tuple rfd_py = rfd.toPyTuple();
-  return rfd_py;
+  return rfd.toPyTuple();
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
   auto& ctx = RRefContext::getInstance();
   auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
-  std::shared_ptr<RRefBase> rref = nullptr;
   jit::script::ScriptTypeParser typeParser;
   TypePtr rref_type = typeParser.parseType(rfd.type_str_);
-  rref = ctx.getOrCreateRRef(rfd, rref_type);
+  c10::intrusive_ptr<RRef> rref = ctx.getOrCreateRRef(rfd, rref_type);
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));
 }
+
+c10::IValue PyRRef::toIValue() {
+  // cast to RRefInterface to hold it into IValue
+  auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
+  return IValue(rrefPtr);
+}
+
 
 } // namespace rpc
 } // namespace distributed
