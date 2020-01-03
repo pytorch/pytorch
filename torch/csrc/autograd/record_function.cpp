@@ -201,14 +201,18 @@ void RecordFunction::processCallbacks() {
 
 void RecordFunction::setThreadId() {
   auto threadId = torch::autograd::profiler::getThreadId();
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       threadId != 0,
       "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
   threadId_ = threadId;
 }
 
 RecordFunction::~RecordFunction() {
-  end();
+  try {
+    end();
+  } catch (const std::exception &e) {
+    LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
+  }
 }
 
 void RecordFunction::end() {

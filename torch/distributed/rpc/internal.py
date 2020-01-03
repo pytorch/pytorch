@@ -163,7 +163,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
         An instance of `torch.autograd._RecordFunction`.
     """
     assert torch.autograd._profiler_enabled(), "Autograd profiler should be enabled."
-    profile_key = "rpc_{}.{}({} -> {})".format(
+    profile_key = "rpc_{}#{}({} -> {})".format(
         exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
     rf = torch.autograd._RecordFunction()
