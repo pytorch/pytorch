@@ -236,28 +236,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 5)
         self.run_test(Reshape(), (x,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_faster_rcnn(self):
-        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
-                                                                                 max_size=300)
-        model.eval()
-        x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_mask_rcnn(self):
-        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
-                                                                             max_size=300)
-        x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_keypoint_rcnn(self):
-        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
-                                                                                     max_size=300)
-        x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
