@@ -208,9 +208,8 @@ class CAFFE2_API Tensor {
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
     // check 0,1 - sized dimention strides.
-    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() &&
-        impl_->is_strides_like_channels_last()) {
-      if (!channels_last_strides_exact_match) {
+    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
+      if (!channels_last_strides_exact_match && !impl_->is_contiguous()) {
         return at::MemoryFormat::ChannelsLast;
       }
       if (get_channels_last_strides(sizes()) == strides()) {
