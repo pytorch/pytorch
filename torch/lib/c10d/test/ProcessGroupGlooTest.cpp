@@ -41,7 +41,7 @@ class SignalTest {
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
+    options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
@@ -370,10 +370,6 @@ void testRecv(const std::string& path) {
 }
 
 int main(int argc, char** argv) {
-  if (torch::cuda::is_available()) {
-    LOG(INFO) << "Skipping test since CUDA is not available.";
-    return EXIT_SUCCESS;
-  }
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
@@ -401,8 +397,10 @@ int main(int argc, char** argv) {
 
 #ifdef USE_CUDA
   {
-    TemporaryFile file;
-    testAllreduce(file.path, at::DeviceType::CUDA);
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAllreduce(file.path, at::DeviceType::CUDA);
+    }
   }
 #endif
 
@@ -413,8 +411,10 @@ int main(int argc, char** argv) {
 
 #ifdef USE_CUDA
   {
-    TemporaryFile file;
-    testBroadcast(file.path, at::DeviceType::CUDA);
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testBroadcast(file.path, at::DeviceType::CUDA);
+    }
   }
 #endif
 
