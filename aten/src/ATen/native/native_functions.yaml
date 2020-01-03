@@ -4521,14 +4521,14 @@
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_index_select_out
+    CPU: index_select_out_cpu_
     CUDA: legacy::cuda::_th_index_select_out
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_index_select
+    CPU: index_select_cpu_
     CUDA: legacy::cuda::_th_index_select
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
