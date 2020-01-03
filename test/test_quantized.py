@@ -1548,11 +1548,11 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           X_scale=hu.floats(1.2, 1.6),
+           X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.lists(hu.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
-           Y_scale=hu.floats(4.2, 5.6),
+           Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
@@ -1674,11 +1674,11 @@ class TestQuantizedConv(unittest.TestCase):
            pad_h=st.integers(0, 2),
            pad_w=st.integers(0, 2),
            dilation=st.integers(1, 2),
-           X_scale=hu.floats(1.2, 1.6),
+           X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
-           W_scale=st.lists(hu.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
            W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
-           Y_scale=hu.floats(4.2, 5.6),
+           Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_relu=st.booleans(),
@@ -1925,7 +1925,7 @@ class TestQNNPackOps(TestCase):
            kernel=st.integers(2, 5),
            stride=st.integers(1, 2),
            padding=st.integers(1, 2),
-           scale=hu.floats(0.2, 1.6),
+           scale=st.floats(0.2, 1.6),
            zero_point=st.integers(0, 25)
            )
     def test_avg_pool2d(
@@ -1979,7 +1979,7 @@ class TestQNNPackOps(TestCase):
            channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
            height=st.integers(4, 10),
            width=st.integers(4, 10),
-           scale=hu.floats(0.02, 2.6),
+           scale=st.floats(0.02, 2.6),
            zero_point=st.integers(0, 25))
     def test_mean(self, batch_size, channels, height, width, scale, zero_point):
         with override_quantized_engine('qnnpack'):
