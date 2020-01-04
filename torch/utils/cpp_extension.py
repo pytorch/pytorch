@@ -838,7 +838,7 @@ def load_inline(name,
                 verbose=False,
                 with_cuda=None,
                 is_python_module=True,
-                with_pytorch_error_handling=None):
+                with_pytorch_error_handling=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -886,9 +886,11 @@ def load_inline(name,
             provided. Set it to ``True`` to force CUDA headers
             and libraries to be included.
         with_pytorch_error_handling: Determines whether pytorch error and
-            warning macros are handled by pytorch instead of pybind. Deprecated
-            in version 1.4, is now always ``True``.
-
+            warning macros are handled by pytorch instead of pybind. To do
+            this, each function ``foo`` is called via an intermediary ``_safe_foo``
+            function. This redirection might cause issues in obscure cases
+            of cpp. This flag should be set to ``False`` when this redirect
+            causes issues.
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
@@ -902,11 +904,6 @@ def load_inline(name,
                                  functions=['sin_add'])
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
-
-    if with_pytorch_error_handling is not None:
-        warnings.warn(
-            "with_pytorch_error_handling is deprecated and is now always True",
-            DeprecationWarning, stacklevel=2)
 
     if isinstance(cpp_sources, str):
         cpp_sources = [cpp_sources]
@@ -932,9 +929,12 @@ def load_inline(name,
                 "Expected 'functions' to be a list or dict, but was {}".format(
                     type(functions)))
         for function_name, docstring in functions.items():
-            module_def.append(
-                'm.def("{0}", {0}, "{1}", py::call_guard<torch::PyWarningHandler>());'.format(
-                    function_name, docstring))
+            if with_pytorch_error_handling:
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
+            else:
+                module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
         cpp_sources += module_def
 

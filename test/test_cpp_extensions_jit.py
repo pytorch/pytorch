@@ -720,9 +720,34 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
+        # Without error handling, the warnings cannot be catched
         warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
                                                          cpp_sources=[source],
-                                                         functions=['foo'])
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 0)
+
+
+        warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=True)
+
 
         with warnings.catch_warnings(record=True) as w:
             # Catched with no error should be detected
