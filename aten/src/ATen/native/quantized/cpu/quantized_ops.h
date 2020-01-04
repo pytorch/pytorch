@@ -85,6 +85,7 @@ using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
+DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
 DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
