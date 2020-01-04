@@ -258,13 +258,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           std::forward_as_tuple(requestId),
           std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
-      auto& requestIdVec = futureTimeouts_[endTime];
-      requestIdVec.push_back(requestId);
+      auto& requestIds = futureTimeouts_[endTime];
+      requestIds.insert(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has earlier end time than other futures in the
       // map.
       if (futureTimeouts_.begin()->first == endTime &&
-          (requestIdVec.size() == 1)) {
+          (requestIds.size() == 1)) {
         notifyThread = true;
       }
     }
@@ -422,7 +422,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[endTime];
-            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            auto it = futuresAtTime.find(id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
@@ -553,7 +553,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
       // to check the remaining futures.
       break;
     } else {
-      const std::vector<int64_t>& futureIDs = it->second;
+      const auto& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
         auto futureIt = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
