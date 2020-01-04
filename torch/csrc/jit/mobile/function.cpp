@@ -38,7 +38,9 @@ void Function::append_operator(const std::string& name,
   auto opname = code_->op_names_.back();
   // Add "_" prefix to work around the double registration both of jit/generated
   // and here. TODO: remove it when we have separate build for lite interpreter.
-  opname.name = "_" + opname.name;
+  if (opname.name != "aten::Int") {
+    opname.name = "_" + opname.name;
+  }
   auto op = c10::Dispatcher::singleton().findSchema(opname);
   TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
   code_->operators_.emplace_back(op);
