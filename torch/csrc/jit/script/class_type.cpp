@@ -112,8 +112,29 @@ size_t ClassType::addConstant(
   return slot;
 }
 
-c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
-  TORCH_CHECK(constantNames_.size() == constantValues_.size());
+IValue ClassType::getConstant(const std::string& name) const {
+  const auto& v = findConstant(name);
+  TORCH_CHECK(
+      v.has_value(),
+      python_str(),
+      " does not have a constant field with name '",
+      name,
+      "'");
+  return *v;
+}
+
+IValue ClassType::getConstant(size_t slot) const {
+  TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
+  TORCH_CHECK(
+      slot < constantValues_.size(),
+      python_str(),
+      " does not have a constant slot of index ",
+      slot);
+  return constantValues_[slot];
+}
+
+c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+  TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
     if (name == c) {
@@ -126,6 +147,12 @@ c10::optional<IValue> ClassType::getConstant(const std::string& name) const {
     return c10::nullopt;
   }
   return constantValues_[pos];
+}
+
+void ClassType::unsafeRemoveConstant(const std::string& name) {
+  auto slot = getConstantSlot(name);
+  constantNames_.erase(constantNames_.begin() + slot);
+  constantValues_.erase(constantValues_.begin() + slot);
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
