@@ -137,6 +137,7 @@ struct SchemaParser {
         name = "";
       }
     } else {
+      L.nextIf('?');
       name = L.expect(TK_IDENT).text();
       if (L.nextIf('=')) {
         default_value = parseDefaultValue(type, N);
