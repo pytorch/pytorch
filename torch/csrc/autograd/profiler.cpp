@@ -28,7 +28,7 @@ std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
-const uint16_t getThreadId() {
+uint16_t getThreadId() {
   return thread_id;
 }
 
