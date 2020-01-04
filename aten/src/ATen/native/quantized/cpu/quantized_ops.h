@@ -6,6 +6,7 @@ namespace at {
 namespace native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
     const at::Tensor& /*qx*/,
     Scalar min,

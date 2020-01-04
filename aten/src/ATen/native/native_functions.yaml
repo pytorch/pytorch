@@ -2345,6 +2345,7 @@
   dispatch:
     CPU: sigmoid
     CUDA: sigmoid
+    QuantizedCPU: quantized_sigmoid
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
