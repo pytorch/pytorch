@@ -490,7 +490,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
     // look up the corresponding future by its time out and request ID,
     // and remove it from the timeouts map
     auto& futuresAtTime = futureTimeouts_[rpcEndTime];
-    auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+    auto it = futuresAtTime.find(id);
     TORCH_INTERNAL_ASSERT(
         it != futuresAtTime.end(),
         "Error: could not find future in futureTimeouts map, race condition.");
