@@ -234,8 +234,8 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
                                           value_dy);
       },
       [&](Vec value_qx) -> Vec {
-        const auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
-                                                  scale_neg_zp_premul_vec);
+        auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
+                                            scale_neg_zp_premul_vec);
         auto value = Vec256<float>(0.0f) - value_dx;
         value = value.exp();
         value = Vec256<float>(1.0f) + value;
