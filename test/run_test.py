@@ -450,7 +450,7 @@ def main():
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
-        handler = CUSTOM_HANDLERS.get(test_module, run_test)
+        handler = CUSTOM_HANDLERS.get(test, run_test)
         return_code = handler(executable, test_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
