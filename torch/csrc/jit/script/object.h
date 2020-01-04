@@ -28,7 +28,14 @@ struct TORCH_API Object {
   }
 
   void setattr(const std::string& name, c10::IValue v) {
-    if (auto slot = _ivalue()->type()->findAttributeSlot(name)) {
+    if (_ivalue()->type()->hasConstant(name)) {
+      TORCH_CHECK(
+          false,
+          "Can't set constant '",
+          name,
+          "' which has value:",
+          _ivalue()->type()->getConstant(name));
+    } else if (auto slot = _ivalue()->type()->findAttributeSlot(name)) {
       const c10::TypePtr& expected = _ivalue()->type()->getAttribute(*slot);
       TORCH_CHECK(
           v.type()->isSubtypeOf(expected),
@@ -40,13 +47,6 @@ struct TORCH_API Object {
           v.type()->python_str(),
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
-    } else if (_ivalue()->type()->hasConstant(name)) {
-      TORCH_CHECK(
-          false,
-          "Can't set constant '",
-          name,
-          "' which has value:",
-          v);
     } else {
       TORCH_CHECK(
           false,
