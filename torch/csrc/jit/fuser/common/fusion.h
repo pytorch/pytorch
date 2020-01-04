@@ -13,21 +13,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-/*
- * Fusion design (Fusion as a container for nodes)
- * We need to figure out our memory model. We don't want
- * people to directly manage lifetime of the nodes they
- * construct and use, however we want mutators to be able
- * to construct new expr's and variables, and their lifetime
- * must persist after these passes.
- * 
- * Fusion could also provide a nice interface to run certain
- * passes. Similar to how schedule in TE does.
- * 
- * As of right now, Fusion is not designed to be used.
- */
-
-
 // TODO: replaceAllUsesOfLeftWithRight(Val, Val) for values
 // TODO: hasUses(Val)
 // TODO: val->uses mapping? expr->location mapping?
@@ -37,6 +22,39 @@ namespace fuser {
 // TODO: printFusion (allow mem location inlining)
 // TODO:
 // TODO: comment
+
+struct Fusion;
+
+struct TORCH_API Manager{
+
+private:
+
+  Fusion* fusion_;
+
+  Manager(){fusion_ = nullptr;}
+
+  void setFusion(Fusion* _fusion){
+    fusion_=_fusion;
+  }
+
+public:
+
+  Manager(Fusion* _fusion){
+    instance().setFusion(_fusion);
+  }
+
+  ~Manager(){
+    instance().setFusion(nullptr);
+  }
+
+  static Manager& instance(){
+    static Manager m;
+    return m;
+  }
+
+  Fusion* fusion(){return instance().fusion_;}
+  
+};
 
 struct TORCH_API Fusion {
   Fusion() {

@@ -53,6 +53,7 @@ struct TORCH_API Statement {
     // TODO: we need to know if fusion has this Satement, if not should we add it or error out?
     fusion_ = fusion;
   }
+
   void setRegion(Region* region) {
     if(isVal())
       std::runtime_error("Values cannot have regions.");
@@ -84,7 +85,7 @@ public:
   virtual ~Val() = 0;
 
   Val() = delete;
-  Val(const ValType _type) : type_{_type} { }
+  Val(const ValType _type);
 
   //TODO: we need a way to prevent users from copying values as we need
   //any values that are the "same" to reference the same object or we need
@@ -279,9 +280,7 @@ struct TORCH_API Expr : public Statement, IRInputOutput {
 public:
   virtual ~Expr() = 0;
   Expr() = delete;
-  Expr(
-    const ExprType _type)
-  : type_{_type} { }
+  Expr(const ExprType _type);
 
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
   ExprType type() const noexcept { return type_; }
