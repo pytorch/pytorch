@@ -1856,12 +1856,12 @@ class TestQNNPackOps(TestCase):
         qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
                                        dtype=torch.quint8)
         with override_quantized_engine('fbgemm'):
-            qYfbgemm = torch.sigmoid(qX)
+            qYserver = torch.sigmoid(qX)
         with override_quantized_engine('qnnpack'):
             qY_hat = torch.sigmoid(qX)
             self.assertEqual(qY, qY_hat,
                              message="QNNPACK Sigmoid failed (FP ref)!")
-            self.assertEqual(qYfbgemm, qY_hat,
+            self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
