@@ -1855,12 +1855,12 @@ class TestQNNPackOps(TestCase):
         qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
                                        dtype=torch.quint8)
         with override_quantized_engine('fbgemm'):
-            qYfbgemm = torch.tanh(qX)
+            qYserver = torch.tanh(qX)
         with override_quantized_engine('qnnpack'):
             qY_hat = torch.tanh(qX)
             self.assertEqual(qY, qY_hat,
                              message="QNNPACK TanH failed (FP ref)!")
-            self.assertEqual(qYfbgemm, qY_hat,
+            self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK TanH failed (FBGEMM ref)!")
 
 
