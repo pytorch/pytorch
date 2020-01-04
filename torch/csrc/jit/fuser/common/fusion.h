@@ -37,6 +37,13 @@ private:
     fusion_=_fusion;
   }
 
+  Manager(const Manager& other) = delete;
+  Manager& operator=(const Manager& other) = delete;
+
+  Manager(Manager&& other) = delete;
+  Manager& operator=(Manager&& other) = delete;
+
+
 public:
 
   Manager(Fusion* _fusion){
@@ -48,7 +55,7 @@ public:
   }
 
   static Manager& instance(){
-    static Manager m;
+    thread_local static Manager m;
     return m;
   }
 
