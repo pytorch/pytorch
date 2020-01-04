@@ -17,6 +17,22 @@ namespace fuser {
 * Statement member definitions & related functions
 */
 
+Val::Val(
+  const ValType _type) 
+  : type_{_type} {
+  if(Manager::instance().fusion())
+    Manager::instance().fusion()->registerVal(this);
+
+}
+
+Expr::Expr(
+    const ExprType _type)
+  : type_{_type} {
+
+    if(Manager::instance().fusion())
+      Manager::instance().fusion()->registerExpr(this);
+}
+
 Statement::~Statement() { }
 
 template <typename T>

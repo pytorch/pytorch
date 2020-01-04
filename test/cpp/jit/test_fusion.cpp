@@ -18,7 +18,10 @@ using namespace torch::jit::fuser;
 // 2. They start with the prefix `test`
 void testCPUFusion() {
 
-  torch::jit::fuser::Float* f = new Float{2.f};
+  Fusion fusion;
+  Manager m(&fusion);
+
+  Float* f = new Float{2.f};
   
   const auto val_type = f->type();
   std::cout << "val type: " << val_type << std::endl;
