@@ -38,7 +38,6 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     }
     // Validation and conversion to make sure `val` is a valid constant
     // is done in python, see `torch/jit/_recursive.py`
-    std::cout << "Adding constant: " << name << " py:" << py::str(val) << " inferred type:" << match.type()->python_str() << " ivalue: " << toIValue(val, match.type()) << std::endl;
     cls->addConstant(name, toIValue(val, match.type()));
   }
 
