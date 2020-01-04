@@ -37,8 +37,8 @@ void testClassTypeAddConstant() {
   ASSERT_TRUE(cls->hasConstant("const1"));
   ASSERT_TRUE(cls->hasConstant("const2"));
   ASSERT_FALSE(cls->hasConstant("const3"));
-  ASSERT_EQ(cls->getConstant("const1").value().toInt(), 1);
-  ASSERT_EQ(cls->getConstant("const2").value().toInt(), 2);
+  ASSERT_EQ(cls->getConstant("const1").toInt(), 1);
+  ASSERT_EQ(cls->getConstant("const2").toInt(), 2);
 }
 
 } // namespace jit

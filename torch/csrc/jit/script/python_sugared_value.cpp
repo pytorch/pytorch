@@ -300,7 +300,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // first class so they get returned as SimpleValues
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   } else if (selfType->hasConstant(field)) {
-    auto v = selfType->getConstant(field).value();
+    auto v = selfType->getConstant(field);
     return toSugaredValue(v, m, loc);
   }
 
