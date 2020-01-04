@@ -105,8 +105,8 @@ struct BailOutGraphBuilderForNode {
   }
 
   void mapValues(
-      const at::ArrayRef<Value*>& block_outputs,
-      const at::ArrayRef<Value*>& carried_deps) {
+      const at::ArrayRef<Value*> block_outputs,
+      const at::ArrayRef<Value*> carried_deps) {
     TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
     for (size_t i = 0; i < block_outputs.size(); i++) {
       auto nv = getOrAddInputForValue(block_outputs[i]);
@@ -185,7 +185,7 @@ struct BailOutGraphBuilderForNode {
   }
 
   void buildBailOutIf(
-      const at::ArrayRef<Value*>& block_outputs,
+      const at::ArrayRef<Value*> block_outputs,
       Node* outer_node) {
     auto if_outputs = outer_node->outputs();
     mapValues(block_outputs, if_outputs);
