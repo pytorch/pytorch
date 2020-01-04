@@ -6,7 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-
+#include <ATen/core/DistributionsHelper.h>
 
 namespace at { namespace native {
 
@@ -127,6 +127,120 @@ Tensor celu(const Tensor & self, Scalar alpha) {
 Tensor & celu_(Tensor & self, Scalar alpha) {
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
+}
+
+
+template <typename scalar_t>
+inline void _rrelu_with_noise_train(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& noise,
+    Scalar lower_,
+    Scalar upper_,
+    Generator* generator) {
+  scalar_t lower = lower_.to<scalar_t>();
+  scalar_t upper = upper_.to<scalar_t>();
+  Tensor tmp_tensor = output.contiguous();
+  scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.data_ptr<scalar_t>();
+  auto gen  = at::get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  for (int64_t i = 0; i < input.numel(); i++) {
+    if (input_data[i] <= 0) {
+      at::uniform_real_distribution<double> uniform(lower, upper);
+      const scalar_t r = (scalar_t)uniform(gen);
+      output_data[i] = input_data[i] * r;
+      noise_data[i] = r;
+    } else {
+      noise_data[i] = 1;
+      output_data[i] = input_data[i];
+    }
+  }
+  if (!output.is_contiguous()) {
+    output.copy_(tmp_tensor);
+  }
+}
+         
+Tensor& rrelu_with_noise_out_cpu(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    Generator* generator) {
+  if (training) {
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+      _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
+    });
+    return output;
+  } else {
+    auto lower_tensor = scalar_to_tensor(lower, self.device());
+    auto upper_tensor = scalar_to_tensor(upper, self.device());
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    return at::leaky_relu_out(output, self, negative_slope);
+  }
+}
+
+Tensor rrelu_with_noise_cpu(
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    Generator* generator) {
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::native::rrelu_with_noise_out_cpu(output, self, noise, lower, upper, training, generator);
+}
+
+Tensor& rrelu_with_noise_cpu_(
+    Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training,
+    Generator* generator) {
+  return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
+}
+
+Tensor& rrelu_with_noise_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training) {
+  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
+  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
+    grad_input = grad_output.mul(noise);
+  } else {
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    grad_input = at::leaky_relu_backward(grad_output, self, negative_slope);
+  }
+  return grad_input;
+}
+
+Tensor rrelu_with_noise_backward(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& noise,
+    Scalar lower,
+    Scalar upper,
+    bool training) {
+  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
+  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
+    return grad_output.mul(noise);
+  } else {
+    auto negative = (lower_tensor + upper_tensor) / 2;
+    Scalar negative_slope = negative.item();
+    return at::leaky_relu_backward(grad_output, self, negative_slope);
+  } 
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {

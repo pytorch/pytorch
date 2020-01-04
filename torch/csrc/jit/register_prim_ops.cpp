@@ -3651,27 +3651,3 @@ static auto reg4 =
 } // namespace
 } // namespace jit
 } // namespace torch
-
-using at::Scalar;
-static auto registry_prim = torch::RegisterOperators().op("aten::Int.Tensor(Tensor a) -> int",
-  torch::RegisterOperators::options().catchAllKernel(
-  [](at::Tensor a) -> int64_t {
-    return a.item<int64_t>();
-}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-).op("aten::Int.bool(bool a) -> int",
-  torch::RegisterOperators::options().catchAllKernel(
-  [](bool b) -> int64_t {
-    return static_cast<int64_t>(b);
-}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-).op("aten::Int.float(float a) -> int",
-  torch::RegisterOperators::options().catchAllKernel(
-  [](double d) -> int64_t {
-    return static_cast<int64_t>(d);
-}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-).op("aten::Int.Scalar(Scalar a) -> int",
-  torch::RegisterOperators::options().catchAllKernel(
-  [](Scalar scalar) -> int64_t {
-    return scalar.toInt();
-}).aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-);
-
