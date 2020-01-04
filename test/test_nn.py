@@ -9329,30 +9329,37 @@ class TestNNDeviceType(NNTestCase):
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
-        gc.collect(); torch.cuda.empty_cache()
+
+        gc.collect()
+        torch.cuda.empty_cache()
         input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
         ret = conv(input_large)
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
         maxdiff0 = (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024))).abs_().max().item()
         self.assertEqual(maxdiff0, 0)
         del maxdiff0
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
         self.assertEqual(maxdiff1, 0)
         del maxdiff1
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
         maxdiff2 = (ret.narrow(0, 2048, 1024) - conv(input_large.narrow(0, 2048, 1024))).abs_().max().item()
         self.assertEqual(maxdiff2, 0)
         del maxdiff2
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
         maxdiff3 = (ret.narrow(0, 3072, 1024) - conv(input_large.narrow(0, 3072, 1024))).abs_().max().item()
         self.assertEqual(maxdiff3, 0)
         del maxdiff3
-        gc.collect(); torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
