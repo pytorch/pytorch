@@ -144,7 +144,6 @@ class QuantizationTestCase(TestCase):
 
         # Test save/load
         buffer = io.BytesIO()
-        print('saving script module: ', script_mod)
         torch.jit.save(script_mod, buffer)
 
         buffer.seek(0)
