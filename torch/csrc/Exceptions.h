@@ -290,7 +290,8 @@ auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
   using traits = function_traits<Func>;
   namespace py = pybind11;
 
-  return [f](Arg<Func, Is> ...args) -> typename traits::result_type {
+  // f=f is needed to handle function references on older compilers
+  return [f=f](Arg<Func, Is> ...args) -> typename traits::result_type {
     HANDLE_TH_ERRORS
     return f(std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
