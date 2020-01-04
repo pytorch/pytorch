@@ -692,6 +692,14 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "setattr",
           [](Object& self, const std::string& name, py::object value) {
+            if (self.type()->hasConstant(name)) {
+              TORCH_CHECK(
+                  false,
+                  "Can't set constant '",
+                  name,
+                  "' which has value:",
+                  self.type()->getConstant(name));
+            }
             TypePtr type = self.type()->getAttribute(name);
             auto ivalue = toIValue(std::move(value), type);
             self.setattr(name, ivalue);

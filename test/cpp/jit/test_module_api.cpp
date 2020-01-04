@@ -41,5 +41,24 @@ void testModuleCloneInstance() {
   ASSERT_EQ(m3.attr(attr_name).toInt(), 3);
 }
 
+void testModuleConstant() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto attr_name = "attr";
+  auto const_name = "const";
+  cls->addAttribute(attr_name, IntType::get());
+  cls->addConstant(const_name, IValue(3));
+  Module m(cu, cls);
+  auto v = IValue(2);
+  m.register_attribute(attr_name,
+                       IntType::get(),
+                       v,
+                       false);
+  ASSERT_TRUE(m.hasattr(attr_name));
+  ASSERT_TRUE(m.hasattr(const_name));
+  ASSERT_EQ(m.attr(attr_name).toInt(), 2);
+  ASSERT_EQ(m.attr(const_name).toInt(), 3);
+}
+
 } // namespace jit
 } // namespace torch

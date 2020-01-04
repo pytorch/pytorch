@@ -28,33 +28,60 @@ struct TORCH_API Object {
   }
 
   void setattr(const std::string& name, c10::IValue v) {
-    size_t slot = _ivalue()->type()->getAttributeSlot(name);
-    const c10::TypePtr& expected = _ivalue()->type()->getAttribute(slot);
-    TORCH_CHECK(
-        v.type()->isSubtypeOf(expected),
-        "Expected a value of type '",
-        expected->python_str(),
-        "' for field '",
-        name,
-        "', but found '",
-        v.type()->python_str(),
-        "'");
-    _ivalue()->setSlot(slot, std::move(v));
+    if (_ivalue()->type()->hasConstant(name)) {
+      TORCH_CHECK(
+          false,
+          "Can't set constant '",
+          name,
+          "' which has value:",
+          _ivalue()->type()->getConstant(name));
+    } else if (auto slot = _ivalue()->type()->findAttributeSlot(name)) {
+      const c10::TypePtr& expected = _ivalue()->type()->getAttribute(*slot);
+      TORCH_CHECK(
+          v.type()->isSubtypeOf(expected),
+          "Expected a value of type '",
+          expected->python_str(),
+          "' for field '",
+          name,
+          "', but found '",
+          v.type()->python_str(),
+          "'");
+      _ivalue()->setSlot(*slot, std::move(v));
+    } else {
+      TORCH_CHECK(
+          false,
+          "Module has no attribute '", name, "'");
+    }
   }
 
   c10::IValue attr(const std::string& name) const {
-    return _ivalue()->getAttr(name);
+    if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
+      return _ivalue()->getSlot(*r);
+    }
+    if (auto r = _ivalue()->type()->findConstantSlot(name)) {
+      return _ivalue()->type()->getConstant(*r);
+    }
+    TORCH_CHECK(
+        false,
+        _ivalue()->type()->python_str(),
+        " does not have a field with name '",
+        name,
+        "'");
   }
 
   c10::IValue attr(const std::string& name, c10::IValue or_else) const {
     if (auto r = _ivalue()->type()->findAttributeSlot(name)) {
       return _ivalue()->getSlot(*r);
     }
+    if (auto r = _ivalue()->type()->findConstantSlot(name)) {
+      return _ivalue()->type()->getConstant(*r);
+    }
     return or_else;
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->findAttributeSlot(name).has_value();
+    return _ivalue()->type()->hasAttribute(name)
+      || _ivalue()->type()->hasConstant(name);
   }
 
   // each object owns its methods. The reference returned here
