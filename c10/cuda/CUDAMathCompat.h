@@ -91,6 +91,13 @@ __MATH_FUNCTIONS_DECL__ double tan(double x) {
   return ::tan(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float tanh(float x) {
+  return ::tanhf(x);
+}
+__MATH_FUNCTIONS_DECL__ double tanh(double x) {
+  return ::tanh(x);
+}
+
 __MATH_FUNCTIONS_DECL__ float normcdf(float x) {
   return ::normcdff(x);
 }
