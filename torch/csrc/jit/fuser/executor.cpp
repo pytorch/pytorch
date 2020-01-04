@@ -138,7 +138,7 @@ static bool shouldExpandArgs(
 }
 
 // Note: assumes that inputs are 32-bit addressable
-static uint32_t computeNumel(const at::ArrayRef<int64_t>& sizes) {
+static uint32_t computeNumel(const at::ArrayRef<int64_t> sizes) {
   uint32_t result = 1;
 
   for (const auto& size : sizes)
