@@ -1853,7 +1853,7 @@ class TestQNNPackOps(TestCase):
 
         # Floating point reference
         Y = torch.sigmoid(X)
-        qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 256, zero_point=0,
                                        dtype=torch.quint8)
         with override_quantized_engine('fbgemm'):
             qYserver = torch.sigmoid(qX)

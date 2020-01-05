@@ -236,11 +236,13 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
       [&](Vec value_qx) -> Vec {
         auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
                                             scale_neg_zp_premul_vec);
-        auto value = Vec256<float>(0.0f) - value_dx;
-        value = value.exp();
-        value = Vec256<float>(1.0f) + value;
-        value = value.recipocal();
-        return Vec::quantize(value, output_scale, output_zero_point,
+        for (int idx = 0; idx < 4; ++idx) {
+          value_dx[idx] = Vec256<float>(0.0f) - value_dx[idx];
+          value_dx[idx] = value_dx[idx].exp();
+          value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
+          value_dx[idx] = value_dx[idx].reciprocal();
+        }
+        return Vec::quantize(value_dx, output_scale, output_zero_point,
                              inv_output_scale);
       }
     );
