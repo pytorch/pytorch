@@ -748,6 +748,8 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     } else {
       // Total depth needs to be updated only in this codepath, since it is
       // not used in the block above (when we call add_thread_pool_task).
+      // In the codepath above, GraphTask.reentrant_depth_ is used to
+      // bootstrap total_depth in the other thread.
       ++total_depth;
 
       // Get back to work while we wait for our new graph_task to
