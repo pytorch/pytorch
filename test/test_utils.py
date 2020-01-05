@@ -122,7 +122,8 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
+        # python_error in case of py2_7_9.
+        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
