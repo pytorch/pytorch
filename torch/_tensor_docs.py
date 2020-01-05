@@ -3413,7 +3413,7 @@ Out-of-place version of :meth:`torch.Tensor.index_fill_`
 
 add_docstr_all('scatter',
                r"""
-scatter(dim, index, source) -> Tensor
+scatter(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
 """)
