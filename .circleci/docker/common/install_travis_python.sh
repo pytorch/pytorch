@@ -89,7 +89,7 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
   as_jenkins pip install psutil
 
   # Install dill for serialization tests
-  as_jenkins pip install "dill>=0.3.1"
+  as_jenkins pip install "dill==0.3.1"
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean
