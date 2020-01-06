@@ -146,6 +146,7 @@ class TORCH_API RpcAgent {
 
  protected:
   const WorkerInfo workerInfo_;
+  const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
 
