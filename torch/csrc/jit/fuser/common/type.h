@@ -13,10 +13,11 @@ namespace fuser {
 
 //Order on strength
 enum class TORCH_API ValType {
-  Float,
-  Int,
-  Scalar_Count //DON'T USE, except as a counter of scalar types for type promotion
-// , TensorLike
+    Tensor
+  , Float
+  , Int
+  
+  
 // , Addr
 // , Range
 };

@@ -10,11 +10,14 @@ TORCH_API Val* promote_new(Val *v1, Val* v2){
     TORCH_CHECK(v1->isVal() && v2->isVal());
     ValType out_type = promote_scalar(v1->getValType().value(), v2->getValType().value());
     switch(out_type){
-        case(ValType::Int):
-            return new Int();
+        case(ValType::Tensor):
+            return new Tensor();
         case(ValType::Float):
             return new Float();
+        case(ValType::Int):
+            return new Int();
     }
+    std::runtime_error("Did not recognize out type.");
 }
 
 TORCH_API Val* add(Val* v1, Val* v2){

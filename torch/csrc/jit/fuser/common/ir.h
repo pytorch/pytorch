@@ -99,8 +99,30 @@ public:
   c10::optional<ValType> getValType() const noexcept override { return type_; }
   ValType type() const noexcept { return type_; }
 
+  bool is_scalar(){
+    static_assert(((int)ValType::Float) == 1); //Depend on ordering to know if Val is a scalar.
+    return type() >= ValType::Float;
+  }
+  
 protected:
   const ValType type_;
+};
+
+// TODO: support symbolic floats vs literal (const) floats (make value an optional)
+// likely want this to be a separate class (FloatImm?)
+struct TORCH_API Tensor : public Val {
+  ~Tensor() = default;
+
+  Tensor()
+  : Val(ValType::Tensor){}
+
+  //Not copyable
+  Tensor(const Tensor& other) = delete;
+  Tensor& operator=(const Tensor& other) = delete;
+
+  Tensor(Tensor&& other) = delete;
+  Tensor& operator=(Tensor&& other) = delete;
+
 };
 
 // TODO: support symbolic floats vs literal (const) floats (make value an optional)
