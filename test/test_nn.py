@@ -9330,6 +9330,7 @@ class TestNNDeviceType(NNTestCase):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
         input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
+        # forward
         ret = conv(input_large)
         maxdiff0 = (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024))).abs_().max().item()
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
@@ -9339,15 +9340,36 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff1, 0)
         self.assertEqual(maxdiff2, 0)
         self.assertEqual(maxdiff3, 0)
+        # backward
+        ret.sum().backward()
+        del ret
+        grad1 = conv.weight.grad.clone()
+        del conv.weight.grad
+        conv(input_large.narrow(0, 0, 1024)).sum().backward()
+        conv(input_large.narrow(0, 1024, 1024)).sum().backward()
+        conv(input_large.narrow(0, 2048, 1024)).sum().backward()
+        conv(input_large.narrow(0, 3072, 1024)).sum().backward()
+        grad2 = conv.weight.grad.clone()
+        self.assertEqual(grad1, grad2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
-        conv1 = nn.Conv2d(2, 2, 8, 8).to(device).to(dtype)
+        conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
         input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
-        ret = conv1(input_large)
-        self.assertEqual(ret[:2048], conv1(input_large[:2048]))
-        self.assertEqual(ret[2048:], conv1(input_large[2048:]))
+        # forward
+        ret = conv(input_large)
+        self.assertEqual(ret[:2048], conv(input_large[:2048]))
+        self.assertEqual(ret[2048:], conv(input_large[2048:]))
+        # backward
+        ret.sum().backward()
+        del ret
+        grad1 = conv.weight.grad.clone()
+        del conv.weight.grad
+        conv(input_large[:2048]).sum().backward()
+        conv(input_large[2048:]).sum().backward()
+        grad2 = conv.weight.grad.clone()
+        self.assertEqual(grad1, grad2)
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
