@@ -74,7 +74,11 @@ namespace jit {
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
   _(CommonAncestor)                    \
-  _(CPUFusion)
+  _(FusionCPU)                         \
+  _(FusionContainer)                   \
+  _(FusionSimpleArith)                 \
+  _(FusionSimpleTypePromote)           \
+
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -83,7 +87,8 @@ namespace jit {
   _(GPUHelloFusion)             \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
-  _(Interp)
+  _(Interp)                     \
+
 
 #define DECLARE_JIT_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_JIT_TEST)

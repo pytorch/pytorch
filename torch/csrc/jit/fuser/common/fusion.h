@@ -54,7 +54,7 @@ public:
   }
 
   static Manager& instance(){
-    thread_local static Manager m;
+    static Manager m;
     return m;
   }
 
@@ -107,6 +107,11 @@ struct TORCH_API Fusion {
     region_->insertLeftAfterRight(left, right);
   }
 
+  const std::deque<Val*>& inputs() const noexcept { return region_->inputs(); }
+  const std::deque<Val*>& outputs() const noexcept { return region_->outputs(); }
+  const std::deque<Expr*>& exprs() const noexcept { return region_->exprs(); }
+
+
   // Functions for adding inputs and outputs
   void addInput(Val* input) { region_->addInput(input); registerVal(input);}
   void addOutput(Val* output) { region_->addOutput(output); registerVal(output);}
@@ -122,9 +127,6 @@ struct TORCH_API Fusion {
 
     return infusion;
   }
-  const std::deque<Val*>& inputs() const noexcept { return region_->inputs(); }
-  const std::deque<Val*>& outputs() const noexcept { return region_->outputs(); }
-  const std::deque<Expr*>& exprs() const noexcept { return region_->exprs(); }
 
   // Functions for registering IR objects
   StmtNameType registerStatement(Statement* stmt) {
@@ -152,6 +154,7 @@ struct TORCH_API Fusion {
 
   void registerRegion(Region* region) {
     // TODO: If we alreay have a region should we allow over-writing it?
+    //If already registered, do nothing
     if (region->fusion()) {
       TORCH_CHECK(region->fusion() == this);
       return;
