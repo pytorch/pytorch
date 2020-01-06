@@ -486,7 +486,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
       at::cuda::blas::gemv<scalar_t>(
-          at::cuda::getCurrentCUDAStream().stream(),
           't',
           k_, m_,
           scale,

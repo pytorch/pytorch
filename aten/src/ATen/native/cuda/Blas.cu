@@ -24,18 +24,18 @@ void addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, cons
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
     if (mat.stride(0) == 1) {
-      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 'n',
+      at::cuda::blas::gemv<scalar_t>('n',
         mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec.data_ptr<scalar_t>(),
         vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
     }
     else if (mat.stride(1) == 1) {
-      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 't',
+      at::cuda::blas::gemv<scalar_t>('t',
         mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
         vec.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
     }
     else {
       Tensor cmat = mat.contiguous();
-      at::cuda::blas::gemv<scalar_t>(at::cuda::getCurrentCUDAStream().stream(), 't',
+      at::cuda::blas::gemv<scalar_t>('t',
           mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
           vec.data_ptr<scalar_t>(), vec.stride(0), beta, result.data_ptr<scalar_t>(), r_stride);
     }
