@@ -850,8 +850,8 @@ bool AliasDb::mayContainAlias(Value* a, Value* b) const {
 }
 
 bool AliasDb::mayContainAlias(
-    const at::ArrayRef<Value*>& a,
-    const at::ArrayRef<Value*>& b) const {
+    const at::ArrayRef<Value*> a,
+    const at::ArrayRef<Value*> b) const {
   std::vector<Element*> a_elements;
   for (const auto& val : a) {
     if (cannotCheckAliasContainment(val)) {
