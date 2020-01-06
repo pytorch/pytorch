@@ -1381,21 +1381,16 @@ Example::
 add_docstr(torch.cummax,
            r"""
 cummax(input, dim, out=None) -> (Tensor, LongTensor)
-
 Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
-
 .. math::
     y_i = max(x_1, x_2, x_3, \dots, x_i)
-
 Args:
     {input}
     dim  (int): the dimension to do the operation over
     out (tuple, optional): the result tuple of two output tensors (out, indices)
-
 Example::
-
     >>> a = torch.randn(10)
     >>> a
     tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
@@ -4216,7 +4211,6 @@ Example::
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
             [2., 1., 4., 2.]])
-
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
