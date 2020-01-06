@@ -3351,6 +3351,30 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    def test_grad_mode_restored_reentrant(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, go):
+                original = torch._C.is_grad_enabled()
+                with torch.enable_grad():
+                    self.assertTrue(torch._C.is_grad_enabled())
+                    foo = torch.rand(go.size(), requires_grad=True)
+                    grad, = torch.autograd.grad(
+                        foo ** 3, foo, grad_outputs=go
+                    )
+                    self.assertTrue(torch._C.is_grad_enabled())
+                self.assertTrue(torch._C.is_grad_enabled() == original)
+                return grad
+
+        inp = torch.rand(3, requires_grad=True)
+
+        MyFunction.apply(inp).sum().backward()
+        MyFunction.apply(inp).sum().backward(create_graph=True)
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
