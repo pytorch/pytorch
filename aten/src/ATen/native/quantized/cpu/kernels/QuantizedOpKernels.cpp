@@ -7,6 +7,7 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/SortingUtils.h>
 
+#include <cmath>
 
 namespace at {
 namespace native {
