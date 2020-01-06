@@ -249,6 +249,7 @@ struct Stmt : public TreeView {
       case TK_ASSERT:
       case TK_PASS:
       case TK_BREAK:
+      case TK_DELETE:
       case TK_CONTINUE:
       case TK_DEF:
         return;
@@ -794,7 +795,8 @@ struct Const : public Expr {
     tree_->matchNumSubtrees(TK_CONST, 1);
   }
   bool isFloatingPoint() const {
-    return subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
+    bool is_inf = subtree(0)->stringValue() == "inf";
+    return is_inf || subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
     return !isFloatingPoint();
@@ -808,8 +810,11 @@ struct Const : public Expr {
     }
   }
   double asFloatingPoint() const {
+    // We can't pass in nullptr as the dummy pointer gets dereferenced for
+    // Android version of strtod_c().
+    char* dummy;
     return torch::jit::script::strtod_c(
-        subtree(0)->stringValue().c_str(), /*endptr=*/nullptr);
+        subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -905,7 +910,8 @@ struct SliceExpr : public Expr {
       const Maybe<Expr>& start,
       const Maybe<Expr>& end,
       const Maybe<Expr>& step) {
-    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
+    return SliceExpr(
+        Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
   }
 
  private:
@@ -1024,6 +1030,18 @@ struct Starred : public Expr {
   }
   static Starred create(const SourceRange& range, const Expr& expr) {
     return Starred(Compound::create(TK_STARRED, range, {expr}));
+  }
+};
+
+struct Delete : public Stmt {
+  explicit Delete(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_DELETE);
+  }
+  Expr expr() const {
+    return Expr(subtree(0));
+  }
+  static Delete create(const Expr& value) {
+    return Delete(Compound::create(TK_DELETE, value.range(), {value}));
   }
 };
 
