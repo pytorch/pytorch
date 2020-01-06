@@ -3564,6 +3564,38 @@ graph(%Ra, %Rb):
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
+    def test_export_opnames(self):
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x + y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 * x
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.one(self.two(x), x)
+
+        class Bar(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.sub = Foo()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.sub.forward(x)
+
+        bar = Bar()
+        ops = torch.jit.export_opnames(bar)
+        expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
+        self.assertEqual(ops, expected)
+
     def test_pytorch_jit_env_off(self):
         import subprocess
         env = os.environ.copy()
@@ -7036,6 +7068,15 @@ a")
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
+
+    # FIXME: get rid of this once we have actual ops using optional floats
+    def test_optional_float(self):
+        def _test_optional_float(x, scale):
+            # type: (Tensor, Optional[float]) -> torch.Tensor
+            return torch._test_optional_float(x, scale=scale)
+
+        self.assertEqual([0], torch.jit.script(_test_optional_float)(torch.randn(()), None).shape)
+        self.assertEqual((), torch.jit.script(_test_optional_float)(torch.randn(()), 2.5).shape)
 
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''

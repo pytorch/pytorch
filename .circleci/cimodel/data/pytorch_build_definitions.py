@@ -210,6 +210,7 @@ def instantiate_configs():
             android_abi = fc.find_prop("android_abi")
             parms_list_ignored_for_docker_image.append(android_abi)
             restrict_phases = ["build"]
+            fc.props["is_important"] = True
 
         elif compiler_name:
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
