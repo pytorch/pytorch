@@ -261,7 +261,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     def get_image_from_url(self, url):
         import requests
-        import numpy
         from PIL import Image
         from io import BytesIO
         from torchvision import transforms
