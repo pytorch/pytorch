@@ -9340,17 +9340,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff1, 0)
         self.assertEqual(maxdiff2, 0)
         self.assertEqual(maxdiff3, 0)
-        # backward
-        ret.sum().backward()
-        del ret
-        grad1 = conv.weight.grad.clone()
-        del conv.weight.grad
-        conv(input_large.narrow(0, 0, 1024)).sum().backward()
-        conv(input_large.narrow(0, 1024, 1024)).sum().backward()
-        conv(input_large.narrow(0, 2048, 1024)).sum().backward()
-        conv(input_large.narrow(0, 3072, 1024)).sum().backward()
-        grad2 = conv.weight.grad.clone()
-        self.assertEqual(grad1, grad2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
@@ -9361,14 +9350,21 @@ class TestNNDeviceType(NNTestCase):
         ret = conv(input_large)
         self.assertEqual(ret[:2048], conv(input_large[:2048]))
         self.assertEqual(ret[2048:], conv(input_large[2048:]))
+
         # backward
-        ret.sum().backward()
+        conv.zero_grad()
+        ret.view(4096, -1).max(dim=1).values.sum().backward()
         del ret
-        grad1 = conv.weight.grad.clone()
-        del conv.weight.grad
-        conv(input_large[:2048]).sum().backward()
-        conv(input_large[2048:]).sum().backward()
-        grad2 = conv.weight.grad.clone()
+        grad1 = conv.weight.grad.detach().clone()
+        conv.zero_grad()
+        conv(input_large[:2048]).view(2048, -1).max(dim=1).values.sum().backward()
+        conv(input_large[2048:]).view(2048, -1).max(dim=1).values.sum().backward()
+        grad2 = conv.weight.grad.detach().clone()
+        # gradients are at the order of hundreds, we need to scale it to
+        # the order of one so that we can compare
+        scale = 1 / grad1.abs().mean()
+        grad1 = grad1 * scale
+        grad2 = grad2 * scale
         self.assertEqual(grad1, grad2)
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
