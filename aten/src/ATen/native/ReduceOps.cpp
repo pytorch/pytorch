@@ -246,8 +246,8 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& out, Tensor& indices, const Tens
 }
 
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
-  auto out = at::empty(self.sizes(), self.scalar_type());
-  auto indices = at::empty(self.sizes(), at::kLong);
+  auto out = at::empty(self.sizes(), self.options());
+  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummax_out(out, indices, self, dim);
   return std::tuple<Tensor &,Tensor &>{out, indices};
 }
