@@ -1,3 +1,6 @@
+from __future__ import division
+from future.builtins import round
+
 import numpy as np
 import unittest
 
@@ -133,15 +136,14 @@ class TestQuantizedOps(TestCase):
         # in the implementations.
         f_min, f_max = -1.0, 1.0
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-        output_scale = (f_max - f_min) / (q_max - q_min + 1)
-        output_zero_point = int(round((q_max + q_min) / 2))
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = int(round((q_max + q_min) / 2.0))
         qY = torch.quantize_per_tensor(Y, scale=output_scale,
                                        zero_point=output_zero_point,
                                        dtype=torch_type)
-
         qY_hat = torch.tanh(qX)
         self.assertEqual(qY, qY_hat,
-                         message="TanH failed: {} vs. {}".format(Y, qY_hat))
+                         message="TanH failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
