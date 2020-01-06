@@ -77,7 +77,8 @@ namespace jit {
   _(LiteInterpreterPrimOverload)       \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
-  _(MobileTypeParser)
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterPrim)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
