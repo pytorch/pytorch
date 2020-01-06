@@ -54,7 +54,7 @@ public:
   }
 
   static Manager& instance(){
-    static Manager m;
+    thread_local static Manager m;
     return m;
   }
 
