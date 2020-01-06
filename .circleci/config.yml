@@ -1478,13 +1478,17 @@ jobs:
           no_output_timeout: "2h"
           command: |
             set -e
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
+            # Temporarily pin pillow to 6.2.1 as PILLOW_VERSION is replaced by
+            # _version_ in 7.0.0. Long term fix should be making changes to
+            # torchvision to be compatible with both < and >= v7.0.0.
+            pip install pillow==6.2.1
             #install the latest version of PyTorch and TorchVision
             pip install torch torchvision
             #run unit test
@@ -1494,6 +1498,7 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
