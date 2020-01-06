@@ -65,6 +65,8 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
+namespace legacy {
+
 template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
 __global__ void elementwise_kernel(int N, func_t f) {
@@ -131,6 +133,44 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
+// similar to above code but work on lambda using index for calculation
+template <typename traits, typename func_t, typename index_t, size_t... INDEX>
+C10_HOST_DEVICE typename traits::result_type
+invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx,
+                       std::index_sequence<INDEX...>) {
+  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])..., idx);
+}
+
+template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
+C10_HOST_DEVICE typename traits::result_type
+invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx) {
+  // index at last position
+  using Indices = std::make_index_sequence<traits::arity-1>;
+  return invoke_with_index_impl<traits>(f, data, strides, i, idx, Indices{});
+}
+
+template <typename traits, typename func_t, typename index_t, size_t... I>
+C10_HOST_DEVICE typename traits::result_type
+invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
+                       int i, int idx, std::index_sequence<I...>) {
+  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])..., idx);
+}
+
+template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
+C10_HOST_DEVICE typename traits::result_type
+invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
+                  int i, int idx) {
+  // index at last position
+  using Indices = std::make_index_sequence<traits::arity-1>;
+  return invoke_with_index_impl<traits>(f, data, strides, dtypes, i, idx, Indices{});
+}
+
+} // namespace legacy
+
+namespace modern {
+
+} // namespace modern
+
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
@@ -159,31 +199,31 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
 
     if (iter.needs_dynamic_casting()) {
-      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
-        arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+        arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = invoke(f, &data.data[1], &strides.data[1], idx);
+        *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
       });
     }
   } else {
-    auto offset_calc = make_offset_calculator<traits::arity + 1>(iter);
+    auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
     if (iter.needs_dynamic_casting()) {
-      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
-        arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = invoke(f, &data.data[1], &offsets.data[1], 1);
+        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
       });
     }
   }
@@ -242,38 +282,6 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   }
 }
 
-// similar to above code but work on lambda using index for calculation
-template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx,
-                       std::index_sequence<INDEX...>) {
-  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])..., idx);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx) {
-  // index at last position
-  using Indices = std::make_index_sequence<traits::arity-1>;
-  return invoke_with_index_impl<traits>(f, data, strides, i, idx, Indices{});
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
-                       int i, int idx, std::index_sequence<I...>) {
-  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])..., idx);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
-                  int i, int idx) {
-  // index at last position
-  using Indices = std::make_index_sequence<traits::arity-1>;
-  return invoke_with_index_impl<traits>(f, data, strides, dtypes, i, idx, Indices{});
-}
-
 template <typename func_t>
 void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
@@ -301,31 +309,31 @@ void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
     }
 
     if (iter.needs_dynamic_casting()) {
-      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
-        arg0_t result = invoke_with_index(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx, idx);
+        arg0_t result = legacy::invoke_with_index(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx, idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = invoke_with_index(f, &data.data[1], &strides.data[1], idx, idx);
+        *out = legacy::invoke_with_index(f, &data.data[1], &strides.data[1], idx, idx);
       });
     }
   } else {
-    auto offset_calc = make_offset_calculator<traits::arity>(iter);
+    auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
     if (iter.needs_dynamic_casting()) {
-      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
-        arg0_t result = invoke_with_index(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1, idx);
+        arg0_t result = legacy::invoke_with_index(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1, idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
-      launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = invoke_with_index(f, &data.data[1], &offsets.data[1], 1, idx);
+        *out = legacy::invoke_with_index(f, &data.data[1], &offsets.data[1], 1, idx);
       });
     }
   }
