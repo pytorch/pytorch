@@ -86,6 +86,36 @@ Tensor Compute(
   return Tensor(func, 0);
 }
 
+Stmt FunctionNode::ElementStmt() {
+  std::vector<Expr> strides(dims_.size());
+  for (int i = 0; i < strides.size(); i++) {
+    if (i == strides.size() - 1) {
+      strides[i] = Expr(1);
+      continue;
+    }
+    Expr stride = dims_[i + 1];
+    for (int j = i + 2; j < dims_.size(); j++) {
+      stride = stride * dims_[j];
+    }
+    strides[i] = stride;
+  }
+
+  Expr total_index;
+  for (int i = 0; i < dims_.size(); i++) {
+    Expr index = this->args_[i] * strides[i];
+    if (i == 0) {
+      total_index = index;
+    } else {
+      total_index = total_index + index;
+    }
+  }
+
+  Expr mask = 1;
+
+  Stmt update_stmt = Store::make(func_var(), total_index, body(), mask);
+  return update_stmt;
+}
+
 } // namespace compiler
 } // namespace jit
 } // namespace torch

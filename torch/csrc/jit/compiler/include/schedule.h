@@ -31,13 +31,13 @@ class ScheduleObject {
 
  protected:
   void AddClonePair(ScheduleObject* new_obj);
+  void set_schedule(ScheduleNode* schedule) {
+    schedule_ = schedule;
+  }
 
  private:
   friend class ScheduleNode;
   virtual ScheduleObject* Clone() = 0;
-  void set_schedule(ScheduleNode* schedule) {
-    schedule_ = schedule;
-  }
   ScheduleObject(const ScheduleObject& other) = delete;
   const ScheduleObject& operator=(const ScheduleObject& other) = delete;
 
@@ -171,7 +171,12 @@ class LoopAxisTransform : public Cloneable<LoopAxisTransform, ScheduleObject> {
  protected:
   friend class ScheduleNode;
   explicit LoopAxisTransform(const std::vector<LoopAxis*>& inputs)
-      : inputs_(inputs) {}
+      : inputs_(inputs) {
+    // TODO: find a better way to set schedule.
+    if (inputs.size() > 0) {
+      this->set_schedule(inputs_[0]->schedule());
+    }
+  }
 
   void set_output_group_count(int group_count) {
     outputs_.resize(group_count);
@@ -257,29 +262,31 @@ class FuseAxisTransform;
 class TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
  public:
   const Var& expr_var() const {
-    return expr_var_;
+    return func_.func_var();
   }
 
   const Expr& body() const {
-    return body_;
+    return func_.body();
+    ;
   }
 
   void CloneFrom(const TensorExprOp* other) {
-    this->expr_var_ = other->expr_var_;
-    this->body_ = other->body_;
+    this->func_ = other->func_;
+  }
+
+  Stmt ElementStmt() {
+    return this->func_.ElementStmt();
   }
 
  private:
   friend class ScheduleNode;
   TensorExprOp() {}
-  TensorExprOp(const Var& expr_var, const Expr& body)
-      : expr_var_(expr_var), body_(body) {}
+  explicit TensorExprOp(const Function& func) : func_(func) {}
 
   // TODO: this needs more work.
   // The ancestor-axes mark the region to evaluate expression.
   // We still need to know the buffer this writes to.
-  Var expr_var_;
-  Expr body_;
+  Function func_;
 };
 
 // Part of the recursive node structure in the tensor expr tree.
@@ -416,8 +423,8 @@ class ScheduleNode : public RefCounted {
     return NewObject<SplitAxisWithTail>(loop_axis, factor, factor_on_inner);
   }
 
-  TensorExprOp* NewTensorExprOp(const Var& expr_var, const Expr& body) {
-    return NewObject<TensorExprOp>(expr_var, body);
+  TensorExprOp* NewTensorExprOp(const Function& func) {
+    return NewObject<TensorExprOp>(func);
   }
 
   TensorExprNode* NewTensorExprNode() {
@@ -442,6 +449,10 @@ class ScheduleNode : public RefCounted {
       Var* inner_var,
       Var* tail_var,
       TensorExprNode** tail_op);
+
+  Stmt Lower() {
+    return Lower(root_node_);
+  }
 
   using CloneMap = std::unordered_map<ScheduleObject*, ScheduleObject*>;
   CloneMap& clone_map() {
@@ -484,6 +495,8 @@ class ScheduleNode : public RefCounted {
   explicit ScheduleNode(const std::vector<Tensor>& funcs);
   ScheduleObject* CloneScheduleObject(ScheduleObject* object);
   ScheduleObject* LookUpCloneScheduleObject(ScheduleObject* object);
+  Stmt Lower(TensorExprNode* node);
+  Stmt LowerNoSibling(TensorExprNode* node);
 
   std::vector<Tensor> tensors_;
   TensorExprNode* root_node_ = nullptr; // not owned
@@ -518,6 +531,10 @@ class Schedule : RefHandle<ScheduleNode> {
  public:
   static Schedule make(const std::vector<Tensor>& funcs) {
     return Schedule(new ScheduleNode(funcs));
+  }
+
+  Stmt Lower() {
+    return node()->Lower();
   }
 
  private:
