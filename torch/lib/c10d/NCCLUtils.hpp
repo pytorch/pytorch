@@ -93,6 +93,7 @@ class NCCLComm {
 
   // Move assignable
   NCCLComm& operator=(NCCLComm&& other) {
+    std::unique_lock<std::mutex> lock(mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
@@ -100,6 +101,7 @@ class NCCLComm {
   }
 
   ncclComm_t getNcclComm() {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
       throw std::runtime_error("NCCL communicator was aborted.");
     }
@@ -134,6 +136,7 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
+    std::unique_lock<std::mutex> lock(mutex_);
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
     }
