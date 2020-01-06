@@ -60,7 +60,12 @@ def _load_global_deps():
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    # NB: If the library doesn't exist, don't fail.  In some settings
+    # (especially in fbcode) there may not be this library, but it doesn't
+    # matter because in those settings you're expected to have setup the
+    # dynamic dependencies properly to start with
+    if os.path.exists(lib_path):
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
 # See Note [Global dependencies]
