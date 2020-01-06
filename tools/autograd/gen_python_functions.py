@@ -931,13 +931,17 @@ def get_python_signature(declaration, include_out):
         typename = arg['simple_type']
         typename = typename if typename != 'Type' else 'ScalarType'
 
-        # TODO: remove this and make optional types in simple_type to be consistent across
-        # tensor and other types after make Tensor? be optional instead of undefined
-        if arg.get('is_nullable') and '?' not in typename:
-            typename = '{}?'.format(typename)
+        if arg.get('is_nullable') and '?' in typename and arg.get('size') is not None:
+            typename = typename.replace('?','')
+            typename = '{}[{}]?'.format(typename, arg['size'])
+        else:
+            # TODO: remove this and make optional types in simple_type to be consistent across
+            # tensor and other types after make Tensor? be optional instead of undefined
+            if arg.get('is_nullable') and '?' not in typename:
+                typename = '{}?'.format(typename)
+            if arg.get('size') is not None:
+                typename = '{}[{}]'.format(typename, arg['size'])
 
-        if arg.get('size') is not None:
-            typename = '{}[{}]'.format(typename, arg['size'])
         param = typename + ' ' + arg['name']
         default = None
         if arg.get('default') is not None:
