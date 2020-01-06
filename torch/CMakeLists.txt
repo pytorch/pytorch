@@ -410,6 +410,9 @@ target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
 # not find them, because they're usually in non-standard locations)
 if (USE_CUDA)
   target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
+  include(../cmake/public/cuda.cmake)
+  target_link_libraries(torch_global_deps torch::cudart)
 endif()
 
 install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
