@@ -22,6 +22,9 @@
 #include <THCUNN/common.h>
 #include <algorithm>
 
+#include <stdio.h>
+
+
 namespace at {
 namespace native {
 
@@ -38,25 +41,25 @@ static int getGradParamsNumThreads(int batchSize){
    return std::min(batchSize * WARP_SIZE, MAX_BLOCK_SIZE);
 }
 
-// calculate the rear part of output tensor sizes
-template <int64_t dim>
-std::vector<int64_t> get_output_size(
-    const Tensor& input,
-    IntArrayRef kernel_size,
-    IntArrayRef stride_size,
-    IntArrayRef pad_size,
-    IntArrayRef dilation_size) {
-  std::vector<int64_t> sizes;
-  for (int index = 0; index < dim; index++) {
-    sizes.push_back(
-        div_rtn<int64_t>(
-            input.size(index + input.dim() - dim) + 2 * pad_size[index] -
-                (dilation_size[index] * (kernel_size[index] - 1) + 1),
-            stride_size[index]) +
-        1);
-  }
-  return sizes;
-}
+// // calculate the rear part of output tensor sizes
+// template <int64_t dim>
+// std::vector<int64_t> get_output_size(
+//     const Tensor& input,
+//     IntArrayRef kernel_size,
+//     IntArrayRef stride_size,
+//     IntArrayRef pad_size,
+//     IntArrayRef dilation_size) {
+//   std::vector<int64_t> sizes;
+//   for (int index = 0; index < dim; index++) {
+//     sizes.push_back(
+//         div_rtn<int64_t>(
+//             input.size(index + input.dim() - dim) + 2 * pad_size[index] -
+//                 (dilation_size[index] * (kernel_size[index] - 1) + 1),
+//             stride_size[index]) +
+//         1);
+//   }
+//   return sizes;
+// }
 
 // Your regular forward pass hopefully
 template <typename T, typename accT, typename IndexType, int kSize>
@@ -346,12 +349,12 @@ static void conv_depthwise3d_cuda_template(
     }
     
     TORCH_CHECK(
-        (input_.ndimension() == 5),
+        (input_.ndimension() == 4),
         "non-empty 5D tensor expected for input");
 
-    // // We should allocate the tensor somewhere here
+    // We should allocate the tensor somewhere here
     auto options = input_.options();
-    auto output_size = get_output_size<4>(
+    auto output_size = internal::get_output_size<4>(
       input_, kernel_size, stride_size, pad_size, dilation_size);
     output = at::empty(output_size, options);
 
@@ -761,7 +764,7 @@ Tensor _conv_depthwise3d_forward_cuda(
   Tensor& output,
   const Tensor& input,
   const Tensor& weight,
-  Tensor bias,
+  const Tensor bias,
   IntArrayRef kernel_size,
   IntArrayRef stride_size,
   IntArrayRef pad_size,
@@ -838,7 +841,10 @@ Tensor conv_depthwise3d_cuda(
   IntArrayRef stride_size,
   IntArrayRef pad_size,
   IntArrayRef dilation_size) {
-    Tensor output;
+
+    auto output_size = internal::get_output_size<4>(input, kernel_size, stride_size, pad_size, dilation_size);
+    auto output = at::empty(output_size, input.options());
+
     _conv_depthwise3d_forward_cuda(
       output, input, weight, bias, kernel_size, stride_size, pad_size, dilation_size
     );
@@ -855,7 +861,9 @@ std::tuple<at::Tensor,at::Tensor> conv_depthwise3d_backward_cuda(
   IntArrayRef dilation_size,
   std::array<bool,2> output_mask) {
 
-    Tensor grad_input, grad_weight;
+    auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
+    auto grad_weight = at::zeros_like(weight, at::MemoryFormat::Contiguous);
+
     if (output_mask[0]) {
         _conv3d_depthwise3d_backward_input_cuda(
           grad_input, gradOutput, input, weight, 
