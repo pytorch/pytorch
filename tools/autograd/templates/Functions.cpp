@@ -430,7 +430,7 @@ Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &
   if (input.numel() == 0) {
     return input;
   }
-  auto result = at::zeros(input.sizes());
+  auto result = at::zeros(input.sizes(), input.options());
   return result.scatter_add_(dim, indices, grad);
 }
 
