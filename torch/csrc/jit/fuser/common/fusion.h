@@ -7,6 +7,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <stack>
 #include <iostream>
 
 namespace torch {
@@ -29,14 +30,11 @@ struct TORCH_API Manager{
 
 private:
 
-  Fusion* fusion_;
+  std::stack<Fusion*> fusion_;
 
-  Manager(){fusion_ = nullptr;}
+  Manager(){}
 
-  void setFusion(Fusion* _fusion){
-    fusion_=_fusion;
-  }
-
+  // Not copyable
   Manager(const Manager& other) = delete;
   Manager& operator=(const Manager& other) = delete;
 
@@ -47,20 +45,24 @@ private:
 public:
 
   Manager(Fusion* _fusion){
-    instance().setFusion(_fusion);
+    instance().fusion_.push(_fusion);
   }
 
   ~Manager(){
-    instance().setFusion(nullptr);
+    if(instance().fusion_.size() > 0)
+      instance().fusion_.pop();
   }
 
   static Manager& instance(){
-    thread_local static Manager m;
+    static Manager m;
     return m;
   }
 
-  Fusion* fusion(){return instance().fusion_;}
-  
+  Fusion* fusion(){
+    if(instance().fusion_.size() > 0)
+      return instance().fusion_.top();
+    return nullptr;
+  }
 };
 
 struct TORCH_API Fusion {
@@ -93,8 +95,11 @@ struct TORCH_API Fusion {
   };
 
   // Functions for inserting expressions
+  // TODO: Lets put some safety into these 2 functions. Run through a quick dependency check
+  // on the expr's inputs.
   void insertAtStart(Expr* expr) { region_->insertAtStart(expr); }
   void insertAtEnd(Expr* expr) { region_->insertAtEnd(expr); }
+
   void insertLeftBeforeRight(Expr* left, Expr* right) {
     region_->insertLeftBeforeRight(left, right);
   }
@@ -103,8 +108,8 @@ struct TORCH_API Fusion {
   }
 
   // Functions for adding inputs and outputs
-  void addInput(Val* input) { region_->addInput(input); }
-  void addOutput(Val* output) { region_->addOutput(output); }
+  void addInput(Val* input) { region_->addInput(input); registerVal(input);}
+  void addOutput(Val* output) { region_->addOutput(output); registerVal(output);}
 
   // Functions for querying / enumerating IR objets
   bool inFusion(const Statement* stmt){
@@ -117,27 +122,9 @@ struct TORCH_API Fusion {
 
     return infusion;
   }
-  std::deque<Val*>& inputs() noexcept { return region_->inputs(); }
-  std::deque<Val*>& outputs() noexcept { return region_->outputs(); }
-
-  std::deque<Expr*>& exprs() noexcept { return region_->exprs(); }
-
-  void print(std::ostream& os) {
-    os << "Fusion{Inputs(" << std::endl;
-    for (auto* input : inputs()) {
-      os << input << std::endl;
-    }
-
-    os << ")->Body(" << std::endl;
-
-    for (auto* expr : exprs()) {
-      os << expr << std::endl;
-    }
-
-    // TODO: print outputs
-
-  }
-
+  const std::deque<Val*>& inputs() const noexcept { return region_->inputs(); }
+  const std::deque<Val*>& outputs() const noexcept { return region_->outputs(); }
+  const std::deque<Expr*>& exprs() const noexcept { return region_->exprs(); }
 
   // Functions for registering IR objects
   StmtNameType registerStatement(Statement* stmt) {
@@ -222,5 +209,8 @@ private:
   StmtNameType getValName() { return val_name_counter_++; }
   StmtNameType getExprName() { return expr_name_counter_++; }
 };
+
+  TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& fusion);
+  TORCH_API std::ostream& operator<<(std::ostream& os, const std::deque<Val*>& vals);
 
 }}} // torch::jit::fuser

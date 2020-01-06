@@ -8,7 +8,6 @@ namespace jit {
 namespace fuser {
 
 ValType promote_scalar(const ValType& t1, const ValType& t2){
-  TORCH_CHECK(t1 < ValType::Scalar_Count && t2 < ValType::Scalar_Count);
   return t1 < t2 ? t1 : t2;
 }
 

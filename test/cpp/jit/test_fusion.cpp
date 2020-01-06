@@ -20,12 +20,12 @@ void testCPUFusion() {
 
   Fusion fusion;
   Manager m(&fusion);
-
+  assert(m.fusion() == &fusion);
+  
   Float* f = new Float{2.f};
   
   const auto val_type = f->type();
-  std::cout << "val type: " << val_type << std::endl;
-
+  
   SimpleHandler* handler = new SimpleHandler{};
   const auto result = f->dispatch(handler);
   std::cout << "Dispatch Float result: " << result << std::endl;
@@ -39,20 +39,43 @@ void testCPUFusion() {
   std::cout << "Dispatch Statement result: " << s_result << std::endl;
   
   Float* f1 = static_cast<Float*>(v);
-
   Float* f3 = new Float();
   Float* f2 = new Float{3.f};
-  Add* an_add = new Add(f3, f1, f2);
-  std::cout<<"Explicit add construction: "<<an_add<<std::endl;
 
+  Add* an_add = new Add(f3, f1, f2);
+  std::cout<<"Explicit add construction: "<<fusion<<std::endl;
+
+  Fusion fusion2;
+  Manager m2(&fusion2);
+  
+  Float* f4 = new Float{4.f};
   Int* i1 = new Int{3};
-  auto f4 = add(f1, i1);
-  std::cout<<"Implicit add construction (f + i): "<<f4<<std::endl;
+  auto f5 = add(f4, i1);
+  std::cout<<"Implicit add construction (f + i): "<<fusion2<<std::endl;
+
+  assert(m.fusion() == &fusion2);
+
+}
+
+void testFusionContainer(){
 
 }
 
 void testGPUFusion() {
-  // std::cout << "Hello world from testGPUFusion" << std::endl;
+  /*
+  Fusion fusion;
+  Manager m(&fusion);
+  Tensor* T1 = new Tensor{};
+  Tensor* T2 = new Tensor{};
+  Float* F1 = new Float{1.0};
+  Val* T3 = add(T2, F1);
+
+  fusion.addInput(T1);
+  fusion.addInput(T2);
+  fusion.addOutput(T3);
+
+  std::cout << fusion << std::endl;
+*/
 }
 
 void testGPUHelloFusion(){

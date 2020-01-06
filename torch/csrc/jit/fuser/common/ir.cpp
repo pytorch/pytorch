@@ -20,17 +20,28 @@ namespace fuser {
 Val::Val(
   const ValType _type) 
   : type_{_type} {
-  if(Manager::instance().fusion())
-    Manager::instance().fusion()->registerVal(this);
-
+    //TODO: should this be a runtime error?
+    if(Manager::instance().fusion() != nullptr){
+      auto* fusion = Manager::instance().fusion();
+      fusion->registerVal(this);
+    }else{
+      std::cout<<"???"<<std::endl;
+    }
 }
 
 Expr::Expr(
     const ExprType _type)
   : type_{_type} {
-
-    if(Manager::instance().fusion())
-      Manager::instance().fusion()->registerExpr(this);
+   
+    //TODO: should this be a runtime error?
+    if(Manager::instance().fusion() != nullptr){
+      auto* fusion = Manager::instance().fusion();
+      fusion->registerExpr(this);
+      fusion->insertAtEnd(this);
+    }else{
+      std::cout<<"??"<<std::endl;
+    }
+    
 }
 
 Statement::~Statement() { }
@@ -47,8 +58,12 @@ int Statement::dispatch(T handler) const{
   const auto maybe_val_type = getValType();
   if (maybe_val_type) {
     switch (*maybe_val_type) {
+      case ValType::Tensor:
+        return ptr(handler)->handle(static_cast<const Tensor*>(this));
       case ValType::Float:
         return ptr(handler)->handle(static_cast<const Float*>(this));
+      case ValType::Int:
+        return ptr(handler)->handle(static_cast<const Int*>(this));
       default:
         throw std::runtime_error("Unknown valtype in dispatch!");
     }

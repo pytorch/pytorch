@@ -34,6 +34,7 @@ int IRPrinter::handle(const Statement* const statement){
   out_ << "Unknown statement";
   return 0;
 }
+
 int IRPrinter::handle(const Float* const f){
   printValPreamble(out_, f) << "f";
   if (f->isSymbolic()) {
@@ -41,6 +42,11 @@ int IRPrinter::handle(const Float* const f){
   } else {
     out_ << *(f->value());
   }
+  return 0;
+}
+
+int IRPrinter::handle(const Tensor* const t){
+  out_<<"T";
   return 0;
 }
 

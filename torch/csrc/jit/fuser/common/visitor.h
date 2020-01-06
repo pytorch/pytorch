@@ -31,6 +31,7 @@ struct TORCH_API IRPrinter {
 
   int handle(const Statement* const statement);
   int handle(const Float* const f);
+  int handle(const Tensor* const t);
   int handle(const Int* const i);
   int handle(const Add* const add);
 
