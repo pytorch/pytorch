@@ -172,6 +172,7 @@ class RRefContext {
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, std::weak_ptr<RRef>, ForkId::Hash> users_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.
