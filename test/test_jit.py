@@ -1371,11 +1371,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly, this test should not be passing \
-    because bias is not handled properly, the reason is passes is because the \
-    parameters of bn are initialized to default values and the recomputed bias \
-    for conv is zero, which is equivalent to no bias")
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1383,6 +1378,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1413,8 +1409,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly")
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1452,8 +1446,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly")
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -2339,6 +2331,7 @@ graph(%Ra, %Rb):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
+    @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
         with enable_profiling_mode():
@@ -3258,6 +3251,7 @@ graph(%Ra, %Rb):
         input = torch.rand(3, 4).cuda()
         self.assertEqual(m(input), m2(input))
 
+    @slowTest
     def test_export_batchnorm(self):
         for mode in ['eval', 'train']:
             for clazz in [
@@ -3877,7 +3871,9 @@ class TestScript(JitTestCase):
                 self.foo = foo
 
         m = M(5)
-        with self.assertRaises(AttributeError):
+        # m has a constant attribute, but we can't
+        # assign to it
+        with self.assertRaises(RuntimeError):
             m.foo = 6
 
 
@@ -6152,6 +6148,7 @@ a")
         code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
         FileCheck().check('sqrtf').run(code)
 
+    @slowTest
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
@@ -7404,15 +7401,6 @@ a")
 
         self.checkScript(func1, (), optimize=True)
         self.checkScript(func2, (), optimize=True)
-
-    # FIXME: get rid of this once we have actual ops using optional floats
-    def test_optional_float(self):
-        def _test_optional_float(x, scale):
-            # type: (Tensor, Optional[float]) -> torch.Tensor
-            return torch._test_optional_float(x, scale=scale)
-
-        self.assertEqual([0], torch.jit.script(_test_optional_float)(torch.randn(()), None).shape)
-        self.assertEqual((), torch.jit.script(_test_optional_float)(torch.randn(()), 2.5).shape)
 
     def _test_tensor_number_math(self, device='cpu'):
         template = dedent('''
@@ -17126,34 +17114,34 @@ nn_functional_tests = [
     ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d', (True, 'aten::__interpolate')),
     ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale', (True, 'aten::__interpolate')),
     ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size', (True, 'aten::__interpolate')),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2, None, 'nearest', None, True),
-     'nearest_4d_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'nearest', None, True),
-     'nearest_4d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bilinear', None, True),
-     'bilinear_4d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bilinear', None, True),
-     'bilinear_4d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bicubic', None, True),
-     'bicubic_4d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bicubic', None, True),
-     'bicubic_4d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (None, 2., 'nearest', None, True),
-     'nearest_3d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (4, None, 'nearest', None, True),
-     'nearest_3d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (None, 2., 'linear', None, True),
-     'linear_3d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M), (4, None, 'linear', None, True),
-     'linear_3d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'nearest', None, True),
-     'nearest_5d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'nearest', None, True),
-     'nearest_5d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'trilinear', None, True),
-     'trilinear_5d_with_scale_use_scale_factor', (True, 'aten::__interpolate')),
-    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, True),
-     'trilinear_5d_with_size_use_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2, None, 'nearest', None, False),
+     'nearest_4d_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4, None, 'nearest', None, False),
+     'nearest_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bilinear', None, False),
+     'bilinear_4d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bilinear', None, False),
+     'bilinear_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2., 'bicubic', None, False),
+     'bicubic_4d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4, None, 'bicubic', None, False),
+     'bicubic_4d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2., 'nearest', None, False),
+     'nearest_3d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4, None, 'nearest', None, False),
+     'nearest_3d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2., 'linear', None, False),
+     'linear_3d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4, None, 'linear', None, False),
+     'linear_3d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'nearest', None, False),
+     'nearest_5d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'nearest', None, False),
+     'nearest_5d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2., 'trilinear', None, False),
+     'trilinear_5d_with_scale_not_recompute_scale_factor', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4, None, 'trilinear', None, False),
+     'trilinear_5d_with_size_not_recompute_scale_factor', (True, 'aten::__interpolate')),
 ]
 
 
@@ -17204,7 +17192,8 @@ additional_module_tests = [
         'module_name': 'Transformer',
         'constructor_args': (1, 1, 1, 1, 2),
         'input_size': (3, 1, 1),
-        'extra_args': (torch.randn(1, 1, 1),)
+        'extra_args': (torch.randn(1, 1, 1),),
+        'slowTest': True
     }
 ]
 
@@ -17501,6 +17490,9 @@ def add_nn_module_test(*args, **kwargs):
 
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
+
+    if 'slowTest' in kwargs:
+        do_test = slowTest(do_test)
 
     post_add_test(test_name, (), do_test, TestJitGeneratedModule)
 

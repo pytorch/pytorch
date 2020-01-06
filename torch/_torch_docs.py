@@ -825,6 +825,26 @@ Example::
     torch.Size([10, 3, 5])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_and,
+           r"""
+bitwise_and(input, other, out=None) -> Tensor
+
+Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical AND.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([1, 0,  3], dtype=torch.int8)
+    >>> torch.bitwise_and(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ False, True, False])
+""".format(**common_args))
+
 add_docstr(torch.bitwise_xor,
            r"""
 bitwise_xor(input, other, out=None) -> Tensor
@@ -3844,25 +3864,37 @@ add_docstr(torch.nonzero,
            r"""
 nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
 
-**When** :attr:`as_tuple` **is false or unspecified:**
+.. note::
+    :func:`torch.nonzero(..., as_tuple=False) <torch.nonzero>` (default) returns a
+    2-D tensor where each row is the index for a nonzero value.
+
+    :func:`torch.nonzero(..., as_tuple=True) <torch.nonzero>` returns a tuple of 1-D
+    index tensors, allowing for advanced indexing, so ``x[x.nonzero(as_tuple=True)]``
+    gives all nonzero values of tensor ``x``. Of the returned tuple, each index tensor
+    contains nonzero indices for a certain dimension.
+
+    See below for more details on the two behaviors.
+
+
+**When** :attr:`as_tuple` **is ``False`` (default)**:
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
 element in :attr:`input`. The result is sorted lexicographically, with
 the last index changing the fastest (C-style).
 
-If :attr:`input` has `n` dimensions, then the resulting indices tensor
+If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
-**When** :attr:`as_tuple` **is true:**
+**When** :attr:`as_tuple` **is ``True``**:
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
 :attr:`input` .
 
-If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tensors
-of size `z`, where `z` is the total number of
+If :attr:`input` has :math:`n` dimensions, then the resulting tuple contains :math:`n`
+tensors of size :math:`z`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
 As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
@@ -3873,8 +3905,8 @@ Args:
     out (LongTensor, optional): the output tensor containing indices
 
 Returns:
-    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is false, the output
-    tensor containing indices. If :attr:`as_tuple` is true, one 1-D tensor for
+    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is ``False``, the output
+    tensor containing indices. If :attr:`as_tuple` is ``True``, one 1-D tensor for
     each dimension, containing the indices of each nonzero element along that
     dimension.
 
