@@ -272,7 +272,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
 
-    def test_max_polling(self):
+    def test_max_pooling(self):
         for device in torch.testing.get_all_device_types():
             named_tensor_1d = torch.zeros(2, 3, 5, device=device, names=list('ABC'))
             named_tensor_2d = torch.zeros(2, 3, 5, 7, device=device, names=list('ABCD'))
