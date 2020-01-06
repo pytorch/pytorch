@@ -16,11 +16,12 @@ using namespace torch::jit::fuser;
 
 // 1. Test cases are void() functions.
 // 2. They start with the prefix `test`
-void testCPUFusion() {
+void testFusionCPU(){}
+
+void testFusionDispatch(){
 
   Fusion fusion;
   Manager m(&fusion);
-  assert(m.fusion() == &fusion);
   
   Float* f = new Float{2.f};
   
@@ -37,28 +38,56 @@ void testCPUFusion() {
   Statement* s = static_cast<Statement*>(f);
   const auto s_result = s->dispatch(handler);
   std::cout << "Dispatch Statement result: " << s_result << std::endl;
-  
-  Float* f1 = static_cast<Float*>(v);
-  Float* f3 = new Float();
-  Float* f2 = new Float{3.f};
 
+}
+
+void testFusionSimpleArith(){
+  Fusion fusion;
+  Manager m(&fusion);
+ 
+  Float* f1 = new Float(1.f);
+  Float* f2 = new Float{2.f};
+  Float* f3 = new Float();
+  
   Add* an_add = new Add(f3, f1, f2);
   std::cout<<"Explicit add construction: "<<fusion<<std::endl;
-
-  Fusion fusion2;
-  Manager m2(&fusion2);
-  
-  Float* f4 = new Float{4.f};
-  Int* i1 = new Int{3};
-  auto f5 = add(f4, i1);
-  std::cout<<"Implicit add construction (f + i): "<<fusion2<<std::endl;
-
-  assert(m.fusion() == &fusion2);
 
 }
 
 void testFusionContainer(){
+  Fusion fusion1;
+  Manager m(&fusion1);
+  Manager *inst = &(m.instance());
+  
+  Float* f1 = new Float(1.f);
+  Float* f2 = new Float(2.f);
+  auto f3 = add(f1, f2);
+  std::cout<<"Implicit add construction: "<<fusion1<<std::endl;
 
+  Fusion fusion2;
+  {
+    Manager m2(&fusion2);
+    Float* f3 = new Float(1.f);
+    Float* f4 = new Float(2.f);
+    auto f5 = add(f3, f4);
+    TORCH_CHECK(m.fusion() == &fusion2);
+    TORCH_CHECK(&(m2.instance()) == inst);
+  }
+
+  TORCH_CHECK(m.fusion() == &fusion1);
+  TORCH_CHECK(&(m.instance()) == inst);
+}
+
+void testFusionSimpleTypePromote(){
+  Fusion fusion;
+  Manager m(&fusion);
+  Manager *inst = &(m.instance());
+  
+  Float* f4 = new Float{4.f};
+  Int* i1 = new Int{3};
+  auto f5 = add(f4, i1);
+
+  TORCH_CHECK(f5->getValType() == ValType::Float);
 }
 
 void testGPUFusion() {

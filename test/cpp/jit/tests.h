@@ -78,7 +78,6 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
-<<<<<<< HEAD
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
@@ -89,10 +88,6 @@ namespace jit {
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)
-=======
-  _(CommonAncestor)                    \
-  _(CPUFusion)
->>>>>>> cpp test extensibility point
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -101,7 +96,8 @@ namespace jit {
   _(GPUHelloFusion)             \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
-  _(Interp)
+  _(Interp)                     \
+
 
 #define DECLARE_JIT_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_JIT_TEST)
