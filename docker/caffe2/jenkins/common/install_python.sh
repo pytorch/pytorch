@@ -32,6 +32,7 @@ install_ubuntu() {
       ;;
     3.6)
       install_ubuntu_deadsnakes python3.6-dev
+      apt-get install -y python3-distutils
       PYTHON=python3.6
       INSTALL_SETUPTOOLS=yes
       ;;
