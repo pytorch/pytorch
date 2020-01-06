@@ -2860,6 +2860,7 @@ class TestAutograd(TestCase):
                 grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
                 self.assertEqual(grad1, grad2)
                 self.assertEqual(grad2.dtype, torch.float)
+
             gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
             grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
             grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
