@@ -42,7 +42,7 @@ from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, 
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, to_gpu, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     TemporaryFileName
-from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, allowCUDAOOM
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
@@ -9325,7 +9325,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out1, out2)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
-    @unittest.skipIf(sys.platform == "win32", "See https://github.com/pytorch/pytorch/issues/31650")
+    @allowCUDAOOM("This test fails with OOM on Windows CI, but succeeds on Linux with same memory. See https://github.com/pytorch/pytorch/issues/31650")
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)

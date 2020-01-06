@@ -2,6 +2,8 @@ r"""This file is allowed to initialize CUDA context when imported."""
 
 import torch
 import torch.cuda
+import unittest
+import functools
 from common_utils import TEST_WITH_ROCM, TEST_NUMBA
 
 
@@ -32,3 +34,17 @@ def initialize_cuda_context_rng():
         for i in range(torch.cuda.device_count()):
             torch.randn(1, device="cuda:{}".format(i))
         __cuda_ctx_rng_initialized = True
+
+
+def allowCUDAOOM(reason):
+    def wrapper(f):
+        @functools.wraps(f)
+        def wrapped_f(*args, **kwargs):
+            try:
+                f(*args, **kwargs)
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e):
+                    raise unittest.SkipTest(reason)
+                raise e
+        return wrapped_f
+    return wrapper
