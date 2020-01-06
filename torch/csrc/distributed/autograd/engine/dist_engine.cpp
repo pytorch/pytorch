@@ -204,8 +204,10 @@ void DistEngine::runEngineAndAccumulateGradients(
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
   ThreadsBlockedGuard guard;
-  variable_list grads = engine_.execute_with_graph_task(
-      autogradContext->retrieveGraphTask(), graphRoot);
+  variable_list grads = engine_
+                            .execute_with_graph_task(
+                                autogradContext->retrieveGraphTask(), graphRoot)
+                            ->wait();
 
   // Accumulate all the gradients in the context.
   TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
