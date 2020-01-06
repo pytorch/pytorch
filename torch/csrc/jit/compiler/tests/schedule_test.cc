@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include "torch/csrc/jit/compiler/include/ir_printer.h"
 #include "torch/csrc/jit/compiler/include/schedule.h"
 #include "torch/csrc/jit/compiler/include/tensor.h"
 #include "torch/csrc/jit/compiler/tests/test_utils.h"
@@ -31,6 +32,17 @@ TEST(TensorExpr, Simple01) {
   Var x_tail_2;
   TensorOperation tail_op_2;
   tensor.SplitWithTail(x_outer, 2, true, &x_2, &x_1, &x_tail_2, &tail_op_2);
+}
+
+TEST(TensorExpr, Lower01) {
+  Tensor tensor = Compute(
+      "f", {Expr(16), Expr(5)}, {"x", "y"}, [](const Var& x, const Var& y) {
+        return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      });
+  Var x = tensor.function().arg(0);
+  Var y = tensor.function().arg(1);
+  Schedule sch = Schedule::make({tensor});
+  Stmt stmt = sch.Lower();
 }
 
 TEST(TensorExpr, Simple02) {

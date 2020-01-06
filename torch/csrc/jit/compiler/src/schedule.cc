@@ -46,8 +46,7 @@ ScheduleNode::ScheduleNode(const std::vector<Tensor>& tensors)
       node->set_loop_axis(loop_axis);
     }
     node = node->NewFirstChild();
-    TensorExprOp* tensor_expr_op =
-        this->NewTensorExprOp(func.func_var(), func.body());
+    TensorExprOp* tensor_expr_op = this->NewTensorExprOp(func);
     node->set_tensor_expr_op(tensor_expr_op);
 
     // attach the node to the user provided tensors.
@@ -212,6 +211,51 @@ ScheduleObject* ScheduleNode::LookUpCloneScheduleObject(
   }
 
   return iter->second;
+}
+
+// TODO: change to a stack-based version without recursion
+Stmt ScheduleNode::Lower(TensorExprNode* node) {
+  if (node == nullptr) {
+    return Stmt();
+  }
+  if (node->next_sibling() != nullptr) {
+    std::vector<Stmt> siblings;
+    TensorExprNode* n = node;
+    while (n != nullptr) {
+      Stmt stmt = LowerNoSibling(n);
+      siblings.push_back(stmt);
+      n = n->next_sibling();
+    }
+    return Block::make(siblings);
+  }
+  return LowerNoSibling(node);
+}
+
+Stmt ScheduleNode::LowerNoSibling(TensorExprNode* node) {
+  if (node == nullptr) {
+    return Stmt();
+  }
+  if (node->is_empty_value()) {
+    return Stmt();
+  }
+  if (node->is_tensor_expr_op()) {
+    CHECK(node->first_child() == nullptr);
+    TensorExprOp* expr_op = node->tensor_expr_op();
+    Stmt stmt = expr_op->ElementStmt();
+    return stmt;
+  } else if (node->is_loop_axis()) {
+    CHECK(node->first_child() != nullptr);
+    LoopAxis* loop_axis = node->loop_axis();
+    Stmt body = Lower(node->first_child());
+    const Var& var = loop_axis->var();
+    const Range& range = loop_axis->range();
+    Stmt for_stmt = For::make(var, range.start(), range.stop(), body);
+    return for_stmt;
+  } else if (node->is_empty_value()) {
+    return Lower(node->first_child());
+  } else {
+    LOG(FATAL) << "Unsupported node type";
+  }
 }
 
 void LoopAxis::CloneFrom(const LoopAxis* other) {

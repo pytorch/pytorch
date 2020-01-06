@@ -107,6 +107,7 @@ class Expr : public RefHandle<BaseExprNode> {
 class Stmt : public RefHandle<BaseStmtNode> {
  public:
   using BaseHandle = RefHandle<BaseStmtNode>;
+  Stmt() {}
   explicit Stmt(const BaseStmtNode* node) : BaseHandle(node) {}
 
   void accept(IRVisitor* visitor) const {

@@ -59,6 +59,7 @@ class FunctionNode : public RefCounted {
   const Var& func_var() const {
     return func_var_;
   }
+  Stmt ElementStmt();
 
  private:
   Var func_var_;
@@ -70,6 +71,7 @@ class FunctionNode : public RefCounted {
 class Function : public RefHandle<FunctionNode> {
  public:
   using BaseClass = RefHandle<FunctionNode>;
+  Function() {}
   Function(
       const std::string& func_name,
       const std::vector<Expr>& dims,
@@ -90,6 +92,10 @@ class Function : public RefHandle<FunctionNode> {
   }
   const Var& func_var() const {
     return node()->func_var();
+  }
+
+  Stmt ElementStmt() {
+    return node()->ElementStmt();
   }
 };
 
