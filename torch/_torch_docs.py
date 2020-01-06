@@ -1389,7 +1389,7 @@ location of each maximum value found in the dimension :attr:`dim`.
 Args:
     {input}
     dim  (int): the dimension to do the operation over
-    out (tuple, optional): the result tuple of two output tensors (out, indices)
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
 Example::
     >>> a = torch.randn(10)
     >>> a
@@ -1397,7 +1397,7 @@ Example::
          1.9946, -0.8209])
     >>> torch.cummax(a, dim=0)
     torch.return_types.cummax(
-        out=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
+        values=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
          1.9946,  1.9946]),
         indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
 """.format(**reduceops_common_args))
