@@ -171,6 +171,16 @@ class TestTensorBoardUtils(BaseTestCase):
         converted = convert_to_HWC(test_image, 'hw')
         self.assertEqual(converted.shape, (32, 32, 3))
 
+    def test_convert_to_HWC_dtype_remains_same(self):
+        # test to ensure convert_to_HWC restores the dtype of input np array and
+        # thus the scale_factor calculated for the image is 1
+        test_image = torch.tensor([[[[1, 2, 3], [4, 5, 6]]]], dtype=torch.uint8)
+        tensor = make_np(test_image)
+        tensor = convert_to_HWC(tensor, 'NCHW')
+        scale_factor = summary._calc_scale_factor(tensor)
+        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+
+
     def test_prepare_video(self):
         # At each timeframe, the sum over all other
         # dimensions of the video should be the same.
