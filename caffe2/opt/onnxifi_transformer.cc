@@ -14,6 +14,11 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+C10_DEFINE_bool(
+    merge_fp32_inputs_into_fp16,
+    false,
+    "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
+
 namespace caffe2 {
 
 namespace {
@@ -199,6 +204,114 @@ NetDef composeResultNet(const OperatorDef& onnxifi_op) {
   NetDef net_opt;
   net_opt.add_op()->CopyFrom(onnxifi_op);
   return net_opt;
+}
+
+void mergeFp32InputsAndConvertToFp16(
+    NetDef* pred_net,
+    ShapeInfoMap* shape_hints) {
+  std::vector<std::pair<std::string, ShapeInfo>> user_inputs;
+  std::unordered_set<std::string> user_input_set;
+  for (const auto& i : pred_net->external_input()) {
+    if (i.find("output") != std::string::npos &&
+        i.find("float_features_output") == std::string::npos &&
+        i.find("feature_preproc/output") == std::string::npos) {
+      const auto& shape_info = shape_hints->at(i);
+      if (shape_info.shape.data_type() != TensorProto_DataType_FLOAT) {
+        continue;
+      }
+      auto shape_info_copy = shape_info;
+      std::stringstream ss;
+      ss << "fp32 input: " << i << ": ";
+      for (auto d : shape_info.shape.dims()) {
+        ss << d << ", ";
+      }
+      LOG(INFO) << ss.str();
+      shape_info_copy.shape.set_data_type(TensorProto_DataType_FLOAT16);
+
+      user_inputs.emplace_back(i, shape_info_copy);
+      user_input_set.emplace(i);
+    }
+  }
+
+  if (!user_inputs.empty()) {
+    std::vector<OperatorDef> ops;
+    for (const auto& op : pred_net->op()) {
+      ops.emplace_back(op);
+    }
+    pred_net->clear_op();
+
+    OperatorDef op1;
+    op1.set_type("Concat");
+    for (const auto& i : user_inputs) {
+      op1.add_input(i.first);
+    }
+    op1.add_output("fp32_input_concated");
+    op1.add_output("fp32_input_concated_split_info");
+    auto shape_info = user_inputs.front().second;
+    int total = 0;
+    for (const auto& u : user_inputs) {
+      total += u.second.shape.dims(1);
+    }
+    shape_info.shape.set_dims(1, total);
+    auto* arg = op1.add_arg();
+    arg->set_name("axis");
+    arg->set_i(1);
+    pred_net->add_op()->CopyFrom(op1);
+
+    // TODO: a possible optimization is to fuse the fp16 conversion into Concat
+    OperatorDef op2;
+    op2.set_type("FloatToHalf");
+    op2.add_input("fp32_input_concated");
+    op2.add_output("fp16_input_concated");
+    arg = op2.add_arg();
+    arg->set_name("clip");
+    arg->set_i(1);
+    shape_hints->emplace("fp16_input_concated", shape_info);
+    pred_net->add_op()->CopyFrom(op2);
+
+    OperatorDef op3;
+    op3.set_type("Split");
+    op3.add_input("fp16_input_concated");
+    std::vector<OperatorDef> converts;
+    for (const auto& i : user_inputs) {
+      std::string new_name = i.first + "_split_fp16";
+      op3.add_output(new_name);
+      shape_hints->emplace(new_name, i.second);
+      converts.emplace_back(CreateOperatorDef(
+          "HalfToFloat",
+          "",
+          {i.first + "_split_fp16"},
+          {i.first + "_split"},
+          {}));
+      auto converted_shape = i.second;
+      converted_shape.shape.set_data_type(TensorProto_DataType_FLOAT);
+      shape_hints->emplace(i.first + "_split", converted_shape);
+    }
+    arg = op3.add_arg();
+    arg->set_name("axis");
+    arg->set_i(1);
+    arg = op3.add_arg();
+    arg->set_name("split");
+    for (const auto& u : user_inputs) {
+      arg->add_ints(u.second.shape.dims(1));
+    }
+    pred_net->add_op()->CopyFrom(op3);
+    for (const auto& op : converts) {
+      pred_net->add_op()->CopyFrom(op);
+    }
+
+    for (auto& op : ops) {
+      for (auto& i : *op.mutable_input()) {
+        if (user_input_set.count(i)) {
+          i = i + "_split";
+        }
+      }
+    }
+
+    for (const auto& op : ops) {
+      pred_net->add_op()->CopyFrom(op);
+    }
+  }
 }
 
 } // namespace
@@ -884,6 +997,9 @@ void OnnxifiTransformer::transform(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
   if (opts_.use_onnx) {
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
+  }
+  if (FLAGS_merge_fp32_inputs_into_fp16) {
+    mergeFp32InputsAndConvertToFp16(pred_net, &shape_hints);
   }
 
   if (opts_.debug) {
