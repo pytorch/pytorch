@@ -6257,7 +6257,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
-        # cumsum / cumprod
+        # cumsum / cumprod / cummax
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
