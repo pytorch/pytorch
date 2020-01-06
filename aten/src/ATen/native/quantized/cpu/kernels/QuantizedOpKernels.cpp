@@ -208,10 +208,10 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
     // See https://stackoverflow.com/a/34448562/3606192 for potential
     // optimizations
-    float output_scale = 0x1.0p-8;
+    float output_scale = 0.00390625;  // 1.0 / 2^8
     int64_t output_zero_point = 0;
     if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 0x1.0p-32;
+      output_scale = 2.3283064e-10;  // 1.0 / 2^32
     } else if (SCALAR_TYPE == at::kQInt8) {
       output_zero_point = -128;
     }
