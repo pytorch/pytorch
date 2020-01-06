@@ -25,7 +25,7 @@ Val::Val(
       auto* fusion = Manager::instance().fusion();
       fusion->registerVal(this);
     }else{
-      std::cout<<"???"<<std::endl;
+      std::cout<<"Warning no fusion group found when creating a Val."<<std::endl;
     }
 }
 
@@ -39,7 +39,7 @@ Expr::Expr(
       fusion->registerExpr(this);
       fusion->insertAtEnd(this);
     }else{
-      std::cout<<"??"<<std::endl;
+      std::cout<<"Warning no fusion group found when creating an Expr."<<std::endl;
     }
     
 }
