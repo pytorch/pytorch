@@ -49,6 +49,18 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller) {
+    throw c10::EnforceFiniteError(
+      file, line, condition, msg, (*GetFetchStackTrace())(), caller
+    );
+}
+
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, const std::string& msg)

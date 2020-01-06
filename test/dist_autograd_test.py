@@ -11,6 +11,7 @@ import torch.distributed.rpc as rpc
 import dist_utils
 from dist_utils import dist_init
 from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing import FileCheck
 
 import threading
 
@@ -1134,7 +1135,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                     if rank % 2 != 0:
                         wait_until_node_failure(rank)
 
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
+                with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
+                                            "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
@@ -1313,7 +1315,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for rank 2 to die.
                 wait_until_node_failure(2)
 
-                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
+                with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
+                                            "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
 
@@ -1567,6 +1570,35 @@ class DistAutogradTest(RpcAgentTestFixture):
         # All contexts should be cleaned up.
         debug_info = dist_autograd._get_debug_info()
         self.assertEqual(0, int(debug_info['num_autograd_contexts']))
+
+
+@unittest.skipIf(
+    not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
+)
+class DistAutogradJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_get_gradients(self):
+        dst_rank = self.rank
+        @torch.jit.script
+        def dist_get_gradients(context_id):
+            # type: (int) -> (Dict[Tensor, Tensor])
+            return dist_autograd.get_gradients(context_id)
+
+        FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
+        with dist_autograd.context() as context_id:
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
+            t3 = torch.add(t1, t2)
+
+            dist_autograd.backward([t3.sum()])
+            grads = dist_get_gradients(context_id)
+
+            self.assertEqual(2, len(grads))
+            self.assertIn(t1, grads)
+            self.assertIn(t2, grads)
+            self.assertEqual(torch.ones(3, 3), grads[t1])
+            self.assertEqual(torch.ones(3, 3), grads[t2])
+
 
 if __name__ == '__main__':
     unittest.main()

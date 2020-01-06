@@ -186,13 +186,13 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
       LOG(FATAL) << "Unknown storage order: " << order_;
   }
 
+  auto sizes = ConvTransposeUnpoolBase<CUDAContext>::GetOutputSize(X, C);
+  auto* Y = Output(0, sizes, at::dtype<T>());
+
   if (X.numel() == 0) {
     VLOG(2) << "Number on elements is 0 in CudnnConvTransposeOp";
     return true;
   }
-
-  auto sizes = ConvTransposeUnpoolBase<CUDAContext>::GetOutputSize(X, C);
-  auto* Y = Output(0, sizes, at::dtype<T>());
 
   int N = 0, M = 0, H = 0, W = 0, H_out = 0, W_out = 0;
   switch (order_) {
@@ -466,11 +466,6 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       break;
     default:
       LOG(FATAL) << "Unknown storage order: " << order_;
-  }
-
-  if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in CudnnConvTransposeOp";
-    return true;
   }
 
   int N = 0, M = 0, H = 0, W = 0, H_out = 0, W_out = 0;
