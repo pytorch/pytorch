@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include <memory>
+#include <mutex>
 
 #include <nccl.h>
 
@@ -107,6 +108,7 @@ class NCCLComm {
 
   void ncclCommAbort() {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
+    std::unique_lock<std::mutex> lock(mutex_);
     if (aborted_) {
       // Should not abort twice.
       return;
@@ -147,6 +149,7 @@ class NCCLComm {
   ncclComm_t ncclComm_;
   bool aborted_;
   ncclResult_t ncclAsyncErr_;
+  mutable std::mutex mutex_;
 };
 
 } // namespace c10d
