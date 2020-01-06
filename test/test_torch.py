@@ -6028,6 +6028,7 @@ def add_neg_dim_tests():
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -10565,10 +10566,27 @@ class TestTorchDeviceType(TestCase):
                                                 [0, 1, 0],
                                                 [2, 2, 2]]))
 
-        # Check that cummulative maximum over a zero length dimension doesn't crash on backprop
-        zeroNumelTensor = torch.zeros(2, 0, requires_grad=True)
-        integrated = zeroNumelTensor.cummax(dim=-1)[0].sum()
-        integrated.backward()
+        # Check that cummulative max over a zero length dimension doesn't crash on backprop.
+        # Also check that cummax over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cummax(dim=dim)
+                # Check that backward does not crash
+                integrated[0].sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cummax(dim=-1)
+        # Check that backward does not crash
+        integrated[0].sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
@@ -11275,11 +11293,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
-        # cumsum, cumprod
+        # cumsum, cumprod, cummax
         self.assertEqual(shape, torch.cumsum(x, 0).shape)
         self.assertEqual(shape, torch.cumsum(x, 2).shape)
         self.assertEqual(shape, torch.cumprod(x, 0).shape)
         self.assertEqual(shape, torch.cumprod(x, 2).shape)
+        self.assertEqual(shape, torch.cummax(x, 0)[0].shape)
+        self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -14748,6 +14768,8 @@ tensor_op_tests = [
     ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types, False),
     ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cumsum', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cummax', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cummax', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
     ('dim', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('dist', '', _small_2d, lambda t, d: [_small_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types, False),
     ('dist', '3_norm', _small_2d, lambda t, d: [_small_2d(t, d), 3], 1e-2, 1e-5, 1e-5, _float_types, False),
