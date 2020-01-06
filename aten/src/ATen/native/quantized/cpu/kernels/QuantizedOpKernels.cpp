@@ -230,7 +230,7 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
       iter,
       [&](scalar_t value_qx) -> scalar_t {
         const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
-        const auto value_dy = 1.0f / (1.0 + std::expf(-value_dx));
+        const auto value_dy = 1.0f / (1.0 + std::exp((-value_dx)));
         return at::quantize_val<scalar_t>(output_scale, output_zero_point,
                                           value_dy);
       },
