@@ -243,10 +243,10 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
     // - Output scale is set to 2.0 / 2^(BIT_NUM)
     // - For signed types output zero point is set to 0
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
-    float output_scale = 0x2.0p-8;
+    float output_scale = 0.0078125;  // 2.0 / 512
     int64_t output_zero_point = 0;
     if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 0x2.0p-32;
+      output_scale = 4.656612873077393e-10;  // 2.0 / 2^32
     } else if (SCALAR_TYPE == at::kQUInt8) {
       output_zero_point = 128;
     }
