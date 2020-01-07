@@ -75,4 +75,10 @@ static inline std::vector<int64_t> conv_weight_size(
   return weight_size;
 }
 
+static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
+  std::vector<int64_t> shape(dim, 1);
+  shape[1] = -1;
+  return bias.reshape(shape);
+}
+
 }} // namespace at::native
