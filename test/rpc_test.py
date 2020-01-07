@@ -1066,7 +1066,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1098,12 +1098,20 @@ class RpcTest(RpcAgentTestFixture):
             import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
 
-        rpc.shutdown()
+        try:
+            if not ignore_leak:
+                assert_context = self.assertRaisesRegex(RuntimeError, "Leaking RRef")
+                assert_context.__enter__()
+
+            rpc.shutdown(graceful=False)
+        except BaseException:
+            if not ignore_leak:
+                if not assert_context.__exit__(*sys.exc_info()):
+                    raise
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
