@@ -205,16 +205,41 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
-  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override;
+  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
+    TORCH_CHECK(
+      !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
+      "Only Tensors of floating point dtype can require gradients");
+    requires_grad_ = requires_grad;
+  }
 
-  bool requires_grad() const override;
+  bool requires_grad() const override {
+    return requires_grad_ || grad_fn_;
+  }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override;
+  Variable& grad() override {
+    return grad_;
+  }
 
-  const Variable& grad() const override;
+  const Variable& grad() const override {
+    return grad_;
+  }
 
-  AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() );
+  AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
+    grad_fn_ = std::move(gradient_edge.function);
+    requires_grad_ = false;
+    is_view_ = false;
+    output_nr_ = gradient_edge.input_nr;
+
+    // set_requires_grad also checks error conditions.
+    if (requires_grad) {
+      TORCH_INTERNAL_ASSERT(self_impl);
+      set_requires_grad(requires_grad, self_impl);
+    }
+    TORCH_CHECK(
+        !grad_fn_ || !requires_grad_,
+        "requires_grad should be false if grad_fn is set");
+  }
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

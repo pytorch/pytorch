@@ -31,7 +31,7 @@ export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 #
 # TODO: Make the ASAN flags a centralized env var and unify with USE_ASAN option
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fno-sanitize=vptr -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install

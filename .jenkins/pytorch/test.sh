@@ -81,11 +81,13 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
-    # NB: we preload libtorch.so to ensure that subsequent loads of C++
-    # extension modules consistently reference the type info in
-    # libtorch.so and its dependencies (most notably, libc++.so).
-    # If another copy of type info is generated, then
-    # UBSAN will fail claiming a vptr violation that looks like:
+    # NB: We load libtorch.so with RTLD_LOCAL.  This means that if
+    # it gets loaded multiple times (as is the case with C++ extensions)
+    # we will have multiple copies of the vptr floating around.  This
+    # doesn't usually cause problems (as we try hard not to use RTTI)
+    # but when UBSAN is turned on, it will do a bunch of virtual pointer
+    # consistency checks which won't work correctly.  When this happens,
+    # you get a violation like:
     #
     #    member call on address XXXXXX which does not point to an object of
     #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
@@ -108,7 +110,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # work in mobile).  However, UBSAN relies on UBSAN to detect vptr
     # confusion, so at least in this environment, we need our ducks in
     # order!
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:$PWD/torch/lib/libtorch_python.so
+    #
+    # By the way, if you arrange for libtorch.so to be loaded globally (e.g.,
+    # using LD_PRELOAD), that would ensure subsequent loads of C++
+    # extension modules consistently reference the type info in libtorch.so and
+    # its dependencies (most notably, libc++.so).  Adding libtorch_python.so
+    # to your LD_PRELOAD isn't really a good idea though, because it
+    # depends on a ton of dynamic libraries that most programs aren't gonna
+    # have.
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
