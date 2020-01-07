@@ -310,7 +310,7 @@ To build the documentation, follow the same steps as above, but run them from
 
 It is helpful when submitting a PR that changes the docs to provide a rendered
 version of the result. You can do this by using GitHub pages to host the docs
-you have built. To do so, follow [these steps](https://help.github.com/en/enterprise/2.13/user/articles/configuring-a-publishing-source-for-github-pages)
+you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
 to make a repo to host your changed documentation.
 
 GitHub pages expects to be hosting a Jekyll generated website which does not work
