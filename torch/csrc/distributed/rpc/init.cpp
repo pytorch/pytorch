@@ -5,7 +5,6 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -298,10 +297,10 @@ If the future completes with an error, an exception is thrown.
 
   // Since FutureMessage is binded to Future, here we need to bind the
   // PythonFutureWrapper to a different name.
-  // TODO Once pyObject can be tagged as IValue and c10::ivalue::Future is
+  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
   // implemented as generic Future<IValue>, we can consider all rpc call
   // to return a future<IValue> later on.
-  py::class_<PythonFutureWrapper>(module, "pyFuture")
+  shared_ptr_class_<PythonFutureWrapper>(module, "_pyFuture")
       .def("wait", [](PythonFutureWrapper& fut) {
         fut.fut->wait();
         auto res = fut.fut->value();
@@ -331,7 +330,7 @@ If the future completes with an error, an exception is thrown.
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
         auto fut = rpcTorchscriptCall(dst, name, stack);
-        return PythonFutureWrapper(fut.toFuture());
+        return PythonFutureWrapper(fut);
       });
 
   module.def(

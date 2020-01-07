@@ -394,13 +394,14 @@ def rpc_async(to, func, args=None, kwargs=None):
 @_require_initialized
 def _rpc_sync(to, qualified_name, args=None, kwargs=None):
     r"""
-    Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
-    messages are sent and received in parallel to execution of Python code. This
+    Make a blocking RPC call to run TorchScript function ``func`` on worker ``to``.
+    RPC messages are sent and received in parallel to execution of Python code. This
     method is thread-safe.
 
     Arguments:
         to (str): name of the destination worker.
-        qualified_name (str): python function annotated with @torch.jit.script
+        qualified_name (str): qualifited name of python function annotated with
+                              @torch.jit.script
                               (like ``moduleName::torchScriptFuncName``)
                               can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -408,23 +409,32 @@ def _rpc_sync(to, qualified_name, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns the result of running ``func``on ``args`` and ``kwargs``.
+        Returns the result of running ``func`` on ``args`` and ``kwargs``.
 
     Example::
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
-        >>> ret = rpc.rpc_sync("worker1", "myModule::myTorchScriptFunc", args=(torch.ones(2), 3))
-        >>> rpc.join_rpc()
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 1:
-        >>> import torch.distributed as dist
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
-        >>> rpc.join_rpc()
+        >>> from torch._jit_internal import _qualified_name
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> ret = rpc._rpc_sync("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
@@ -435,14 +445,15 @@ def _rpc_sync(to, qualified_name, args=None, kwargs=None):
 @_require_initialized
 def _rpc_async(to, qualified_name, args=None, kwargs=None):
     r"""
-    Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
-    messages are sent and received in parallel to execution of Python code. This
+    Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
+    RPC messages are sent and received in parallel to execution of Python code. This
     method is thread-safe. This method will immediately return a
-    Future<Message> that can be awaited on.
+    _pyFuture that can be awaited on.
 
     Arguments:
         to (str): name of the destination worker.
-        qualified_name (str): python function annotated with @torch.jit.script
+        qualified_name (str): qualifited name of python function annotated with
+                              @torch.jit.script
                               (like ``moduleName::torchScriptFuncName``)
                               can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
@@ -450,29 +461,35 @@ def _rpc_async(to, qualified_name, args=None, kwargs=None):
                        invocation.
 
     Returns:
-        Returns a PythonFutureWrapper object that can be waited
+        Returns a _pyFuture object that can be waited
         on. When completed, the return value of ``func`` on ``args`` and
-        ``kwargs`` can be retrieved from the PythonFutureWrapper object.
+        ``kwargs`` can be retrieved from the _pyFuture object.
 
     Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
 
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_model_parallel("worker0")
-        >>> worker1 = rpc.get_worker_id("worker1")
-        >>> fut1 = rpc.rpc_async(worker1, "myModule::myTorchScriptFunc", args=(torch.ones(2), 3))
-        >>> fut2 = rpc.rpc_async(worker1, "myModule::myTorchScriptFunc", args=(1, 2))
-        >>> result = fut1.wait() + fut2.wait()
-        >>> rpc.join_rpc()
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
 
-        On worker 1:
-        >>> import torch.distributed as dist
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
         >>> import torch.distributed.rpc as rpc
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> rpc.init_model_parallel("worker1")
-        >>> rpc.join_rpc()
+        >>> from torch._jit_internal import _qualified_name
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> fut = rpc._rpc_async("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> ret = fut.wait()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}

@@ -321,7 +321,6 @@ void slow_conv_transpose3d_out_cuda_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           at::cuda::blas::gemm<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
               'n',
               't',
               n,
@@ -372,7 +371,6 @@ void slow_conv_transpose3d_out_cuda_template(
           // column-major matrices)
           if (bias.defined()) {
             at::cuda::blas::gemm<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
                 't',
                 'n',
                 n_,
@@ -580,7 +578,6 @@ void slow_conv_transpose3d_backward_out_cuda_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           at::cuda::blas::gemm<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
               'n',
               'n',
               n,
@@ -818,7 +815,6 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
             at::cuda::blas::gemm<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
                 't',
                 'n',
                 n,
@@ -844,7 +840,6 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
             // Do GEMV (note: this is a bit confusing because gemv assumes
             // column-major matrices)
             at::cuda::blas::gemv<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
                 't',
                 k_,
                 m_,

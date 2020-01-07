@@ -136,7 +136,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   // Gets the output size. The output channel is manually specified.
   std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
     CAFFE_ENFORCE(4 == input.dim());
-    CAFFE_ENFORCE(input.numel() > 0);
+    CAFFE_ENFORCE_GT(input.size_from_dim(1), 0);
     int N = input.dim32(0);
     bool channel_first = false; // initialized to suppress compiler warning.
     int H = 0, W = 0; // initialized to suppress compiler warning.

@@ -11,7 +11,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::IValue rpcTorchscriptCall(
+c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
     const std::string& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack) {
@@ -41,11 +41,13 @@ c10::IValue rpcTorchscriptCall(
                               const rpc::Message& message,
                               const c10::optional<utils::FutureError>& futErr) {
     if (futErr) {
-      throw std::runtime_error((*futErr).what());
+      c10::ivalue::Future::FutureError jitFutErr(std::string((*futErr).what()));
+      futPtr->markCompleted(std::move(jitFutErr));
+    } else {
+      futPtr->markCompleted(deserializeRespToIValue(message));
     }
-    futPtr->markCompleted(deserializeRespToIValue(message));
   });
-  return IValue(futPtr);
+  return futPtr;
 }
 
 } // namespace rpc
