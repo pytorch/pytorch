@@ -756,12 +756,14 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       --current_depth;
       --total_depth;
 
-      // Check for errors, call callbacks and sync streams. We return a
-      // completed future here since 'thread_main' above is a call blocking an
-      // autograd engine thread and not the thread the user called
+      // The graph task should have completed and the associated future should
+      // be marked completed as well.
+      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+
+      // We return a completed future here since 'thread_main' above is a call
+      // blocking an autograd engine thread and not the thread the user called
       // 'execute_with_graph_task' from.
-      return std::make_shared<FutureVariableList>(
-          graph_task_exec_post_processing(graph_task));
+      return graph_task->future_result_;
     }
   }
 }
