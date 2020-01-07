@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
+import time
 from functools import partial, wraps
 
 import torch.distributed as dist
@@ -139,9 +140,12 @@ TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
 TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
     test_object.rpc_backend,
     init_method=test_object.init_method,
-    # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
-    num_send_recv_threads=16,
+    # Some tests need additional threads (ex: test_trainer_ps)
+    num_send_recv_threads=8,
 )
+
+def noop():
+    pass
 
 def wait_until_node_failure(rank):
     '''
