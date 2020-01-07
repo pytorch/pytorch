@@ -258,13 +258,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           std::forward_as_tuple(requestId),
           std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
-      auto& requestIdVec = futureTimeouts_[endTime];
-      requestIdVec.push_back(requestId);
+      auto& requestIds = futureTimeouts_[endTime];
+      requestIds.insert(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has earlier end time than other futures in the
       // map.
       if (futureTimeouts_.begin()->first == endTime &&
-          (requestIdVec.size() == 1)) {
+          (requestIds.size() == 1)) {
         notifyThread = true;
       }
     }
@@ -281,7 +281,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
-    TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(
         [this](const Message& message) {
           sendCounts_.increment(pg_->getRank());
@@ -338,29 +337,20 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         // the lock
         std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
         const auto dst = work.to_.id_;
-        if (work.message_.isShutdown()) {
-          pendingSends.reserve(1);
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-          }
-        } else {
-          std::vector<torch::Tensor> payload = {torch::from_blob(
-              (void*)serializedPayload.c_str(),
-              serializedPayload.length(),
-              {torch::kChar})};
-          pendingSends.reserve(2);
+        std::vector<torch::Tensor> payload = {torch::from_blob(
+            (void*)serializedPayload.c_str(),
+            serializedPayload.length(),
+            {torch::kChar})};
+        pendingSends.reserve(2);
 
-          sendCounts_.increment(dst);
+        sendCounts_.increment(dst);
 
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-            pendingSends.emplace_back(
-                pg_->send(payload, dst, dst /* channelTag */));
-          }
+        {
+          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+          pendingSends.emplace_back(
+              pg_->send(preamble, dst, dst /* channelTag */));
+          pendingSends.emplace_back(
+              pg_->send(payload, dst, dst /* channelTag */));
         }
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
@@ -432,7 +422,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[endTime];
-            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            auto it = futuresAtTime.find(id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
@@ -480,15 +470,6 @@ void ProcessGroupAgent::listenLoop() {
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
     int64_t id = preamble_items[3];
-
-    if (type == MessageType::SHUTDOWN) {
-      // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
-      // before logging, but it is not appropriate to call InitGoogleLogging()
-      // here either.
-      LOG(INFO) << "Shutting down ProcessGroupAgent " << workerInfo_.name_
-                << std::endl;
-      return;
-    }
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
@@ -572,7 +553,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
       // to check the remaining futures.
       break;
     } else {
-      const std::vector<int64_t>& futureIDs = it->second;
+      const auto& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
         auto futureIt = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
