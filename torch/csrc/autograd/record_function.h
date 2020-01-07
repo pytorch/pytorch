@@ -115,8 +115,8 @@ struct TORCH_API RecordFunction {
 
   // Retrieves the thread_id that this RecordFunction was created with. Useful
   // if we need to access Events created by the original thread in a different
-  // thread. The threadId_ should only be set in cases where RecordFunction::end
-  // is called in a different thread.
+  // thread. The threadId_ should only be set (via setThreadId) in cases where
+  // RecordFunction::end is called in a different thread.
   inline uint16_t getThreadId() const {
     return threadId_;
   }
@@ -133,8 +133,9 @@ struct TORCH_API RecordFunction {
 
   bool initialized_ = false;
   bool run_sampled_ = false;
-  // The thread_id that this RecordFunction was created with. Invalid if it is
-  // 0.
+  // The thread_id that this RecordFunction was created with. If 0, this means
+  // that it was not set with setThreadId() and this RecordFunction's callbacks
+  // cannot be invoked from a separate thread.
   uint16_t threadId_ = 0;
 };
 
