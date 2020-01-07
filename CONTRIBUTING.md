@@ -310,7 +310,8 @@ To build the documentation, follow the same steps as above, but run them from
 ### Previewing changes
 
 To view HTML files locally, you can open the files in your web browser. For example,
-navigate to [file:///your_pytorch_folder/docs/build/html/index.html](file:///your_pytorch_folder/docs/build/html/index.html).
+navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
+browser.
 
 If you are developing on a remote machine, you can set up an SSH tunnel so that
 you can access the HTTP server on the remote machine from your local machine. To map
