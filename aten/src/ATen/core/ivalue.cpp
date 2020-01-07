@@ -143,8 +143,11 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
-    case IValue::Tag::Tuple:
-      return printList(out, v.toTuple()->elements(), "(", ")");
+    case IValue::Tag::Tuple: {
+      const auto& elements = v.toTuple()->elements();
+      const auto& finish = elements.size() == 1 ? ",)" : ")";
+      return printList(out, elements, "(", finish);
+    }
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
     case IValue::Tag::DoubleList:
@@ -197,6 +200,11 @@ IValue ivalue::Object::getAttr(const std::string& name) const {
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
   const size_t slot = type_.type_->getAttributeSlot(name);
   setSlot(slot, std::move(v));
+}
+
+void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
+  const size_t slot = type_.type_->getAttributeSlot(name);
+  unsafeRemoveSlot(slot);
 }
 
 void ivalue::Object::resizeObject(size_t slot) {

@@ -1,7 +1,8 @@
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -10,20 +11,8 @@
 namespace torch {
 namespace jit {
 
-static std::unordered_set<Value *> collectLoopCounts(Node *n) {
-
-  std::unordered_set<Value *> loopCounts;
-  Block *it = n->owningBlock();
-  while (it->owningNode()) {
-    auto outerNode = it->owningNode();
-    if (outerNode->kind() == prim::Loop) {
-      LoopView lv(outerNode);
-      loopCounts.insert(lv.currentTripCount());
-    }
-    it = outerNode->owningBlock();
-  }
-
-  return loopCounts;
+static bool shouldBeCapturedInByBailOut(Node* n) {
+  return n->kind() != prim::Constant;
 }
 
 struct BailOutGraphBuilderForNode {
@@ -40,17 +29,23 @@ struct BailOutGraphBuilderForNode {
     // this reduces the number of inputs to a bailout graph significantly
     // making it easier to debug
     if (node->kind() == prim::Constant) {
+      TORCH_INTERNAL_ASSERT(!shouldBeCapturedInByBailOut(node));
       auto new_const = copy_graph_->createClone(node, {nullptr});
-      copy_graph_->block()->appendNode(new_const);
+      copy_graph_->block()->prependNode(new_const);
       return new_const->output();
     }
 
     live_inputs_.push_back(old_value);
     auto new_value = copy_graph_->block()->addInput();
-    return mapExistingInputForValue(old_value, new_value);
+    GRAPH_DEBUG(
+        "Adding a new value %",
+        new_value->debugName(),
+        " for %",
+        old_value->debugName());
+    return mapValueAndCopyMetadata(old_value, new_value);
   }
 
-  Value* mapExistingInputForValue(Value* old_value, Value* new_value) {
+  Value* mapValueAndCopyMetadata(Value* old_value, Value* new_value) {
     this->old_to_new_[old_value] = new_value;
     new_value->copyMetadata(old_value);
     return new_value;
@@ -69,6 +64,20 @@ struct BailOutGraphBuilderForNode {
     return this->old_to_new_[v];
   }
 
+  Node* cloneNode(Node* node) {
+    auto* block = copy_graph_->block();
+    auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+
+    auto new_node = block->appendNode(copy_graph_->createClone(node, env));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      auto oo = node->outputs()[i];
+      auto no = new_node->outputs()[i];
+      old_to_new_[oo] = no;
+    }
+
+    return new_node;
+  }
+
   // buildBailOutBlockFrom builds a bailout graph from
   // a given node `n` until the end of the owning block
   // If `n` belongs to `prim::If` or `prim::Loop`
@@ -76,18 +85,9 @@ struct BailOutGraphBuilderForNode {
   // from block's owning node (e.g. `prim::If` or
   // `prim::Loop`)
   void buildBailOutBlockFrom(Node* n) {
-    auto* block = copy_graph_->block();
     auto b = n->owningBlock();
     for (auto it = n->iterator(); it != b->nodes().end(); it++) {
-      auto env = [this](Value* v) { return getOrAddInputForValue(v); };
-
-      auto node = *it;
-      auto new_node = block->appendNode(copy_graph_->createClone(node, env));
-      for (size_t i = 0; i < node->outputs().size(); ++i) {
-        auto oo = node->outputs()[i];
-        auto no = new_node->outputs()[i];
-        old_to_new_[oo] = no;
-      }
+      cloneNode(*it);
     }
 
     // we are either in `prim::If` or `prim::Loop`
@@ -105,8 +105,8 @@ struct BailOutGraphBuilderForNode {
   }
 
   void mapValues(
-      const at::ArrayRef<Value*>& block_outputs,
-      const at::ArrayRef<Value*>& carried_deps) {
+      const at::ArrayRef<Value*> block_outputs,
+      const at::ArrayRef<Value*> carried_deps) {
     TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
     for (size_t i = 0; i < block_outputs.size(); i++) {
       auto nv = getOrAddInputForValue(block_outputs[i]);
@@ -120,7 +120,7 @@ struct BailOutGraphBuilderForNode {
     auto cur_iter = getInputForValue(lv.currentTripCount());
     auto block_outputs = lv.bodyBlock()->outputs();
     auto carried_deps = lv.carriedInputsWithCond();
-    mapValues(block_outputs, carried_deps);
+
     auto* block = copy_graph_->block();
     // subtract the number of iterations
     WithInsertPoint guard(*block->nodes().end());
@@ -129,12 +129,63 @@ struct BailOutGraphBuilderForNode {
     auto one = copy_graph_->insertConstant({1});
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
-    mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
-    buildBailOutBlockFrom(outer_node);
+    TORCH_INTERNAL_ASSERT(old_to_new_.count(outer_node->inputs()[0]) != 0);
+    auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
+
+    // We need to be careful when mapping `block_outputs` to continuation
+    // loop's inputs since `cloneFrom` will replace `%4` with the same value
+    // in both, `prim::Loop` and `aten::cat` in the example below:
+    //
+    // ... : Tensor = prim::Loop(%MAX_TRIP_COUNT, %COND, ..., %4)
+    //   block0(%i.2 : int, ...):
+    //     ...
+    //     %y.5 : Double(3) = aten::cat(%22, %4)
+    //     ...
+    //
+    // However for the cloned loop node, the values should be different.
+    // Namely, the value in `prim::Loop` should come from
+    // `lv.bodyBlock()->outputs()` which are mapped to the outputs of the
+    // current iteration whereas `%4` in `aten::cat` needs to be mapped to the
+    // cloned value of `%4` in a bailout graph. To work around this, we manually
+    // clone loop nodes
+
+    // map the residual loop's inputs to the outputs of the current iteration
+    // (i.e. `block_outputs`)
+    auto new_loop =
+        copy_graph_->insertNode(copy_graph_->create(prim::Loop, {}, 0))
+            ->setSourceRange(outer_node->sourceRange());
+    new_loop->addInput(updated_max_trip_count);
+    for (auto bo : block_outputs) {
+      new_loop->addInput(getOrAddInputForValue(bo));
+    }
+
+    // clone the loop body and map old loop's outputs to new loop's outputs
+    auto new_loop_body = new_loop->addBlock();
+    auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+    new_loop_body->cloneFrom(lv.bodyBlock(), env);
+    for (auto ov : lv.carriedOutputs()) {
+      auto no = new_loop->addOutput();
+      mapValueAndCopyMetadata(ov, no);
+    }
+    LoopView new_lv(new_loop);
+    {
+      WithInsertPoint guard_in_loop(*new_lv.bodyBlock()->nodes().begin());
+      // `one` will be replaced with new_lv.currentTripCount()
+      // but it needs to be done after
+      // new_lv.currentTripCount()->replaceAllUsesWith(adj_iter_ctr);
+      // to avoid cyclical references
+      auto adj_iter_ctr = copy_graph_->insert(aten::add, {cur_plus_one, one});
+      new_lv.currentTripCount()->replaceAllUsesWith(adj_iter_ctr);
+      adj_iter_ctr->node()->replaceInputWith(one, new_lv.currentTripCount());
+    }
+
+    if (outer_node->next()) {
+      buildBailOutBlockFrom(outer_node->next());
+    }
   }
 
   void buildBailOutIf(
-      const at::ArrayRef<Value*>& block_outputs,
+      const at::ArrayRef<Value*> block_outputs,
       Node* outer_node) {
     auto if_outputs = outer_node->outputs();
     mapValues(block_outputs, if_outputs);
@@ -142,10 +193,14 @@ struct BailOutGraphBuilderForNode {
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
-
+    // add graph inputs for guard's input
+    // and loop counts for loops `n` is contained in
+    // to make sure we can line bailout grap's inputs up properly
+    // with arguments to this BailOut node.
     for (auto bi : n->inputs()) {
       getOrAddInputForValue(bi);
     }
+
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -238,29 +293,13 @@ struct BailOutInserter {
         // guarded inputs come first
         // currently, there's always one guaded input
         bailout_node->addInput(it->input());
-
-        // we need to collect loop counts to
-        // record the number of iterations already run
-        // however, liveness doesn't capture loop counts
-        // if they aren't used explicitly in a loop
-        // so we collect them manually here
-        auto loopCounts = collectLoopCounts(*it);
-        for (auto lc : loopCounts) {
-          bailout_node->addInput(lc);
-        }
-
         for (auto li : live_inputs) {
           // Guarded inputs have already been added
-          // BailOutGraphBuilder materializes constants into a bailout
-          // graph rather than captures them as arguments,
-          // so there's no need to add them to inputs
-          // Also, skip loop counts as they are added in advance right after
-          // the guarded input
-          if (li->node()->kind() == prim::Constant || li == it->input() ||
-              loopCounts.count(li) != 0) {
+          // Also, skip some inputs that BailOutGraphBuilder can
+          // materialize into bailout graphs directly
+          if (!shouldBeCapturedInByBailOut(li->node()) || li == it->input()) {
             continue;
           }
-
           bailout_node->addInput(li);
         }
 
@@ -296,8 +335,8 @@ void InsertBailOuts(std::shared_ptr<Graph> graph) {
 // index matches the given `index`
 static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   for (auto n : b->nodes()) {
-    if (n->kind() == prim::BailOut && n->hasAttribute(attr::index) &&
-        n->i(attr::index) == index) {
+    if ((n->kind() == prim::BailOut || n->kind() == prim::Guard) &&
+        n->hasAttribute(attr::index) && n->i(attr::index) == index) {
       return n;
     }
     for (auto ib : n->blocks()) {
@@ -313,7 +352,7 @@ static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
 // to its users
 static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::BailOut) {
+    if (it->kind() == prim::BailOut || it->kind() == prim::Guard) {
       // clear profiling information
       it->inputs().at(0)->setType(TensorType::get());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
@@ -333,16 +372,21 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     const std::shared_ptr<Graph>& target) {
   auto orig_bailout_node =
       locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
+
+  GRAPH_DEBUG("bailout triggered for ", *orig_bailout_node);
+  GRAPH_DUMP("original bailout graph ", orig);
   TORCH_INTERNAL_ASSERT(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);
   TORCH_INTERNAL_ASSERT(
-      orig_bailout_node && orig_bailout_node->kind() == prim::BailOut &&
+      orig_bailout_node &&
+      (orig_bailout_node->kind() == prim::BailOut ||
+       orig_bailout_node->kind() == prim::Guard) &&
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
+  GRAPH_DUMP("bailout_graph ", bailout_graph);
   removeBailouts(bailout_graph->block());
-  ConstantPooling(bailout_graph);
   return bailout_graph;
 }
 

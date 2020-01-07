@@ -15,6 +15,7 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -76,34 +77,25 @@ static void check_out_type_matches(Tensor result,
 }
 
 inline Tensor dispatch_arange(Scalar end, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, end);
 }
 
 inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::arange(end, options);
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, start, end, step);
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::arange(start, end, step, options);
-}
-
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -121,7 +113,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto end = r.scalar(0);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(2) && allIntegral({end}) ? at::ScalarType::Long : r.scalartype(2);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(4))
@@ -141,7 +133,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto scalarType = r.isNone(4) && allIntegral({start, end, step}) ? at::ScalarType::Long : r.scalartype(4);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(6))
@@ -161,14 +153,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(result));
   return at::range_out(result, start, end, step);
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);
 }
@@ -205,39 +197,39 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 }
 
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, generator, options);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, options);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, generator, options);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, options);
 }
 
@@ -245,10 +237,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
@@ -274,25 +264,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   } else if (r.idx == 1) {
-    if (r.isNone(2)) {
-      auto high = r.toInt64(0);
-      auto size = r.intlist(1);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(3, at::ScalarType::Long);
-      auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(6));
-      return wrap(dispatch_randint(high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
-                             r.layout(4), r.isNone(4),
-                             r.device(5), r.isNone(5));
-      return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.tensor(2)).set_requires_grad(r.toBool(6)));
-    }
-  } else if (r.idx == 2) {
     if (r.isNone(4)) {
       auto low = r.toInt64(0);
       auto high = r.toInt64(1);
@@ -313,31 +284,13 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
                              r.device(7), r.isNone(7));
       return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
     }
-  } else if (r.idx == 3) {
-    if (r.isNone(3)) {
-      auto low = r.toInt64(0);
-      auto high = r.toInt64(1);
-      auto size = r.intlist(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
-      auto device = r.device(6);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
-      return wrap(dispatch_randint(low, high, size, options));
-    } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
-      return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
-    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
+// implemented on python object to allow torch.as_tensor to be constructed with arbitrarily nested
+// python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -346,57 +299,35 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+// implemented on python object here because PyObject currently not natively declarable
+// See: ATen/native/README.md for more context
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.from_numpy", jit::tracer::WARN_CONSTRUCTOR);
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
+  return THPVariable_Wrap(torch::utils::tensor_from_numpy(arg));
   END_HANDLE_TH_ERRORS
 }
 
 static Tensor dispatch_nonzero(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero();
 }
 
 static Tensor dispatch_nonzero(const Tensor & self, Tensor out) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return at::nonzero_out(out, self);
 }
 
 static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero_numpy();
 }
 
-static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
-    "nonzero(Tensor input, *, bool as_tuple)",
-  });
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
-    }
-  } else {
-    if (r.toBool(1)) {
-      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    }
-  }
-  END_HANDLE_TH_ERRORS
-}
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs);
 
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
@@ -406,6 +337,8 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
   END_HANDLE_TH_ERRORS
 }
 
+// implemented on python object to allow torch.tensor to be constructed with arbitrarily nested
+// python objects - list, tuple, np array, scalar, etc.
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -423,6 +356,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+
   if (r.idx == 0) {
     return wrap(r.tensor(0).get_device());
   }
@@ -430,27 +364,28 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "numel(Tensor input)",
-  }, /*traceable=*/false);
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs);
 
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+// generated forward declarations start here
 
-  if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
+${py_signatures}
+
+// Wrapper converts a raised TypeError into returning NotImplemented
+// Used to implement binary arithmetic operators
+template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
+static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+  PyObject* ret = Func(self, args, kwargs);
+  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
+    PyErr_Clear();
+    Py_INCREF(Py_NotImplemented);
+    ret = Py_NotImplemented;
   }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
+  return ret;
 }
 
-// generated methods start here
-
-${py_methods}
-
+// XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
+// Any new ops added here should be accompanied with a comment why they are not
+// being registered through native_functions.yaml, and be tagged cpp / JIT
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"as_tensor", (PyCFunction)(void(*)(void))THPVariable_as_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
@@ -476,7 +411,7 @@ static PyTypeObject THPVariableFunctions = {
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */
@@ -521,4 +456,132 @@ void initTorchFunctions(PyObject* module) {
   }
 }
 
+/*
+ *
+ * Calls __torch_function__ on the overloaded arguments to a torch API
+ * function in order of precedence, returning the first result that is
+ * not NotImplemented. If all arguments return NotImplemented, raises a
+ * TypeError.
+ *
+ * Assumes overloaded_args has at least one entry. All entries must have
+ * a __torch_function__ attribute that resolves to a callable that
+ * accepts a torch API function, arguments, and keyword arguments for
+ * the torch API function.
+ *
+ * It is sufficient to call PythonArgs::has_torch_function before
+ * calling this function to verify that there are valid arguments
+ * present. If that is not done then special care must be taken to
+ * ensure there are arguments that are overloaded with
+ * __torch_function__.
+ *
+ * See torch._overrides._implement_torch_function for the equivalent
+ * code in the pure-python implementation.
+ *
+ * 'r' is a parsed PythonArgs instance, returned from
+ * PythonArgParser::parse.
+ *
+ * 'args' is a reference to the python tuple of arguments to the torch
+ * API function.
+ *
+ * 'kwargs' is a reference to the python dict of keyword arguments to
+ * the torch API function.
+ *
+ * 'torch_api' is a reference to python torch API namespace.
+ *
+ */
+
+PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
+  py::object torch_api_function = PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != NULL, "torch API function must exist");
+  py::object ret;
+  for (auto &arg : r.signature.overloaded_args) {
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
+    if (ret.ptr() != Py_NotImplemented) {
+      // Return the reference to the result. This also covers the case where ret
+      // is NULL and __torch_function__ raised an exception, which we throw below
+      break;
+    }
+  }
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __array_function__, throw it
+    throw python_error();
+  }
+  else if (ret.ptr() == Py_NotImplemented) {
+    // all __torch_function__ implementations in overloaded_args
+    // returned NotImplemented, so we raise a TypeError.
+    std::stringstream ss;
+    ss << "no implementation found for 'torch." << r.get_func_name()
+       << "' on types that implement __torch_function__: [";
+    for (auto &arg : r.signature.overloaded_args) {
+      ss << arg.ptr()->ob_type->tp_name;
+      if (!arg.is(r.signature.overloaded_args.back())) {
+        ss << ", ";
+      }
+      else {
+        ss << "]";
+      }
+    }
+    const std::string& tmp = ss.str();
+    PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    throw python_error();
+  }
+  return ret.release().ptr();
+}
+
+// generated methods start here
+
+${py_methods}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
+    "nonzero(Tensor input, *, bool as_tuple)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, args, kwargs, THPVariableFunctions);
+  }
+
+  if (r.idx == 0) {
+    if (r.isNone(1)) {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
+    }
+  } else {
+    if (r.toBool(1)) {
+      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    }
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "numel(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, args, kwargs, THPVariableFunctions);
+  }
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 }} // namespace torch::autograd

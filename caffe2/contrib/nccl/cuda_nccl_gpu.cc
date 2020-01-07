@@ -1,4 +1,4 @@
-#include "cuda_nccl_gpu.h"
+#include "caffe2/contrib/nccl/cuda_nccl_gpu.h"
 
 namespace caffe2 {
 namespace nccl {

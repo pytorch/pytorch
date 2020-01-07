@@ -29,19 +29,19 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "        x.set_(y)";
 
 at::Tensor& TensorImpl::grad() {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
-  } else {
-    AT_ERROR("grad is not implemented for Tensor");
-  }
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  return autograd_meta_->grad();
 }
 
 const at::Tensor& TensorImpl::grad() const {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
-  } else {
-    AT_ERROR("grad is not implemented for Tensor");
-  }
+  // Yes, I know this looks really weird.  But I don't really have a choice as
+  // long as this function returns a const reference to Tensor.  I'm not
+  // really sure how I would have designed this API differently, but it
+  // is not so easy to fix right now because the mutable counterpart of
+  // this function must keep working so that "x.grad() = ..." keeps working
+  // (part of public API).
+  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
+  return autograd_meta_->grad();
 }
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_set_(type_set.remove(TensorTypeId::VariableTensorId)) {
+      type_set_(type_set.add(TensorTypeId::VariableTensorId)) {
   if (!type_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
@@ -84,9 +84,9 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    if (size(d) != 1) {
-      if (stride(d) == z) {
-        z *= size(d);
+    if (sizes_[d] != 1) {
+      if (strides_[d] == z) {
+        z *= sizes_[d];
       } else {
         is_contiguous = false;
         break;
@@ -97,12 +97,12 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t expected = 1;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) == expected) {
-          expected *= size(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] == expected) {
+          expected *= sizes_[d];
         } else {
           return false;
         }
@@ -114,12 +114,12 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t min = 0;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) > min) {
-          min = stride(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] > min) {
+          min = strides_[d];
         } else {
           return false;
         }
@@ -132,7 +132,7 @@ bool TensorImpl::compute_strides_like_channels_last() const {
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return size(0) < 2 || stride(0) == 1;
+    return sizes_[0] < 2 || strides_[0] == 1;
   }
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
@@ -143,6 +143,8 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_[a] < 2) {
         return false;
+      } else if (sizes_[b] < 2) {
+        return true;
       }
       return strides_[a] < strides_[b];
   });
@@ -180,14 +182,6 @@ int64_t TensorImpl::stride(int64_t d) const {
   return strides_[d];
 }
 
-TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
-  if (set_zero_dim) {
-    resize_dim(0);
-  }
-  return this;
-}
-
 bool TensorImpl::has_storage() const {
   return storage_;
 }
@@ -223,5 +217,77 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 }
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
+
+void TensorImpl::set_requires_grad(bool requires_grad) {
+  if (!requires_grad && !autograd_meta_) return;
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  // NB: In principle, setting requires_grad to false could result in
+  // the AutogradMeta becoming equal to a default constructed state,
+  // in which case we could apply the nullptr AutogradMeta optimization
+  // (see autograd_meta_ docs).  But we don't do this right now.  Note
+  // that it is unsound to unconditionally set AutogradMeta to false
+  // when you set requires_grad to False, as there may be nontrivial
+  // information content in the other fields; for example, we may
+  // have set the string name for a Variable, or there may be hooks
+  // registered for it.
+  autograd_meta_->set_requires_grad(requires_grad, this);
+}
+
+bool TensorImpl::requires_grad() const {
+  if (!autograd_meta_) return false;
+  return autograd_meta_->requires_grad();
+}
+
+void TensorImpl::set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
+  // NB: autograd_meta may be null!  That just means it's the default
+  // constructor
+  autograd_meta_ = std::move(autograd_meta);
+}
+
+c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
+  // NB: Might return null!
+  return autograd_meta_.get();
+}
+
+void TensorImpl::copy_tensor_metadata(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  dest_impl->storage_ = src_impl->storage_;
+  dest_impl->sizes_ = src_impl->sizes_;
+  dest_impl->strides_ = src_impl->strides_;
+  dest_impl->storage_offset_ = src_impl->storage_offset_;
+  dest_impl->data_type_ = src_impl->data_type_;
+  dest_impl->device_opt_ = src_impl->device_opt_;
+  dest_impl->type_set_ = src_impl->type_set_;
+  dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+  dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+  dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
+  dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
+  dest_impl->reserved_ = src_impl->reserved_;
+  dest_impl->set_version_counter(version_counter);
+  dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  if (src_impl->named_tensor_meta_ != nullptr) {
+    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
+  }
+}
+
+namespace impl {
+
+namespace {
+AutogradMetaFactory* meta_factory = nullptr;
+}
+
+void SetAutogradMetaFactory(AutogradMetaFactory* factory) {
+  meta_factory = factory;
+}
+AutogradMetaFactory* GetAutogradMetaFactory() {
+  TORCH_CHECK(meta_factory, "Support for autograd has not been loaded; have you linked against libtorch.so?")
+  return meta_factory;
+}
+
+} // namespace impl
 
 } // namespace c10

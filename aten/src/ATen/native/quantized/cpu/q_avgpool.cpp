@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,9 +15,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
+
+namespace {
 
 template <typename scalar_t>
 static void avg_pool2d_out_frame(
@@ -69,18 +71,17 @@ static void avg_pool2d_out_frame(
           ptr_output->val_ = 0;
 
           int64_t divide_factor;
-          int64_t size;
+          int64_t size = (hend - hstart) * (wend - wstart);
           if (divisor_override.has_value()) {
             divide_factor = divisor_override.value();
-            size = (hend - hstart) * (wend - wstart);
           } else {
             if (count_include_pad) {
               divide_factor = pool_size;
             } else {
               divide_factor = (hend - hstart) * (wend - wstart);
             }
-            size = divide_factor;
           }
+
           int64_t kx, ky;
           for (ky = hstart; ky < hend; ky++) {
             for (kx = wstart; kx < wend; kx++)

@@ -6,7 +6,6 @@ import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
-
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -358,6 +357,8 @@ class Module(object):
 
         .. function:: to(tensor, non_blocking=False)
 
+        .. function:: to(memory_format=torch.channels_last)
+
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
         only cast the floating point parameters and buffers to :attr:`dtype`
@@ -379,6 +380,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
+            memory_format (:class:`torch.memory_format`): the desired memory
+                format for 4D parameters and buffers in this module (keyword
+                only argument)
 
         Returns:
             Module: self
@@ -413,7 +417,7 @@ class Module(object):
 
         """
 
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
@@ -421,6 +425,8 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
+            if convert_to_format is not None and t.dim() == 4:
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking, memory_format=convert_to_format)
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
@@ -500,32 +506,24 @@ class Module(object):
         self._forward_hooks[handle.id] = hook
         return handle
 
-    def _tracing_name(self, tracing_state):
-        if not tracing_state._traced_module_stack:
-            return None
-        module = tracing_state._traced_module_stack[-1]
-        for name, child in module.named_children():
-            if child is self:
-                return name
-        return None
 
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
-        if not tracing_state:
+        if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        if not hasattr(tracing_state, '_traced_module_stack'):
-            tracing_state._traced_module_stack = []
-        name = self._tracing_name(tracing_state)
-        if name:
-            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
-        else:
-            tracing_state.push_scope(self._get_name())
-        tracing_state._traced_module_stack.append(self)
+        recording_scopes = torch.jit._trace_module_map is not None
+        if recording_scopes:
+            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            if name:
+                cur_scope_name = tracing_state.current_scope()
+                tracing_state.push_scope(name)
+            else:
+                recording_scopes = False
         try:
             result = self.forward(*input, **kwargs)
         finally:
-            tracing_state.pop_scope()
-            tracing_state._traced_module_stack.pop()
+            if recording_scopes:
+                tracing_state.pop_scope()
         return result
 
     def __call__(self, *input, **kwargs):

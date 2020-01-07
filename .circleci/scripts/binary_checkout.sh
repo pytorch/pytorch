@@ -1,5 +1,11 @@
 #!/bin/bash
 set -eux -o pipefail
+
+retry () {
+    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+}
+
+
 # This step runs on multiple executors with different envfile locations
 if [[ "$(uname)" == Darwin ]]; then
   # macos executor (builds and tests)
@@ -17,7 +23,7 @@ export PYTORCH_ROOT="$workdir/pytorch"
 export BUILDER_ROOT="$workdir/builder"
 
 # Clone the Pytorch branch
-git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+retry git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
 pushd "$PYTORCH_ROOT"
 if [[ -n "${CIRCLE_PR_NUMBER:-}" ]]; then
   # "smoke" binary build on PRs
@@ -33,13 +39,13 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-git submodule update --init --recursive --quiet
+retry git submodule update --init --recursive --quiet
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1

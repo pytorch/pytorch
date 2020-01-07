@@ -34,9 +34,9 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 }
 
 template<class Result, class... Args>
-inline Result callOpUnboxed(const c10::OperatorHandle& op, c10::TensorTypeId dispatchKey, Args... args) {
+inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
   return c10::Dispatcher::singleton()
-      .template callUnboxed<Result, Args...>(op, dispatchKey, std::forward<Args>(args)...);
+      .template callUnboxed<Result, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispatch_key) {

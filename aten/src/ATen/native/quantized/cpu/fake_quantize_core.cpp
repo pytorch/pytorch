@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/math_compat.h>
 
 /* Core operations for fake-quantization shared between per tensor
  and per-channel fake quant */

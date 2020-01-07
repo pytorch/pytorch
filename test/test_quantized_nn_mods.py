@@ -1,19 +1,24 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.intrinsic as nni
+import torch.nn.intrinsic.quantized as nnq_fused
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic.quantized as nnq_fused
 import torch.nn.quantized.functional as qF
-from torch.nn.quantized.modules import Conv2d
-from torch.nn.intrinsic.quantized import ConvReLU2d
 import torch.quantization
-from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+
 from common_quantization import QuantizationTestCase, prepare_dynamic
 from common_quantized import _calculate_dynamic_qparams, override_quantized_engine
-from hypothesis import given
+from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
-import unittest
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
+
 import io
+import numpy as np
+import unittest
 
 '''
 Note that tests in this file are just API test, to make sure we wrapped the
@@ -21,6 +26,59 @@ quantized operator implementations correctly in the user facing APIs, these are
 not correctness test for the underlying quantized operators. For correctness
 test please see `caffe2/test/test_quantized.py`.
 '''
+
+def _make_conv_test_input(
+    batch_size, in_channels_per_group, input_feature_map_size,
+    out_channels_per_group, groups, kernel_size, X_scale, X_zero_point, W_scale,
+    W_zero_point, use_bias, use_channelwise,
+):
+    in_channels = in_channels_per_group * groups
+    out_channels = out_channels_per_group * groups
+
+    (X_value_min, X_value_max) = (0, 4)
+    X_init = torch.randint(
+        X_value_min, X_value_max,
+        (batch_size, in_channels,) + input_feature_map_size)
+    X = X_scale * (X_init - X_zero_point).float()
+    X_q = torch.quantize_per_tensor(
+        X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+
+    W_scale = W_scale * out_channels
+    W_zero_point = W_zero_point * out_channels
+    # Resize W_scale and W_zero_points arrays equal to out_channels
+    W_scale = W_scale[:out_channels]
+    W_zero_point = W_zero_point[:out_channels]
+    # For testing, we use small values for weights and for activations so that
+    # no overflow occurs in vpmaddubsw instruction. If the overflow occurs in
+    # qconv implementation and if there is no overflow.
+    # In reference we can't exactly match the results with reference.
+    # Please see the comment in qconv implementation file
+    #   aten/src/ATen/native/quantized/cpu/qconv.cpp for more details.
+    (W_value_min, W_value_max) = (-5, 5)
+    # The operator expects them in the format
+    # (out_channels, in_channels/groups,) + kernel_size
+    W_init = torch.randint(
+        W_value_min, W_value_max,
+        (out_channels, in_channels_per_group,) + kernel_size)
+    b_init = torch.randint(0, 10, (out_channels,))
+
+    if use_channelwise:
+        W_shape = (-1, 1) + (1,) * len(kernel_size)
+        W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
+        W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+        W = W_scales_tensor.reshape(*W_shape) * (
+            W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
+        b = X_scale * W_scales_tensor * b_init.float()
+        W_q = torch.quantize_per_channel(
+            W, W_scales_tensor, W_zero_points_tensor.long(), 0,
+            dtype=torch.qint8)
+    else:
+        W = W_scale[0] * (W_init - W_zero_point[0]).float()
+        b = X_scale * W_scale[0] * b_init.float()
+        W_q = torch.quantize_per_tensor(
+            W, scale=W_scale[0], zero_point=W_zero_point[0], dtype=torch.qint8)
+
+    return (X, X_q, W, W_q, b if use_bias else None)
 
 
 class FunctionalAPITest(QuantizationTestCase):
@@ -33,73 +91,153 @@ class FunctionalAPITest(QuantizationTestCase):
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
 
-    @no_deadline
-    @given(
-        use_bias=st.booleans(),
-        per_channel=st.booleans(),
-        qengine=st.sampled_from(("qnnpack", "fbgemm"))
-    )
-    def test_conv_api(self, use_bias, per_channel, qengine):
-        """Tests the correctness of the conv module.
-        The correctness is defined against the functional implementation.
-        """
+    def _test_conv_api_impl(
+        self, qconv_fn, conv_fn, batch_size, in_channels_per_group,
+        input_feature_map_size, out_channels_per_group, groups, kernel_size,
+        stride, padding, dilation, X_scale, X_zero_point, W_scale, W_zero_point,
+        Y_scale, Y_zero_point, use_bias, use_channelwise,
+    ):
+        for i in range(len(kernel_size)):
+            assume(input_feature_map_size[i] + 2 * padding[i]
+                   >= dilation[i] * (kernel_size[i] - 1) + 1)
+        (X, X_q, W, W_q, b) = _make_conv_test_input(
+            batch_size, in_channels_per_group, input_feature_map_size,
+            out_channels_per_group, groups, kernel_size, X_scale,
+            X_zero_point, W_scale, W_zero_point, use_bias, use_channelwise)
+
+        Y_exp = conv_fn(X, W, b, stride, padding, dilation, groups)
+        Y_exp = torch.quantize_per_tensor(
+            Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+        Y_act = qconv_fn(
+            X_q, W_q, b, stride, padding, dilation, groups,
+            padding_mode="zeros", scale=Y_scale, zero_point=Y_zero_point)
+
+        # Make sure the results match
+        # assert_array_almost_equal compares using the following formula:
+        #     abs(desired-actual) < 1.5 * 10**(-decimal)
+        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # We use decimal = 0 to ignore off-by-1 differences between reference
+        # and test. Off-by-1 differences arise due to the order of round and
+        # zero_point addition operation, i.e., if addition followed by round is
+        # used by reference and round followed by addition is used by test, the
+        # results may differ by 1.
+        # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is
+        # 4 assuming the rounding mode is round-to-nearest, ties-to-even.
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
+
+
+
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           H=st.integers(4, 16),
+           W=st.integers(4, 16),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans(),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_conv2d_api(
+        self, batch_size, in_channels_per_group, H, W, out_channels_per_group,
+        groups, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_channelwise, qengine,
+    ):
+        # Tests the correctness of the conv2d function.
 
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            per_channel = False
+            use_channelwise = False
+
+        input_feature_map_size = (H, W)
+        kernel_size = (kernel_h, kernel_w)
+        stride = (stride_h, stride_w)
+        padding = (pad_h, pad_w)
+        dilation = (dilation, dilation)
+
         with override_quantized_engine(qengine):
-            N, iC, H, W = 10, 10, 10, 3
-            oC, g, kH, kW = 16, 1, 3, 3
-            scale, zero_point = 1.0 / 255, 128
-            stride = (1, 1)
-            i_padding = (0, 0)
-            dilation = (1, 1)
+            qconv_fn = qF.conv2d
+            conv_fn = F.conv2d
+            self._test_conv_api_impl(
+                qconv_fn, conv_fn, batch_size, in_channels_per_group,
+                input_feature_map_size, out_channels_per_group, groups,
+                kernel_size, stride, padding, dilation, X_scale, X_zero_point,
+                W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
+                use_channelwise)
 
-            X = torch.randn(N, iC, H, W, dtype=torch.float32)
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           D=st.integers(4, 8),
+           H=st.integers(4, 8),
+           W=st.integers(4, 8),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel_d=st.integers(1, 4),
+           kernel_h=st.integers(1, 4),
+           kernel_w=st.integers(1, 4),
+           stride_d=st.integers(1, 2),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_d=st.integers(0, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_channelwise=st.booleans(),
+           qengine=st.sampled_from(("fbgemm",)))
+    def test_conv3d_api(
+        self, batch_size, in_channels_per_group, D, H, W,
+        out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
+        stride_d, stride_h, stride_w, pad_d, pad_h, pad_w, dilation, X_scale,
+        X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
+        use_channelwise, qengine,
+    ):
+        # Tests the correctness of the conv3d function.
+        # Currently conv3d only supports FbGemm engine
 
-            w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
 
-            if per_channel:
-                scale_tensor = torch.ones(oC, dtype=torch.double)
-                zero_point_tensor = torch.zeros(oC, dtype=torch.long)
-                for i in range(len(scale_tensor)):
-                    scale_tensor[i] = (i + 1.0) / 255.0
+        input_feature_map_size = (D, H, W)
+        kernel_size = (kernel_d, kernel_h, kernel_w)
+        stride = (stride_d, stride_h, stride_w)
+        padding = (pad_d, pad_h, pad_w)
+        dilation = (dilation, dilation, dilation)
 
-                qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
-            else:
-                qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
-
-            b = torch.randn(oC, dtype=torch.float32) if use_bias else None
-            q_filters_ref = torch.ops.quantized.conv_prepack(qw,
-                                                             b,
-                                                             stride,
-                                                             i_padding,
-                                                             dilation,
-                                                             g)
-
-
-            ref_result = torch.ops.quantized.conv2d(qX, q_filters_ref,
-                                                    stride,
-                                                    i_padding, dilation,
-                                                    g, scale, zero_point)
-
-            q_result = torch.nn.quantized.functional.conv2d(qX,
-                                                            qw,
-                                                            bias=b, scale=scale,
-                                                            zero_point=zero_point,
-                                                            stride=stride, padding=i_padding,
-                                                            dilation=dilation, groups=g,
-                                                            dtype=torch.quint8)
-
-            self.assertEqual(ref_result, q_result)
+        with override_quantized_engine(qengine):
+            qconv_fn = qF.conv3d
+            conv_fn = F.conv3d
+            self._test_conv_api_impl(
+                qconv_fn, conv_fn, batch_size, in_channels_per_group,
+                input_feature_map_size, out_channels_per_group, groups,
+                kernel_size, stride, padding, dilation, X_scale, X_zero_point,
+                W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
+                use_channelwise)
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
-    @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -125,7 +263,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
-        W_pack = qlinear._packed_params
+        W_pack = qlinear._packed_params._packed_params
         Z_dq = qlinear(X)
 
         # Check if the module implementation matches calling the
@@ -135,9 +273,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Test serialization of dynamic quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
-        self.assertEqual(model_dict['weight'], W_q)
+        self.assertEqual(model_dict['_packed_params.weight'], W_q)
         if use_bias:
-            self.assertEqual(model_dict['bias'], B)
+            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
@@ -148,8 +286,8 @@ class DynamicModuleAPITest(QuantizationTestCase):
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_params),
-                         linear_unpack(loaded_qlinear._packed_params))
+        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                         linear_unpack(loaded_qlinear._packed_params._packed_params))
         if use_bias:
             self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
@@ -159,7 +297,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
 
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
@@ -217,7 +355,6 @@ class ModuleAPITest(QuantizationTestCase):
                          message="ReLU6 module API failed")
 
 
-    @no_deadline
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -263,7 +400,7 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear.set_weight_bias(W_q, B)
             # Simple round-trip test to ensure weight()/set_weight() API
             self.assertEqual(qlinear.weight(), W_q)
-            W_pack = qlinear._packed_params
+            W_pack = qlinear._packed_params._packed_params
 
             qlinear.scale = float(scale)
             qlinear.zero_point = int(zero_point)
@@ -281,11 +418,10 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertEqual(Z_ref, Z_q)
 
             # Test serialization of quantized Linear Module using state_dict
-
             model_dict = qlinear.state_dict()
-            self.assertEqual(model_dict['weight'], W_q)
+            self.assertEqual(model_dict['_packed_params.weight'], W_q)
             if use_bias:
-                self.assertEqual(model_dict['bias'], B)
+                self.assertEqual(model_dict['_packed_params.bias'], B)
             b = io.BytesIO()
             torch.save(model_dict, b)
             b.seek(0)
@@ -299,8 +435,8 @@ class ModuleAPITest(QuantizationTestCase):
             loaded_qlinear.load_state_dict(loaded_dict)
 
             linear_unpack = torch.ops.quantized.linear_unpack
-            self.assertEqual(linear_unpack(qlinear._packed_params),
-                             linear_unpack(loaded_qlinear._packed_params))
+            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                             linear_unpack(loaded_qlinear._packed_params._packed_params))
             if use_bias:
                 self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
             self.assertEqual(qlinear.scale, loaded_qlinear.scale)
@@ -311,7 +447,7 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertTrue(hasattr(qlinear, '_weight_bias'))
             self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
             self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
             Z_q2 = loaded_qlinear(X_q)
             self.assertEqual(Z_q, Z_q2)
 
@@ -365,201 +501,292 @@ class ModuleAPITest(QuantizationTestCase):
         rqr2 = dequant_m(qr2)
         self.assertEqual(rqr, rqr2)
 
-    @no_deadline
-    @given(
-        use_bias=st.booleans(),
-        use_fused=st.booleans(),
-        per_channel=st.booleans(),
-        qengine=st.sampled_from(("qnnpack", "fbgemm"))
-    )
-    def test_conv_api(self, use_bias, use_fused, per_channel, qengine):
-        """Tests the correctness of the conv module.
-        The correctness is defined against the functional implementation.
-        """
+    def _test_conv_api_impl(
+        self, module_name, qconv_module, conv_module, batch_size,
+        in_channels_per_group, input_feature_map_size, out_channels_per_group,
+        groups, kernel_size, stride, padding, dilation, X_scale, X_zero_point,
+        W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
+        use_channelwise,
+    ):
+        for i in range(len(kernel_size)):
+            assume(input_feature_map_size[i] + 2 * padding[i]
+                   >= dilation[i] * (kernel_size[i] - 1) + 1)
+
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        (X, X_q, W, W_q, b) = _make_conv_test_input(
+            batch_size, in_channels_per_group, input_feature_map_size,
+            out_channels_per_group, groups, kernel_size, X_scale, X_zero_point,
+            W_scale, W_zero_point, use_bias, use_channelwise)
+
+        qconv_module.set_weight_bias(W_q, b)
+        qconv_module.scale = Y_scale
+        qconv_module.zero_point = Y_zero_point
+
+        if use_fused:
+            conv_module[0].weight.data = W
+            if use_bias:
+                conv_module[0].bias.data = b
+        else:
+            conv_module.weight.data = W
+            if use_bias:
+                conv_module.bias.data = b
+
+        # Test members
+        self.assertTrue(module_name in str(qconv_module))
+        self.assertTrue(hasattr(qconv_module, '_packed_params'))
+        self.assertTrue(hasattr(qconv_module, 'scale'))
+        self.assertTrue(hasattr(qconv_module, 'zero_point'))
+
+        # Test properties
+        self.assertEqual(W_q, qconv_module.weight())
+        if use_bias:
+            self.assertEqual(b, qconv_module.bias())
+        self.assertEqual(Y_scale, qconv_module.scale)
+        self.assertEqual(Y_zero_point, qconv_module.zero_point)
+
+        # Test forward
+        Y_exp = conv_module(X)
+        Y_exp = torch.quantize_per_tensor(
+            Y_exp, scale=Y_scale, zero_point=Y_zero_point, dtype=torch.quint8)
+        Y_act = qconv_module(X_q)
+
+        # Make sure the results match
+        # assert_array_almost_equal compares using the following formula:
+        #     abs(desired-actual) < 1.5 * 10**(-decimal)
+        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # We use decimal = 0 to ignore off-by-1 differences between reference
+        # and test. Off-by-1 differences arise due to the order of round and
+        # zero_point addition operation, i.e., if addition followed by round is
+        # used by reference and round followed by addition is used by test, the
+        # results may differ by 1.
+        # For example, the result of round(2.5) + 1 is 3 while round(2.5 + 1) is
+        # 4 assuming the rounding mode is round-to-nearest, ties-to-even.
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_act.int_repr().numpy(), decimal=0)
+
+        # Test serialization of quantized Conv Module using state_dict
+        model_dict = qconv_module.state_dict()
+        self.assertEqual(W_q, model_dict['weight'])
+        if use_bias:
+            self.assertEqual(b, model_dict['bias'])
+        bytes_io = io.BytesIO()
+        torch.save(model_dict, bytes_io)
+        bytes_io.seek(0)
+        loaded_dict = torch.load(bytes_io)
+        for key in loaded_dict:
+            self.assertEqual(model_dict[key], loaded_dict[key])
+
+        loaded_qconv_module = type(qconv_module)(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            groups, use_bias, padding_mode="zeros")
+        loaded_qconv_module.load_state_dict(loaded_dict)
+
+        self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
+        self.assertTrue(module_name in str(loaded_qconv_module))
+        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+        self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
+
+        self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
+        if use_bias:
+            self.assertEqual(qconv_module.bias(), loaded_qconv_module.bias())
+        self.assertEqual(qconv_module.scale, loaded_qconv_module.scale)
+        self.assertEqual(qconv_module.zero_point,
+                         loaded_qconv_module.zero_point)
+        Y_loaded = loaded_qconv_module(X_q)
+        np.testing.assert_array_almost_equal(
+            Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
+
+        # The below check is meant to ensure that `torch.save` and `torch.load`
+        # serialization works, however it is currently broken by the following:
+        # https://github.com/pytorch/pytorch/issues/24045
+        #
+        # Instead, we currently check that the proper exception is thrown on
+        # save.
+        # <start code>
+        # b = io.BytesIO()
+        # torch.save(conv_under_test, b)
+        # b.seek(0)
+        # loaded_conv = torch.load(b)
+        #
+        # self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
+        # self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
+        # self.assertEqual(loaded_qconv_module.zero_point,
+        #                  qconv_module.zero_point)
+        # <end code>
+        with self.assertRaisesRegex(
+            RuntimeError, r'torch.save\(\) is not currently supported'
+        ):
+            bytes_io = io.BytesIO()
+            torch.save(qconv_module, bytes_io)
+
+        # JIT testing
+        self.checkScriptable(
+            qconv_module, list(zip([X_q], [Y_exp])),
+            check_save_load=True)
+
+        # Test from_float
+        conv_module.qconfig = torch.quantization.default_qconfig
+        torch.quantization.prepare(conv_module, inplace=True)
+        conv_module(X.float())
+        converted_qconv_module = torch.nn.Sequential(conv_module)
+        torch.quantization.convert(converted_qconv_module, inplace=True)
+
+        # Smoke test to make sure the module actually runs
+        if use_bias:
+            if use_fused:
+                self.assertEqual(conv_module[0].bias,
+                                 converted_qconv_module[0].bias())
+            else:
+                self.assertEqual(conv_module.bias,
+                                 converted_qconv_module[0].bias())
+        # Smoke test extra_repr
+        self.assertTrue(module_name in str(converted_qconv_module))
+
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           H=st.integers(4, 16),
+           W=st.integers(4, 16),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           groups=st.integers(1, 4),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_fused=st.booleans(),
+           use_channelwise=st.booleans(),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_conv2d_api(
+        self, batch_size, in_channels_per_group, H, W, out_channels_per_group,
+        groups, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_fused, use_channelwise, qengine,
+    ):
+        # Tests the correctness of the conv2d module.
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
             if IS_PPC or TEST_WITH_UBSAN:
                 return
-            per_channel = False
+            use_channelwise = False
+
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (H, W)
+        kernel_size = (kernel_h, kernel_w)
+        stride = (stride_h, stride_w)
+        padding = (pad_h, pad_w)
+        dilation = (dilation, dilation)
+
         with override_quantized_engine(qengine):
-            N, iC, H, W = 10, 10, 10, 3
-            oC, g, kH, kW = 16, 1, 3, 3
-            scale, zero_point = 1.0 / 255, 128
-
-            X = torch.randn(N, iC, H, W, dtype=torch.float32)
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
-
-            w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
-
-            if per_channel:
-                scale_tensor = torch.ones(oC, dtype=torch.double)
-                zero_point_tensor = torch.zeros(oC, dtype=torch.long)
-                for i in range(len(scale_tensor)):
-                    scale_tensor[i] = (i + 1.0) / 255.0
-
-                qw = torch.quantize_per_channel(w, scales=scale_tensor, zero_points=zero_point_tensor, axis=0, dtype=torch.qint8)
-            else:
-                qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
-
-            b = torch.randn(oC, dtype=torch.float32) if use_bias else None
-
             if use_fused:
-                conv_under_test = ConvReLU2d(in_channels=iC,
-                                             out_channels=oC,
-                                             kernel_size=(kH, kW),
-                                             stride=1,
-                                             padding=0,
-                                             dilation=1,
-                                             groups=g,
-                                             bias=use_bias,
-                                             padding_mode='zeros')
+                module_name = "QuantizedConvReLU2d"
+                qconv_module = nnq_fused.ConvReLU2d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
             else:
-                conv_under_test = Conv2d(in_channels=iC,
-                                         out_channels=oC,
-                                         kernel_size=(kH, kW),
-                                         stride=1,
-                                         padding=0,
-                                         dilation=1,
-                                         groups=g,
-                                         bias=use_bias,
-                                         padding_mode='zeros')
-            # Run module with default-initialized parameters.
-            # This tests that the constructor is correct.
-            conv_under_test.set_weight_bias(qw, b)
-            conv_under_test(qX)
+                module_name = "QuantizedConv2d"
+                qconv_module = nnq.Conv2d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
 
-            conv_under_test.scale = scale
-            conv_under_test.zero_point = zero_point
-
-            # Test members
-            self.assertTrue(hasattr(conv_under_test, '_packed_params'))
-            self.assertTrue(hasattr(conv_under_test, 'scale'))
-            self.assertTrue(hasattr(conv_under_test, 'zero_point'))
-
-            # Test properties
-            self.assertEqual(qw, conv_under_test.weight())
-            if use_bias:
-                self.assertEqual(b, conv_under_test.bias())
-            self.assertEqual(scale, conv_under_test.scale)
-            self.assertEqual(zero_point, conv_under_test.zero_point)
-
-            # Test forward
-            result_under_test = conv_under_test(qX)
-            result_reference = qF.conv2d(qX, qw, bias=b,
-                                         scale=scale, zero_point=zero_point,
-                                         stride=1, padding=0,
-                                         dilation=1, groups=g, dtype=torch.quint8
-                                         )
+            conv_module = nn.Conv2d(
+                in_channels, out_channels, kernel_size, stride, padding,
+                dilation, groups, use_bias, padding_mode="zeros")
             if use_fused:
-                # result_reference < zero_point doesn't work for qtensor yet
-                # result_reference[result_reference < zero_point] = zero_point
-                MB, OC, OH, OW = result_reference.size()
-                for i in range(MB):
-                    for j in range(OC):
-                        for h in range(OH):
-                            for w in range(OW):
-                                if result_reference[i][j][h][w].int_repr() < zero_point:
-                                    # assign 0. that gets converted to zero_point
-                                    result_reference[i][j][h][w] = 0.
+                relu_module = nn.ReLU()
+                conv_module = nni.ConvReLU2d(conv_module, relu_module)
+            conv_module = conv_module.float()
 
-            self.assertEqual(result_reference, result_under_test,
-                             message="Tensors are not equal.")
+            self._test_conv_api_impl(
+                module_name, qconv_module, conv_module, batch_size,
+                in_channels_per_group, input_feature_map_size,
+                out_channels_per_group, groups, kernel_size, stride, padding,
+                dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+                Y_zero_point, use_bias, use_fused, use_channelwise)
 
-            # Test serialization of quantized Conv Module using state_dict
-            model_dict = conv_under_test.state_dict()
-            self.assertEqual(model_dict['weight'], qw)
-            if use_bias:
-                self.assertEqual(model_dict['bias'], b)
-            b = io.BytesIO()
-            torch.save(model_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            for key in model_dict:
-                self.assertEqual(loaded_dict[key], model_dict[key])
+    @given(batch_size=st.integers(1, 3),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
+           D=st.integers(3, 6),
+           H=st.integers(3, 6),
+           W=st.integers(3, 6),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
+           groups=st.integers(1, 4),
+           kernel_d=st.integers(1, 3),
+           kernel_h=st.integers(1, 3),
+           kernel_w=st.integers(1, 3),
+           stride_d=st.integers(1, 2),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_d=st.integers(0, 1),
+           pad_h=st.integers(0, 1),
+           pad_w=st.integers(0, 1),
+           dilation=st.integers(1, 2),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.integers(0, 4),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(-5, 5), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.integers(0, 4),
+           use_bias=st.booleans(),
+           use_fused=st.booleans(),
+           use_channelwise=st.booleans(),
+           qengine=st.sampled_from(("fbgemm",)))
+    def test_conv3d_api(
+        self, batch_size, in_channels_per_group, D, H, W,
+        out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
+        stride_d, stride_h, stride_w, pad_d, pad_h, pad_w, dilation, X_scale,
+        X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
+        use_channelwise, use_fused, qengine,
+    ):
+        # Tests the correctness of the conv3d module.
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        in_channels = in_channels_per_group * groups
+        out_channels = out_channels_per_group * groups
+        input_feature_map_size = (D, H, W)
+        kernel_size = (kernel_d, kernel_h, kernel_w)
+        stride = (stride_d, stride_h, stride_w)
+        padding = (pad_d, pad_h, pad_w)
+        dilation = (dilation, dilation, dilation)
+
+        with override_quantized_engine(qengine):
             if use_fused:
-                loaded_conv_under_test = ConvReLU2d(in_channels=iC,
-                                                    out_channels=oC,
-                                                    kernel_size=(kH, kW),
-                                                    stride=1,
-                                                    padding=0,
-                                                    dilation=1,
-                                                    groups=g,
-                                                    bias=use_bias,
-                                                    padding_mode='zeros')
-
-                self.assertTrue('QuantizedConvReLU2d' in str(loaded_conv_under_test))
+                module_name = "QuantizedConvReLU3d"
+                qconv_module = nnq_fused.ConvReLU3d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
             else:
-                loaded_conv_under_test = Conv2d(in_channels=iC,
-                                                out_channels=oC,
-                                                kernel_size=(kH, kW),
-                                                stride=1,
-                                                padding=0,
-                                                dilation=1,
-                                                groups=g,
-                                                bias=use_bias,
-                                                padding_mode='zeros')
-                self.assertTrue('QuantizedConv2d' in str(loaded_conv_under_test))
-            loaded_conv_under_test.load_state_dict(loaded_dict)
-            self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
-            if use_bias:
-                self.assertEqual(loaded_conv_under_test.bias(), conv_under_test.bias())
-            self.assertEqual(loaded_conv_under_test.scale, conv_under_test.scale)
-            self.assertEqual(loaded_conv_under_test.zero_point, conv_under_test.zero_point)
-            self.assertTrue(dir(loaded_conv_under_test) == dir(conv_under_test))
-            self.assertTrue(hasattr(conv_under_test, '_packed_params'))
-            self.assertTrue(hasattr(loaded_conv_under_test, '_packed_params'))
-            self.assertTrue(hasattr(conv_under_test, '_weight_bias'))
-            self.assertTrue(hasattr(loaded_conv_under_test, '_weight_bias'))
-            self.assertEqual(loaded_conv_under_test._weight_bias(), conv_under_test._weight_bias())
-            self.assertEqual(loaded_conv_under_test.weight(), qw)
-            loaded_result = loaded_conv_under_test(qX)
-            self.assertEqual(loaded_result, result_reference)
+                module_name = "QuantizedConv3d"
+                qconv_module = nnq.Conv3d(
+                    in_channels, out_channels, kernel_size, stride, padding,
+                    dilation, groups, use_bias, padding_mode="zeros")
 
-            # The below check is meant to ensure that `torch.save` and `torch.load`
-            # serialization works, however it is currently broken by the following:
-            # https://github.com/pytorch/pytorch/issues/24045
-            #
-            # Instead, we currently check that the proper exception is thrown on save.
-            # <start code>
-            # b = io.BytesIO()
-            # torch.save(conv_under_test, b)
-            # b.seek(0)
-            # loaded_conv = torch.load(b)
-            #
-            # self.assertEqual(conv_under_test.bias(), loaded_conv.bias())
-            # self.assertEqual(conv_under_test.scale, loaded_conv.scale)
-            # self.assertEqual(conv_under_test.zero_point, loaded_conv.zero_point)
-            # <end code>
-            with self.assertRaisesRegex(RuntimeError, r'torch.save\(\) is not currently supported'):
-                b = io.BytesIO()
-                torch.save(conv_under_test, b)
+            conv_module = nn.Conv3d(
+                in_channels, out_channels, kernel_size, stride, padding,
+                dilation, groups, use_bias, padding_mode="zeros")
+            if use_fused:
+                relu_module = nn.ReLU()
+                conv_module = nni.ConvReLU3d(conv_module, relu_module)
+            conv_module = conv_module.float()
 
-            # JIT testing
-            self.checkScriptable(conv_under_test, list(zip([qX], [result_reference])), check_save_load=True)
-
-            # Test from_float
-            float_conv = torch.nn.Conv2d(in_channels=iC,
-                                         out_channels=oC,
-                                         kernel_size=(kH, kW),
-                                         stride=1,
-                                         padding=0,
-                                         dilation=1,
-                                         groups=g,
-                                         bias=use_bias,
-                                         padding_mode='zeros').float()
-            float_conv.qconfig = torch.quantization.default_qconfig
-            torch.quantization.prepare(float_conv, inplace=True)
-            float_conv(X.float())
-            quantized_float_conv = torch.nn.Sequential(float_conv)
-            torch.quantization.convert(quantized_float_conv, inplace=True)
-
-            # Smoke test to make sure the module actually runs
-            quantized_float_conv(qX)
-            if use_bias:
-                self.assertEqual(quantized_float_conv[0].bias(), float_conv.bias)
-            # Smoke test extra_repr
-            self.assertTrue('QuantizedConv2d' in str(quantized_float_conv))
+            self._test_conv_api_impl(
+                module_name, qconv_module, conv_module, batch_size,
+                in_channels_per_group, input_feature_map_size,
+                out_channels_per_group, groups, kernel_size, stride, padding,
+                dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
+                Y_zero_point, use_bias, use_fused, use_channelwise)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.

@@ -22,9 +22,10 @@ from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, record_function, emit_nvtx)
+                                     FunctionEvent, FunctionEventAvg,
+                                     record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
@@ -39,7 +40,7 @@ from common_methods_invocations import (method_tests,
                                         mask_not_all_zeros,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCUDA, dtypes, dtypesIfCUDA,
+                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                 deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -878,6 +879,27 @@ class TestAutograd(TestCase):
             self.assertFalse(torch.is_grad_enabled())
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
+
+    def test_set_grad_generator_functions(self):
+        @torch.no_grad()
+        def gen_no_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), False)
+                yield i
+
+        with torch.enable_grad():
+            for _ in gen_no_grad():
+                self.assertEqual(torch.is_grad_enabled(), True)
+
+        @torch.enable_grad()
+        def gen_enable_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), True)
+                yield i
+
+        with torch.no_grad():
+            for _ in gen_enable_grad():
+                self.assertEqual(torch.is_grad_enabled(), False)
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
@@ -2522,7 +2544,10 @@ class TestAutograd(TestCase):
         x = torch.randn(10, 10)
 
         with profile() as p:
+            self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
+
+        self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
         names = ['mul', 'add']
@@ -2571,6 +2596,23 @@ class TestAutograd(TestCase):
 
         assert([get_children_ids(event) for event in events] == res)
 
+    def test_profiler_function_event_avg(self):
+        avg = FunctionEventAvg()
+        avg.add(FunctionEvent(id=0, name="foo", thread=0, cpu_start=10, cpu_end=15))
+        avg.add(FunctionEvent(id=1, name="foo", thread=0, cpu_start=20, cpu_end=30))
+        avg.add(avg)
+        self.assertEqual(avg.key, "foo")
+
+        # aggregate stats
+        self.assertEqual(avg.count, 4)
+        self.assertEqual(avg.cpu_time_total, 30)
+        self.assertEqual(avg.self_cpu_time_total, 30)
+        self.assertEqual(avg.cuda_time_total, 0)
+
+        # average stats
+        self.assertEqual(avg.cpu_time, 7.5)
+        self.assertEqual(avg.cuda_time_total, 0)
+
     def test_profiler_shapes(self):
         print("")
         layer1 = torch.nn.Linear(20, 30)
@@ -2593,6 +2635,18 @@ class TestAutograd(TestCase):
         )
         print(prof.table())
         print(prof.key_averages(group_by_input_shape=True).table())
+
+    def test_profiler_no_cuda(self):
+        print("")
+        layer = torch.nn.Linear(20, 30)
+        x = torch.randn(128, 20)
+        with profile(use_cuda=False) as prof:
+            layer(x)
+
+        prof_str = str(prof)
+        print(prof_str)
+        self.assertTrue('cpu' in prof_str.lower())
+        self.assertTrue('cuda' not in prof_str.lower())
 
     def test_profiler_aggregation_lstm(self):
         print("")
@@ -2631,18 +2685,79 @@ class TestAutograd(TestCase):
     def test_record_function(self):
         x = torch.randn(10, 10)
 
-        with profile() as p:
-            with record_function("label"):
+        def forward(x):
+            with record_function("outer"):
                 y = x * 2 + 4
+                with record_function("inner"):
+                    y = y - 1
+            y = y / 1
 
-        last_end = 0
-        names = ['mul', 'add']
-        labels = ['label']
-        self.assertEqual(len(p.function_events), len(names) + len(labels))
-        for info, expected_name in zip(p.function_events, labels):
-            self.assertGreater(info.cpu_interval.start, last_end)
+        forward(x)
+
+        with profile() as p:
+            forward(x)
+
+        events = p.function_events
+        start_order = [
+            'profiler::_record_function_enter',
+            'outer',
+            'mul',
+            'add',
+            'profiler::_record_function_enter',
+            'inner',
+            'sub',
+            'profiler::_record_function_exit',
+            'profiler::_record_function_exit',
+            'div',
+        ]
+        self.assertEqual(len(events), len(start_order))
+        for info, expected_name in zip(events, start_order):
             self.assertEqual(info.name, expected_name)
-            last_end = info.cpu_interval.end
+
+        def count_events_before(before, target):
+            matches = [e for e in events if e.name == before]
+            self.assertEqual(len(matches), 1)
+            match = matches[0]
+
+            count = 0
+            for e in events:
+                if e.name == target and e.cpu_interval.end <= match.cpu_interval.end:
+                    count += 1
+            return count
+
+        self.assertEqual(
+            count_events_before("inner", "profiler::_record_function_exit"),
+            1,
+        )
+        self.assertEqual(
+            count_events_before("outer", "profiler::_record_function_exit"),
+            2,
+        )
+
+        # We can also use record_function to decorate arbitrary function
+        @record_function('my_func')
+        def f(x, y):
+            return x + y
+
+        with profile() as p:
+            f(1, 2)
+
+        self.assertTrue('my_func' in str(p))
+
+    def test_record_function_multithreaded(self):
+        rf = record_function("outer")
+        rf.__enter__()
+        with profile():
+            # test that exiting the record function after starting a profile
+            # doesn't throw.
+            rf.__exit__()
+
+        with profile():
+            rf.__enter__()
+        # test that exiting the record function after the profile has ended
+        # doesn't throw.
+        rf.__exit__()
+
 
     def test_dir(self):
         x = torch.randn(10, 10)
@@ -3311,7 +3426,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -3362,24 +3477,26 @@ def add_test(
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+        def do_test(self, device, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,))[0][0]
+                self_variable = create_input((self_size,), device=device)[0][0]
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs, device=device)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 if not exclude_tensor_method(name, test_name):
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
                     if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
-                        output_tensor = torch.DoubleTensor((output_tensor,))
+                        # TODO: I'm not sure why we insert an outer dimension
+                        # here, seems a bit strange
+                        output_tensor = torch.tensor((output_tensor, ), dtype=torch.float, device=device)
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
@@ -3476,10 +3593,8 @@ def add_test(
         for skip in skipTestIf:
             do_test = skip(do_test)
 
-        setattr(TestAutograd, test_name, do_test)
+        setattr(TestAutogradDeviceType, test_name, do_test)
 
-for test in method_tests():
-    add_test(*test)
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -3921,6 +4036,19 @@ class TestAutogradDeviceType(TestCase):
         output = input.to(device=devices[1]) + input.to(device=devices[1])
         output.backward()
 
+    @onlyCPU
+    def test_copy_(self, device):
+        # At the time of writing this test, copy_ is not generated from native_functions.yaml
+        # there was a bug that bfloat16 was not recognized as floating.
+        x = torch.randn(10, device=device, requires_grad=True)
+        floating_dt = [dt for dt in torch.testing.get_all_dtypes() if dt.is_floating_point]
+        for dt in floating_dt:
+            y = torch.empty(10, device=device, dtype=dt)
+            y.copy_(x)
+            self.assertTrue(y.requires_grad)
+            z = x.to(torch.bfloat16)
+            self.assertTrue(z.requires_grad)
+
     @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):
         # Output on gpu so that this task will be associated with the gpu thread
@@ -3952,7 +4080,18 @@ class TestAutogradDeviceType(TestCase):
         out.sum().backward()
 
 
-instantiate_device_type_tests(TestAutogradDeviceType, globals())
+for test in method_tests():
+    add_test(*test)
+
+
+# e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
+instantiate_device_type_tests(
+    TestAutogradDeviceType,
+    globals(),
+    # Exclude ROCM for now, there are a lot of failures.  See
+    # https://github.com/pytorch/pytorch/issues/30845
+    except_for='cuda' if TEST_WITH_ROCM else None
+)
 
 if __name__ == '__main__':
     run_tests()

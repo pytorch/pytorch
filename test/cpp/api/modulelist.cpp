@@ -240,12 +240,12 @@ TEST_F(ModuleListTest, IsCloneable) {
 }
 
 TEST_F(ModuleListTest, RegistersElementsAsSubmodules) {
-  ModuleList list(Linear(10, 3), Conv2d(1, 2, 3), FeatureDropout(0.5));
+  ModuleList list(Linear(10, 3), Conv2d(1, 2, 3), Dropout2d(0.5));
 
   auto modules = list->children();
   ASSERT_TRUE(modules[0]->as<Linear>());
   ASSERT_TRUE(modules[1]->as<Conv2d>());
-  ASSERT_TRUE(modules[2]->as<FeatureDropout>());
+  ASSERT_TRUE(modules[2]->as<Dropout2d>());
 }
 
 TEST_F(ModuleListTest, NestingIsPossible) {
@@ -278,10 +278,10 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
   ASSERT_EQ(
       c10::str(list),
       "torch::nn::ModuleList(\n"
-      "  (0): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
-      "  (1): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
-      "  (2): torch::nn::Dropout(rate=0.5)\n"
-      "  (3): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
+      "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
+      "  (1): torch::nn::Conv2d(1, 2, kernel_size=[3, 3], stride=[1, 1])\n"
+      "  (2): torch::nn::Dropout(p=0.5, inplace=false)\n"
+      "  (3): torch::nn::BatchNorm(num_features=5, eps=1e-05, momentum=0.1, affine=true, track_running_stats=true)\n"
       "  (4): torch::nn::Embedding(num_embeddings=4, embedding_dim=10)\n"
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");

@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -10,9 +11,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
+
+namespace {
 
 inline int start_index(int out_idx, int out_len, int in_len) {
   /*

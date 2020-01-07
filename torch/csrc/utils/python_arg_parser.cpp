@@ -5,7 +5,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -132,10 +131,86 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-bool FunctionParameter::check(PyObject* obj) {
+/*
+ *  obj has a __torch_function__ implementation and may either be a
+ *  subclass of Tensor or a Tensor-like duck type. We may need to
+ *  append this object to the overloaded_args vector, which tracks all
+ *  of the arguments with distinct __torch_function__ implementations
+ *  we've seen so far.
+ *
+ *  If this is the first argument we've seen with __torch_function__
+ *  defined, we unconditionally add obj to the overloaded_args vector.
+ *
+ *  If we've already seen arguments with __torch_function__ defined,
+ *  then we first need to check if obj is the same type as any of the
+ *  entries in overloaded_args.  If so, we can ignore obj since we
+ *  already have an entry in overloaded_args with the same
+ *  __torch_function__ implementation.
+ *
+ *  If it's a different type, we then need to check if it's a subclass
+ *  of one of the types we've already seen. If so, we need to insert an
+ *  entry in overloaded_args for this type with higher precedence than
+ *  the superclass.
+ *
+ *  See torch._overrides._get_overloaded_types_and_args for the equivalent
+ *  function in the Python __torch_function__ implementation.
+ *
+ *  The precedence-determining algorithm implemented in this function is
+ *  described in NEP-0018:
+ *  https://numpy.org/neps/nep-0018-array-function-protocol.html
+ *
+ *  'overloaded_args' is a reference to a vector of pybind11 handles
+ *  that have distinct __torch_function__ implementations, in order of calling
+ *  precedence.
+ *
+ *  'obj' is an object to check for a __torch_function__ implementation
+ *
+ */
+
+void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* obj) {
+  bool class_not_seen_yet = true;
+  for (auto &arg : overloaded_args) {
+    if (Py_TYPE(obj) == Py_TYPE(arg.ptr())) {
+      // obj is the same type as another parameter we've seen in a prior
+      // iteration of the loop over parameters so we already have an entry
+      // with the proper __torch_function__ implementation to call, so skip
+      // this parameter
+      class_not_seen_yet = false;
+      break;
+    }
+  }
+  if (class_not_seen_yet) {
+    int arg_index = overloaded_args.size();
+    for (int j = 0; j < arg_index; j++) {
+      if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
+        // obj is a subclass of another object we've seen already so its
+        // __torch_function__ should be called first, therefore we
+        // insert it into overloaded_args before the superclass
+        arg_index = j;
+        break;
+      }
+    }
+    // add object to overloaded_args. If it's a subclass of another class
+    // we've already seen it will be inserted before the superclass,
+    // otherwise it will be inserted at the end of the array
+    overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
+  }
+}
+
+auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool
+{
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      if (THPVariable_CheckExact(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        if (check_has_torch_function(obj)) {
+          append_overloaded_arg(overloaded_args, obj);
+        }
+        return true;
+      }
+      return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -163,7 +238,6 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
       if (THPUtils_checkDimnameList(obj)) {
@@ -172,7 +246,6 @@ bool FunctionParameter::check(PyObject* obj) {
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -215,10 +288,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
-#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -315,7 +386,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error("invalid device: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" || str != "") {
+    if (str != "None" && str != "") {
       throw std::runtime_error("invalid default string: " + str);
     }
   }
@@ -500,6 +571,10 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     return false;
   }
 
+  if (!overloaded_args.empty()) {
+    overloaded_args.clear();
+  }
+
   int i = 0;
   for (auto& param : params) {
     PyObject* obj = nullptr;
@@ -532,11 +607,14 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj)) {
+    } else if (param.check(obj, this->overloaded_args)) {
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
+    } else if (check_has_torch_function(obj)) {
+      append_overloaded_arg(overloaded_args, obj);
+      dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
@@ -574,7 +652,6 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     }
     return false;
   }
-
   return true;
 }
 
@@ -654,9 +731,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  }else if (PyComplex_Check(obj)) {
+  } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  }else if (THPUtils_checkDouble(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,
@@ -667,9 +744,11 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  auto tensor = scalar_to_tensor(scalar);
+  at::AutoNonVariableTypeMode guard;
+
+  at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return autograd::make_variable(tensor);
+  return tensor;
 }
 
 at::Scalar PythonArgs::scalar_slow(int i) {

@@ -32,15 +32,17 @@ default_set = set([
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
+    # Caffe2 CentOS
+    'caffe2-py3.6-devtoolset7-cuda9.0-cudnn7-centos7',
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
     'libtorch 2.7 cpu',
-    'libtorch-ios-10.2.1-nightly-x86_64-build',
-    'libtorch-ios-10.2.1-nightly-arm64-build',
-    'libtorch-ios-10.2.1-nightly-binary-build-upload',
+    'libtorch-ios-11.2.1-nightly-x86_64-build',
+    'libtorch-ios-11.2.1-nightly-arm64-build',
+    'libtorch-ios-11.2.1-nightly-binary-build-upload',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
@@ -48,20 +50,26 @@ default_set = set([
     'caffe2-py2-system-macos10.13',
     # PyTorch OSX
     'pytorch-macos-10.13-py3',
-    'pytorch-macos-10.13-cuda9.2-cudnn7-py3',
+    'pytorch-macos-10.13-cuda10.0-cudnn7-py3',
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build',
     # PyTorch Android gradle
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32',
     # Pytorch iOS builds
-    'pytorch-ios-10.2.1-x86_64_build',
-    'pytorch-ios-10.2.1-arm64_build',
+    'pytorch-ios-11.2.1-x86_64_build',
+    'pytorch-ios-11.2.1-arm64_build',
+    # PyTorch Mobile builds
+    'pytorch-linux-xenial-py3-clang5-mobile-build',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',
 
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
+
+    # GraphExecutor config jobs
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_simple-test',
+    'pytorch-linux-xenial-py3.6-gcc5.4-ge_config_legacy-test',
 
     # Other checks
     'pytorch-short-perf-test-gpu',

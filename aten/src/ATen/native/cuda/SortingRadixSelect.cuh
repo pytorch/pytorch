@@ -229,7 +229,7 @@ __device__ scalar_t findPattern(
     index_t withinSliceStride,
     bitwise_t desired,
     bitwise_t desiredMask) {
-  if (threadIdx.x < C10_WARP_SIZE) {
+  if (threadIdx.x < 2) {
     smem[threadIdx.x] = static_cast<scalar_t>(0);
   }
   __syncthreads();

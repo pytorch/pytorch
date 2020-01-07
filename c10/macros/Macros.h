@@ -116,13 +116,6 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // here to hip and everyone is happy.
 namespace at { namespace cuda { using namespace c10::hip; }}
 
-// C10_NORETURN
-#if defined(_MSC_VER)
-#define C10_NORETURN __declspec(noreturn)
-#else
-#define C10_NORETURN __attribute__((noreturn))
-#endif
-
 // C10_LIKELY/C10_UNLIKELY
 //
 // These macros provide parentheses, so you can use these macros as:
@@ -199,6 +192,15 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_WARP_SIZE 32
 #endif
 
+// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels. This is not supported by Apple platforms so we special case it.
+// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#define CUDA_KERNEL_ASSERT(...)
+#else // __APPLE__
+#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -261,6 +263,15 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
 #define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
+#endif
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 AT_CPP14_CONSTEXPR
+#define IS_NOT_GCC5_CONSTEXPR AT_IS_CPP14_CONSTEXPR
 #endif
 
 #endif // C10_MACROS_MACROS_H_

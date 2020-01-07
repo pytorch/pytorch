@@ -1,4 +1,4 @@
-## @package onnx
+# @package onnx
 # Module caffe2.python.onnx.backend_rep
 from __future__ import absolute_import
 from __future__ import division
@@ -55,7 +55,11 @@ class Caffe2Rep(BackendRep):
                 self.workspace.RunNet(self.init_net.name)
                 self.ran_init_net = True
             self.workspace.RunNet(self.predict_net.name)
-        output_values = [self.workspace.FetchBlob(name)
-                         for name in self.predict_net.external_output]
+        output_values = []
+        for name in self.predict_net.external_output:
+            try:
+                output_values.append(self.workspace.FetchBlob(name))
+            except Exception:
+                output_values.append(self.workspace.FetchInt8Blob(name))
         return namedtupledict('Outputs',
                               self.predict_net.external_output)(*output_values)

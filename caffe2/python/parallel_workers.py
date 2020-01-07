@@ -177,7 +177,7 @@ class WorkerCoordinator(object):
                 w.join(5.0)  # don't wait forever, thread may be blocked in i/o
         success = True
         for w in self._workers:
-            if w.isAlive():
+            if w.is_alive():
                 print("Worker {} failed to close while waiting".format(w))
                 success = False
 

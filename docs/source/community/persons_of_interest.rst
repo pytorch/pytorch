@@ -36,6 +36,7 @@ torch.optim
 
 -  Vincent Quenneville-Belair (`vincentqb <https://github.com/vincentqb>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
+-  Wanchao Liang (`wanchaol <https://github.com/wanchaol>`__)
 
 Autograd Engine
 ~~~~~~~~~~~~~~~
@@ -95,6 +96,20 @@ MKLDNN
 -  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 -  Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
+Mobile
+~~~~~~
+
+-  David Reiss (`dreiss <https://github.com/dreiss>`__)
+-  Jiakai Liu (`ljk53 <https://github.com/ljk53>`__)
+
+Quantization
+~~~~~~
+
+-  Raghuraman Krishnamoorthi (`dreiss <https://github.com/dreiss>`__)
+-  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
+-  Lingyi Liu (`lly-zero-one <https://github.com/lly-zero-one>`__)
+-  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
+
 XLA
 ~~~
 
@@ -138,6 +153,9 @@ ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
 
 -  Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+-  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 
 Windows
 ~~~~~~~

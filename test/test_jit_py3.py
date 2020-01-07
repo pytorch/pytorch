@@ -2,6 +2,7 @@ from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional, Any
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
@@ -63,6 +64,13 @@ class TestScriptPy3(JitTestCase):
         for i in range(1000):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
+
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
 
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -229,7 +237,6 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
-
     def test_any_in_class_fails(self):
         class MyCoolNamedTuple(NamedTuple):
             a : Any
@@ -240,7 +247,6 @@ class TestScriptPy3(JitTestCase):
             def foo():
                 return MyCoolNamedTuple(4, 5.5, [3])
             print(foo.graph)
-
 
 if __name__ == '__main__':
     run_tests()

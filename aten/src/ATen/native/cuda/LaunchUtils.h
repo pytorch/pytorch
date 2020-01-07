@@ -1,4 +1,5 @@
 #pragma once
+#include<algorithm>
 
 namespace at {
 namespace native {
@@ -10,7 +11,7 @@ static int lastPow2(unsigned int n) {
   n |= (n >> 4);
   n |= (n >> 8);
   n |= (n >> 16);
-  return n - (n >> 1);
+  return std::max<int>(1, n - (n >> 1));
 }
 
 } // namespace native

@@ -151,7 +151,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                       example_outputs=example_outputs,
                                       do_constant_folding=False,
                                       opset_version=self.opset_version,
-                                      keep_initializers_as_inputs=True)
+                                      keep_initializers_as_inputs=True,
+                                      add_node_names=False)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -161,7 +162,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None, do_constant_folding=False):
+                        example_outputs=None, do_constant_folding=True):
         """
         This is what the user facing version will look like
         """
@@ -336,9 +337,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -379,9 +382,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -420,9 +425,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
-        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
+        # Constant folding works when model has parameters embedded. For this case, we need to disable it
+        onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
+                              do_constant_folding=False)
         other_input = make_input(RNN_BATCH_SIZE + 1)
         _ = run_embed_params(onnxir, model, other_input, use_gpu=False)
 
@@ -437,7 +444,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # predict net. When we embed parameters, there should be more
         # ops in the init net.
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params,
-                                                  keep_initializers_as_inputs=True)[0])
+                                                  keep_initializers_as_inputs=True,
+                                                  do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
             assert len(prepared.init_net.op) == 875
@@ -583,9 +591,24 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm1d(self):
+        c = torch.randn(BATCH_SIZE, 224, 224)
+        model = nn.BatchNorm1d(224)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    def test_batchnorm1d_noaffine(self):
+        c = torch.randn(BATCH_SIZE, 224)
+        model = nn.BatchNorm1d(224, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_batchnorm2d_noaffine(self):
         c = torch.randn(128, 128, 1, 1)
         model = nn.BatchNorm2d(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
+    def test_batchnorm3d_noaffine(self):
+        c = torch.randn(128, 128, 1, 1, 1)
+        model = nn.BatchNorm3d(128, affine=False)
         self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
 
     def test_constant(self):
@@ -1178,6 +1201,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
+    def test_logsoftmax_dim(self):
+        for i in range(-4, 3):
+            model = nn.LogSoftmax(dim=i)
+            input = torch.randn(3, 4, 5, 6)
+            self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
 
@@ -1316,7 +1345,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1328,7 +1357,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1340,7 +1369,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
 
-    @skipIfUnsupportedOpsetVersion([10])
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1367,6 +1396,40 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(3, 4, 5)
         self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_zero(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.zero_()
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_inplace_fill(self):
+        class Fill_(torch.nn.Module):
+            def forward(self, x):
+                return x.fill_(3)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_inplace_arithmetic(self):
+        class Arithmetic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                x = torch.ones(2, 3, 4)
+                y = torch.ones(2, 3, 4) * 2
+                x.add_(3)
+                y.mul_(x)
+                return x, y
+
+        x = torch.ones(2, 3, 4)
+        y = torch.ones(2, 3, 4) * 2
+        self.run_model_test(Arithmetic(),
+                            train=False, input=(), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(x + 3, y * (x + 3)))
 
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
@@ -1489,9 +1552,20 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    # InstanceNorm model (used in the subgraph) includes unused weights,
+    # so skip this in TestCaffe2BackendEmbed
+    @skipIfEmbed
     def test_group_norm(self):
-        c = torch.randn(BATCH_SIZE, 6, 224)
-        model = nn.GroupNorm(3, 6)
+        c = torch.randn(BATCH_SIZE, 6, 224, 224)
+        model = nn.GroupNorm(3, 6, eps=0.0002)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    # InstanceNorm model (used in the subgraph) includes unused weights,
+    # so skip this in TestCaffe2BackendEmbed
+    @skipIfEmbed
+    def test_group_norm_noaffine(self):
+        c = torch.randn(BATCH_SIZE, 6, 224, 224)
+        model = nn.GroupNorm(3, 6, eps=0.0002, affine=False)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
     def test_rsub(self):
@@ -2233,6 +2307,20 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid(self):
+        class MeshgridModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        model = MeshgridModel()
+        outputs = model(x, y, z)
+        self.run_model_test(model, train=False, input=(x, y, z), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):

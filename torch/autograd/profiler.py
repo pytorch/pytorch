@@ -4,12 +4,29 @@ import torch
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
+try:
+    # Available in Python >= 3.2
+    from contextlib import ContextDecorator
+except ImportError:
+    import functools
+
+    class ContextDecorator(object):
+        def __call__(self, func):
+            @functools.wraps(func)
+            def wrapped(*args, **kwargs):
+                with self:
+                    return func(*args, **kwargs)
+
+            return wrapped
+
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
+        use_cuda = kwargs.pop('use_cuda', True)
         super(EventList, self).__init__(*args, **kwargs)
         self._cpu_children_populated = False
+        self._use_cuda = use_cuda
 
     def __str__(self):
         return self.table()
@@ -89,7 +106,7 @@ class EventList(list):
             A string containing the table.
         """
         return build_table(
-            self, sort_by=sort_by, row_limit=row_limit, header=header)
+            self, sort_by=sort_by, row_limit=row_limit, header=header, use_cuda=self._use_cuda)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -171,7 +188,7 @@ class EventList(list):
         for evt in self:
             stats[get_key(evt, group_by_input_shapes)].add(
                 evt, group_by_input_shapes)
-        return EventList(stats.values())
+        return EventList(stats.values(), use_cuda=self._use_cuda)
 
     def total_average(self):
         """Averages all events.
@@ -215,6 +232,12 @@ class profile(object):
     .. warning:
         This context managers should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
+
+    .. warning:
+        Due to some CUDA multiprocessing limitations (multiprocessing-cuda-note_),
+        one cannot use the profiler with ``use_cuda = True`` to benchmark
+        DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
+        please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
         >>> x = torch.randn((1, 1), requires_grad=True)
@@ -260,7 +283,7 @@ class profile(object):
         if not self.enabled:
             return
         records = torch.autograd._disable_profiler()
-        self.function_events = EventList(parse_cpu_trace(records))
+        self.function_events = EventList(parse_cpu_trace(records), use_cuda=self.use_cuda)
         return False
 
     def __repr__(self):
@@ -308,9 +331,10 @@ class profile(object):
         return self.function_events.self_cpu_time_total
 
 
-class record_function(object):
-    """Context manager that adds a label to a block of Python code when running autograd
-    profiler.  It is useful when tracing the code profile.
+class record_function(ContextDecorator):
+    """Context manager/function decorator that adds a label to a block of
+    Python code (or function) when running autograd profiler. It is
+    useful when tracing the code profile.
 
     Arguments:
         name (str): Label assigned to the block of code.
@@ -337,15 +361,16 @@ class record_function(object):
         -----------------------------------  ---------------  ---------------  ---------------
         Self CPU time total: 234.344us
         CUDA time total: 0.000us
+
     """
     def __init__(self, name):
         self.name = name
 
     def __enter__(self):
-        torch.autograd._push_range(self.name)
+        self.handle = torch.ops.profiler._record_function_enter(self.name)
 
     def __exit__(self, *args):
-        torch.autograd._pop_range()
+        torch.ops.profiler._record_function_exit(self.handle)
         return False
 
 
@@ -605,12 +630,12 @@ class FunctionEventAvg(FormattedTimesMixin):
             not group_by_input_shapes or
             other.input_shapes == self.input_shapes
         )
-        assert isinstance(other, FunctionEvent)
+        assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
-        self.cpu_time_total += other.cpu_time
-        self.cuda_time_total += other.cuda_time
+        self.cpu_time_total += other.cpu_time_total
+        self.cuda_time_total += other.cuda_time_total
         self.self_cpu_time_total += other.self_cpu_time_total
-        self.count += 1
+        self.count += other.count
         return self
 
     def __iadd__(self, other):
@@ -776,7 +801,7 @@ def parse_nvprof_trace(path):
 # Pretty printer
 
 
-def build_table(events, sort_by=None, header=None, row_limit=100):
+def build_table(events, sort_by=None, header=None, row_limit=100, use_cuda=True):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -784,7 +809,7 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
     if sort_by is not None:
         events = EventList(sorted(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ))
+        ), use_cuda=use_cuda)
 
     has_input_shapes = any(
         [event.input_shapes is not None for event in events])
@@ -799,11 +824,16 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
         'CPU total %',
         'CPU total',
         'CPU time avg',
-        'CUDA total %',
-        'CUDA total',
-        'CUDA time avg',
-        'Number of Calls',
     ]
+    if use_cuda:
+        headers.extend([
+            'CUDA total %',
+            'CUDA total',
+            'CUDA time avg',
+        ])
+    headers.append(
+        'Number of Calls'
+    )
 
     # Have to use a list because nonlocal is Py3 only...
     SPACING_SIZE = 2
@@ -857,17 +887,23 @@ def build_table(events, sort_by=None, header=None, row_limit=100):
             format_time_share(evt.cpu_time_total, self_cpu_time_total),
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
-            # CUDA time total %
-            format_time_share(evt.cuda_time_total, cuda_time_total),
-            evt.cuda_time_total_str,
-            evt.cuda_time_str,  # Cuda time avg
-            evt.count,  # Number of calls
         ]
+        if use_cuda:
+            row_values.extend([
+                # CUDA time total %
+                format_time_share(evt.cuda_time_total, cuda_time_total),
+                evt.cuda_time_total_str,
+                evt.cuda_time_str,  # Cuda time avg
+            ])
+        row_values.append(
+            evt.count,  # Number of calls
+        )
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
         append(row_format.format(*row_values))
 
     append(header_sep)
     append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
-    append("CUDA time total: {}".format(format_time(cuda_time_total)))
+    if use_cuda:
+        append("CUDA time total: {}".format(format_time(cuda_time_total)))
     return ''.join(result)

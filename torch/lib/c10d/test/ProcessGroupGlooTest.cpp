@@ -9,6 +9,8 @@
 #include <sstream>
 #include <thread>
 
+#include <torch/cuda.h>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -37,9 +39,10 @@ class SignalTest {
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
-    // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
+    // Set a timeout that is small enough to make this test run fast, but also
+    // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
+    options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
@@ -259,6 +262,114 @@ void testBarrier(const std::string& path) {
   }
 }
 
+void testSend(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  constexpr uint64_t tag = 0x1337;
+
+  // Create a sender thread and ensure that sendWork can be aborted.
+  std::thread senderThread([&]() {
+    auto selfRank = 0;
+    auto destRank = 1;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+    // Ensure that we can abort SendWork
+    auto work = pg.send(tensors, destRank, tag);
+    bool sendCompleted;
+    std::thread waitSendWorkThread([&]() { sendCompleted = work->wait(); });
+    work->abort();
+    waitSendWorkThread.join();
+    TORCH_CHECK(!sendCompleted);
+
+    // Ensure that future waits can complete successfully.
+    work = pg.send(tensors, destRank, tag);
+    sendCompleted = work->wait();
+    TORCH_CHECK(sendCompleted);
+  });
+
+  // Helper receiver thread to simulate a real send/recv pair.
+  std::thread receiverThread([&]() {
+    auto selfRank = 1;
+    auto srcRank = 0;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+
+    // Receive for first send.
+    auto work = pg.recv(tensors, srcRank, tag);
+    work->wait();
+
+    // Receive for 2nd send.
+    work = pg.recv(tensors, srcRank, tag);
+    work->wait();
+  });
+
+  senderThread.join();
+  receiverThread.join();
+}
+
+void testRecv(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  constexpr uint64_t tag = 0x1337;
+
+  // Create a receiver thread and ensure that recvWork can be aborted.
+  std::thread receiverThread([&]() {
+    auto selfRank = 0;
+    auto srcRank = 1;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+
+    // Ensure that we can abort recvWork
+    auto work = pg.recv(tensors, srcRank, tag);
+    bool recvCompleted;
+    std::thread waitRecvWorkThread([&]() { recvCompleted = work->wait(); });
+    work->abort();
+    waitRecvWorkThread.join();
+    TORCH_CHECK(!recvCompleted);
+
+    // Ensure that future recvWork can complete successfully.
+    work = pg.recv(tensors, srcRank, tag);
+    recvCompleted = work->wait();
+    TORCH_CHECK(recvCompleted);
+  });
+
+  // Helper sender thread to simluate a real recv/send pair.
+  std::thread senderThread([&]() {
+    auto selfRank = 1;
+    auto destRank = 0;
+
+    auto& pg = tests[selfRank].getProcessGroup();
+
+    std::vector<at::Tensor> tensors = {
+        at::ones({16, 16}),
+    };
+    // Send for first recv.
+    auto work = pg.send(tensors, destRank, tag);
+    work->wait();
+
+    // Send for 2nd recv.
+    work = pg.send(tensors, destRank, tag);
+    work->wait();
+  });
+
+  receiverThread.join();
+  senderThread.join();
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -287,8 +398,10 @@ int main(int argc, char** argv) {
 
 #ifdef USE_CUDA
   {
-    TemporaryFile file;
-    testAllreduce(file.path, at::DeviceType::CUDA);
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAllreduce(file.path, at::DeviceType::CUDA);
+    }
   }
 #endif
 
@@ -299,14 +412,26 @@ int main(int argc, char** argv) {
 
 #ifdef USE_CUDA
   {
-    TemporaryFile file;
-    testBroadcast(file.path, at::DeviceType::CUDA);
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testBroadcast(file.path, at::DeviceType::CUDA);
+    }
   }
 #endif
 
   {
     TemporaryFile file;
     testBarrier(file.path);
+  }
+
+  {
+    TemporaryFile file;
+    testSend(file.path);
+  }
+
+  {
+    TemporaryFile file;
+    testRecv(file.path);
   }
 
   std::cout << "Test successful" << std::endl;

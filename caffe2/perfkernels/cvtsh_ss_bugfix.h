@@ -39,7 +39,7 @@ _cvtss_sh(float a, int imm8) {
 #undef __APPLE_NEED_FIX
 #undef __CLANG_NEED_FIX
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 
 #include <c10/util/Half.h>
 #include <cstdint>

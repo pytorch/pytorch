@@ -9,10 +9,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
-// arithmetic, comparisions, and trigonometric functions. It handles
+// arithmetic, comparisons, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
 // This is inspired by NumPy's Array Iterator API (NpyIter).
@@ -76,12 +75,13 @@ struct CAFFE2_API OperandInfo {
   explicit OperandInfo(const Tensor& t) : tensor(t) {
     if (t.defined()) {
       device = t.device();
-      dtype = t.scalar_type();
+      target_dtype = t.scalar_type();
+      current_dtype = target_dtype;
     }
     validate();
   }
   OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), dtype(dtype) {
+    : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
     validate();
   }
 
@@ -99,14 +99,20 @@ struct CAFFE2_API OperandInfo {
 
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
-  /// specifies which type to allocate. Note that there is very limited support
-  /// for type conversions currently: they are only allowed for zero-dim tensors.
+  /// specifies which type to allocate. target_dtype and device are initialized with the dtype and device of the tensor
+  /// but during type promotion target_dtype value can become different from tensor's dtype
+  /// also, during type promotion target_dtype and device can be set for an undefined tensor so that tensor can be properly
+  /// constructed later.
   Device device = kCPU;
-  ScalarType dtype = ScalarType::Undefined;
+  ScalarType target_dtype = ScalarType::Undefined;
+  // Caches dtype of the tensor, because scalar_type is an expensive operation
+  // If dtype of the tensor is changed (e.g. as a result of type promotion or in allocate_outputs), this
+  //value should be changed too.
+  ScalarType current_dtype = ScalarType::Undefined;
 
-  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
-    return TensorOptions(dtype).device(device);
+    return TensorOptions(target_dtype).device(device);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
@@ -127,9 +133,10 @@ struct CAFFE2_API OperandInfo {
 struct SplitUntil32Bit;
 
 enum class CommonDTypeStrategy : uint8_t {
-  COMPUTE_ALL = 0, // Compute common dtype based on inputs and outputs. Try to promote common dtype to inputs and outputs
-  COMPUTE_INPUTS = 1, // Compute common dtype based only on inputs. Try to promote common dtype only to inputs
-  COMPUTE_NONE = 2, // Do not compute and promote common dtype
+  NONE, // Do not compute a common dtype
+  CHECK, // Compute and validate a common dtype but don't promote.
+  PROMOTE_INPUTS, // Promote common dtype but only validate inputs (comparison ops have boolean output)
+  PROMOTE // Promote to common dtype.
 };
 
 struct CAFFE2_API TensorIterator {
@@ -189,8 +196,9 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
-  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
+  ScalarType dtype(int arg=0) const { return operands_[arg].current_dtype; }
+  ScalarType common_dtype() const { return common_dtype_; }
+  ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
@@ -206,7 +214,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void cast_outputs() {
-    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
+    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
       for(int i=0; i < noutputs(); i++) {
         if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
           operands_[i].original_tensor.copy_(operands_[i].tensor);
@@ -229,8 +237,10 @@ struct CAFFE2_API TensorIterator {
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
   void select_all_keeping_dim(int start_dim, IntArrayRef starts);
-  /// Replaces the data pointer and strides for the operand at index `arg`
-  void replace_operand(int arg, void* data, IntArrayRef stride);
+  /// Replaces the data pointer for the operand at index `arg`.
+  /// The new pointer should have the same sizes, strides and dtype as the
+  /// original
+  void unsafe_replace_operand(int arg, void* data);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
@@ -262,6 +272,10 @@ struct CAFFE2_API TensorIterator {
   /// called *before* coalesce_dimensions() is called.
   DimVector invert_perm(IntArrayRef input) const;
 
+  /// Reapply same re-ordering as it is done by reorder_dimensions. This can
+  /// only be called *before* coalesce_dimensions() is called.
+  DimVector apply_perm_and_mul(IntArrayRef input, int mul) const;
+
   /// Helper functions for CPU iteration
   StrideVector get_dim_strides(int dim) const;
   StrideVector get_strides() const;
@@ -284,6 +298,10 @@ struct CAFFE2_API TensorIterator {
   /// as opposed to something that will be accumulated further. Only relevant for
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
+
+  bool needs_dynamic_casting() const {
+    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
+  }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
@@ -308,16 +326,24 @@ struct CAFFE2_API TensorIterator {
     operands_.emplace_back(input, device, dtype);
   }
 
+  void promote_common_dtype() {
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+  }
+
   void dont_compute_common_dtype() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_NONE;
+    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
   }
 
   void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_INPUTS;
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
   }
 
   void dont_resize_outputs() {
     resize_outputs_ = false;
+  }
+
+  void dynamic_cast_if(bool condition) {
+    force_dynamic_casting_ = force_dynamic_casting_ || condition;
   }
 
   void build();
@@ -332,21 +358,21 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
-#ifdef BUILD_NAMEDTENSOR
+  void fast_set_up();
+  bool can_use_fast_set_up();
   void compute_names();
   void propagate_names_to_outputs();
-#endif
   void coalesce_dimensions();
+  void analyze_memory_format();
 
 protected:
   DimVector shape_;
   DimVector perm_;
-#ifdef BUILD_NAMEDTENSOR
   NameVector names_;
-#endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
+  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
+  ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
@@ -355,6 +381,10 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool have_differing_types_ = false;
+  bool force_dynamic_casting_ = false;
+  bool all_ops_same_shape_ = false;
+  bool requires_channels_last_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
