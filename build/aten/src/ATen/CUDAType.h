@@ -41,7 +41,7 @@ namespace CUDAType {
   Tensor _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional);
   std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> _cudnn_rnn(const Tensor & input, TensorList weight, int64_t weight_stride0, const Tensor & weight_buf, const Tensor & hx, const Tensor & cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor & dropout_state);
   std::tuple<Tensor,Tensor,Tensor,std::vector<Tensor>> _cudnn_rnn_backward(const Tensor & input, TensorList weight, int64_t weight_stride0, const Tensor & weight_buf, const Tensor & hx, const Tensor & cx, const Tensor & output, const Tensor & grad_output, const Tensor & grad_hy, const Tensor & grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor & dropout_state, const Tensor & reserve, std::array<bool,4> output_mask);
-  Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions & options);
+  Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory);
   std::tuple<Tensor,Tensor> _fused_dropout(const Tensor & self, double p, Generator * generator);
   Tensor _masked_scale(const Tensor & self, const Tensor & mask, double scale);
   Tensor add(const Tensor & self, const Tensor & other, Scalar alpha);
@@ -106,8 +106,8 @@ namespace CUDAType {
   std::tuple<Tensor,Tensor,Tensor,Tensor> _embedding_bag(const Tensor & weight, const Tensor & indices, const Tensor & offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, const Tensor & per_sample_weights);
   Tensor _embedding_bag_dense_backward(const Tensor & grad, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, const Tensor & bag_size, const Tensor & maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, const Tensor & per_sample_weights);
   Tensor _embedding_bag_per_sample_weights_backward(const Tensor & grad, const Tensor & weight, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, int64_t mode);
-  Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format);
-  Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options);
+  Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format);
+  Tensor empty_strided(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
   Tensor & erf_(Tensor & self);
   Tensor & erf_out(Tensor & out, const Tensor & self);
   Tensor & erfc_(Tensor & self);
@@ -301,8 +301,8 @@ namespace CUDAType {
   Tensor diag(const Tensor & self, int64_t diagonal);
   Tensor & triu_out(Tensor & out, const Tensor & self, int64_t diagonal);
   Tensor & tril_out(Tensor & out, const Tensor & self, int64_t diagonal);
-  Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options);
-  Tensor triu_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options);
+  Tensor tril_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
+  Tensor triu_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory);
   Tensor trace(const Tensor & self);
   Tensor & ne_out(Tensor & out, const Tensor & self, Scalar other);
   Tensor ne(const Tensor & self, Scalar other);

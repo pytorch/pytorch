@@ -922,7 +922,7 @@ Tensor _sparse_addmm(const Tensor & self, const Tensor & sparse, const Tensor & 
   }
   return result;
 }
-Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("_sparse_coo_tensor_unsafe", std::vector<c10::IValue>({indices, values}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -935,23 +935,25 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, 
     jit::tracer::addInputs(node, "indices", indices);
     jit::tracer::addInputs(node, "values", values);
     jit::tracer::addInputs(node, "size", size);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::_sparse_coo_tensor_unsafe(indices, values, size, options);
+  auto result = TypeDefault::_sparse_coo_tensor_unsafe(indices, values, size, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
   }
   return result;
 }
-Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
   RECORD_FUNCTION("_sparse_coo_tensor_with_dims_and_tensors", std::vector<c10::IValue>({indices, values}), Node::peek_at_next_sequence_nr());
   auto& indices_ = unpack(indices, "indices", 3);
   auto& values_ = unpack(values, "values", 4);
-  auto options_ = TensorOptions(options);
   check_no_requires_grad(indices, "indices");
   std::shared_ptr<SparseCooTensorWithDimsAndTensorsBackward> grad_fn;
   if (compute_requires_grad( values )) {
@@ -973,7 +975,10 @@ Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dens
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "indices", indices);
     jit::tracer::addInputs(node, "values", values);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
@@ -990,7 +995,7 @@ Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dens
   #endif
   auto tmp = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices_, values_, options_);
+    return at::__sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices_, values_, dtype, layout, device, pin_memory);
   })();
   auto result = std::move(tmp);
   #ifndef NDEBUG
@@ -2828,7 +2833,7 @@ Tensor & bitwise_xor_(Tensor & self, const Tensor & other) {
   }
   return self;
 }
-Tensor blackman_window(int64_t window_length, const TensorOptions & options) {
+Tensor blackman_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("blackman_window", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -2839,19 +2844,22 @@ Tensor blackman_window(int64_t window_length, const TensorOptions & options) {
     node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "window_length", window_length);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::blackman_window(window_length, options);
+  auto result = TypeDefault::blackman_window(window_length, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
   }
   return result;
 }
-Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+Tensor blackman_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("blackman_window", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -2863,12 +2871,15 @@ Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "window_length", window_length);
     jit::tracer::addInputs(node, "periodic", periodic);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::blackman_window(window_length, periodic, options);
+  auto result = TypeDefault::blackman_window(window_length, periodic, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -4134,7 +4145,7 @@ std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors) {
   }
   return std::make_tuple(std::move(eigenvalues), std::move(eigenvectors_return));
 }
-Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
   RECORD_FUNCTION("empty", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -4146,22 +4157,24 @@ Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOpt
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "names", names);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::empty(size, names, options, memory_format);
+  auto result = TypeDefault::empty(size, names, dtype, layout, device, pin_memory, memory_format);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
   }
   return result;
 }
-Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
   RECORD_FUNCTION("empty", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
-  auto options_ = TensorOptions(options);
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
   if (jit::tracer::isTracing()) {
@@ -4171,7 +4184,10 @@ Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<Memo
     node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "size", size);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
   
@@ -4179,7 +4195,7 @@ Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<Memo
   }
   auto tmp = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::empty(size, options_, memory_format);
+    return at::_empty(size, dtype, layout, device, pin_memory, memory_format);
   })();
   auto result = std::move(tmp);
   if (tracer_state) {
@@ -8722,7 +8738,7 @@ Tensor & neg_(Tensor & self) {
   }
   return self;
 }
-Tensor new_empty(const Tensor & self, IntArrayRef size, const TensorOptions & options) {
+Tensor new_empty(const Tensor & self, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("new_empty", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -8734,12 +8750,15 @@ Tensor new_empty(const Tensor & self, IntArrayRef size, const TensorOptions & op
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     jit::tracer::addInputs(node, "size", size);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::new_empty(self, size, options);
+  auto result = TypeDefault::new_empty(self, size, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -9273,7 +9292,7 @@ Tensor normal(const Tensor & mean, const Tensor & std, Generator * generator) {
   }
   return result;
 }
-Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   RECORD_FUNCTION("normal", std::vector<c10::IValue>({}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -9287,12 +9306,15 @@ Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, 
     jit::tracer::addInputs(node, "std", std);
     jit::tracer::addInputs(node, "size", size);
     jit::tracer::addInputs(node, "generator", generator);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::normal(mean, std, size, generator, options);
+  auto result = TypeDefault::normal(mean, std, size, generator, dtype, layout, device, pin_memory);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -12482,7 +12504,7 @@ Tensor zeros_like(const Tensor & self, c10::optional<MemoryFormat> memory_format
   }
   return result;
 }
-Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor zeros_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   RECORD_FUNCTION("zeros_like", std::vector<c10::IValue>({self}), Node::peek_at_next_sequence_nr());
   torch::jit::Node* node = nullptr;
   std::shared_ptr<jit::tracer::TracingState> tracer_state;
@@ -12493,13 +12515,16 @@ Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optio
     node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    jit::tracer::addInputs(node, "options", options);
+    jit::tracer::addInputs(node, "dtype", dtype);
+    jit::tracer::addInputs(node, "layout", layout);
+    jit::tracer::addInputs(node, "device", device);
+    jit::tracer::addInputs(node, "pin_memory", pin_memory);
     jit::tracer::addInputs(node, "memory_format", memory_format);
     tracer_state->graph->insertNode(node);
   
     jit::tracer::setTracingState(nullptr);
   }
-  auto result = TypeDefault::zeros_like(self, options, memory_format);
+  auto result = TypeDefault::zeros_like(self, dtype, layout, device, pin_memory, memory_format);
   if (tracer_state) {
     jit::tracer::setTracingState(std::move(tracer_state));
     jit::tracer::addOutput(node, result);
@@ -12590,11 +12615,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, const TensorOptions &), &VariableType::_sparse_coo_tensor_unsafe>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &VariableType::_sparse_coo_tensor_unsafe>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, const TensorOptions &), &VariableType::_sparse_coo_tensor_with_dims_and_tensors>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, ScalarType, Layout, Device, bool), &VariableType::_sparse_coo_tensor_with_dims_and_tensors>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_standard_gamma(Tensor self, Generator? generator=None) -> Tensor")
@@ -12718,11 +12743,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, const TensorOptions &), &VariableType::blackman_window>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &VariableType::blackman_window>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, bool, const TensorOptions &), &VariableType::blackman_window>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &VariableType::blackman_window>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::broadcast_tensors(Tensor[] tensors) -> Tensor[]")
@@ -12826,11 +12851,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &, c10::optional<MemoryFormat>), &VariableType::empty>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &VariableType::empty>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>), &VariableType::empty>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &VariableType::empty>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::eq.Scalar(Tensor self, Scalar other) -> Tensor")
@@ -13222,7 +13247,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, IntArrayRef, const TensorOptions &), &VariableType::new_empty>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &VariableType::new_empty>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::nll_loss2d.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)")
@@ -13274,7 +13299,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (double, double, IntArrayRef, Generator *, const TensorOptions &), &VariableType::normal>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (double, double, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &VariableType::normal>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)")
@@ -13526,7 +13551,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &VariableType::zeros_like>(TensorTypeId::VariableTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &VariableType::zeros_like>(TensorTypeId::VariableTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 
 }

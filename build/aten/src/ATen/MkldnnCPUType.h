@@ -36,7 +36,7 @@ namespace MkldnnCPUType {
   Tensor add(const Tensor & self, const Tensor & other, Scalar alpha);
   Tensor & add_(Tensor & self, const Tensor & other, Scalar alpha);
   Tensor & add_out(Tensor & out, const Tensor & self, const Tensor & other, Scalar alpha);
-  Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format);
+  Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format);
   Tensor mkldnn_linear(const Tensor & input, const Tensor & weight, const Tensor & bias);
   Tensor mkldnn_max_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode);
   Tensor mul(const Tensor & self, const Tensor & other);

@@ -1974,7 +1974,7 @@ static PyObject * THPVariable__cudnn_init_dropout_state(PyObject* self_, PyObjec
     "_cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -1985,14 +1985,11 @@ static PyObject * THPVariable__cudnn_init_dropout_state(PyObject* self_, PyObjec
     auto train = r.toBool(1);
     auto dropout_seed = r.toInt64(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch__cudnn_init_dropout_state(dropout, train, dropout_seed, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch__cudnn_init_dropout_state(dropout, train, dropout_seed, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -2196,7 +2193,7 @@ static PyObject * THPVariable__empty_affine_quantized(PyObject* self_, PyObject*
     "_empty_affine_quantized(IntArrayRef size, *, double scale=1, int64_t zero_point=0, MemoryFormat? memory_format=MemoryFormat::Contiguous, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<10> parsed_args;
+  ParsedArgs<13> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -2208,14 +2205,11 @@ static PyObject * THPVariable__empty_affine_quantized(PyObject* self_, PyObject*
     auto zero_point = r.toInt64(2);
     auto memory_format = r.memoryformatOptional(3);
     auto dtype = r.scalartype(4);
+    auto layout = r.layout(5).layout;
     auto device = r.device(6);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(5).layout)
-        .requires_grad(r.toBool(8))
-        .pinned_memory(r.toBool(7));
-    return wrap(dispatch__empty_affine_quantized(size, scale, zero_point, memory_format, options));
+    auto pin_memory = r.toBool(7);
+    auto requires_grad = r.toBool(8);
+    return wrap(dispatch__empty_affine_quantized(size, dtype, layout, device, pin_memory, requires_grad, scale, zero_point, memory_format));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -2227,7 +2221,7 @@ static PyObject * THPVariable__empty_per_channel_affine_quantized(PyObject* self
     "_empty_per_channel_affine_quantized(IntArrayRef size, *, Tensor scales, Tensor zero_points, int64_t axis, MemoryFormat? memory_format=MemoryFormat::Contiguous, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<11> parsed_args;
+  ParsedArgs<14> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -2240,14 +2234,11 @@ static PyObject * THPVariable__empty_per_channel_affine_quantized(PyObject* self
     auto axis = r.toInt64(3);
     auto memory_format = r.memoryformatOptional(4);
     auto dtype = r.scalartype(5);
+    auto layout = r.layout(6).layout;
     auto device = r.device(7);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(6).layout)
-        .requires_grad(r.toBool(9))
-        .pinned_memory(r.toBool(8));
-    return wrap(dispatch__empty_per_channel_affine_quantized(size, scales, zero_points, axis, memory_format, options));
+    auto pin_memory = r.toBool(8);
+    auto requires_grad = r.toBool(9);
+    return wrap(dispatch__empty_per_channel_affine_quantized(size, scales, zero_points, axis, dtype, layout, device, pin_memory, requires_grad, memory_format));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -4007,7 +3998,7 @@ static PyObject * THPVariable_bartlett_window(PyObject* self_, PyObject* args, P
     "bartlett_window(int64_t window_length, bool periodic, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -4016,26 +4007,20 @@ static PyObject * THPVariable_bartlett_window(PyObject* self_, PyObject* args, P
   if (r.idx == 0) {
     auto window_length = r.toInt64(0);
     auto dtype = r.scalartype(1);
+    auto layout = r.layout(2).layout;
     auto device = r.device(3);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(2).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_bartlett_window(window_length, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_bartlett_window(window_length, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_bartlett_window(window_length, periodic, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_bartlett_window(window_length, periodic, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -4370,7 +4355,7 @@ static PyObject * THPVariable_blackman_window(PyObject* self_, PyObject* args, P
     "blackman_window(int64_t window_length, bool periodic, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -4379,26 +4364,20 @@ static PyObject * THPVariable_blackman_window(PyObject* self_, PyObject* args, P
   if (r.idx == 0) {
     auto window_length = r.toInt64(0);
     auto dtype = r.scalartype(1);
+    auto layout = r.layout(2).layout;
     auto device = r.device(3);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(2).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_blackman_window(window_length, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_blackman_window(window_length, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_blackman_window(window_length, periodic, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_blackman_window(window_length, periodic, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -5838,7 +5817,7 @@ static PyObject * THPVariable_empty(PyObject* self_, PyObject* args, PyObject* k
     "empty(IntArrayRef size, *, MemoryFormat? memory_format=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -5850,27 +5829,21 @@ static PyObject * THPVariable_empty(PyObject* self_, PyObject* args, PyObject* k
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto memory_format = r.memoryformatOptional(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_empty(size, names, memory_format, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_empty(size, names, dtype, layout, device, pin_memory, requires_grad, memory_format));
   } else if (r.idx == 1) {
     if (r.isNone(2)) {
       auto size = r.intlist(0);
       auto memory_format = r.memoryformatOptional(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_empty(size, memory_format, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_empty(size, dtype, layout, device, pin_memory, requires_grad, memory_format));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -5889,7 +5862,7 @@ static PyObject * THPVariable_empty_like(PyObject* self_, PyObject* args, PyObje
     "empty_like(Tensor input, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -5899,14 +5872,11 @@ static PyObject * THPVariable_empty_like(PyObject* self_, PyObject* args, PyObje
     auto self = r.tensor(0);
     auto memory_format = r.memoryformatOptional(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_empty_like(self, memory_format, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_empty_like(self, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_empty_like(r.tensor(0), r.memoryformatOptional(1)).set_requires_grad(r.toBool(4)));
   }
@@ -5920,7 +5890,7 @@ static PyObject * THPVariable_empty_strided(PyObject* self_, PyObject* args, PyO
     "empty_strided(IntArrayRef size, IntArrayRef stride, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -5930,14 +5900,11 @@ static PyObject * THPVariable_empty_strided(PyObject* self_, PyObject* args, PyO
     auto size = r.intlist(0);
     auto stride = r.intlist(1);
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_empty_strided(size, stride, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_empty_strided(size, stride, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -6190,7 +6157,7 @@ static PyObject * THPVariable_eye(PyObject* self_, PyObject* args, PyObject* kwa
     "eye(int64_t n, int64_t m, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -6200,14 +6167,11 @@ static PyObject * THPVariable_eye(PyObject* self_, PyObject* args, PyObject* kwa
     if (r.isNone(1)) {
       auto n = r.toInt64(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_eye(n, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_eye(n, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -6219,14 +6183,11 @@ static PyObject * THPVariable_eye(PyObject* self_, PyObject* args, PyObject* kwa
       auto n = r.toInt64(0);
       auto m = r.toInt64(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_eye(n, m, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_eye(n, m, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -6744,7 +6705,7 @@ static PyObject * THPVariable_from_file(PyObject* self_, PyObject* args, PyObjec
     "from_file(std::string filename, bool? shared=None, int64_t? size=0, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -6755,14 +6716,11 @@ static PyObject * THPVariable_from_file(PyObject* self_, PyObject* args, PyObjec
     auto shared = r.toBoolOptional(1);
     auto size = r.toInt64Optional(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_from_file(filename, shared, size, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_from_file(filename, shared, size, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -6775,7 +6733,7 @@ static PyObject * THPVariable_full(PyObject* self_, PyObject* args, PyObject* kw
     "full(IntArrayRef size, Scalar fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -6787,27 +6745,21 @@ static PyObject * THPVariable_full(PyObject* self_, PyObject* args, PyObject* kw
     auto __names = r.toDimnameListOptional(2);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_full(size, fill_value, names, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_full(size, fill_value, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     if (r.isNone(2)) {
       auto size = r.intlist(0);
       auto fill_value = r.scalar(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_full(size, fill_value, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_full(size, fill_value, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -6826,7 +6778,7 @@ static PyObject * THPVariable_full_like(PyObject* self_, PyObject* args, PyObjec
     "full_like(Tensor input, Scalar fill_value, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -6837,14 +6789,11 @@ static PyObject * THPVariable_full_like(PyObject* self_, PyObject* args, PyObjec
     auto fill_value = r.scalar(1);
     auto memory_format = r.memoryformatOptional(2);
     auto dtype = r.scalartypeWithDefault(3, self.scalar_type());
+    auto layout = r.layoutWithDefault(4, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(5, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(4, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_full_like(self, fill_value, memory_format, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_full_like(self, fill_value, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_full_like(r.tensor(0), r.scalar(1), r.memoryformatOptional(2)).set_requires_grad(r.toBool(5)));
   }
@@ -7142,7 +7091,7 @@ static PyObject * THPVariable_hamming_window(PyObject* self_, PyObject* args, Py
     "hamming_window(int64_t window_length, bool periodic, double alpha, double beta, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<10> parsed_args;
+  ParsedArgs<13> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -7151,53 +7100,41 @@ static PyObject * THPVariable_hamming_window(PyObject* self_, PyObject* args, Py
   if (r.idx == 0) {
     auto window_length = r.toInt64(0);
     auto dtype = r.scalartype(1);
+    auto layout = r.layout(2).layout;
     auto device = r.device(3);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(2).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_hamming_window(window_length, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_hamming_window(window_length, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_hamming_window(window_length, periodic, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_hamming_window(window_length, periodic, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 2) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto alpha = r.toDouble(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_hamming_window(window_length, periodic, alpha, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_hamming_window(window_length, periodic, alpha, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 3) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto alpha = r.toDouble(2);
     auto beta = r.toDouble(3);
     auto dtype = r.scalartype(4);
+    auto layout = r.layout(5).layout;
     auto device = r.device(6);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(5).layout)
-        .requires_grad(r.toBool(8))
-        .pinned_memory(r.toBool(7));
-    return wrap(dispatch_hamming_window(window_length, periodic, alpha, beta, options));
+    auto pin_memory = r.toBool(7);
+    auto requires_grad = r.toBool(8);
+    return wrap(dispatch_hamming_window(window_length, periodic, alpha, beta, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -7210,7 +7147,7 @@ static PyObject * THPVariable_hann_window(PyObject* self_, PyObject* args, PyObj
     "hann_window(int64_t window_length, bool periodic, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -7219,26 +7156,20 @@ static PyObject * THPVariable_hann_window(PyObject* self_, PyObject* args, PyObj
   if (r.idx == 0) {
     auto window_length = r.toInt64(0);
     auto dtype = r.scalartype(1);
+    auto layout = r.layout(2).layout;
     auto device = r.device(3);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(2).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_hann_window(window_length, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_hann_window(window_length, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto window_length = r.toInt64(0);
     auto periodic = r.toBool(1);
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_hann_window(window_length, periodic, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_hann_window(window_length, periodic, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -7975,7 +7906,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     "linspace(Scalar start, Scalar end, int64_t steps=100, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -7987,14 +7918,11 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
       auto end = r.scalar(1);
       auto steps = r.toInt64(2);
       auto dtype = r.scalartype(4);
+      auto layout = r.layout(5).layout;
       auto device = r.device(6);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(8))
-          .pinned_memory(r.toBool(7));
-      return wrap(dispatch_linspace(start, end, steps, options));
+      auto pin_memory = r.toBool(7);
+      auto requires_grad = r.toBool(8);
+      return wrap(dispatch_linspace(start, end, steps, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
                              r.layout(5), r.isNone(5),
@@ -8313,7 +8241,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     "logspace(Scalar start, Scalar end, int64_t steps=100, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<10> parsed_args;
+  ParsedArgs<13> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -8326,14 +8254,11 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
       auto steps = r.toInt64(2);
       auto base = r.toDouble(3);
       auto dtype = r.scalartype(5);
+      auto layout = r.layout(6).layout;
       auto device = r.device(7);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(6).layout)
-          .requires_grad(r.toBool(9))
-          .pinned_memory(r.toBool(8));
-      return wrap(dispatch_logspace(start, end, steps, base, options));
+      auto pin_memory = r.toBool(8);
+      auto requires_grad = r.toBool(9);
+      return wrap(dispatch_logspace(start, end, steps, base, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(4), r.scalartype(5), r.isNone(5),
                              r.layout(6), r.isNone(6),
@@ -9674,7 +9599,7 @@ static PyObject * THPVariable_normal(PyObject* self_, PyObject* args, PyObject* 
     "normal(double mean, double std, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<10> parsed_args;
+  ParsedArgs<13> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -9705,14 +9630,11 @@ static PyObject * THPVariable_normal(PyObject* self_, PyObject* args, PyObject* 
       auto size = r.intlist(2);
       auto generator = r.generator(3);
       auto dtype = r.scalartype(5);
+      auto layout = r.layout(6).layout;
       auto device = r.device(7);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(6).layout)
-          .requires_grad(r.toBool(9))
-          .pinned_memory(r.toBool(8));
-      return wrap(dispatch_normal(mean, std, size, generator, options));
+      auto pin_memory = r.toBool(8);
+      auto requires_grad = r.toBool(9);
+      return wrap(dispatch_normal(mean, std, size, generator, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(4), r.scalartype(5), r.isNone(5),
                              r.layout(6), r.isNone(6),
@@ -9761,7 +9683,7 @@ static PyObject * THPVariable_ones(PyObject* self_, PyObject* args, PyObject* kw
     "ones(IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -9772,26 +9694,20 @@ static PyObject * THPVariable_ones(PyObject* self_, PyObject* args, PyObject* kw
     auto __names = r.toDimnameListOptional(1);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_ones(size, names, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_ones(size, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     if (r.isNone(1)) {
       auto size = r.intlist(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_ones(size, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_ones(size, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -9810,7 +9726,7 @@ static PyObject * THPVariable_ones_like(PyObject* self_, PyObject* args, PyObjec
     "ones_like(Tensor input, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -9820,14 +9736,11 @@ static PyObject * THPVariable_ones_like(PyObject* self_, PyObject* args, PyObjec
     auto self = r.tensor(0);
     auto memory_format = r.memoryformatOptional(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_ones_like(self, memory_format, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_ones_like(self, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_ones_like(r.tensor(0), r.memoryformatOptional(1)).set_requires_grad(r.toBool(4)));
   }
@@ -10458,7 +10371,7 @@ static PyObject * THPVariable_rand(PyObject* self_, PyObject* args, PyObject* kw
     "rand(IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10469,41 +10382,32 @@ static PyObject * THPVariable_rand(PyObject* self_, PyObject* args, PyObject* kw
     auto __names = r.toDimnameListOptional(1);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_rand(size, names, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_rand(size, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto size = r.intlist(0);
     auto generator = r.generator(1);
     auto __names = r.toDimnameListOptional(2);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_rand(size, generator, names, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_rand(size, generator, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 2) {
     if (r.isNone(2)) {
       auto size = r.intlist(0);
       auto generator = r.generator(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_rand(size, generator, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_rand(size, generator, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -10514,14 +10418,11 @@ static PyObject * THPVariable_rand(PyObject* self_, PyObject* args, PyObject* kw
     if (r.isNone(1)) {
       auto size = r.intlist(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_rand(size, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_rand(size, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -10540,7 +10441,7 @@ static PyObject * THPVariable_rand_like(PyObject* self_, PyObject* args, PyObjec
     "rand_like(Tensor input, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10550,14 +10451,11 @@ static PyObject * THPVariable_rand_like(PyObject* self_, PyObject* args, PyObjec
     auto self = r.tensor(0);
     auto memory_format = r.memoryformatOptional(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_rand_like(self, memory_format, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_rand_like(self, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_rand_like(r.tensor(0), r.memoryformatOptional(1)).set_requires_grad(r.toBool(4)));
   }
@@ -10574,7 +10472,7 @@ static PyObject * THPVariable_randint_like(PyObject* self_, PyObject* args, PyOb
     "randint_like(Tensor input, int64_t low, int64_t high, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<10> parsed_args;
+  ParsedArgs<13> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10585,14 +10483,11 @@ static PyObject * THPVariable_randint_like(PyObject* self_, PyObject* args, PyOb
     auto high = r.toInt64(1);
     auto memory_format = r.memoryformatOptional(2);
     auto dtype = r.scalartypeWithDefault(3, self.scalar_type());
+    auto layout = r.layoutWithDefault(4, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(5, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(4, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_randint_like(self, high, memory_format, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_randint_like(self, high, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_randint_like(r.tensor(0), r.toInt64(1), r.memoryformatOptional(2)).set_requires_grad(r.toBool(5)));
   } else if (r.idx == 2) {
@@ -10601,14 +10496,11 @@ static PyObject * THPVariable_randint_like(PyObject* self_, PyObject* args, PyOb
     auto high = r.toInt64(2);
     auto memory_format = r.memoryformatOptional(3);
     auto dtype = r.scalartypeWithDefault(4, self.scalar_type());
+    auto layout = r.layoutWithDefault(5, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(6, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(5, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(8))
-        .pinned_memory(r.toBool(7));
-    return wrap(dispatch_randint_like(self, low, high, memory_format, options));
+    auto pin_memory = r.toBool(7);
+    auto requires_grad = r.toBool(8);
+    return wrap(dispatch_randint_like(self, low, high, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 3) {
     return wrap(dispatch_randint_like(r.tensor(0), r.toInt64(1), r.toInt64(2), r.memoryformatOptional(3)).set_requires_grad(r.toBool(6)));
   }
@@ -10625,7 +10517,7 @@ static PyObject * THPVariable_randn(PyObject* self_, PyObject* args, PyObject* k
     "randn(IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10636,41 +10528,32 @@ static PyObject * THPVariable_randn(PyObject* self_, PyObject* args, PyObject* k
     auto __names = r.toDimnameListOptional(1);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_randn(size, names, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_randn(size, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     auto size = r.intlist(0);
     auto generator = r.generator(1);
     auto __names = r.toDimnameListOptional(2);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_randn(size, generator, names, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_randn(size, generator, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 2) {
     if (r.isNone(2)) {
       auto size = r.intlist(0);
       auto generator = r.generator(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_randn(size, generator, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_randn(size, generator, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -10681,14 +10564,11 @@ static PyObject * THPVariable_randn(PyObject* self_, PyObject* args, PyObject* k
     if (r.isNone(1)) {
       auto size = r.intlist(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_randn(size, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_randn(size, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -10707,7 +10587,7 @@ static PyObject * THPVariable_randn_like(PyObject* self_, PyObject* args, PyObje
     "randn_like(Tensor input, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10717,14 +10597,11 @@ static PyObject * THPVariable_randn_like(PyObject* self_, PyObject* args, PyObje
     auto self = r.tensor(0);
     auto memory_format = r.memoryformatOptional(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_randn_like(self, memory_format, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_randn_like(self, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_randn_like(r.tensor(0), r.memoryformatOptional(1)).set_requires_grad(r.toBool(4)));
   }
@@ -10739,7 +10616,7 @@ static PyObject * THPVariable_randperm(PyObject* self_, PyObject* args, PyObject
     "randperm(int64_t n, *, Tensor out=None, ScalarType dtype=torch.int64, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -10750,14 +10627,11 @@ static PyObject * THPVariable_randperm(PyObject* self_, PyObject* args, PyObject
       auto n = r.toInt64(0);
       auto generator = r.generator(1);
       auto dtype = r.scalartype(3);
+      auto layout = r.layout(4).layout;
       auto device = r.device(5);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(4).layout)
-          .requires_grad(r.toBool(7))
-          .pinned_memory(r.toBool(6));
-      return wrap(dispatch_randperm(n, generator, options));
+      auto pin_memory = r.toBool(6);
+      auto requires_grad = r.toBool(7);
+      return wrap(dispatch_randperm(n, generator, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
                              r.layout(4), r.isNone(4),
@@ -10768,14 +10642,11 @@ static PyObject * THPVariable_randperm(PyObject* self_, PyObject* args, PyObject
     if (r.isNone(1)) {
       auto n = r.toInt64(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_randperm(n, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_randperm(n, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -11323,7 +11194,7 @@ static PyObject * THPVariable_scalar_tensor(PyObject* self_, PyObject* args, PyO
     "scalar_tensor(Scalar s, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<7> parsed_args;
+  ParsedArgs<10> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -11332,14 +11203,11 @@ static PyObject * THPVariable_scalar_tensor(PyObject* self_, PyObject* args, PyO
   if (r.idx == 0) {
     auto s = r.scalar(0);
     auto dtype = r.scalartype(1);
+    auto layout = r.layout(2).layout;
     auto device = r.device(3);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(2).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_scalar_tensor(s, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_scalar_tensor(s, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -12633,7 +12501,7 @@ static PyObject * THPVariable_tril_indices(PyObject* self_, PyObject* args, PyOb
     "tril_indices(int64_t row, int64_t col, int64_t offset=0, *, ScalarType dtype=torch.int64, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -12644,14 +12512,11 @@ static PyObject * THPVariable_tril_indices(PyObject* self_, PyObject* args, PyOb
     auto col = r.toInt64(1);
     auto offset = r.toInt64(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_tril_indices(row, col, offset, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_tril_indices(row, col, offset, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -12705,7 +12570,7 @@ static PyObject * THPVariable_triu_indices(PyObject* self_, PyObject* args, PyOb
     "triu_indices(int64_t row, int64_t col, int64_t offset=0, *, ScalarType dtype=torch.int64, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -12716,14 +12581,11 @@ static PyObject * THPVariable_triu_indices(PyObject* self_, PyObject* args, PyOb
     auto col = r.toInt64(1);
     auto offset = r.toInt64(2);
     auto dtype = r.scalartype(3);
+    auto layout = r.layout(4).layout;
     auto device = r.device(5);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(4).layout)
-        .requires_grad(r.toBool(7))
-        .pinned_memory(r.toBool(6));
-    return wrap(dispatch_triu_indices(row, col, offset, options));
+    auto pin_memory = r.toBool(6);
+    auto requires_grad = r.toBool(7);
+    return wrap(dispatch_triu_indices(row, col, offset, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -12956,7 +12818,7 @@ static PyObject * THPVariable_zeros(PyObject* self_, PyObject* args, PyObject* k
     "zeros(IntArrayRef size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -12967,26 +12829,20 @@ static PyObject * THPVariable_zeros(PyObject* self_, PyObject* args, PyObject* k
     auto __names = r.toDimnameListOptional(1);
     c10::optional<DimnameList> names = __names ? c10::make_optional(DimnameList(__names.value())) : c10::nullopt;
     auto dtype = r.scalartype(2);
+    auto layout = r.layout(3).layout;
     auto device = r.device(4);
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layout(3).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_zeros(size, names, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_zeros(size, names, dtype, layout, device, pin_memory, requires_grad));
   } else if (r.idx == 1) {
     if (r.isNone(1)) {
       auto size = r.intlist(0);
       auto dtype = r.scalartype(2);
+      auto layout = r.layout(3).layout;
       auto device = r.device(4);
-      const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
-      return wrap(dispatch_zeros(size, options));
+      auto pin_memory = r.toBool(5);
+      auto requires_grad = r.toBool(6);
+      return wrap(dispatch_zeros(size, dtype, layout, device, pin_memory, requires_grad));
     } else {
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2),
                              r.layout(3), r.isNone(3),
@@ -13005,7 +12861,7 @@ static PyObject * THPVariable_zeros_like(PyObject* self_, PyObject* args, PyObje
     "zeros_like(Tensor input, *, MemoryFormat? memory_format=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if(r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
@@ -13015,14 +12871,11 @@ static PyObject * THPVariable_zeros_like(PyObject* self_, PyObject* args, PyObje
     auto self = r.tensor(0);
     auto memory_format = r.memoryformatOptional(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_zeros_like(self, memory_format, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_zeros_like(self, dtype, layout, device, pin_memory, memory_format, requires_grad));
   } else if (r.idx == 1) {
     return wrap(dispatch_zeros_like(r.tensor(0), r.memoryformatOptional(1)).set_requires_grad(r.toBool(4)));
   }

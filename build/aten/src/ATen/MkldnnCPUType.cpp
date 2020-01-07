@@ -60,10 +60,11 @@ Tensor & add_out(Tensor & out, const Tensor & self, const Tensor & other, Scalar
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::mkldnn_add_out(out, self, other, alpha);
 }
-Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_mkldnn(size, options, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_mkldnn(size, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor mkldnn_linear(const Tensor & input, const Tensor & weight, const Tensor & bias) {
     if (input.has_names() || weight.has_names() || bias.has_names()) {
@@ -273,7 +274,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>), &MkldnnCPUType::empty>(TensorTypeId::MkldnnCPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &MkldnnCPUType::empty>(TensorTypeId::MkldnnCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::mkldnn_linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor")

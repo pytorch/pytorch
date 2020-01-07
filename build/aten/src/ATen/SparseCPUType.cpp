@@ -64,10 +64,11 @@ Tensor & div_out(Tensor & out, const Tensor & self, const Tensor & other) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::div_out_sparse_zerodim(out, self, other);
 }
-Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_sparse(size, options, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_sparse(size, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor isnan(const Tensor & self) {
 
@@ -199,20 +200,21 @@ Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar 
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::s_addmm_sparse_dense_cpu_(self, mat1, mat2, beta, alpha);
 }
-Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const TensorOptions & options) {
+Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::new_with_dims_sparse(sparse_dim, dense_dim, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::new_with_dims_sparse(sparse_dim, dense_dim, size, dtype, layout, device, pin_memory);
 }
-Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
     if (indices.has_names() || values.has_names()) {
         AT_ERROR(
             "_sparse_coo_tensor_with_dims_and_tensors is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::new_with_dims_and_tensor_sparse(sparse_dim, dense_dim, size, indices, values, options);
+    const DeviceGuard device_guard(device);
+    return at::native::new_with_dims_and_tensor_sparse(sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory);
 }
 Tensor & sparse_resize_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     if (self.has_names()) {
@@ -449,7 +451,7 @@ static auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>), &SparseCPUType::empty>(TensorTypeId::SparseCPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &SparseCPUType::empty>(TensorTypeId::SparseCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::isnan(Tensor self) -> Tensor")
@@ -540,12 +542,12 @@ static auto registerer = torch::RegisterOperators()
     .impl_unboxedOnlyKernel<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), &SparseCPUType::addmm_>(TensorTypeId::SparseCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
-    .schema("aten::_sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, const TensorOptions &), &SparseCPUType::_sparse_coo_tensor_with_dims>(TensorTypeId::SparseCPUTensorId)
+    .schema("aten::_sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &SparseCPUType::_sparse_coo_tensor_with_dims>(TensorTypeId::SparseCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, const TensorOptions &), &SparseCPUType::_sparse_coo_tensor_with_dims_and_tensors>(TensorTypeId::SparseCPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, ScalarType, Layout, Device, bool), &SparseCPUType::_sparse_coo_tensor_with_dims_and_tensors>(TensorTypeId::SparseCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)")

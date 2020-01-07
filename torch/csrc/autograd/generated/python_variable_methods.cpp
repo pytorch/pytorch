@@ -4404,21 +4404,18 @@ static PyObject * THPVariable_new_empty(PyObject* self_, PyObject* args, PyObjec
     "new_empty(IntArrayRef size, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
 
   if (r.idx == 0) {
     auto size = r.intlist(0);
     auto dtype = r.scalartypeWithDefault(1, self.scalar_type());
+    auto layout = r.layoutWithDefault(2, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(3, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(2, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_new_empty(self, size, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_new_empty(self, size, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -4430,7 +4427,7 @@ static PyObject * THPVariable_new_full(PyObject* self_, PyObject* args, PyObject
     "new_full(IntArrayRef size, Scalar fill_value, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  ParsedArgs<9> parsed_args;
+  ParsedArgs<12> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
 
@@ -4438,14 +4435,11 @@ static PyObject * THPVariable_new_full(PyObject* self_, PyObject* args, PyObject
     auto size = r.intlist(0);
     auto fill_value = r.scalar(1);
     auto dtype = r.scalartypeWithDefault(2, self.scalar_type());
+    auto layout = r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(4, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(3, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(6))
-        .pinned_memory(r.toBool(5));
-    return wrap(dispatch_new_full(self, size, fill_value, options));
+    auto pin_memory = r.toBool(5);
+    auto requires_grad = r.toBool(6);
+    return wrap(dispatch_new_full(self, size, fill_value, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -4457,21 +4451,18 @@ static PyObject * THPVariable_new_zeros(PyObject* self_, PyObject* args, PyObjec
     "new_zeros(IntArrayRef size, *, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<11> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
 
   if (r.idx == 0) {
     auto size = r.intlist(0);
     auto dtype = r.scalartypeWithDefault(1, self.scalar_type());
+    auto layout = r.layoutWithDefault(2, *torch::getLayout(self.options().backend())).layout;
     auto device = r.deviceWithDefault(3, self.device());
-    const auto options = TensorOptions()
-        .dtype(dtype)
-        .device(device)
-        .layout(r.layoutWithDefault(2, *torch::getLayout(self.options().backend())).layout)
-        .requires_grad(r.toBool(5))
-        .pinned_memory(r.toBool(4));
-    return wrap(dispatch_new_zeros(self, size, options));
+    auto pin_memory = r.toBool(4);
+    auto requires_grad = r.toBool(5);
+    return wrap(dispatch_new_zeros(self, size, dtype, layout, device, pin_memory, requires_grad));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

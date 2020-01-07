@@ -529,8 +529,8 @@ RegisterOperators reg(
              (std::move(peek(stack, 6, 8))).toInt(),
              (std::move(peek(stack, 7, 8))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::_empty_affine_quantized((std::move(peek(stack, 0, 8))).toIntListRef(),
-             options,
+                 auto result_ = torch::__empty_affine_quantized((std::move(peek(stack, 0, 8))).toIntListRef(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 5, 8))).toDouble(),
              (std::move(peek(stack, 6, 8))).toInt(),
              (std::move(peek(stack, 7, 8))).toOptional<c10::MemoryFormat>());
@@ -819,10 +819,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toIntListRef(),
              options);
              #else
-                 auto result_ = torch::_sparse_coo_tensor_unsafe((std::move(peek(stack, 0, 7))).toTensor(),
+                 auto result_ = torch::__sparse_coo_tensor_unsafe((std::move(peek(stack, 0, 7))).toTensor(),
              (std::move(peek(stack, 1, 7))).toTensor(),
              (std::move(peek(stack, 2, 7))).toIntListRef(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));
@@ -847,12 +847,12 @@ RegisterOperators reg(
              (std::move(peek(stack, 4, 9))).toTensor(),
              options);
              #else
-                 auto result_ = torch::_sparse_coo_tensor_with_dims_and_tensors((std::move(peek(stack, 0, 9))).toInt(),
+                 auto result_ = torch::__sparse_coo_tensor_with_dims_and_tensors((std::move(peek(stack, 0, 9))).toInt(),
              (std::move(peek(stack, 1, 9))).toInt(),
              (std::move(peek(stack, 2, 9))).toIntListRef(),
              (std::move(peek(stack, 3, 9))).toTensor(),
              (std::move(peek(stack, 4, 9))).toTensor(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 9);
              pack(stack, std::move(result_));
@@ -1653,8 +1653,8 @@ RegisterOperators reg(
                  auto result_ = at::blackman_window((std::move(peek(stack, 0, 5))).toInt(),
              options);
              #else
-                 auto result_ = torch::blackman_window((std::move(peek(stack, 0, 5))).toInt(),
-             options);
+                 auto result_ = torch::_blackman_window((std::move(peek(stack, 0, 5))).toInt(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));
@@ -1676,9 +1676,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toBool(),
              options);
              #else
-                 auto result_ = torch::blackman_window((std::move(peek(stack, 0, 6))).toInt(),
+                 auto result_ = torch::_blackman_window((std::move(peek(stack, 0, 6))).toInt(),
              (std::move(peek(stack, 1, 6))).toBool(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -2810,9 +2810,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toScalar(),
              options);
              #else
-                 auto result_ = torch::full((std::move(peek(stack, 0, 6))).toIntListRef(),
+                 auto result_ = torch::_full((std::move(peek(stack, 0, 6))).toIntListRef(),
              (std::move(peek(stack, 1, 6))).toScalar(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -2850,9 +2850,9 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 6, 7))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::full_like((std::move(peek(stack, 0, 7))).toTensor(),
+                 auto result_ = torch::_full_like((std::move(peek(stack, 0, 7))).toTensor(),
              (std::move(peek(stack, 1, 7))).toScalar(),
-             options,
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 6, 7))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 7);
@@ -3649,11 +3649,11 @@ RegisterOperators reg(
              (std::move(peek(stack, 3, 8))).toDouble(),
              options);
              #else
-                 auto result_ = torch::logspace((std::move(peek(stack, 0, 8))).toScalar(),
+                 auto result_ = torch::_logspace((std::move(peek(stack, 0, 8))).toScalar(),
              (std::move(peek(stack, 1, 8))).toScalar(),
              (std::move(peek(stack, 2, 8))).toInt(),
              (std::move(peek(stack, 3, 8))).toDouble(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 8);
              pack(stack, std::move(result_));
@@ -5018,8 +5018,8 @@ RegisterOperators reg(
                  auto result_ = at::randn((std::move(peek(stack, 0, 5))).toIntListRef(),
              options);
              #else
-                 auto result_ = torch::randn((std::move(peek(stack, 0, 5))).toIntListRef(),
-             options);
+                 auto result_ = torch::_randn((std::move(peek(stack, 0, 5))).toIntListRef(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));
@@ -5055,8 +5055,8 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::randn_like((std::move(peek(stack, 0, 6))).toTensor(),
-             options,
+                 auto result_ = torch::_randn_like((std::move(peek(stack, 0, 6))).toTensor(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 6);
@@ -5093,9 +5093,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toScalar(),
              options);
              #else
-                 auto result_ = torch::range((std::move(peek(stack, 0, 6))).toScalar(),
+                 auto result_ = torch::_range((std::move(peek(stack, 0, 6))).toScalar(),
              (std::move(peek(stack, 1, 6))).toScalar(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -5118,10 +5118,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toScalar(),
              options);
              #else
-                 auto result_ = torch::range((std::move(peek(stack, 0, 7))).toScalar(),
+                 auto result_ = torch::_range((std::move(peek(stack, 0, 7))).toScalar(),
              (std::move(peek(stack, 1, 7))).toScalar(),
              (std::move(peek(stack, 2, 7))).toScalar(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));
@@ -5455,8 +5455,8 @@ RegisterOperators reg(
                  auto result_ = at::scalar_tensor((std::move(peek(stack, 0, 5))).toScalar(),
              options);
              #else
-                 auto result_ = torch::scalar_tensor((std::move(peek(stack, 0, 5))).toScalar(),
-             options);
+                 auto result_ = torch::_scalar_tensor((std::move(peek(stack, 0, 5))).toScalar(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));

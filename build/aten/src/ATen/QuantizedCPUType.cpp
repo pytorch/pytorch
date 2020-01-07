@@ -55,20 +55,22 @@ Tensor clamp(const Tensor & self, c10::optional<Scalar> min, c10::optional<Scala
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::quantized_clamp(self, min, max);
 }
-Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
+Tensor _empty_affine_quantized(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_affine_quantized_cpu(size, options, scale, zero_point, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_affine_quantized_cpu(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
 }
-Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
     if (scales.has_names() || zero_points.has_names()) {
         AT_ERROR(
             "_empty_per_channel_affine_quantized is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_per_channel_affine_quantized_cpu(size, scales, zero_points, axis, options, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_per_channel_affine_quantized_cpu(size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor quantized_max_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {
     if (self.has_names()) {
@@ -434,11 +436,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, double, int64_t, c10::optional<MemoryFormat>), &QuantizedCPUType::_empty_affine_quantized>(TensorTypeId::QuantizedCPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, double, int64_t, c10::optional<MemoryFormat>), &QuantizedCPUType::_empty_affine_quantized>(TensorTypeId::QuantizedCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>), &QuantizedCPUType::_empty_per_channel_affine_quantized>(TensorTypeId::QuantizedCPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &QuantizedCPUType::_empty_per_channel_affine_quantized>(TensorTypeId::QuantizedCPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor")

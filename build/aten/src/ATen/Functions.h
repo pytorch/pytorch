@@ -33,6 +33,7 @@ static inline std::tuple<Tensor,Tensor> _cudnn_ctc_loss(const Tensor & log_probs
 static inline Tensor _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional);
 static inline std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor> _cudnn_rnn(const Tensor & input, TensorList weight, int64_t weight_stride0, const Tensor & weight_buf, const Tensor & hx, const Tensor & cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor & dropout_state);
 static inline std::tuple<Tensor,Tensor,Tensor,std::vector<Tensor>> _cudnn_rnn_backward(const Tensor & input, TensorList weight, int64_t weight_stride0, const Tensor & weight_buf, const Tensor & hx, const Tensor & cx, const Tensor & output, const Tensor & grad_output, const Tensor & grad_hy, const Tensor & grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const Tensor & dropout_state, const Tensor & reserve, std::array<bool,4> output_mask);
+static inline Tensor __cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory=false);
 static inline Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions & options);
 static inline int64_t _debug_has_internal_overlap(const Tensor & self);
 static inline std::tuple<Tensor,Tensor> _fused_dropout(const Tensor & self, double p, Generator * generator=nullptr);
@@ -87,8 +88,11 @@ static inline Tensor any(const Tensor & self, int64_t dim, bool keepdim=false);
 static inline Tensor & any_out(Tensor & out, const Tensor & self, int64_t dim, bool keepdim=false);
 static inline Tensor any(const Tensor & self, Dimname dim, bool keepdim=false);
 static inline Tensor & any_out(Tensor & out, const Tensor & self, Dimname dim, bool keepdim=false);
+static inline Tensor _arange(Scalar end, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor arange(Scalar end, const TensorOptions & options={});
+static inline Tensor _arange(Scalar start, Scalar end, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor arange(Scalar start, Scalar end, const TensorOptions & options={});
+static inline Tensor _arange(Scalar start, Scalar end, Scalar step, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor arange(Scalar start, Scalar end, Scalar step, const TensorOptions & options={});
 static inline Tensor & arange_out(Tensor & out, Scalar end);
 static inline Tensor & arange_out(Tensor & out, Scalar start, Scalar end, Scalar step=1);
@@ -106,7 +110,9 @@ static inline Tensor & atan_out(Tensor & out, const Tensor & self);
 static inline Tensor baddbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
 static inline Tensor & _baddbmm_mkl_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
 static inline Tensor & baddbmm_out(Tensor & out, const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
+static inline Tensor _bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor bartlett_window(int64_t window_length, const TensorOptions & options={});
+static inline Tensor _bartlett_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options={});
 static inline Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);
 static inline std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t> _batch_norm_impl_index(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled);
@@ -128,7 +134,9 @@ static inline Tensor logical_and(const Tensor & self, const Tensor & other);
 static inline Tensor & logical_and_out(Tensor & out, const Tensor & self, const Tensor & other);
 static inline Tensor logical_or(const Tensor & self, const Tensor & other);
 static inline Tensor & logical_or_out(Tensor & out, const Tensor & self, const Tensor & other);
+static inline Tensor _blackman_window(int64_t window_length, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor blackman_window(int64_t window_length, const TensorOptions & options={});
+static inline Tensor _blackman_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions & options={});
 static inline Tensor bmm(const Tensor & self, const Tensor & mat2);
 static inline Tensor & bmm_out(Tensor & out, const Tensor & self, const Tensor & mat2);
@@ -225,13 +233,19 @@ static inline Tensor _embedding_bag_backward(const Tensor & grad, const Tensor &
 static inline Tensor _embedding_bag_sparse_backward(const Tensor & grad, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, const Tensor & bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, const Tensor & per_sample_weights);
 static inline Tensor _embedding_bag_dense_backward(const Tensor & grad, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, const Tensor & bag_size, const Tensor & maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, const Tensor & per_sample_weights);
 static inline Tensor _embedding_bag_per_sample_weights_backward(const Tensor & grad, const Tensor & weight, const Tensor & indices, const Tensor & offsets, const Tensor & offset2bag, int64_t mode);
+static inline Tensor _empty(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options={}, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _empty(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor empty(IntArrayRef size, const TensorOptions & options={}, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor __empty_affine_quantized(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt, double scale=1, int64_t zero_point=0, c10::optional<MemoryFormat> memory_format=MemoryFormat::Contiguous);
 static inline Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options={}, double scale=1, int64_t zero_point=0, c10::optional<MemoryFormat> memory_format=MemoryFormat::Contiguous);
+static inline Tensor __empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt, c10::optional<MemoryFormat> memory_format=MemoryFormat::Contiguous);
 static inline Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, const TensorOptions & options={}, c10::optional<MemoryFormat> memory_format=MemoryFormat::Contiguous);
 static inline Tensor & empty_out(Tensor & out, IntArrayRef size, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor empty_like(const Tensor & self, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _empty_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor empty_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _empty_strided(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options={});
 static inline Tensor erf(const Tensor & self);
 static inline Tensor & erf_(Tensor & self);
@@ -245,7 +259,9 @@ static inline Tensor & exp_out(Tensor & out, const Tensor & self);
 static inline Tensor expm1(const Tensor & self);
 static inline Tensor & expm1_(Tensor & self);
 static inline Tensor & expm1_out(Tensor & out, const Tensor & self);
+static inline Tensor _eye(int64_t n, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor eye(int64_t n, const TensorOptions & options={});
+static inline Tensor _eye(int64_t n, int64_t m, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor eye(int64_t n, int64_t m, const TensorOptions & options={});
 static inline Tensor & eye_out(Tensor & out, int64_t n);
 static inline Tensor & eye_out(Tensor & out, int64_t n, int64_t m);
@@ -263,22 +279,32 @@ static inline Tensor floor_divide(const Tensor & input, Scalar other);
 static inline Tensor frac(const Tensor & self);
 static inline Tensor & frac_(Tensor & self);
 static inline Tensor & frac_out(Tensor & out, const Tensor & self);
+static inline Tensor _full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions & options={});
 static inline Tensor & full_out(Tensor & out, IntArrayRef size, Scalar fill_value);
 static inline Tensor full_like(const Tensor & self, Scalar fill_value, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _full_like(const Tensor & self, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor full_like(const Tensor & self, Scalar fill_value, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _from_file(std::string filename, c10::optional<bool> shared=c10::nullopt, c10::optional<int64_t> size=0, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor from_file(std::string filename, c10::optional<bool> shared=c10::nullopt, c10::optional<int64_t> size=0, const TensorOptions & options={});
 static inline Tensor grid_sampler(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
 static inline Tensor grid_sampler_2d(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
 static inline std::tuple<Tensor,Tensor> grid_sampler_2d_backward(const Tensor & grad_output, const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
 static inline Tensor grid_sampler_3d(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
 static inline std::tuple<Tensor,Tensor> grid_sampler_3d_backward(const Tensor & grad_output, const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners);
+static inline Tensor _hann_window(int64_t window_length, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hann_window(int64_t window_length, const TensorOptions & options={});
+static inline Tensor _hann_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hann_window(int64_t window_length, bool periodic, const TensorOptions & options={});
+static inline Tensor _hamming_window(int64_t window_length, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hamming_window(int64_t window_length, const TensorOptions & options={});
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hamming_window(int64_t window_length, bool periodic, const TensorOptions & options={});
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, double alpha, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, const TensorOptions & options={});
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, double alpha, double beta, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, double beta, const TensorOptions & options={});
 static inline Tensor hinge_embedding_loss(const Tensor & self, const Tensor & target, double margin=1.0, int64_t reduction=at::Reduction::Mean);
 static inline Tensor ger(const Tensor & self, const Tensor & vec2);
@@ -330,6 +356,7 @@ static inline Tensor fbgemm_linear_fp16_weight_fp32_activation(const Tensor & in
 static inline Tensor fbgemm_linear_fp16_weight(const Tensor & input, const Tensor & packed_weight, const Tensor & bias);
 static inline Tensor fbgemm_pack_quantized_matrix(const Tensor & input);
 static inline Tensor fbgemm_pack_quantized_matrix(const Tensor & input, int64_t K, int64_t N);
+static inline Tensor _linspace(Scalar start, Scalar end, int64_t steps=100, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor linspace(Scalar start, Scalar end, int64_t steps=100, const TensorOptions & options={});
 static inline Tensor & linspace_out(Tensor & out, Scalar start, Scalar end, int64_t steps=100);
 static inline Tensor log(const Tensor & self);
@@ -345,6 +372,7 @@ static inline Tensor log2(const Tensor & self);
 static inline Tensor & log2_(Tensor & self);
 static inline Tensor & log2_out(Tensor & out, const Tensor & self);
 static inline Tensor logdet(const Tensor & self);
+static inline Tensor _logspace(Scalar start, Scalar end, int64_t steps=100, double base=10.0, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor logspace(Scalar start, Scalar end, int64_t steps=100, double base=10.0, const TensorOptions & options={});
 static inline Tensor & logspace_out(Tensor & out, Scalar start, Scalar end, int64_t steps=100, double base=10.0);
 static inline Tensor log_softmax(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt);
@@ -438,10 +466,13 @@ static inline Tensor _nnpack_spatial_convolution(const Tensor & input, const Ten
 static inline std::tuple<Tensor,Tensor,Tensor> _nnpack_spatial_convolution_backward(const Tensor & input, const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, std::array<bool,3> output_mask);
 static inline Tensor _nnpack_spatial_convolution_backward_input(const Tensor & input, const Tensor & grad_output, const Tensor & weight, IntArrayRef padding);
 static inline Tensor _nnpack_spatial_convolution_backward_weight(const Tensor & input, IntArrayRef weightsize, const Tensor & grad_output, IntArrayRef padding);
+static inline Tensor _ones(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor ones(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _ones(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor ones(IntArrayRef size, const TensorOptions & options={});
 static inline Tensor & ones_out(Tensor & out, IntArrayRef size);
 static inline Tensor ones_like(const Tensor & self, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _ones_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor ones_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor pairwise_distance(const Tensor & x1, const Tensor & x2, double p=2, double eps=1e-06, bool keepdim=false);
 static inline Tensor cdist(const Tensor & x1, const Tensor & x2, double p=2, c10::optional<int64_t> compute_mode=c10::nullopt);
@@ -453,18 +484,28 @@ static inline Tensor cosine_similarity(const Tensor & x1, const Tensor & x2, int
 static inline Tensor pixel_shuffle(const Tensor & self, int64_t upscale_factor);
 static inline Tensor pinverse(const Tensor & self, double rcond=1e-15);
 static inline Tensor poisson_nll_loss(const Tensor & input, const Tensor & target, bool log_input, bool full, double eps, int64_t reduction);
+static inline Tensor _scalar_tensor(Scalar s, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor scalar_tensor(Scalar s, const TensorOptions & options={});
+static inline Tensor _rand(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor rand(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _rand(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor rand(IntArrayRef size, const TensorOptions & options={});
+static inline Tensor _rand(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor rand(IntArrayRef size, Generator * generator, const TensorOptions & options={});
 static inline Tensor & rand_out(Tensor & out, IntArrayRef size);
 static inline Tensor & rand_out(Tensor & out, IntArrayRef size, Generator * generator);
 static inline Tensor rand_like(const Tensor & self, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _rand_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor rand_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randint(int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randint(int64_t high, IntArrayRef size, const TensorOptions & options={});
+static inline Tensor _randint(int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options={});
+static inline Tensor _randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options={});
+static inline Tensor _randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options={});
 static inline Tensor & randint_out(Tensor & out, int64_t high, IntArrayRef size);
 static inline Tensor & randint_out(Tensor & out, int64_t high, IntArrayRef size, Generator * generator);
@@ -472,21 +513,32 @@ static inline Tensor & randint_out(Tensor & out, int64_t low, int64_t high, IntA
 static inline Tensor & randint_out(Tensor & out, int64_t low, int64_t high, IntArrayRef size, Generator * generator);
 static inline Tensor randint_like(const Tensor & self, int64_t high, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor randint_like(const Tensor & self, int64_t low, int64_t high, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randint_like(const Tensor & self, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor randint_like(const Tensor & self, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randint_like(const Tensor & self, int64_t low, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor randint_like(const Tensor & self, int64_t low, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randn(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randn(IntArrayRef size, const TensorOptions & options={});
+static inline Tensor _randn(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randn(IntArrayRef size, Generator * generator, const TensorOptions & options={});
+static inline Tensor _randn(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randn(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options={});
 static inline Tensor & randn_out(Tensor & out, IntArrayRef size);
 static inline Tensor & randn_out(Tensor & out, IntArrayRef size, Generator * generator);
 static inline Tensor randn_like(const Tensor & self, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randn_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor randn_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _randperm(int64_t n, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randperm(int64_t n, const TensorOptions & options={});
+static inline Tensor _randperm(int64_t n, Generator * generator, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor randperm(int64_t n, Generator * generator, const TensorOptions & options={});
 static inline Tensor & randperm_out(Tensor & out, int64_t n);
 static inline Tensor & randperm_out(Tensor & out, int64_t n, Generator * generator);
+static inline Tensor _range(Scalar start, Scalar end, Scalar step=1, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor range(Scalar start, Scalar end, Scalar step=1, const TensorOptions & options={});
+static inline Tensor _range(Scalar start, Scalar end, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor range(Scalar start, Scalar end, const TensorOptions & options={});
 static inline Tensor & range_out(Tensor & out, Scalar start, Scalar end, Scalar step=1);
 static inline Tensor reciprocal(const Tensor & self);
@@ -628,10 +680,13 @@ static inline Tensor _weight_norm(const Tensor & v, const Tensor & g, int64_t di
 static inline std::tuple<Tensor,Tensor> _weight_norm_cuda_interface(const Tensor & v, const Tensor & g, int64_t dim=0);
 static inline std::tuple<Tensor,Tensor> _weight_norm_cuda_interface_backward(const Tensor & grad_w, const Tensor & saved_v, const Tensor & saved_g, const Tensor & saved_norms, int64_t dim);
 static inline std::tuple<Tensor,Tensor> _weight_norm_differentiable_backward(const Tensor & grad_w, const Tensor & saved_v, const Tensor & saved_g, const Tensor & saved_norms, int64_t dim);
+static inline Tensor _zeros(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor zeros(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options={});
+static inline Tensor _zeros(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor zeros(IntArrayRef size, const TensorOptions & options={});
 static inline Tensor & zeros_out(Tensor & out, IntArrayRef size);
 static inline Tensor zeros_like(const Tensor & self, c10::optional<MemoryFormat> memory_format=c10::nullopt);
+static inline Tensor _zeros_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory=false, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format=c10::nullopt);
 static inline Tensor _standard_gamma_grad(const Tensor & self, const Tensor & output);
 static inline Tensor _standard_gamma(const Tensor & self, Generator * generator=nullptr);
@@ -674,11 +729,17 @@ static inline Tensor rsub(const Tensor & self, Scalar other, Scalar alpha=1);
 static inline Tensor _sparse_addmm(const Tensor & self, const Tensor & sparse, const Tensor & dense, Scalar beta=1, Scalar alpha=1);
 static inline Tensor & addmm_out(Tensor & out, const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
 static inline Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
-static inline Tensor sparse_coo_tensor(IntArrayRef size, const TensorOptions & options);
+static inline Tensor _sparse_coo_tensor(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=false);
+static inline Tensor sparse_coo_tensor(IntArrayRef size, const TensorOptions & options={});
+static inline Tensor _sparse_coo_tensor(const Tensor & indices, const Tensor & values, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, const TensorOptions & options={});
+static inline Tensor _sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options={});
+static inline Tensor __sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options={});
-static inline Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const TensorOptions & options);
+static inline Tensor __sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=false);
+static inline Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const TensorOptions & options={});
+static inline Tensor __sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, ScalarType dtype, Layout layout, Device device, bool pin_memory=false);
 static inline Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options);
 static inline Tensor to_dense_backward(const Tensor & grad, const Tensor & input);
 static inline Tensor & hspmm_out(Tensor & out, const Tensor & mat1, const Tensor & mat2);
@@ -785,8 +846,10 @@ static inline Tensor & triu_out(Tensor & out, const Tensor & self, int64_t diago
 static inline Tensor triu(const Tensor & self, int64_t diagonal=0);
 static inline Tensor & tril_out(Tensor & out, const Tensor & self, int64_t diagonal=0);
 static inline Tensor tril(const Tensor & self, int64_t diagonal=0);
-static inline Tensor tril_indices(int64_t row, int64_t col, int64_t offset=0, const TensorOptions & options=at::kLong);
-static inline Tensor triu_indices(int64_t row, int64_t col, int64_t offset=0, const TensorOptions & options=at::kLong);
+static inline Tensor _tril_indices(int64_t row, int64_t col, int64_t offset=0, c10::optional<ScalarType> dtype=at::kLong, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
+static inline Tensor tril_indices(int64_t row, int64_t col, int64_t offset=0, const TensorOptions & options={});
+static inline Tensor _triu_indices(int64_t row, int64_t col, int64_t offset=0, c10::optional<ScalarType> dtype=at::kLong, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
+static inline Tensor triu_indices(int64_t row, int64_t col, int64_t offset=0, const TensorOptions & options={});
 static inline Tensor trace(const Tensor & self);
 static inline Tensor & ne_out(Tensor & out, const Tensor & self, Scalar other);
 static inline Tensor ne(const Tensor & self, Scalar other);
@@ -930,6 +993,7 @@ static inline Tensor & normal_out(Tensor & out, double mean, const Tensor & std,
 static inline Tensor normal(double mean, const Tensor & std, Generator * generator=nullptr);
 static inline Tensor & normal_out(Tensor & out, const Tensor & mean, const Tensor & std, Generator * generator=nullptr);
 static inline Tensor normal(const Tensor & mean, const Tensor & std, Generator * generator=nullptr);
+static inline Tensor _normal(double mean, double std, IntArrayRef size, Generator * generator=nullptr, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt);
 static inline Tensor normal(double mean, double std, IntArrayRef size, Generator * generator=nullptr, const TensorOptions & options={});
 static inline Tensor & normal_out(Tensor & out, double mean, double std, IntArrayRef size, Generator * generator=nullptr);
 static inline Tensor alias(const Tensor & self);
@@ -1386,20 +1450,23 @@ static inline std::tuple<Tensor,Tensor,Tensor,std::vector<Tensor>> _cudnn_rnn_ba
     return op.callUnboxed<std::tuple<Tensor,Tensor,Tensor,std::vector<Tensor>>, const Tensor &, TensorList, int64_t, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, int64_t, bool, double, bool, bool, IntArrayRef, const Tensor &, const Tensor &, std::array<bool,4>>(input, weight, weight_stride0, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, output_mask);
 #endif
 }
-static inline Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions & options) {
+static inline Tensor __cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
     
         default:
-            AT_ERROR("_cudnn_init_dropout_state not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("_cudnn_init_dropout_state not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_cudnn_init_dropout_state", ""}).value();
-    return op.callUnboxed<Tensor, double, bool, int64_t, const TensorOptions &>(dropout, train, dropout_seed, options);
+    return op.callUnboxed<Tensor, double, bool, int64_t, ScalarType, Layout, Device, bool>(dropout, train, dropout_seed, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions & options) {
+    return __cudnn_init_dropout_state(dropout, train, dropout_seed, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline int64_t _debug_has_internal_overlap(const Tensor & self) {
 #ifdef USE_STATIC_DISPATCH
@@ -1975,38 +2042,47 @@ static inline Tensor & any_out(Tensor & out, const Tensor & self, Dimname dim, b
     return op.callUnboxed<Tensor &, Tensor &, const Tensor &, Dimname, bool>(out, self, dim, keepdim);
 #endif
 }
-static inline Tensor arange(Scalar end, const TensorOptions & options) {
+static inline Tensor _arange(Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::arange(end, options);
+    return TypeDefault::arange(end, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::arange", ""}).value();
-    return op.callUnboxed<Tensor, Scalar, const TensorOptions &>(end, options);
+    return op.callUnboxed<Tensor, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(end, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor arange(Scalar start, Scalar end, const TensorOptions & options) {
+inline Tensor arange(Scalar end, const TensorOptions & options) {
+    return _arange(end, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _arange(Scalar start, Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::arange(start, end, options);
+    return TypeDefault::arange(start, end, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::arange", "start"}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, const TensorOptions &>(start, end, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor arange(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+inline Tensor arange(Scalar start, Scalar end, const TensorOptions & options) {
+    return _arange(start, end, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _arange(Scalar start, Scalar end, Scalar step, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::arange(start, end, step, options);
+    return TypeDefault::arange(start, end, step, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::arange", "start_step"}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, Scalar, const TensorOptions &>(start, end, step, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, step, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor arange(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+    return _arange(start, end, step, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & arange_out(Tensor & out, Scalar end) {
 #ifdef USE_STATIC_DISPATCH
@@ -2207,27 +2283,33 @@ static inline Tensor & baddbmm_out(Tensor & out, const Tensor & self, const Tens
     return op.callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(out, self, batch1, batch2, beta, alpha);
 #endif
 }
-static inline Tensor bartlett_window(int64_t window_length, const TensorOptions & options) {
+static inline Tensor _bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::bartlett_window(window_length, options);
+    return TypeDefault::bartlett_window(window_length, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::bartlett_window", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(window_length, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+inline Tensor bartlett_window(int64_t window_length, const TensorOptions & options) {
+    return _bartlett_window(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _bartlett_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::bartlett_window(window_length, periodic, options);
+    return TypeDefault::bartlett_window(window_length, periodic, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::bartlett_window", "periodic"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, const TensorOptions &>(window_length, periodic, options);
+    return op.callUnboxed<Tensor, int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+    return _bartlett_window(window_length, periodic, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled) {
 #ifdef USE_STATIC_DISPATCH
@@ -2465,27 +2547,33 @@ static inline Tensor & logical_or_out(Tensor & out, const Tensor & self, const T
     return op.callUnboxed<Tensor &, Tensor &, const Tensor &, const Tensor &>(out, self, other);
 #endif
 }
-static inline Tensor blackman_window(int64_t window_length, const TensorOptions & options) {
+static inline Tensor _blackman_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::blackman_window(window_length, options);
+    return TypeDefault::blackman_window(window_length, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::blackman_window", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(window_length, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+inline Tensor blackman_window(int64_t window_length, const TensorOptions & options) {
+    return _blackman_window(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _blackman_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::blackman_window(window_length, periodic, options);
+    return TypeDefault::blackman_window(window_length, periodic, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::blackman_window", "periodic"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, const TensorOptions &>(window_length, periodic, options);
+    return op.callUnboxed<Tensor, int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+    return _blackman_window(window_length, periodic, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor bmm(const Tensor & self, const Tensor & mat2) {
 #ifdef USE_STATIC_DISPATCH
@@ -3658,76 +3746,88 @@ static inline Tensor _embedding_bag_per_sample_weights_backward(const Tensor & g
     return op.callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(grad, weight, indices, offsets, offset2bag, mode);
 #endif
 }
-static inline Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _empty(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::empty(size, names, options, memory_format);
+    return TypeDefault::empty(size, names, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::empty", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, const TensorOptions &, c10::optional<MemoryFormat>>(size, names, options, memory_format);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(size, names, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+inline Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _empty(size, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::empty(size, options, memory_format);
+            return CPUType::empty(size, dtype, layout, device, pin_memory, memory_format);
             break;
         case Backend::SparseCPU:
-            return SparseCPUType::empty(size, options, memory_format);
+            return SparseCPUType::empty(size, dtype, layout, device, pin_memory, memory_format);
             break;
         default:
-            AT_ERROR("empty not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("empty not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::empty", "memory_format"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>>(size, options, memory_format);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(size, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
+inline Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _empty(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor __empty_affine_quantized(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::_empty_affine_quantized(size, options, scale, zero_point, memory_format);
+            return CPUType::_empty_affine_quantized(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
             break;
         case Backend::QuantizedCPU:
-            return QuantizedCPUType::_empty_affine_quantized(size, options, scale, zero_point, memory_format);
+            return QuantizedCPUType::_empty_affine_quantized(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
             break;
         default:
-            AT_ERROR("_empty_affine_quantized not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("_empty_affine_quantized not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_empty_affine_quantized", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &, double, int64_t, c10::optional<MemoryFormat>>(size, options, scale, zero_point, memory_format);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, double, int64_t, c10::optional<MemoryFormat>>(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
 #endif
 }
-static inline Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+inline Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
+    return __empty_affine_quantized(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), scale, zero_point, memory_format);
+}
+static inline Tensor __empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::_empty_per_channel_affine_quantized(size, scales, zero_points, axis, options, memory_format);
+            return CPUType::_empty_per_channel_affine_quantized(size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
             break;
         case Backend::QuantizedCPU:
-            return QuantizedCPUType::_empty_per_channel_affine_quantized(size, scales, zero_points, axis, options, memory_format);
+            return QuantizedCPUType::_empty_per_channel_affine_quantized(size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
             break;
         default:
-            AT_ERROR("_empty_per_channel_affine_quantized not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, options)));
+            AT_ERROR("_empty_per_channel_affine_quantized not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(scales, zero_points, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_empty_per_channel_affine_quantized", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const Tensor &, const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>>(size, scales, zero_points, axis, options, memory_format);
+    return op.callUnboxed<Tensor, IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
 #endif
+}
+inline Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return __empty_per_channel_affine_quantized(size, scales, zero_points, axis, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
 }
 static inline Tensor & empty_out(Tensor & out, IntArrayRef size, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
@@ -3749,33 +3849,39 @@ static inline Tensor empty_like(const Tensor & self, c10::optional<MemoryFormat>
     return op.callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(self, memory_format);
 #endif
 }
-static inline Tensor empty_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _empty_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::empty_like(self, options, memory_format);
+    return TypeDefault::empty_like(self, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::empty_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>>(self, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options) {
+inline Tensor empty_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _empty_like(self, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _empty_strided(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::empty_strided(size, stride, options);
+            return CPUType::empty_strided(size, stride, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("empty_strided not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("empty_strided not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::empty_strided", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, IntArrayRef, const TensorOptions &>(size, stride, options);
+    return op.callUnboxed<Tensor, IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, stride, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options) {
+    return _empty_strided(size, stride, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor erf(const Tensor & self) {
 #ifdef USE_STATIC_DISPATCH
@@ -3939,27 +4045,33 @@ static inline Tensor & expm1_out(Tensor & out, const Tensor & self) {
     return op.callUnboxed<Tensor &, Tensor &, const Tensor &>(out, self);
 #endif
 }
-static inline Tensor eye(int64_t n, const TensorOptions & options) {
+static inline Tensor _eye(int64_t n, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::eye(n, options);
+    return TypeDefault::eye(n, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::eye", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(n, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(n, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor eye(int64_t n, int64_t m, const TensorOptions & options) {
+inline Tensor eye(int64_t n, const TensorOptions & options) {
+    return _eye(n, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _eye(int64_t n, int64_t m, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::eye(n, m, options);
+    return TypeDefault::eye(n, m, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::eye", "m"}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, const TensorOptions &>(n, m, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(n, m, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor eye(int64_t n, int64_t m, const TensorOptions & options) {
+    return _eye(n, m, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & eye_out(Tensor & out, int64_t n) {
 #ifdef USE_STATIC_DISPATCH
@@ -4139,27 +4251,33 @@ static inline Tensor & frac_out(Tensor & out, const Tensor & self) {
     return op.callUnboxed<Tensor &, Tensor &, const Tensor &>(out, self);
 #endif
 }
-static inline Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, const TensorOptions & options) {
+static inline Tensor _full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::full(size, fill_value, names, options);
+    return TypeDefault::full(size, fill_value, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::full", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Scalar, c10::optional<DimnameList>, const TensorOptions &>(size, fill_value, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Scalar, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, fill_value, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) {
+inline Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _full(size, fill_value, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::full(size, fill_value, options);
+    return TypeDefault::full(size, fill_value, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::full", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Scalar, const TensorOptions &>(size, fill_value, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, fill_value, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) {
+    return _full(size, fill_value, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & full_out(Tensor & out, IntArrayRef size, Scalar fill_value) {
 #ifdef USE_STATIC_DISPATCH
@@ -4181,33 +4299,39 @@ static inline Tensor full_like(const Tensor & self, Scalar fill_value, c10::opti
     return op.callUnboxed<Tensor, const Tensor &, Scalar, c10::optional<MemoryFormat>>(self, fill_value, memory_format);
 #endif
 }
-static inline Tensor full_like(const Tensor & self, Scalar fill_value, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _full_like(const Tensor & self, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::full_like(self, fill_value, options, memory_format);
+    return TypeDefault::full_like(self, fill_value, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::full_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, Scalar, const TensorOptions &, c10::optional<MemoryFormat>>(self, fill_value, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, Scalar, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, fill_value, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions & options) {
+inline Tensor full_like(const Tensor & self, Scalar fill_value, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _full_like(self, fill_value, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::from_file(filename, shared, size, options);
+            return CPUType::from_file(filename, shared, size, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("from_file not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("from_file not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::from_file", ""}).value();
-    return op.callUnboxed<Tensor, std::string, c10::optional<bool>, c10::optional<int64_t>, const TensorOptions &>(filename, shared, size, options);
+    return op.callUnboxed<Tensor, std::string, c10::optional<bool>, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(filename, shared, size, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions & options) {
+    return _from_file(filename, shared, size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor grid_sampler(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
 #ifdef USE_STATIC_DISPATCH
@@ -4283,71 +4407,89 @@ static inline std::tuple<Tensor,Tensor> grid_sampler_3d_backward(const Tensor & 
     return op.callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, bool>(grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
 #endif
 }
-static inline Tensor hann_window(int64_t window_length, const TensorOptions & options) {
+static inline Tensor _hann_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hann_window(window_length, options);
+    return TypeDefault::hann_window(window_length, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hann_window", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(window_length, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor hann_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+inline Tensor hann_window(int64_t window_length, const TensorOptions & options) {
+    return _hann_window(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _hann_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hann_window(window_length, periodic, options);
+    return TypeDefault::hann_window(window_length, periodic, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hann_window", "periodic"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, const TensorOptions &>(window_length, periodic, options);
+    return op.callUnboxed<Tensor, int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor hamming_window(int64_t window_length, const TensorOptions & options) {
+inline Tensor hann_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+    return _hann_window(window_length, periodic, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _hamming_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hamming_window(window_length, options);
+    return TypeDefault::hamming_window(window_length, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hamming_window", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(window_length, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor hamming_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+inline Tensor hamming_window(int64_t window_length, const TensorOptions & options) {
+    return _hamming_window(window_length, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hamming_window(window_length, periodic, options);
+    return TypeDefault::hamming_window(window_length, periodic, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hamming_window", "periodic"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, const TensorOptions &>(window_length, periodic, options);
+    return op.callUnboxed<Tensor, int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, const TensorOptions & options) {
+inline Tensor hamming_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+    return _hamming_window(window_length, periodic, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, double alpha, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hamming_window(window_length, periodic, alpha, options);
+    return TypeDefault::hamming_window(window_length, periodic, alpha, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hamming_window", "periodic_alpha"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, double, const TensorOptions &>(window_length, periodic, alpha, options);
+    return op.callUnboxed<Tensor, int64_t, bool, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, alpha, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, double beta, const TensorOptions & options) {
+inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, const TensorOptions & options) {
+    return _hamming_window(window_length, periodic, alpha, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _hamming_window(int64_t window_length, bool periodic, double alpha, double beta, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::hamming_window(window_length, periodic, alpha, beta, options);
+    return TypeDefault::hamming_window(window_length, periodic, alpha, beta, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::hamming_window", "periodic_alpha_beta"}).value();
-    return op.callUnboxed<Tensor, int64_t, bool, double, double, const TensorOptions &>(window_length, periodic, alpha, beta, options);
+    return op.callUnboxed<Tensor, int64_t, bool, double, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(window_length, periodic, alpha, beta, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor hamming_window(int64_t window_length, bool periodic, double alpha, double beta, const TensorOptions & options) {
+    return _hamming_window(window_length, periodic, alpha, beta, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor hinge_embedding_loss(const Tensor & self, const Tensor & target, double margin, int64_t reduction) {
 #ifdef USE_STATIC_DISPATCH
@@ -4910,16 +5052,19 @@ static inline Tensor fbgemm_pack_quantized_matrix(const Tensor & input, int64_t 
     return op.callUnboxed<Tensor, const Tensor &, int64_t, int64_t>(input, K, N);
 #endif
 }
-static inline Tensor linspace(Scalar start, Scalar end, int64_t steps, const TensorOptions & options) {
+static inline Tensor _linspace(Scalar start, Scalar end, int64_t steps, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::linspace(start, end, steps, options);
+    return TypeDefault::linspace(start, end, steps, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::linspace", ""}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, int64_t, const TensorOptions &>(start, end, steps, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, steps, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor linspace(Scalar start, Scalar end, int64_t steps, const TensorOptions & options) {
+    return _linspace(start, end, steps, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & linspace_out(Tensor & out, Scalar start, Scalar end, int64_t steps) {
 #ifdef USE_STATIC_DISPATCH
@@ -5103,16 +5248,19 @@ static inline Tensor logdet(const Tensor & self) {
     return op.callUnboxed<Tensor, const Tensor &>(self);
 #endif
 }
-static inline Tensor logspace(Scalar start, Scalar end, int64_t steps, double base, const TensorOptions & options) {
+static inline Tensor _logspace(Scalar start, Scalar end, int64_t steps, double base, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::logspace(start, end, steps, base, options);
+    return TypeDefault::logspace(start, end, steps, base, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::logspace", ""}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, int64_t, double, const TensorOptions &>(start, end, steps, base, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, int64_t, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, steps, base, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor logspace(Scalar start, Scalar end, int64_t steps, double base, const TensorOptions & options) {
+    return _logspace(start, end, steps, base, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & logspace_out(Tensor & out, Scalar start, Scalar end, int64_t steps, double base) {
 #ifdef USE_STATIC_DISPATCH
@@ -6251,27 +6399,33 @@ static inline Tensor _nnpack_spatial_convolution_backward_weight(const Tensor & 
     return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, const Tensor &, IntArrayRef>(input, weightsize, grad_output, padding);
 #endif
 }
-static inline Tensor ones(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+static inline Tensor _ones(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::ones(size, names, options);
+    return TypeDefault::ones(size, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::ones", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, const TensorOptions &>(size, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor ones(IntArrayRef size, const TensorOptions & options) {
+inline Tensor ones(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _ones(size, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _ones(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::ones(size, options);
+    return TypeDefault::ones(size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::ones", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &>(size, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor ones(IntArrayRef size, const TensorOptions & options) {
+    return _ones(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & ones_out(Tensor & out, IntArrayRef size) {
 #ifdef USE_STATIC_DISPATCH
@@ -6293,16 +6447,19 @@ static inline Tensor ones_like(const Tensor & self, c10::optional<MemoryFormat> 
     return op.callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(self, memory_format);
 #endif
 }
-static inline Tensor ones_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _ones_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::ones_like(self, options, memory_format);
+    return TypeDefault::ones_like(self, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::ones_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>>(self, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, dtype, layout, device, pin_memory, memory_format);
 #endif
+}
+inline Tensor ones_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _ones_like(self, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
 }
 static inline Tensor pairwise_distance(const Tensor & x1, const Tensor & x2, double p, double eps, bool keepdim) {
 #ifdef USE_STATIC_DISPATCH
@@ -6404,60 +6561,75 @@ static inline Tensor poisson_nll_loss(const Tensor & input, const Tensor & targe
     return op.callUnboxed<Tensor, const Tensor &, const Tensor &, bool, bool, double, int64_t>(input, target, log_input, full, eps, reduction);
 #endif
 }
-static inline Tensor scalar_tensor(Scalar s, const TensorOptions & options) {
+static inline Tensor _scalar_tensor(Scalar s, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::scalar_tensor(s, options);
+    return TypeDefault::scalar_tensor(s, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::scalar_tensor", ""}).value();
-    return op.callUnboxed<Tensor, Scalar, const TensorOptions &>(s, options);
+    return op.callUnboxed<Tensor, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(s, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor rand(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+inline Tensor scalar_tensor(Scalar s, const TensorOptions & options) {
+    return _scalar_tensor(s, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _rand(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::rand(size, names, options);
+    return TypeDefault::rand(size, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::rand", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, const TensorOptions &>(size, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+inline Tensor rand(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _rand(size, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::rand(size, generator, names, options);
+    return TypeDefault::rand(size, generator, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::rand", "generator_with_names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<DimnameList>, const TensorOptions &>(size, generator, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, generator, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor rand(IntArrayRef size, const TensorOptions & options) {
+inline Tensor rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _rand(size, generator, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _rand(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::rand(size, options);
+    return TypeDefault::rand(size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::rand", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &>(size, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor rand(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor rand(IntArrayRef size, const TensorOptions & options) {
+    return _rand(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _rand(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::rand(size, generator, options);
+    return TypeDefault::rand(size, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::rand", "generator"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Generator *, const TensorOptions &>(size, generator, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, generator, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor rand(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+    return _rand(size, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & rand_out(Tensor & out, IntArrayRef size) {
 #ifdef USE_STATIC_DISPATCH
@@ -6489,60 +6661,75 @@ static inline Tensor rand_like(const Tensor & self, c10::optional<MemoryFormat> 
     return op.callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(self, memory_format);
 #endif
 }
-static inline Tensor rand_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _rand_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::rand_like(self, options, memory_format);
+    return TypeDefault::rand_like(self, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::rand_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>>(self, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
+inline Tensor rand_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _rand_like(self, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _randint(int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint(high, size, options);
+    return TypeDefault::randint(high, size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, IntArrayRef, const TensorOptions &>(high, size, options);
+    return op.callUnboxed<Tensor, int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(high, size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
+    return _randint(high, size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randint(int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint(high, size, generator, options);
+    return TypeDefault::randint(high, size, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint", "generator"}).value();
-    return op.callUnboxed<Tensor, int64_t, IntArrayRef, Generator *, const TensorOptions &>(high, size, generator, options);
+    return op.callUnboxed<Tensor, int64_t, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(high, size, generator, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
+inline Tensor randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+    return _randint(high, size, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint(low, high, size, options);
+    return TypeDefault::randint(low, high, size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint", "low"}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, const TensorOptions &>(low, high, size, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(low, high, size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
+    return _randint(low, high, size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint(low, high, size, generator, options);
+    return TypeDefault::randint(low, high, size, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint", "low_generator"}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, Generator *, const TensorOptions &>(low, high, size, generator, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(low, high, size, generator, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+    return _randint(low, high, size, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & randint_out(Tensor & out, int64_t high, IntArrayRef size) {
 #ifdef USE_STATIC_DISPATCH
@@ -6604,71 +6791,89 @@ static inline Tensor randint_like(const Tensor & self, int64_t low, int64_t high
     return op.callUnboxed<Tensor, const Tensor &, int64_t, int64_t, c10::optional<MemoryFormat>>(self, low, high, memory_format);
 #endif
 }
-static inline Tensor randint_like(const Tensor & self, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _randint_like(const Tensor & self, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint_like(self, high, options, memory_format);
+    return TypeDefault::randint_like(self, high, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>>(self, high, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, int64_t, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, high, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor randint_like(const Tensor & self, int64_t low, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+inline Tensor randint_like(const Tensor & self, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _randint_like(self, high, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _randint_like(const Tensor & self, int64_t low, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randint_like(self, low, high, options, memory_format);
+    return TypeDefault::randint_like(self, low, high, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randint_like", "low_dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, int64_t, int64_t, const TensorOptions &, c10::optional<MemoryFormat>>(self, low, high, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, int64_t, int64_t, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, low, high, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor randn(IntArrayRef size, const TensorOptions & options) {
+inline Tensor randint_like(const Tensor & self, int64_t low, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _randint_like(self, low, high, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _randn(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randn(size, options);
+    return TypeDefault::randn(size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randn", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &>(size, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randn(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+inline Tensor randn(IntArrayRef size, const TensorOptions & options) {
+    return _randn(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randn(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randn(size, generator, options);
+    return TypeDefault::randn(size, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randn", "generator"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Generator *, const TensorOptions &>(size, generator, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, generator, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randn(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+inline Tensor randn(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+    return _randn(size, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randn(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randn(size, names, options);
+    return TypeDefault::randn(size, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randn", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, const TensorOptions &>(size, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+inline Tensor randn(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _randn(size, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randn(size, generator, names, options);
+    return TypeDefault::randn(size, generator, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randn", "generator_with_names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<DimnameList>, const TensorOptions &>(size, generator, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, Generator *, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, generator, names, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _randn(size, generator, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & randn_out(Tensor & out, IntArrayRef size) {
 #ifdef USE_STATIC_DISPATCH
@@ -6700,38 +6905,47 @@ static inline Tensor randn_like(const Tensor & self, c10::optional<MemoryFormat>
     return op.callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(self, memory_format);
 #endif
 }
-static inline Tensor randn_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _randn_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randn_like(self, options, memory_format);
+    return TypeDefault::randn_like(self, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randn_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>>(self, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, dtype, layout, device, pin_memory, memory_format);
 #endif
 }
-static inline Tensor randperm(int64_t n, const TensorOptions & options) {
+inline Tensor randn_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _randn_like(self, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
+}
+static inline Tensor _randperm(int64_t n, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randperm(n, options);
+    return TypeDefault::randperm(n, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randperm", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, const TensorOptions &>(n, options);
+    return op.callUnboxed<Tensor, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(n, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor randperm(int64_t n, Generator * generator, const TensorOptions & options) {
+inline Tensor randperm(int64_t n, const TensorOptions & options) {
+    return _randperm(n, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _randperm(int64_t n, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::randperm(n, generator, options);
+    return TypeDefault::randperm(n, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::randperm", "generator"}).value();
-    return op.callUnboxed<Tensor, int64_t, Generator *, const TensorOptions &>(n, generator, options);
+    return op.callUnboxed<Tensor, int64_t, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(n, generator, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor randperm(int64_t n, Generator * generator, const TensorOptions & options) {
+    return _randperm(n, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & randperm_out(Tensor & out, int64_t n) {
 #ifdef USE_STATIC_DISPATCH
@@ -6759,27 +6973,33 @@ static inline Tensor & randperm_out(Tensor & out, int64_t n, Generator * generat
     return op.callUnboxed<Tensor &, Tensor &, int64_t, Generator *>(out, n, generator);
 #endif
 }
-static inline Tensor range(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+static inline Tensor _range(Scalar start, Scalar end, Scalar step, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::range(start, end, step, options);
+    return TypeDefault::range(start, end, step, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::range", "step"}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, Scalar, const TensorOptions &>(start, end, step, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, step, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor range(Scalar start, Scalar end, const TensorOptions & options) {
+inline Tensor range(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+    return _range(start, end, step, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _range(Scalar start, Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::range(start, end, options);
+    return TypeDefault::range(start, end, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::range", ""}).value();
-    return op.callUnboxed<Tensor, Scalar, Scalar, const TensorOptions &>(start, end, options);
+    return op.callUnboxed<Tensor, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(start, end, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor range(Scalar start, Scalar end, const TensorOptions & options) {
+    return _range(start, end, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & range_out(Tensor & out, Scalar start, Scalar end, Scalar step) {
 #ifdef USE_STATIC_DISPATCH
@@ -8414,27 +8634,33 @@ static inline std::tuple<Tensor,Tensor> _weight_norm_differentiable_backward(con
     return op.callUnboxed<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t>(grad_w, saved_v, saved_g, saved_norms, dim);
 #endif
 }
-static inline Tensor zeros(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+static inline Tensor _zeros(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::zeros(size, names, options);
+    return TypeDefault::zeros(size, names, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::zeros", "names"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, const TensorOptions &>(size, names, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, names, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor zeros(IntArrayRef size, const TensorOptions & options) {
+inline Tensor zeros(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+    return _zeros(size, names, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _zeros(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::zeros(size, options);
+    return TypeDefault::zeros(size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::zeros", ""}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &>(size, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor zeros(IntArrayRef size, const TensorOptions & options) {
+    return _zeros(size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & zeros_out(Tensor & out, IntArrayRef size) {
 #ifdef USE_STATIC_DISPATCH
@@ -8456,16 +8682,19 @@ static inline Tensor zeros_like(const Tensor & self, c10::optional<MemoryFormat>
     return op.callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(self, memory_format);
 #endif
 }
-static inline Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+static inline Tensor _zeros_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::zeros_like(self, options, memory_format);
+    return TypeDefault::zeros_like(self, dtype, layout, device, pin_memory, memory_format);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(self, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::zeros_like", "dtype"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>>(self, options, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>>(self, dtype, layout, device, pin_memory, memory_format);
 #endif
+}
+inline Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+    return _zeros_like(self, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory(), memory_format);
 }
 static inline Tensor _standard_gamma_grad(const Tensor & self, const Tensor & output) {
 #ifdef USE_STATIC_DISPATCH
@@ -8994,83 +9223,101 @@ static inline Tensor addmm(const Tensor & self, const Tensor & mat1, const Tenso
     return op.callUnboxed<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(self, mat1, mat2, beta, alpha);
 #endif
 }
-static inline Tensor sparse_coo_tensor(IntArrayRef size, const TensorOptions & options) {
+static inline Tensor _sparse_coo_tensor(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::sparse_coo_tensor(size, options);
+    return TypeDefault::sparse_coo_tensor(size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::sparse_coo_tensor", "size"}).value();
-    return op.callUnboxed<Tensor, IntArrayRef, const TensorOptions &>(size, options);
+    return op.callUnboxed<Tensor, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+inline Tensor sparse_coo_tensor(IntArrayRef size, const TensorOptions & options) {
+    return _sparse_coo_tensor(size, typeMetaToScalarType(options.dtype()), options.layout_opt(), options.device(), options.pinned_memory());
+}
+static inline Tensor _sparse_coo_tensor(const Tensor & indices, const Tensor & values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::sparse_coo_tensor(indices, values, options);
+    return TypeDefault::sparse_coo_tensor(indices, values, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::sparse_coo_tensor", "indices"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, const TensorOptions &>(indices, values, options);
+    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(indices, values, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+    return _sparse_coo_tensor(indices, values, typeMetaToScalarType(options.dtype()), options.layout_opt(), options.device(), options.pinned_memory());
+}
+static inline Tensor _sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::sparse_coo_tensor(indices, values, size, options);
+    return TypeDefault::sparse_coo_tensor(indices, values, size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::sparse_coo_tensor", "indices_size"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, IntArrayRef, const TensorOptions &>(indices, values, size, options);
+    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(indices, values, size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+inline Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+    return _sparse_coo_tensor(indices, values, size, typeMetaToScalarType(options.dtype()), options.layout_opt(), options.device(), options.pinned_memory());
+}
+static inline Tensor __sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::_sparse_coo_tensor_unsafe(indices, values, size, options);
+    return TypeDefault::_sparse_coo_tensor_unsafe(indices, values, size, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_sparse_coo_tensor_unsafe", ""}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, IntArrayRef, const TensorOptions &>(indices, values, size, options);
+    return op.callUnboxed<Tensor, const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(indices, values, size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const TensorOptions & options) {
+inline Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+    return __sparse_coo_tensor_unsafe(indices, values, size, typeMetaToScalarType(options.dtype()), options.layout_opt(), options.device(), options.pinned_memory());
+}
+static inline Tensor __sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::SparseCPU:
-            return SparseCPUType::_sparse_coo_tensor_with_dims(sparse_dim, dense_dim, size, options);
+            return SparseCPUType::_sparse_coo_tensor_with_dims(sparse_dim, dense_dim, size, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("_sparse_coo_tensor_with_dims not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("_sparse_coo_tensor_with_dims not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_sparse_coo_tensor_with_dims", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, const TensorOptions &>(sparse_dim, dense_dim, size, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(sparse_dim, dense_dim, size, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+inline Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const TensorOptions & options) {
+    return __sparse_coo_tensor_with_dims(sparse_dim, dense_dim, size, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor __sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(indices, values, options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory)))) {
         case Backend::SparseCPU:
-            return SparseCPUType::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, options);
+            return SparseCPUType::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("_sparse_coo_tensor_with_dims_and_tensors not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(indices, values, options)));
+            AT_ERROR("_sparse_coo_tensor_with_dims_and_tensors not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(indices, values, dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::_sparse_coo_tensor_with_dims_and_tensors", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, const TensorOptions &>(sparse_dim, dense_dim, size, indices, values, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, ScalarType, Layout, Device, bool>(sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+    return __sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor to_dense_backward(const Tensor & grad, const Tensor & input) {
 #ifdef USE_STATIC_DISPATCH
@@ -10352,39 +10599,45 @@ static inline Tensor tril(const Tensor & self, int64_t diagonal) {
     return op.callUnboxed<Tensor, const Tensor &, int64_t>(self, diagonal);
 #endif
 }
-static inline Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+static inline Tensor _tril_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::tril_indices(row, col, offset, options);
+            return CPUType::tril_indices(row, col, offset, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("tril_indices not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("tril_indices not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::tril_indices", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, int64_t, const TensorOptions &>(row, col, offset, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(row, col, offset, dtype, layout, device, pin_memory);
 #endif
 }
-static inline Tensor triu_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+inline Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+    return _tril_indices(row, col, offset, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+}
+static inline Tensor _triu_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(options)))) {
+    switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)))) {
         case Backend::CPU:
-            return CPUType::triu_indices(row, col, offset, options);
+            return CPUType::triu_indices(row, col, offset, dtype, layout, device, pin_memory);
             break;
         default:
-            AT_ERROR("triu_indices not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(options)));
+            AT_ERROR("triu_indices not implemented for ", at::toString(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory)));
     }
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::triu_indices", ""}).value();
-    return op.callUnboxed<Tensor, int64_t, int64_t, int64_t, const TensorOptions &>(row, col, offset, options);
+    return op.callUnboxed<Tensor, int64_t, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(row, col, offset, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor triu_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+    return _triu_indices(row, col, offset, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor trace(const Tensor & self) {
 #ifdef USE_STATIC_DISPATCH
@@ -12539,16 +12792,19 @@ static inline Tensor normal(const Tensor & mean, const Tensor & std, Generator *
     return op.callUnboxed<Tensor, const Tensor &, const Tensor &, Generator *>(mean, std, generator);
 #endif
 }
-static inline Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+static inline Tensor _normal(double mean, double std, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::normal(mean, std, size, generator, options);
+    return TypeDefault::normal(mean, std, size, generator, dtype, layout, device, pin_memory);
 #else
-    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(options));
+    globalLegacyTypeDispatch().initForTensorTypeSet(c10::detail::multi_dispatch_tensor_type_set(dtype, layout, device, pin_memory));
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::normal", "float_float"}).value();
-    return op.callUnboxed<Tensor, double, double, IntArrayRef, Generator *, const TensorOptions &>(mean, std, size, generator, options);
+    return op.callUnboxed<Tensor, double, double, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(mean, std, size, generator, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+    return _normal(mean, std, size, generator, typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 }
 static inline Tensor & normal_out(Tensor & out, double mean, double std, IntArrayRef size, Generator * generator) {
 #ifdef USE_STATIC_DISPATCH

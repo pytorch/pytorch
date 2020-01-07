@@ -504,9 +504,12 @@ class CAFFE2_API Tensor {
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other) const;
   Tensor dot(const Tensor & tensor) const;
-  Tensor new_empty(IntArrayRef size, const TensorOptions & options={}) const;
-  Tensor new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options={}) const;
-  Tensor new_zeros(IntArrayRef size, const TensorOptions & options={}) const;
+  Tensor _new_empty(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt) const;
+  Tensor new_empty(IntArrayRef size, const at::TensorOptions & options={}) const;
+  Tensor _new_full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt) const;
+  Tensor new_full(IntArrayRef size, Scalar fill_value, const at::TensorOptions & options={}) const;
+  Tensor _new_zeros(IntArrayRef size, c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=c10::nullopt) const;
+  Tensor new_zeros(IntArrayRef size, const at::TensorOptions & options={}) const;
   Tensor & resize_(IntArrayRef size, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor erf() const;
   Tensor & erf_() const;
@@ -724,7 +727,8 @@ class CAFFE2_API Tensor {
   int64_t q_per_channel_axis() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
-  Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
+  Tensor _to(c10::optional<ScalarType> dtype=c10::nullopt, c10::optional<Layout> layout=c10::nullopt, c10::optional<Device> device=c10::nullopt, c10::optional<bool> pin_memory=false, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
+  Tensor to(const at::TensorOptions & options={}, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false, c10::optional<MemoryFormat> memory_format=c10::nullopt) const;

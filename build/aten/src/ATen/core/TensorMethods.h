@@ -1027,32 +1027,80 @@ inline Tensor Tensor::dot(const Tensor & tensor) const {
     return op.callUnboxed<Tensor, const Tensor &, const Tensor &>(const_cast<Tensor&>(*this), tensor);
 #endif
 }
-inline Tensor Tensor::new_empty(IntArrayRef size, const TensorOptions & options) const {
+inline Tensor Tensor::_new_empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, options);
+    return TypeDefault::new_empty(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::new_empty", ""}).value();
-    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, const TensorOptions &>(const_cast<Tensor&>(*this), size, options);
+    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 #endif
 }
-inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) const {
+inline Tensor Tensor::new_empty(IntArrayRef size, const at::TensorOptions & options) const {
+    c10::optional<ScalarType> dtype = c10::nullopt;
+    c10::optional<Layout> layout = c10::nullopt;
+    c10::optional<Device> device = c10::nullopt;
+    c10::optional<bool> pin_memory = c10::nullopt;
+
+    if (options.dtype_opt().has_value()) {
+        dtype = typeMetaToScalarType(options.dtype());
+    }
+
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
+
+    return _new_empty(size, dtype, layout, device, pin_memory);
+}
+inline Tensor Tensor::_new_full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, options);
+    return TypeDefault::new_full(const_cast<Tensor&>(*this), size, fill_value, dtype, layout, device, pin_memory);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::new_full", ""}).value();
-    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, Scalar, const TensorOptions &>(const_cast<Tensor&>(*this), size, fill_value, options);
+    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(const_cast<Tensor&>(*this), size, fill_value, dtype, layout, device, pin_memory);
 #endif
 }
-inline Tensor Tensor::new_zeros(IntArrayRef size, const TensorOptions & options) const {
+inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const at::TensorOptions & options) const {
+    c10::optional<ScalarType> dtype = c10::nullopt;
+    c10::optional<Layout> layout = c10::nullopt;
+    c10::optional<Device> device = c10::nullopt;
+    c10::optional<bool> pin_memory = c10::nullopt;
+
+    if (options.dtype_opt().has_value()) {
+        dtype = typeMetaToScalarType(options.dtype());
+    }
+
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
+
+    return _new_full(size, fill_value, dtype, layout, device, pin_memory);
+}
+inline Tensor Tensor::_new_zeros(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::new_zeros(const_cast<Tensor&>(*this), size, options);
+    return TypeDefault::new_zeros(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::new_zeros", ""}).value();
-    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, const TensorOptions &>(const_cast<Tensor&>(*this), size, options);
+    return op.callUnboxed<Tensor, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>>(const_cast<Tensor&>(*this), size, dtype, layout, device, pin_memory);
 #endif
+}
+inline Tensor Tensor::new_zeros(IntArrayRef size, const at::TensorOptions & options) const {
+    c10::optional<ScalarType> dtype = c10::nullopt;
+    c10::optional<Layout> layout = c10::nullopt;
+    c10::optional<Device> device = c10::nullopt;
+    c10::optional<bool> pin_memory = c10::nullopt;
+
+    if (options.dtype_opt().has_value()) {
+        dtype = typeMetaToScalarType(options.dtype());
+    }
+
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
+
+    return _new_zeros(size, dtype, layout, device, pin_memory);
 }
 inline Tensor & Tensor::resize_(IntArrayRef size, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
@@ -3394,14 +3442,30 @@ inline QScheme Tensor::qscheme() const {
     return op.callUnboxed<QScheme, const Tensor &>(const_cast<Tensor&>(*this));
 #endif
 }
-inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
+inline Tensor Tensor::_to(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    return TypeDefault::to(const_cast<Tensor&>(*this), options, non_blocking, copy, memory_format);
+    return TypeDefault::to(const_cast<Tensor&>(*this), dtype, layout, device, pin_memory, non_blocking, copy, memory_format);
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::to", "dtype_layout"}).value();
-    return op.callUnboxed<Tensor, const Tensor &, const TensorOptions &, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), options, non_blocking, copy, memory_format);
+    return op.callUnboxed<Tensor, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), dtype, layout, device, pin_memory, non_blocking, copy, memory_format);
 #endif
+}
+inline Tensor Tensor::to(const at::TensorOptions & options, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
+    c10::optional<ScalarType> dtype = c10::nullopt;
+    c10::optional<Layout> layout = c10::nullopt;
+    c10::optional<Device> device = c10::nullopt;
+    c10::optional<bool> pin_memory = c10::nullopt;
+
+    if (options.dtype_opt().has_value()) {
+        dtype = typeMetaToScalarType(options.dtype());
+    }
+
+    layout = options.layout_opt();
+    device = options.device_opt();
+    pin_memory = options.pinned_memory_opt();
+
+    return _to(dtype, layout, device, pin_memory, non_blocking, copy, memory_format);
 }
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH

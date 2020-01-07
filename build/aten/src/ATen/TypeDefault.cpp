@@ -598,20 +598,23 @@ Tensor & any_out(Tensor & out, const Tensor & self, Dimname dim, bool keepdim) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::any_out(out, self, dim, keepdim);
 }
-Tensor arange(Scalar end, const TensorOptions & options) {
+Tensor arange(Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::arange(end, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::arange(end, dtype, layout, device, pin_memory);
 }
-Tensor arange(Scalar start, Scalar end, const TensorOptions & options) {
+Tensor arange(Scalar start, Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::arange(start, end, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::arange(start, end, dtype, layout, device, pin_memory);
 }
-Tensor arange(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+Tensor arange(Scalar start, Scalar end, Scalar step, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::arange(start, end, step, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::arange(start, end, step, dtype, layout, device, pin_memory);
 }
 Tensor & arange_out(Tensor & out, Scalar end) {
     if (out.has_names()) {
@@ -693,15 +696,17 @@ Tensor & _baddbmm_mkl_(Tensor & self, const Tensor & batch1, const Tensor & batc
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::_baddbmm_mkl_(self, batch1, batch2, beta, alpha);
 }
-Tensor bartlett_window(int64_t window_length, const TensorOptions & options) {
+Tensor bartlett_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::bartlett_window(window_length, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::bartlett_window(window_length, dtype, layout, device, pin_memory);
 }
-Tensor bartlett_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+Tensor bartlett_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::bartlett_window(window_length, periodic, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::bartlett_window(window_length, periodic, dtype, layout, device, pin_memory);
 }
 Tensor batch_norm(const Tensor & input, const Tensor & weight, const Tensor & bias, const Tensor & running_mean, const Tensor & running_var, bool training, double momentum, double eps, bool cudnn_enabled) {
     if (input.has_names() || weight.has_names() || bias.has_names() || running_mean.has_names() || running_var.has_names()) {
@@ -833,15 +838,17 @@ Tensor & logical_or_(Tensor & self, const Tensor & other) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::logical_or_(self, other);
 }
-Tensor blackman_window(int64_t window_length, const TensorOptions & options) {
+Tensor blackman_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::blackman_window(window_length, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::blackman_window(window_length, dtype, layout, device, pin_memory);
 }
-Tensor blackman_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+Tensor blackman_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::blackman_window(window_length, periodic, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::blackman_window(window_length, periodic, dtype, layout, device, pin_memory);
 }
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
     if (at::has_names(tensors)) {
@@ -1293,40 +1300,43 @@ Tensor _embedding_bag_sparse_backward(const Tensor & grad, const Tensor & indice
     const OptionalDeviceGuard device_guard(device_of(grad));
     return at::native::_embedding_bag_sparse_backward(grad, indices, offsets, offset2bag, bag_size, num_weights, scale_grad_by_freq, mode, per_sample_weights);
 }
-Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 
     // DeviceGuard omitted
-    return at::native::empty(size, names, options, memory_format);
+    return at::native::empty(size, names, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor new_empty(const Tensor & self, IntArrayRef size, const TensorOptions & options) {
+Tensor new_empty(const Tensor & self, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (self.has_names()) {
         AT_ERROR(
             "new_empty is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::new_empty(self, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::new_empty(self, size, dtype, layout, device, pin_memory);
 }
-Tensor new_full(const Tensor & self, IntArrayRef size, Scalar fill_value, const TensorOptions & options) {
+Tensor new_full(const Tensor & self, IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (self.has_names()) {
         AT_ERROR(
             "new_full is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::new_full(self, size, fill_value, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::new_full(self, size, fill_value, dtype, layout, device, pin_memory);
 }
-Tensor new_zeros(const Tensor & self, IntArrayRef size, const TensorOptions & options) {
+Tensor new_zeros(const Tensor & self, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (self.has_names()) {
         AT_ERROR(
             "new_zeros is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::new_zeros(self, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::new_zeros(self, size, dtype, layout, device, pin_memory);
 }
 Tensor & resize_(Tensor & self, IntArrayRef size, c10::optional<MemoryFormat> memory_format) {
 
@@ -1348,10 +1358,10 @@ Tensor empty_like(const Tensor & self, c10::optional<MemoryFormat> memory_format
     // DeviceGuard omitted
     return at::native::empty_like(self, memory_format);
 }
-Tensor empty_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
     // DeviceGuard omitted
-    return at::native::empty_like(self, options, memory_format);
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor erf(const Tensor & self) {
 
@@ -1393,15 +1403,17 @@ Tensor expand_as(const Tensor & self, const Tensor & other) {
     // DeviceGuard omitted
     return at::native::expand_as(self, other);
 }
-Tensor eye(int64_t n, const TensorOptions & options) {
+Tensor eye(int64_t n, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::eye(n, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::eye(n, dtype, layout, device, pin_memory);
 }
-Tensor eye(int64_t n, int64_t m, const TensorOptions & options) {
+Tensor eye(int64_t n, int64_t m, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::eye(n, m, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::eye(n, m, dtype, layout, device, pin_memory);
 }
 Tensor flatten(const Tensor & self, int64_t start_dim, int64_t end_dim) {
 
@@ -1468,15 +1480,16 @@ Tensor & frac_out(Tensor & out, const Tensor & self) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::frac_out(out, self);
 }
-Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::full(size, fill_value, names, options);
+    return at::native::full(size, fill_value, names, dtype, layout, device, pin_memory);
 }
-Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions & options) {
+Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::full(size, fill_value, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::full(size, fill_value, dtype, layout, device, pin_memory);
 }
 Tensor & full_out(Tensor & out, IntArrayRef size, Scalar fill_value) {
     if (out.has_names()) {
@@ -1493,10 +1506,10 @@ Tensor full_like(const Tensor & self, Scalar fill_value, c10::optional<MemoryFor
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::full_like(self, fill_value, memory_format);
 }
-Tensor full_like(const Tensor & self, Scalar fill_value, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor full_like(const Tensor & self, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::full_like(self, fill_value, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::full_like(self, fill_value, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor grid_sampler(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
     if (input.has_names() || grid.has_names()) {
@@ -1508,35 +1521,41 @@ Tensor grid_sampler(const Tensor & input, const Tensor & grid, int64_t interpola
     const OptionalDeviceGuard device_guard(device_of(input));
     return at::native::grid_sampler(input, grid, interpolation_mode, padding_mode, align_corners);
 }
-Tensor hann_window(int64_t window_length, const TensorOptions & options) {
+Tensor hann_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hann_window(window_length, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hann_window(window_length, dtype, layout, device, pin_memory);
 }
-Tensor hann_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+Tensor hann_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hann_window(window_length, periodic, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hann_window(window_length, periodic, dtype, layout, device, pin_memory);
 }
-Tensor hamming_window(int64_t window_length, const TensorOptions & options) {
+Tensor hamming_window(int64_t window_length, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hamming_window(window_length, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hamming_window(window_length, dtype, layout, device, pin_memory);
 }
-Tensor hamming_window(int64_t window_length, bool periodic, const TensorOptions & options) {
+Tensor hamming_window(int64_t window_length, bool periodic, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hamming_window(window_length, periodic, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hamming_window(window_length, periodic, dtype, layout, device, pin_memory);
 }
-Tensor hamming_window(int64_t window_length, bool periodic, double alpha, const TensorOptions & options) {
+Tensor hamming_window(int64_t window_length, bool periodic, double alpha, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hamming_window(window_length, periodic, alpha, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hamming_window(window_length, periodic, alpha, dtype, layout, device, pin_memory);
 }
-Tensor hamming_window(int64_t window_length, bool periodic, double alpha, double beta, const TensorOptions & options) {
+Tensor hamming_window(int64_t window_length, bool periodic, double alpha, double beta, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::hamming_window(window_length, periodic, alpha, beta, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::hamming_window(window_length, periodic, alpha, beta, dtype, layout, device, pin_memory);
 }
 Tensor hinge_embedding_loss(const Tensor & self, const Tensor & target, double margin, int64_t reduction) {
     if (self.has_names() || target.has_names()) {
@@ -1898,10 +1917,11 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor & input, int64_t K, int64_t N) 
     const OptionalDeviceGuard device_guard(device_of(input));
     return at::native::fbgemm_pack_quantized_matrix(input, K, N);
 }
-Tensor linspace(Scalar start, Scalar end, int64_t steps, const TensorOptions & options) {
+Tensor linspace(Scalar start, Scalar end, int64_t steps, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::linspace(start, end, steps, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::linspace(start, end, steps, dtype, layout, device, pin_memory);
 }
 Tensor log(const Tensor & self) {
 
@@ -1948,10 +1968,11 @@ Tensor logdet(const Tensor & self) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::logdet(self);
 }
-Tensor logspace(Scalar start, Scalar end, int64_t steps, double base, const TensorOptions & options) {
+Tensor logspace(Scalar start, Scalar end, int64_t steps, double base, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::logspace(start, end, steps, base, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::logspace(start, end, steps, base, dtype, layout, device, pin_memory);
 }
 Tensor log_softmax(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype) {
 
@@ -2343,15 +2364,16 @@ Tensor _nnpack_spatial_convolution_backward_weight(const Tensor & input, IntArra
     const OptionalDeviceGuard device_guard(device_of(input));
     return at::native::_nnpack_spatial_convolution_backward_weight(input, weightsize, grad_output, padding);
 }
-Tensor ones(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor ones(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::ones(size, names, options);
+    return at::native::ones(size, names, dtype, layout, device, pin_memory);
 }
-Tensor ones(IntArrayRef size, const TensorOptions & options) {
+Tensor ones(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::ones(size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::ones(size, dtype, layout, device, pin_memory);
 }
 Tensor & ones_out(Tensor & out, IntArrayRef size) {
     if (out.has_names()) {
@@ -2368,10 +2390,10 @@ Tensor ones_like(const Tensor & self, c10::optional<MemoryFormat> memory_format)
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::ones_like(self, memory_format);
 }
-Tensor ones_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor ones_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::ones_like(self, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::ones_like(self, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor pairwise_distance(const Tensor & x1, const Tensor & x2, double p, double eps, bool keepdim) {
     if (x1.has_names() || x2.has_names()) {
@@ -2503,30 +2525,33 @@ Tensor poisson_nll_loss(const Tensor & input, const Tensor & target, bool log_in
     const OptionalDeviceGuard device_guard(device_of(input));
     return at::native::poisson_nll_loss(input, target, log_input, full, eps, reduction);
 }
-Tensor scalar_tensor(Scalar s, const TensorOptions & options) {
+Tensor scalar_tensor(Scalar s, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::scalar_tensor(s, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::scalar_tensor(s, dtype, layout, device, pin_memory);
 }
-Tensor rand(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor rand(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::rand(size, names, options);
+    return at::native::rand(size, names, dtype, layout, device, pin_memory);
 }
-Tensor rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor rand(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::rand(size, generator, names, options);
+    return at::native::rand(size, generator, names, dtype, layout, device, pin_memory);
 }
-Tensor rand(IntArrayRef size, const TensorOptions & options) {
+Tensor rand(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::rand(size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::rand(size, dtype, layout, device, pin_memory);
 }
-Tensor rand(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor rand(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::rand(size, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::rand(size, generator, dtype, layout, device, pin_memory);
 }
 Tensor & rand_out(Tensor & out, IntArrayRef size) {
     if (out.has_names()) {
@@ -2553,30 +2578,34 @@ Tensor rand_like(const Tensor & self, c10::optional<MemoryFormat> memory_format)
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::rand_like(self, memory_format);
 }
-Tensor rand_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor rand_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::rand_like(self, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::rand_like(self, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
+Tensor randint(int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint(high, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randint(high, size, dtype, layout, device, pin_memory);
 }
-Tensor randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor randint(int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint(high, size, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randint(high, size, generator, dtype, layout, device, pin_memory);
 }
-Tensor randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
+Tensor randint(int64_t low, int64_t high, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint(low, high, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randint(low, high, size, dtype, layout, device, pin_memory);
 }
-Tensor randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint(low, high, size, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randint(low, high, size, generator, dtype, layout, device, pin_memory);
 }
 Tensor & randint_out(Tensor & out, int64_t high, IntArrayRef size) {
     if (out.has_names()) {
@@ -2638,45 +2667,47 @@ Tensor randint_like(const Tensor & self, int64_t low, int64_t high, c10::optiona
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::randint_like(self, low, high, memory_format);
 }
-Tensor randint_like(const Tensor & self, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor randint_like(const Tensor & self, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
     if (self.has_names()) {
         AT_ERROR(
             "randint_like is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint_like(self, high, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::randint_like(self, high, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor randint_like(const Tensor & self, int64_t low, int64_t high, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor randint_like(const Tensor & self, int64_t low, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
     if (self.has_names()) {
         AT_ERROR(
             "randint_like is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::randint_like(self, low, high, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::randint_like(self, low, high, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor randn(IntArrayRef size, const TensorOptions & options) {
+Tensor randn(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randn(size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randn(size, dtype, layout, device, pin_memory);
 }
-Tensor randn(IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor randn(IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randn(size, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randn(size, generator, dtype, layout, device, pin_memory);
 }
-Tensor randn(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
-
-    // DeviceGuard omitted
-    return at::native::randn(size, names, options);
-}
-Tensor randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor randn(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::randn(size, generator, names, options);
+    return at::native::randn(size, names, dtype, layout, device, pin_memory);
+}
+Tensor randn(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+
+    // DeviceGuard omitted
+    return at::native::randn(size, generator, names, dtype, layout, device, pin_memory);
 }
 Tensor & randn_out(Tensor & out, IntArrayRef size) {
     if (out.has_names()) {
@@ -2703,20 +2734,22 @@ Tensor randn_like(const Tensor & self, c10::optional<MemoryFormat> memory_format
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::randn_like(self, memory_format);
 }
-Tensor randn_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor randn_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randn_like(self, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::randn_like(self, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor randperm(int64_t n, const TensorOptions & options) {
+Tensor randperm(int64_t n, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randperm(n, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randperm(n, dtype, layout, device, pin_memory);
 }
-Tensor randperm(int64_t n, Generator * generator, const TensorOptions & options) {
+Tensor randperm(int64_t n, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::randperm(n, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::randperm(n, generator, dtype, layout, device, pin_memory);
 }
 Tensor & randperm_out(Tensor & out, int64_t n) {
     if (out.has_names()) {
@@ -2728,15 +2761,17 @@ Tensor & randperm_out(Tensor & out, int64_t n) {
     const OptionalDeviceGuard device_guard(device_of(out));
     return at::native::randperm_out(out, n);
 }
-Tensor range(Scalar start, Scalar end, Scalar step, const TensorOptions & options) {
+Tensor range(Scalar start, Scalar end, Scalar step, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::range(start, end, step, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::range(start, end, step, dtype, layout, device, pin_memory);
 }
-Tensor range(Scalar start, Scalar end, const TensorOptions & options) {
+Tensor range(Scalar start, Scalar end, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::range(start, end, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::range(start, end, dtype, layout, device, pin_memory);
 }
 Tensor reciprocal(const Tensor & self) {
 
@@ -3508,15 +3543,16 @@ std::tuple<Tensor,Tensor> _weight_norm_differentiable_backward(const Tensor & gr
     const OptionalDeviceGuard device_guard(device_of(grad_w));
     return at::native::_weight_norm_differentiable_backward(grad_w, saved_v, saved_g, saved_norms, dim);
 }
-Tensor zeros(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options) {
+Tensor zeros(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
     // DeviceGuard omitted
-    return at::native::zeros(size, names, options);
+    return at::native::zeros(size, names, dtype, layout, device, pin_memory);
 }
-Tensor zeros(IntArrayRef size, const TensorOptions & options) {
+Tensor zeros(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::zeros(size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::zeros(size, dtype, layout, device, pin_memory);
 }
 Tensor & zeros_out(Tensor & out, IntArrayRef size) {
     if (out.has_names()) {
@@ -3533,10 +3569,10 @@ Tensor zeros_like(const Tensor & self, c10::optional<MemoryFormat> memory_format
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::zeros_like(self, memory_format);
 }
-Tensor zeros_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor zeros_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::zeros_like(self, options, memory_format);
+    const DeviceGuard device_guard(device);
+    return at::native::zeros_like(self, dtype, layout, device, pin_memory, memory_format);
 }
 Tensor _sparse_sum(const Tensor & self) {
     if (self.has_names()) {
@@ -3783,40 +3819,44 @@ Tensor _sparse_addmm(const Tensor & self, const Tensor & sparse, const Tensor & 
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::_sparse_addmm(self, sparse, dense, beta, alpha);
 }
-Tensor sparse_coo_tensor(IntArrayRef size, const TensorOptions & options) {
+Tensor sparse_coo_tensor(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::sparse_coo_tensor(size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::sparse_coo_tensor(size, dtype, layout, device, pin_memory);
 }
-Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, const TensorOptions & options) {
+Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (indices.has_names() || values.has_names()) {
         AT_ERROR(
             "sparse_coo_tensor is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::sparse_coo_tensor(indices, values, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::sparse_coo_tensor(indices, values, dtype, layout, device, pin_memory);
 }
-Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (indices.has_names() || values.has_names()) {
         AT_ERROR(
             "sparse_coo_tensor is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::sparse_coo_tensor(indices, values, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::sparse_coo_tensor(indices, values, size, dtype, layout, device, pin_memory);
 }
-Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, const TensorOptions & options) {
+Tensor _sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
     if (indices.has_names() || values.has_names()) {
         AT_ERROR(
             "_sparse_coo_tensor_unsafe is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::_sparse_coo_tensor_unsafe(indices, values, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::_sparse_coo_tensor_unsafe(indices, values, size, dtype, layout, device, pin_memory);
 }
 Tensor to_dense_backward(const Tensor & grad, const Tensor & input) {
     if (grad.has_names() || input.has_names()) {
@@ -3848,10 +3888,10 @@ Tensor to_mkldnn_backward(const Tensor & grad, const Tensor & input) {
     const OptionalDeviceGuard device_guard(device_of(grad));
     return at::native::to_mkldnn_backward(grad, input);
 }
-Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) {
+Tensor to(const Tensor & self, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) {
 
     // DeviceGuard omitted
-    return at::native::to(self, options, non_blocking, copy, memory_format);
+    return at::native::to(self, dtype, layout, device, pin_memory, non_blocking, copy, memory_format);
 }
 Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<MemoryFormat> memory_format) {
 
@@ -5003,10 +5043,11 @@ Tensor all(const Tensor & self) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::all(self);
 }
-Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, const TensorOptions & options) {
+Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::normal(mean, std, size, generator, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::normal(mean, std, size, generator, dtype, layout, device, pin_memory);
 }
 Tensor & normal_out(Tensor & out, double mean, double std, IntArrayRef size, Generator * generator) {
     if (out.has_names()) {
@@ -5757,15 +5798,15 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, const TensorOptions &), &TypeDefault::arange>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::arange>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, const TensorOptions &), &TypeDefault::arange>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::arange>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, Scalar, const TensorOptions &), &TypeDefault::arange>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::arange>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)")
@@ -5809,11 +5850,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::bartlett_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::bartlett_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, const TensorOptions &), &TypeDefault::bartlett_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::bartlett_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")
@@ -5893,11 +5934,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::blackman_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::blackman_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, const TensorOptions &), &TypeDefault::blackman_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::blackman_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::broadcast_tensors(Tensor[] tensors) -> Tensor[]")
@@ -6132,19 +6173,19 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::empty>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &TypeDefault::empty>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, const TensorOptions &), &TypeDefault::new_empty>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::new_empty>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, Scalar, const TensorOptions &), &TypeDefault::new_full>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::new_full>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, const TensorOptions &), &TypeDefault::new_zeros>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::new_zeros>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
@@ -6159,7 +6200,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::empty_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::empty_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::erf(Tensor self) -> Tensor")
@@ -6191,11 +6232,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::eye>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::eye>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, const TensorOptions &), &TypeDefault::eye>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::eye>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor")
@@ -6251,11 +6292,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Scalar, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::full>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Scalar, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::full>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Scalar, const TensorOptions &), &TypeDefault::full>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::full>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6267,7 +6308,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, Scalar, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::full_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, Scalar, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::full_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor")
@@ -6275,27 +6316,27 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::hann_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hann_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hann_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, const TensorOptions &), &TypeDefault::hann_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hann_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hamming_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::hamming_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hamming_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hamming_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, const TensorOptions &), &TypeDefault::hamming_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hamming_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hamming_window.periodic_alpha(int window_length, bool periodic, float alpha, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, double, const TensorOptions &), &TypeDefault::hamming_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hamming_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, double, double, const TensorOptions &), &TypeDefault::hamming_window>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, bool, double, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::hamming_window>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor")
@@ -6467,7 +6508,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::linspace(Scalar start, Scalar end, int steps=100, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, int64_t, const TensorOptions &), &TypeDefault::linspace>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::linspace>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::log(Tensor self) -> Tensor")
@@ -6503,7 +6544,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::logspace(Scalar start, Scalar end, int steps=100, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, int64_t, double, const TensorOptions &), &TypeDefault::logspace>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, int64_t, double, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::logspace>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
@@ -6719,11 +6760,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::ones>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::ones>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, const TensorOptions &), &TypeDefault::ones>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::ones>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6735,7 +6776,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::ones_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::ones_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor")
@@ -6795,23 +6836,23 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, const TensorOptions &), &TypeDefault::scalar_tensor>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::scalar_tensor>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::rand>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::rand>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::rand>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::rand>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, const TensorOptions &), &TypeDefault::rand>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::rand>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, const TensorOptions &), &TypeDefault::rand>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::rand>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6827,23 +6868,23 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::rand_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::rand_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, IntArrayRef, const TensorOptions &), &TypeDefault::randint>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randint>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, IntArrayRef, Generator *, const TensorOptions &), &TypeDefault::randint>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randint>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, IntArrayRef, const TensorOptions &), &TypeDefault::randint>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randint>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, IntArrayRef, Generator *, const TensorOptions &), &TypeDefault::randint>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, int64_t, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randint>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6871,27 +6912,27 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::randint_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, int64_t, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::randint_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, int64_t, int64_t, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::randint_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, int64_t, int64_t, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::randint_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, const TensorOptions &), &TypeDefault::randn>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randn>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, const TensorOptions &), &TypeDefault::randn>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randn>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::randn>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randn>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::randn>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, Generator *, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randn>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6907,15 +6948,15 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::randn_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::randn_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, const TensorOptions &), &TypeDefault::randperm>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randperm>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, Generator *, const TensorOptions &), &TypeDefault::randperm>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (int64_t, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::randperm>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)")
@@ -6923,11 +6964,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, Scalar, const TensorOptions &), &TypeDefault::range>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::range>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, const TensorOptions &), &TypeDefault::range>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (Scalar, Scalar, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::range>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::reciprocal(Tensor self) -> Tensor")
@@ -7377,11 +7418,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, const TensorOptions &), &TypeDefault::zeros>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<DimnameList>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::zeros>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, const TensorOptions &), &TypeDefault::zeros>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::zeros>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)")
@@ -7393,7 +7434,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, c10::optional<MemoryFormat>), &TypeDefault::zeros_like>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, ScalarType, Layout, Device, bool, c10::optional<MemoryFormat>), &TypeDefault::zeros_like>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_sparse_sum(Tensor self) -> Tensor")
@@ -7503,20 +7544,20 @@ auto registerer = torch::RegisterOperators()
     .catchAllKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(&TypeDefault::_sparse_addmm)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
-    .schema("aten::sparse_coo_tensor.size(int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, const TensorOptions &), &TypeDefault::sparse_coo_tensor>()
+    .schema("aten::sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor")
+    .impl_unboxedOnlyCatchAllKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::sparse_coo_tensor>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, const TensorOptions &), &TypeDefault::sparse_coo_tensor>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::sparse_coo_tensor>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::sparse_coo_tensor.indices_size(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, const TensorOptions &), &TypeDefault::sparse_coo_tensor>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::sparse_coo_tensor>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, const TensorOptions &), &TypeDefault::_sparse_coo_tensor_unsafe>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const Tensor &, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::_sparse_coo_tensor_unsafe>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::to_dense_backward(Tensor grad, Tensor input) -> Tensor")
@@ -7535,8 +7576,8 @@ auto registerer = torch::RegisterOperators()
     .catchAllKernel<Tensor (const Tensor &, const Tensor &)>(&TypeDefault::to_mkldnn_backward)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
-    .schema("aten::to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, const TensorOptions &, bool, bool, c10::optional<MemoryFormat>), &TypeDefault::to>()
+    .schema("aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
+    .impl_unboxedOnlyCatchAllKernel<Tensor (const Tensor &, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, bool, bool, c10::optional<MemoryFormat>), &TypeDefault::to>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
@@ -8064,7 +8105,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<Tensor (double, double, IntArrayRef, Generator *, const TensorOptions &), &TypeDefault::normal>()
+    .impl_unboxedOnlyCatchAllKernel<Tensor (double, double, IntArrayRef, Generator *, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &TypeDefault::normal>()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)")

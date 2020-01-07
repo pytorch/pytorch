@@ -474,11 +474,11 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 8, 9))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::_empty_per_channel_affine_quantized((std::move(peek(stack, 0, 9))).toIntListRef(),
+                 auto result_ = torch::__empty_per_channel_affine_quantized((std::move(peek(stack, 0, 9))).toIntListRef(),
              (std::move(peek(stack, 1, 9))).toTensor(),
              (std::move(peek(stack, 2, 9))).toTensor(),
              (std::move(peek(stack, 3, 9))).toInt(),
-             options,
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 8, 9))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 9);
@@ -1229,8 +1229,8 @@ RegisterOperators reg(
                  auto result_ = at::arange((std::move(peek(stack, 0, 5))).toScalar(),
              options);
              #else
-                 auto result_ = torch::arange((std::move(peek(stack, 0, 5))).toScalar(),
-             options);
+                 auto result_ = torch::_arange((std::move(peek(stack, 0, 5))).toScalar(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));
@@ -1252,9 +1252,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toScalar(),
              options);
              #else
-                 auto result_ = torch::arange((std::move(peek(stack, 0, 6))).toScalar(),
+                 auto result_ = torch::_arange((std::move(peek(stack, 0, 6))).toScalar(),
              (std::move(peek(stack, 1, 6))).toScalar(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -1277,10 +1277,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toScalar(),
              options);
              #else
-                 auto result_ = torch::arange((std::move(peek(stack, 0, 7))).toScalar(),
+                 auto result_ = torch::_arange((std::move(peek(stack, 0, 7))).toScalar(),
              (std::move(peek(stack, 1, 7))).toScalar(),
              (std::move(peek(stack, 2, 7))).toScalar(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));
@@ -2309,8 +2309,8 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::empty((std::move(peek(stack, 0, 6))).toIntListRef(),
-             options,
+                 auto result_ = torch::_empty((std::move(peek(stack, 0, 6))).toIntListRef(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 6);
@@ -2347,8 +2347,8 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::empty_like((std::move(peek(stack, 0, 6))).toTensor(),
-             options,
+                 auto result_ = torch::_empty_like((std::move(peek(stack, 0, 6))).toTensor(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 6);
@@ -2371,9 +2371,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toIntListRef(),
              options);
              #else
-                 auto result_ = torch::empty_strided((std::move(peek(stack, 0, 6))).toIntListRef(),
+                 auto result_ = torch::_empty_strided((std::move(peek(stack, 0, 6))).toIntListRef(),
              (std::move(peek(stack, 1, 6))).toIntListRef(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -2974,8 +2974,8 @@ RegisterOperators reg(
                  auto result_ = at::hann_window((std::move(peek(stack, 0, 5))).toInt(),
              options);
              #else
-                 auto result_ = torch::hann_window((std::move(peek(stack, 0, 5))).toInt(),
-             options);
+                 auto result_ = torch::_hann_window((std::move(peek(stack, 0, 5))).toInt(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));
@@ -2997,9 +2997,9 @@ RegisterOperators reg(
              (std::move(peek(stack, 1, 6))).toBool(),
              options);
              #else
-                 auto result_ = torch::hann_window((std::move(peek(stack, 0, 6))).toInt(),
+                 auto result_ = torch::_hann_window((std::move(peek(stack, 0, 6))).toInt(),
              (std::move(peek(stack, 1, 6))).toBool(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 6);
              pack(stack, std::move(result_));
@@ -3426,10 +3426,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toInt(),
              options);
              #else
-                 auto result_ = torch::linspace((std::move(peek(stack, 0, 7))).toScalar(),
+                 auto result_ = torch::_linspace((std::move(peek(stack, 0, 7))).toScalar(),
              (std::move(peek(stack, 1, 7))).toScalar(),
              (std::move(peek(stack, 2, 7))).toInt(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));
@@ -4486,11 +4486,11 @@ RegisterOperators reg(
              nullptr,
              options);
              #else
-                 auto result_ = torch::normal((std::move(peek(stack, 0, 8))).toDouble(),
+                 auto result_ = torch::_normal((std::move(peek(stack, 0, 8))).toDouble(),
              (std::move(peek(stack, 1, 8))).toDouble(),
              (std::move(peek(stack, 2, 8))).toIntListRef(),
              nullptr,
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 8);
              pack(stack, std::move(result_));
@@ -4855,8 +4855,8 @@ RegisterOperators reg(
                  auto result_ = at::rand((std::move(peek(stack, 0, 5))).toIntListRef(),
              options);
              #else
-                 auto result_ = torch::rand((std::move(peek(stack, 0, 5))).toIntListRef(),
-             options);
+                 auto result_ = torch::_rand((std::move(peek(stack, 0, 5))).toIntListRef(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 5);
              pack(stack, std::move(result_));
@@ -4892,8 +4892,8 @@ RegisterOperators reg(
              options,
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #else
-                 auto result_ = torch::rand_like((std::move(peek(stack, 0, 6))).toTensor(),
-             options,
+                 auto result_ = torch::_rand_like((std::move(peek(stack, 0, 6))).toTensor(),
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad(),
              (std::move(peek(stack, 5, 6))).toOptional<c10::MemoryFormat>());
              #endif
              drop(stack, 6);
@@ -6214,10 +6214,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toInt(),
              options);
              #else
-                 auto result_ = torch::tril_indices((std::move(peek(stack, 0, 7))).toInt(),
+                 auto result_ = torch::_tril_indices((std::move(peek(stack, 0, 7))).toInt(),
              (std::move(peek(stack, 1, 7))).toInt(),
              (std::move(peek(stack, 2, 7))).toInt(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));
@@ -6253,10 +6253,10 @@ RegisterOperators reg(
              (std::move(peek(stack, 2, 7))).toInt(),
              options);
              #else
-                 auto result_ = torch::triu_indices((std::move(peek(stack, 0, 7))).toInt(),
+                 auto result_ = torch::_triu_indices((std::move(peek(stack, 0, 7))).toInt(),
              (std::move(peek(stack, 1, 7))).toInt(),
              (std::move(peek(stack, 2, 7))).toInt(),
-             options);
+             at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad());
              #endif
              drop(stack, 7);
              pack(stack, std::move(result_));

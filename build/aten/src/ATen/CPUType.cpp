@@ -335,30 +335,34 @@ Tensor _embedding_bag_per_sample_weights_backward(const Tensor & grad, const Ten
     const OptionalDeviceGuard device_guard(device_of(grad));
     return at::native::_embedding_bag_per_sample_weights_backward_cpu(grad, weight, indices, offsets, offset2bag, mode);
 }
-Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor empty(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_cpu(size, options, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_cpu(size, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
+Tensor _empty_affine_quantized(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_affine_quantized_other_backends_stub(size, options, scale, zero_point, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_affine_quantized_other_backends_stub(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
 }
-Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
+Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scales, const Tensor & zero_points, int64_t axis, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
     if (scales.has_names() || zero_points.has_names()) {
         AT_ERROR(
             "_empty_per_channel_affine_quantized is not yet supported with named tensors. Please drop names via "
             "`tensor = tensor.rename(None)`, call the op with an unnamed tensor, "
             "and set names on the result of the operation.");
     }
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_per_channel_affine_quantized_other_backends_stub(size, scales, zero_points, axis, options, memory_format);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_per_channel_affine_quantized_other_backends_stub(size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
 }
-Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options) {
+Tensor empty_strided(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::empty_strided_cpu(size, stride, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::empty_strided_cpu(size, stride, dtype, layout, device, pin_memory);
 }
 Tensor & erf_(Tensor & self) {
 
@@ -420,10 +424,11 @@ Tensor & floor_out(Tensor & out, const Tensor & self) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::floor_out(out, self);
 }
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions & options) {
+Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::from_file(filename, shared, size, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::from_file(filename, shared, size, dtype, layout, device, pin_memory);
 }
 Tensor grid_sampler_2d(const Tensor & input, const Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
     if (input.has_names() || grid.has_names()) {
@@ -1705,15 +1710,17 @@ Tensor & tril_out(Tensor & out, const Tensor & self, int64_t diagonal) {
     const OptionalDeviceGuard device_guard(device_of(self));
     return at::native::tril_cpu_out(out, self, diagonal);
 }
-Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+Tensor tril_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::tril_indices_cpu(row, col, offset, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::tril_indices_cpu(row, col, offset, dtype, layout, device, pin_memory);
 }
-Tensor triu_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions & options) {
+Tensor triu_indices(int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
 
-    const DeviceGuard device_guard(options.device());
-    return at::native::triu_indices_cpu(row, col, offset, options);
+    auto dev = device.has_value() ? device.value() : Device(kCPU);
+    const DeviceGuard device_guard(dev);
+    return at::native::triu_indices_cpu(row, col, offset, dtype, layout, device, pin_memory);
 }
 Tensor trace(const Tensor & self) {
     if (self.has_names()) {
@@ -4645,19 +4652,19 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>), &CPUType::empty>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &CPUType::empty>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const TensorOptions &, double, int64_t, c10::optional<MemoryFormat>), &CPUType::_empty_affine_quantized>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, double, int64_t, c10::optional<MemoryFormat>), &CPUType::_empty_affine_quantized>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>), &CPUType::_empty_per_channel_affine_quantized>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>, c10::optional<MemoryFormat>), &CPUType::_empty_per_channel_affine_quantized>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, IntArrayRef, const TensorOptions &), &CPUType::empty_strided>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (IntArrayRef, IntArrayRef, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &CPUType::empty_strided>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::erf_(Tensor(a!) self) -> Tensor(a!)")
@@ -4701,7 +4708,7 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (std::string, c10::optional<bool>, c10::optional<int64_t>, const TensorOptions &), &CPUType::from_file>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (std::string, c10::optional<bool>, c10::optional<int64_t>, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &CPUType::from_file>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor")
@@ -5337,11 +5344,11 @@ auto registerer = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, int64_t, const TensorOptions &), &CPUType::tril_indices>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &CPUType::tril_indices>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, int64_t, const TensorOptions &), &CPUType::triu_indices>(TensorTypeId::CPUTensorId)
+    .impl_unboxedOnlyKernel<Tensor (int64_t, int64_t, int64_t, c10::optional<ScalarType>, c10::optional<Layout>, c10::optional<Device>, c10::optional<bool>), &CPUType::triu_indices>(TensorTypeId::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::trace(Tensor self) -> Tensor")
