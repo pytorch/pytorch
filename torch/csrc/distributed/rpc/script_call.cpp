@@ -70,7 +70,8 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
         "It is TorchScript function call, operator should not be set.");
     ivalues.emplace_back((*qualifiedName_).qualifiedName());
   } else {
-    AT_ERROR(
+    TORCH_INTERNAL_ASSERT(
+        false,
         "Either builtin operator or TorchScript function name should be set.");
   }
 }

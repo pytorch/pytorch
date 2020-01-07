@@ -238,7 +238,6 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_functions.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
