@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/script/concrete_module_type.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace jit {
 namespace script {
+
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
   py::object pyQualName = py::module::import("torch._jit_internal")
@@ -25,6 +27,18 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& isParameter = pr.second.isParam_;
 
     cls->addAttribute(name, type, isParameter);
+  }
+
+  for (const auto& pr : constants_) {
+    const auto& name = pr.first;
+    const auto& val = pr.second.v_;
+    auto match = tryToInferType(val);
+    if (!match.success()) {
+      TORCH_INTERNAL_ASSERT(false, "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ", py::str(val), "\n:", match.reason());
+    }
+    // Validation and conversion to make sure `val` is a valid constant
+    // is done in python, see `torch/jit/_recursive.py`
+    cls->addConstant(name, toIValue(val, match.type()));
   }
 
   for (const auto& moduleInfo : modules_) {
@@ -225,15 +239,6 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
-}
-
-c10::optional<py::object> ConcreteModuleType::findConstant(
-    const std::string& name) const {
-  auto it = data_.constants_.find(name);
-  if (it != data_.constants_.end()) {
-    return it->second.v_;
-  }
-  return c10::nullopt;
 }
 
 void ConcreteModuleType::dump() const {
