@@ -10442,7 +10442,7 @@ class TestNNDeviceType(NNTestCase):
                     self.assertEqual(y.dim(), 0)
                     if reduction == 'sum':
                         self.assertEqual(y.item(), 0)
-                    else: # reduction == 'mean':
+                    else:  # reduction == 'mean':
                         self.assertTrue(math.isnan(y.item()))
                 y.sum().backward()
                 self.assertEqual(x.grad.size(), x.size())
@@ -10458,7 +10458,7 @@ class TestNNDeviceType(NNTestCase):
         for N in [0, 10]:
             for H in [0, 10]:
                 for W in [0, 10]:
-                    if (N * C * H * W == 0): # If input is empty
+                    if (N * C * H * W == 0):  # If input is empty
                         x = torch.rand(N, C, H, W, requires_grad=True, device=device)
                         target = torch.randint(C, (N, H, W), device=device)
                         test_nll_loss(x, target)
