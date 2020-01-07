@@ -266,7 +266,7 @@ struct NormTwoOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return sqrt(a);
+    return device_sqrt(a);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
