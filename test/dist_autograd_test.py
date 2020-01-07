@@ -1071,6 +1071,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 error_str = (
                     "Encountered exception in ProcessGroupAgent::enqueueSend"
                     if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                    # Shutdown sequence is not very well defined and as a result
+                    # we might see either of the exception messages below.
                     else "(Request aborted during client shutdown)|"
                                             "(worker.: Error in reponse from worker.: server shutting down)")
                 with self.assertRaisesRegex(RuntimeError, error_str):
@@ -1251,7 +1253,10 @@ class DistAutogradTest(RpcAgentTestFixture):
                 error_str = (
                     "Encountered exception in ProcessGroupAgent::enqueueSend"
                     if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                    else "Request aborted during client shutdown")
+                    # Shutdown sequence is not very well defined and as a result
+                    # we might see either of the exception messages below.
+                    else "(Request aborted during client shutdown)|"
+                                            "(worker.: Error in reponse from worker.: server shutting down)")
                 with self.assertRaisesRegex(RuntimeError, error_str):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
