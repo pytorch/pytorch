@@ -8,6 +8,7 @@
     + [Tips](#tips)
     + [Building C++ Documentation](#building-c---documentation)
   * [Previewing changes](#previewing-changes)
+    + [Submitting changes for review](#submitting-changes-for-review)
   * [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with--py-spy-)
 - [Managing multiple build trees](#managing-multiple-build-trees)
@@ -308,6 +309,32 @@ To build the documentation, follow the same steps as above, but run them from
 
 ### Previewing changes
 
+To view HTML files, you must start an HTTP server. For example
+
+```bash
+# Start a server from the current directory (Python 3 only)
+cd docs/build/html
+python -m http.server
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine from your local machine. To map
+remote port 8000 to local port 8000, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8000:my_machine:8000
+
+# For Eternal Terminal
+et my_machine -t="8000:8000"
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+#### Submitting changes for review
+
 It is helpful when submitting a PR that changes the docs to provide a rendered
 version of the result. You can do this by using GitHub pages to host the docs
 you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
@@ -336,6 +363,7 @@ git push
 ```
 
 Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
+
 
 ### Adding documentation tests
 
