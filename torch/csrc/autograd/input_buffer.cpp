@@ -45,40 +45,62 @@ namespace torch { namespace autograd {
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) If the variable is not a CUDA variable, accumulation happens on the
-  //      device of the variable.
-  //  (2) If the variable is a CUDA variable, and the producer and consumer
+  //  (1) If var is not a CUDA variable, accumulation happens on var's device.
+  //  (2) If var is a CUDA variable, and the producer and consumer
   //      share its device, then:
   //        (2a) if the producer and consumer do not share a stream,
   //             the consumer is synced with the producer.
   //        (2b) accumulation happens on the consumer's stream
-  //  (3) If the variable is a CUDA variable but it, the producer, and the
-  //      consumer are on multiple devices, then accumulation happens on
-  //      the default stream of the variable's device.
+  //  (3) If var is a CUDA variable but it, the producer, and the
+  //      consumer are on multiple devices, then:
+  //        (2a) We assume var was created on its device's current stream.
+  //             If that stream is different from the consumer stream,
+  //             we sync the consumer with var's device's current stream.
+  //        (3a) accumulation still happens on the consumer's stream
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
   if (device_of(var)->is_cuda()) {
+    // Accumulation, if necessary, always happens on the consumer stream.
+    opt_accumulate_stream = opt_consumer_stream;
+    // It's possible var resides on a different device from opt_producer_stream.
+    // For example, if the Node we're currently evaluating is a CopyBackward that spans
+    // two devices, opt_producer_stream will be the stream on which the original forward-pass
+    // output was created, which resides on a different device from var.  var itself will have
+    // been created on the current stream of the original forward-pass input's device.
+    c10::optional<c10::Stream> opt_var_stream = c10::nullopt;
     const auto on_producer = opt_producer_stream
                         && device_of(var) == opt_producer_stream->device();
     const auto on_consumer = opt_consumer_stream
                         && device_of(var) == opt_consumer_stream->device();
     if (on_producer && on_consumer) {
       // (2) CUDA variable with producer and consumer sharing a device
-      //     Accumulation happens on consumer's stream
-      opt_accumulate_stream = opt_consumer_stream;
-      if (opt_producer_stream != opt_consumer_stream) {
-        // (2a) Syncs consumer with producer
-        auto event = c10::Event{c10::DeviceType::CUDA};
-        event.record(*opt_producer_stream);
-        opt_consumer_stream->wait(event);
-      }
+      opt_var_stream = opt_producer_stream;
     } else {
       // (3) CUDA variable with multiple devices
-      //     Accumulation happens on variable's device's default stream
-      const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-      const auto default_stream = guard.getDefaultStream(*device_of(var));
-      opt_accumulate_stream = default_stream;
+      // get_current_stream_helper is a hack to access the current stream on var's device
+      // that will compile even if the build is CPU-only.
+      const auto get_current_stream_helper = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+      opt_var_stream = get_current_stream_helper.getStream(*device_of(var));
+    }
+
+    // If the consumer's original forward-pass output was on a particular device,
+    // I think we can safely say it expects the grad for that output to be on the same device
+    TORCH_INTERNAL_ASSERT(opt_var_stream->device() == opt_consumer_stream->device());
+
+    if (opt_var_stream != opt_consumer_stream) {
+      // Sync consumer with var stream
+      // Events are associated with the current device on construction, and
+      // "cudaEventRecord() will fail if the input event and input stream are associated to different devices"
+      // so just in case, we guard onto the the var & consumer's device before creating the event.
+      // TODO:  Maybe we should guard onto var's device for the entirety of InputBuffer::add?
+      c10::DeviceGuard device_guard{opt_var_stream->device()};
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(*opt_var_stream);
+      opt_consumer_stream->wait(event);
+      // I think we need a
+      // c10::cuda::CUDACachingAllocator::recordStream(var.storage().data_ptr(), opt_consumer_stream);
+      // here but I'm not sure if this will allow a CPU-only build to compile.
     }
   }
 
