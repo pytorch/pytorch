@@ -3372,6 +3372,48 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    def test_reentrant_with_callbacks(self):
+        counter = [0]
+
+        def inc_counter():
+            counter[0] += 1
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Add a callback to execute.
+                Variable._execution_engine.queue_callback(inc_counter)
+
+                return input
+
+        class MyReentrantFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Reentrant backward call.
+                tmp_inp = input.detach().requires_grad_()
+                with torch.enable_grad():
+                    tmp_out = (MyFunc.apply(tmp_inp)).sum()
+                tmp_out.backward()
+                return input
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = MyReentrantFunc.apply(t1)
+        t3 = t2.sum()
+        torch.autograd.backward([t3])
+
+        # Verify callback is called only once.
+        self.assertEquals(1, counter[0])
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -3706,8 +3748,6 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
             # TODO: We are not rebasing the history and so the inplace computation is wrong
             gradcheck(fn, (a, b))
-
-
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
