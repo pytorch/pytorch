@@ -744,13 +744,10 @@ class Module(object):
         for hook in self._load_state_dict_pre_hooks.values():
             hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
-        local_state_params = itertools.chain(self._parameters.items(), self._buffers.items())
-        local_state = dict(local_state_params)
+        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        local_state = {k: v for k, v in local_name_params if v is not None}
 
-        for name, param in local_state_params:
-            if param is None:
-                del local_state[name]
-                continue
+        for name, param in local_state.items():
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
