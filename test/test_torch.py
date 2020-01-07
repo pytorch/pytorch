@@ -19,6 +19,7 @@ import types
 import textwrap
 import zipfile
 from torch._utils_internal import get_file_path_2
+from torch.serialization import check_module_version_greater_or_equal
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
@@ -28,7 +29,7 @@ from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
-from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, TEST_DILL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
@@ -53,7 +54,15 @@ if TEST_SCIPY:
 if TEST_LIBROSA:
     import librosa
 
+if TEST_DILL:
+    import dill
+    HAS_DILL_AT_LEAST_0_3_1 = check_module_version_greater_or_equal(dill, (0, 3, 1))
+else:
+    HAS_DILL_AT_LEAST_0_3_1 = False
+
 SIZE = 100
+
+
 
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
@@ -667,6 +676,14 @@ class _TestTorchMixin(object):
         y = torch.tensor(example, dtype=torch.uint8)
         torch.sum(x, 0, out=y)
         self.assertEqual(x.sum(0, dtype=torch.uint8), y)
+
+    def test_dim_reduction_less_than_64(self):
+        sizes = [1] * 65
+        x = torch.randn(sizes)
+        with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
+            torch.sum(x, 64)
+        with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
+            torch.sum(x, -1)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -4147,6 +4164,38 @@ class _TestTorchMixin(object):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
+    @unittest.skipIf(
+        not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
+        '"dill" not found or is correct version'
+    )
+    def test_serialization_dill_version_not_supported(self):
+        x = torch.randn(5, 5)
+
+        with tempfile.NamedTemporaryFile() as f:
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
+                torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            with self.assertRaisesRegex(ValueError, 'supports dill >='):
+                x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+
+    @unittest.skipIf(
+        not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
+        '"dill" not found or not correct version'
+    )
+    def test_serialization_dill(self):
+        x = torch.randn(5, 5)
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f, pickle_module=dill)
+            f.seek(0)
+            x2 = torch.load(f, pickle_module=dill, encoding='utf-8')
+            self.assertIsInstance(x2, type(x))
+            self.assertEqual(x, x2)
+            f.seek(0)
+            x3 = torch.load(f, pickle_module=dill)
+            self.assertIsInstance(x3, type(x))
+            self.assertEqual(x, x3)
+
     def test_serialization_offset_filelike(self):
         a = torch.randn(5, 5)
         b = torch.randn(1024, 1024, 512, dtype=torch.float32)
@@ -5283,7 +5332,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             tensor[0] = np_val
             self.assertEqual(tensor[0], np_val)
 
-            # Original reported issue, np integral type parses to the correct 
+            # Original reported issue, np integral type parses to the correct
             # PyTorch integral type when passed for a `Scalar` parameter in
             # arithmetic operations:
             t = torch.from_numpy(np_arr)
@@ -6638,6 +6687,36 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
 
+    def test_bitwise_and(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
+            expected_res = torch.tensor([0, 0, 3], dtype=dtype, device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor([0, 2, 2], dtype=dtype, device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_and(a, b), expected_res)
+            self.assertEqual(torch.bitwise_and(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_and(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_and(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_and_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_and_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+        self.assertEqual(torch.tensor([False, True, False], device=device),
+                         torch.bitwise_and(torch.tensor([True, True, False], device=device),
+                                           torch.tensor([False, True, False], device=device)))
+
     def test_bitwise_xor(self, device):
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
@@ -7659,6 +7738,10 @@ class TestTorchDeviceType(TestCase):
         # test empty tensor, should just return an empty tensor of the same shape
         data = torch.tensor([])
         self.assertEqual(data, data.flip(0))
+
+        # test bool tensor
+        a = torch.tensor([False, True])
+        self.assertEqual(a.flip(0), torch.tensor([True, False]))
 
     def test_rot90(self, device):
         data = torch.arange(1, 5, device=device).view(2, 2)
@@ -10357,6 +10440,28 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(aRes, torch.tensor([[1, 1, 2],
                                              [0, 0, 0],
                                              [1, 2, 3]]))
+
+        # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
+        # Also check that cumsum over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cumsum(dim=dim)
+                # Check that backward does not crash
+                integrated.sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cumsum(dim=-1)
+        # Check that backward does not crash
+        integrated.sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
     def test_cumprod(self, device):
         x = torch.rand(100, 100, device=device)
