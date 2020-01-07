@@ -15,6 +15,9 @@ except ImportError:
     from tools.shared.module_loader import import_module
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
@@ -144,6 +147,7 @@ return wrap(${namedtuple_return_type}${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
+  ${tensor_options}
   ${initialize_cuda}
   ${AutoNoGIL}
   return ${dispatch_call}(${dispatch_args});
@@ -336,6 +340,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Device &': 'device',
         'c10::optional<DimnameList>': 'toDimnameListOptional',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<Device>': 'deviceOptional',
+        'c10::optional<Layout>': 'layoutOptional',
         'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
@@ -376,8 +382,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
-
-        has_tensor_options = any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])
+        has_tensor_options = TOUtils.check_if_factory_method(declaration['arguments'])
 
         def get_type_args(args):
             return [arg for arg in args if arg['simple_type'] == 'Type']
@@ -447,6 +452,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # We always want to unpack when we have TensorOptions.
         unpack = has_tensor_options
         for arg in inputs:
+            if out_idx is not None and arg_idx == out_idx:
+                # skip output
+                arg_idx += 1
+
+            #[CHECK THIS]
+            if has_tensor_options and arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
+                expr, formal = parse_arg(arg, arg_idx)
+                actuals.append(arg['name'])
+                formal_args.append(formal)
+                continue
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
             if has_self and arg['name'] == 'self':
@@ -455,6 +470,25 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 continue
             append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
             arg_idx += 1
+
+        # This is a hack to insert 'requires_grad'.
+        # Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+        # In the tracking issue https://github.com/pytorch/pytorch/issues/30405
+        if has_tensor_options and check_is_factory_or_like_or_new_function(declaration):
+            added = False
+            i = 0
+            for f in formal_args:
+                if f == 'c10::optional<bool> pin_memory':
+                    formal_args.insert(i + 1, 'c10::optional<bool> requires_grad')
+                    actuals.insert(i + 1, 'requires_grad')
+                    added = True
+                    break
+                else:
+                    i += 1
+
+            if not added:
+                formal_args.append('c10::optional<bool> requires_grad')
+                actuals.append('requires_grad')
 
         if len(outputs) == 1:
             append_actuals_formals(*parse_arg(outputs[0], arg_idx))
@@ -470,11 +504,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # type args go after the outputs to match the signature generation.
         arg_idx = arg_idx if out_idx is None else out_idx + 1
         for arg in type_args:
-            parsed_type_args = parse_arg(arg, arg_idx, unpack)
+            parsed_type_args = parse_arg(arg, arg_idx)
             arg_idx += 1
 
         # check python_binding_arguments
-        has_device_bind = False
         requires_grad = None
         python_binding_arguments = declaration.get('python_binding_arguments', [])
         if 'dtype' in (a['name'] for a in python_binding_arguments):
@@ -498,7 +531,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 if len(outputs) == 0:
                     assert parsed_type_args
                     assert layout
-                    device, device_type = parse_arg(arg, device_idx, True)
+                    device, device_type = parse_arg(arg, device_idx)
 
                     if not has_tensor_options:
                         # add type, device formals and corresponding actuals.
@@ -509,7 +542,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                         actuals.append("torch::getVariableType({}, {}, {})".format(parsed_type_args[0], layout, device))
                         actuals.append('{}.index()'.format(device))
 
-                    has_device_bind = True
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
             elif arg['name'] == 'pin_memory' and arg['simple_type'] == 'bool':
@@ -520,25 +552,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                                     "\"Device device\" are supported".format(arg)))
 
         dtype = parsed_type_args[0] if parsed_type_args else None
-        if has_tensor_options and all([dtype, device, layout, requires_grad]):
-            body.append(TENSOR_OPTIONS.substitute({
-                'dtype': dtype,
-                'layout': layout,
-                'device': device,
-                'requires_grad': requires_grad,
-                'pin_memory': pin_memory,
-            }))
-            formal_args.append('const TensorOptions & options')
-            actuals.append('options')
+        add_requires_grad = check_is_factory_or_like_or_new_function(declaration)
+
+        if has_tensor_options:
+            body.append('auto dtype = ' + dtype + ';')
+            body.append('auto layout = ' + layout + '.layout;')
+            body.append('auto device = ' + device + ';')
+            body.append('auto pin_memory = ' + pin_memory + ';')
+
+            if add_requires_grad:
+                body.append("auto requires_grad = " + requires_grad + ";")
 
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
-
-        if has_tensor_options:
-            env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
-        else:
-            env['initialize_cuda'] = ''
 
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
@@ -547,12 +574,33 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
-            env['dispatch_call'] = 'self.{}'.format(declaration['name'])
+            if has_tensor_options:
+                env['dispatch_call'] = 'self._{}'.format(declaration['name'])
+            else:
+                env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
             namespace = 'torch' if (has_tensor_options or declaration['name'].endswith('_like')) else 'at'
-            env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
+            if has_tensor_options:
+                env['dispatch_call'] = '{}::_{}'.format(namespace, declaration['name'])
+            else:
+                env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
+
+        if has_tensor_options:
+            env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
+            if add_requires_grad:
+                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
+                    .layout(layout).pinned_memory(pin_memory).requires_grad(requires_grad);"
+
+                if not 'Tensor' in declaration['method_of']:
+                    env['dispatch_args'].insert(env['dispatch_args'].index('pin_memory') + 1, 'requires_grad')
+            else:
+                env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
+                    .layout(layout).pinned_memory(pin_memory);"
+        else:
+            env['initialize_cuda'] = ''
+            env['tensor_options'] = ''
 
         env['AutoNoGIL'] = 'pybind11::gil_scoped_release no_gil;' if not declaration['with_gil'] else ''
 
@@ -581,6 +629,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if requires_grad and not has_tensor_options:
             call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
                                                                      requires_grad=requires_grad)
+
         if simple_return_type == 'void':
             body.append('{call_dispatch};'.format(call_dispatch=call_dispatch))
             body.append('Py_RETURN_NONE;')
@@ -609,6 +658,35 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         cond = 'if' if i == 0 else '} else if'
         return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
 
+    def check_is_factory_or_like_or_new_function(declaration):
+        is_factory_or_like_or_new_function = False
+        has_tensor_input_arg = False
+
+        for arg in declaration['arguments']:
+            if arg.get('output', False):
+                continue
+
+            typename = arg['simple_type']
+            if typename in ['Tensor', 'TensorList']:
+                has_tensor_input_arg = True
+            if arg['name'] == 'requires_grad':
+                raise ValueError("argument named requires_grad not supported")
+
+        has_tensor_return = False
+        for ret in declaration['returns']:
+            if ret['dynamic_type'] in ['Tensor', 'TensorList']:
+                # this probably won't work if one of the returns is not a tensor, but it will
+                # produce a compile-time error that is obvious
+                has_tensor_return = True
+
+        category_override = declaration['category_override']
+        is_like_function = name.endswith('_like') or category_override == 'like'
+        is_new_function = name.startswith('new_') or category_override == 'new'
+        is_factory_function = has_tensor_return and not has_tensor_input_arg or category_override == 'factory'
+        is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
+
+        return is_factory_or_like_or_new_function
+
     def get_python_binding_arguments(declaration):
         python_binding_arguments = []
         has_tensor_input_arg = False
@@ -622,7 +700,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_input_arg = True
             if arg['simple_type'] == 'Type':
                 has_type_input_arg = True
-            elif arg['simple_type'] == 'TensorOptions':
+            if TOUtils.check_if_factory_method(declaration['arguments']):
                 has_options_arg = True
             if arg['name'] == 'requires_grad':
                 raise ValueError("argument named requires_grad not supported")
@@ -688,6 +766,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'simple_type': 'bool',
             }
             python_binding_arguments.append(pin_memory_arg)
+
         if is_factory_or_like_or_new_function:
             requires_grad_arg = {
                 'default': False,
@@ -769,7 +848,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
-
         env['traceable'] = 'true' if all(should_trace(d) for d in declarations) else 'false'
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
@@ -946,8 +1024,10 @@ def get_python_signature(declaration, include_out):
             type_args.append(arg)
             continue
         # Skip `TensorOptions` in Python, as it is only used on the C++ side.
-        if arg['simple_type'] == 'TensorOptions':
-            continue
+        if TOUtils.check_if_factory_method(declaration['arguments']):
+            if arg['name'] in TOUtils.tensor_options_args:
+                continue
+
         if arg.get('kwarg_only', False) and positional:
             py_formal_args.append('*')
             positional = False

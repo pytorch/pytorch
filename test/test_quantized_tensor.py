@@ -124,9 +124,8 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q.q_zero_point(), q_el.q_zero_point())
         self.assertEqual(q.dtype, q_el.dtype)
 
-        # create via empty_like but change the dtype (currently not supported)
-        with self.assertRaises(RuntimeError):
-            torch.empty_like(q, dtype=torch.qint8)
+        # create via empty_like but change the dtype
+        self.assertEqual(torch.qint8, torch.empty_like(q, dtype=torch.qint8).dtype)
 
     def test_qtensor_dtypes(self):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2

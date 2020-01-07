@@ -230,7 +230,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(
         [
             {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
-             'default': 'long', 'is_nullable': True},
+             'default': 'at::kLong', 'is_nullable': True},
             {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
              'default': 'c10::nullopt', 'is_nullable': True},
             {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
@@ -251,42 +251,29 @@ def parse_arguments(args, func_variants, declaration, func_return):
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
 
-    def check_topt_representation(topt_representation):
-        for idx, supported_topt in enumerate(supported_topt_arguments):
-            matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
-            if matches:
-                return corresponding_topts[idx]
-        return None
-
-    def is_tensor_option(argument):
-        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
-
-    new_arguments = []
     idx = 0
+
+    # This is a hack
+    # Please see [Fix processing default values from native_functions.yaml] in the
+    # tracking issue https://github.com/pytorch/pytorch/issues/30405
     while idx < len(arguments):
         argument = arguments[idx]
-        number_of_arguments = len(supported_topt_arguments[0])
-        if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
-            topt_representation = []
-            for i in range(number_of_arguments):
-                argument = arguments[idx]
-                if not is_tensor_option(argument):
-                    break
-                topt_representation.append(argument)
-                idx += 1
-            if len(topt_representation) == number_of_arguments:
-                merged_argument = check_topt_representation(topt_representation)
-                assert merged_argument, \
-                    "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
-                    .format(str(topt_representation), str(supported_topt_arguments))
-                new_arguments.append(merged_argument)
-            else:
-                new_arguments += topt_representation
-        else:
-            new_arguments.append(argument)
-            idx += 1
+        if declaration['name'] == 'tril_indices' or declaration['name'] == 'triu_indices':
+            arguments = [
+                {'type': 'int64_t', 'name': 'row', 'is_nullable': False, 'annotation': None},
+                {'type': 'int64_t', 'name': 'col', 'is_nullable': False, 'annotation': None},
+                {'type': 'int64_t', 'name': 'offset', 'is_nullable': False, 'annotation': None, 'default': 0},
+                {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+                 'default': 'at::kLong', 'is_nullable': True},
+                {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+                 'default': 'c10::nullopt', 'is_nullable': True},
+                {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+                 'default': 'c10::nullopt', 'is_nullable': True},
+                {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+                 'default': 'c10::nullopt', 'is_nullable': True},
+            ]
 
-    arguments = new_arguments
+        idx += 1
 
     # Sanity checks
 

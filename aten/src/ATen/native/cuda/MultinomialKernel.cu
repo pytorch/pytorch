@@ -375,7 +375,11 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // To exploit greater parallelism for the sampling, generate the
       // Uniform random samples in a separate kernel launch, into
       // temporarily allocated memory. The device RNG is thread-limited
-      Tensor sampled = native::empty_cuda({numDist, n_sample}, self_v.options());
+      Tensor sampled = native::empty_cuda({numDist, n_sample}, 
+                                          typeMetaToScalarType(self_v.options().dtype()), 
+                                                               self_v.options().layout(), 
+                                                               self_v.options().device(), 
+                                                               self_v.options().pinned_memory());
       at::native::uniform_cuda_(sampled, 0.0, 1.0, gen);
 
       dim3 block(numCategories < maxThreads ? numCategories : maxThreads);

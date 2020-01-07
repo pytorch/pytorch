@@ -85,7 +85,13 @@ SparseTensor new_sparse(const TensorOptions& options) {
 
 /** Actual dispatched creation methods ***/
 
-SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
+SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  const auto options = TensorOptions()
+        .dtype(dtype)
+        .layout(layout)
+        .device(device)
+        .pinned_memory(pin_memory);
+
   SparseTensor self = new_sparse(options);
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
@@ -97,7 +103,15 @@ SparseTensor new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> size,
     const LongTensor& indices,
     const Tensor& values,
-    const TensorOptions& options) {
+    ScalarType dtype, 
+    Layout layout, 
+    Device device, 
+    bool pin_memory) {
+  const auto options = TensorOptions()
+        .dtype(dtype)
+        .layout(layout)
+        .device(device)
+        .pinned_memory(pin_memory);
   SparseTensor self = new_sparse(options);
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
   // NOTE: There is no guarantee that `indices` and `values` don't contain AutogradMeta. However,
@@ -116,14 +130,14 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
-  return new_with_dims_sparse(size.size(), 0, size, options);
+Tensor empty_sparse(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(pin_memory.has_value() && !pin_memory.value(), "Only dense CPU tensors can be pinned");
+  return new_with_dims_sparse(size.size(), 0, size, dtype.value(), layout.value(), device.value(), pin_memory.value());
 }
 
 /* Shape init */
-Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
-  return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
+Tensor sparse_coo_tensor(ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+  return at::__sparse_coo_tensor_with_dims(size.size(), 0, size, dtype, at::kSparse, device, pin_memory);
 }
 
 /* Pointer-copy init */
@@ -141,11 +155,12 @@ namespace {
   }
 }
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
+
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
@@ -190,11 +205,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
 }
 
 // NB: Got rid of the sizes == NULL case
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
@@ -240,11 +255,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
 // are guaranteed to be within bounds.
 // NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
@@ -260,7 +275,7 @@ SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFor
       !optional_memory_format.has_value(),
       "unsupported memory format option ",
       optional_memory_format.value());
-  SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
+  SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), typeMetaToScalarType(self.options().dtype()), self.options().layout(), self.options().device(), self.options().pinned_memory());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
 }
@@ -309,7 +324,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
+    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, typeMetaToScalarType(sparse_options.dtype()), sparse_options.layout(), sparse_options.device(), sparse_options.pinned_memory());
   }
   LongTensor indices;
   if (sparse_dim == dims) {

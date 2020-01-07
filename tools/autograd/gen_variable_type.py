@@ -27,6 +27,10 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+
+
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
 # of proper scopes, where subsequent compilation passes can ask for the unfolding
@@ -219,7 +223,7 @@ CALL_DEFAULT = CodeTemplate("""\
 TypeDefault::${api_name}(${type_method_args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
-at::${api_name}(${unpacked_args})""")
+at::${api_name_prefix}${api_name}(${unpacked_args})""")
 
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
 self_.${api_name}(${unpacked_method_args})""")
@@ -846,7 +850,11 @@ def emit_body(declaration):
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
             if 'namespace' in declaration['method_of']:
-                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+                api_name_prefix = ''
+                if TOUtils.check_if_factory_method(declaration['arguments']):
+                    api_name_prefix = '_'
+
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined, api_name_prefix=api_name_prefix)
             else:
                 unpacked_method_args = combined['unpacked_args'][1:]
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(

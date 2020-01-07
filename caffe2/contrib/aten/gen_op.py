@@ -37,8 +37,10 @@ if args.aten_root:
             args.aten_root))
     sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
     from code_template import CodeTemplate as CT
+    from tensor_options_utils import check_if_factory_method
 else:
     from src.ATen.code_template import CodeTemplate as CT
+    from src.ATen.tensor_options_utils import check_if_factory_method
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
@@ -201,7 +203,7 @@ def get_num_inputs(o):
 def find_factory_methods(decls):
     factory_methods = {}
     for o in decls:
-        if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
+        if check_if_factory_method(o['arguments']):
             factory_methods[o['name']] = 0
     return factory_methods
 

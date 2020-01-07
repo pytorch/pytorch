@@ -13,14 +13,14 @@ inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU) {
     if (s.isFloatingPoint()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kDouble));
+      return at::native::scalar_tensor(s, at::kDouble, /* layout */ c10::nullopt, at::kCPU);
     } else if (s.isBoolean()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kBool));
+      return at::native::scalar_tensor(s, at::kBool, /* layout */ c10::nullopt, at::kCPU);
     } else if (s.isComplex()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kComplexDouble));
+      return at::native::scalar_tensor(s, at::kComplexDouble, /* layout */ c10::nullopt, at::kCPU);
     } else {
       AT_ASSERT(s.isIntegral(false));
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kLong));
+      return at::native::scalar_tensor(s,  at::kLong, /* layout */ c10::nullopt, at::kCPU);
     }
   }
   if (s.isFloatingPoint()) {

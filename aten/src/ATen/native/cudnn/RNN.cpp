@@ -1075,11 +1075,25 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 }
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
-// to initialize just the state tensor
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+// to initialize just the state tensor.
+//
+// We should be passing optional dtype, layout, device and pin_memory here.
+// Please, see [All schemas in native_functions.yaml that have TensorOptions
+// should be have optional ScalarType, Layout, Device and pin memory] in the
+// tracking issue https://github.com/pytorch/pytorch/issues/30405
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
+
+  // This is a hack.
+  // Please see [Use only optional version of tensor options when getting them from TensorOptions object]
+  // In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
+  const auto options = TensorOptions()
+        .dtype(dtype)
+        .layout(layout)
+        .device(device)
+        .pinned_memory(pin_memory);
   dropout_desc.initialize_rng(handle, dropout_p, dropout_seed, options);
   return dropout_desc.state;
 }
@@ -1158,8 +1172,8 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
-    state.buffer = at::_cudnn_init_dropout_state(
-      dropout_p, train, seed, options.dtype(at::kByte));
+    state.buffer = at::__cudnn_init_dropout_state(
+      dropout_p, train, seed, at::kByte, options.layout(), options.device(), options.pinned_memory());
     // NB: CUDA binds the event to a device at creation time, so we can initialize it
     // only now, when we know we're on the correct device.
     state.event.emplace();
