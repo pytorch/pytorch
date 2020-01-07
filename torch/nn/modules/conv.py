@@ -23,6 +23,10 @@ class _ConvNd(Module):
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
             raise ValueError('out_channels must be divisible by groups')
+        valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
+        if padding_mode not in valid_padding_modes:
+            raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
+                valid_padding_modes, padding_mode))
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -32,10 +36,6 @@ class _ConvNd(Module):
         self.transposed = transposed
         self.output_padding = output_padding
         self.groups = groups
-        if padding_mode not in {'zeros', 'reflect', 'replicate', 'circular'}:
-            raise ValueError(
-                "padding_mode must be one of {{'zeros', 'reflect', 'replicate', 'circular'}}, "
-                "but got padding_mode='{}'".format(padding_mode))
         self.padding_mode = padding_mode
         self._padding_repeated_twice = _repeat_tuple(self.padding, 2)
         if transposed:
@@ -147,7 +147,7 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
@@ -278,7 +278,7 @@ class Conv2d(_ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -411,7 +411,7 @@ class Conv3d(_ConvNd):
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'`` Default: ``'zeros'``
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
