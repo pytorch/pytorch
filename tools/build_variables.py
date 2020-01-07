@@ -142,6 +142,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/print_handler.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
+    "torch/csrc/jit/register_prim_ops_c10.cpp",
     "torch/csrc/jit/register_string_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
     "torch/csrc/jit/register_distributed_ops.cpp",

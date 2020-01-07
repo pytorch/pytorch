@@ -211,7 +211,7 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     float output_scale = 0.00390625;  // 1.0 / 2^8
     int64_t output_zero_point = 0;
     if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 2.3283064e-10;  // 1.0 / 2^32
+      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
     } else if (SCALAR_TYPE == at::kQInt8) {
       output_zero_point = -128;
     }
@@ -237,7 +237,7 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
       [&](Vec value_qx) -> Vec {
         auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
                                             scale_neg_zp_premul_vec);
-        for (int idx = 0; idx < 4; ++idx) {
+        for (int idx = 0; idx < value_dx.size(); ++idx) {
           value_dx[idx] = Vec256<float>(0.0f) - value_dx[idx];
           value_dx[idx] = value_dx[idx].exp();
           value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
