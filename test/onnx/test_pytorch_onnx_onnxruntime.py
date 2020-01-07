@@ -223,6 +223,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_reshape_constant_fold(self):
+        class Reshape(torch.nn.Module):
+            def __init__(self, ):
+                super(Reshape, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                scale_1 = self.weight.reshape(1, -1, 1, 1)
+                return x * scale_1
+
+        x = torch.randn(4, 5)
+        self.run_test(Reshape(), (x,), rtol=1e-3, atol=1e-5)
+
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
