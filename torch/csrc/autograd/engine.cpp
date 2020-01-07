@@ -386,7 +386,11 @@ void GraphTask::set_exception(
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    future_result_->setError(e.what());
+    if (!future_result_->completed()) {
+      future_result_->setError(e.what());
+    } else {
+      TORCH_INTERNAL_ASSERT(future_result_->hasError());
+    }
   }
 }
 
