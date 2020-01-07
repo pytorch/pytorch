@@ -669,7 +669,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_rpc_complex_args(ExecMode.REMOTE)
 
     def context_cleanup_test_helper(self, rpc_args, func, nested=False):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         # test that in dist autograd, in the case that tensors communicated over RPC do
         # NOT require grad, we still cleanup the dist autograd contexts created
