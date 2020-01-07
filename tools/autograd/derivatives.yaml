@@ -1114,26 +1114,26 @@
 - name: replication_pad3d(Tensor self, int[6] padding) -> Tensor
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float scales_1=-1.0) -> Tensor
-  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales_1)
+- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float? scales=None) -> Tensor
+  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales)
 
-- name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2)
+- name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
-- name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2)
+- name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_1, scales_2, scales_3)
+- name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d(Tensor self, int[1] output_size, float scales_1=-1.0) -> Tensor
-  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales_1)
+- name: upsample_nearest1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
+  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales)
 
-- name: upsample_nearest2d(Tensor self, int[2] output_size, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_1, scales_2)
+- name: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
 
-- name: upsample_nearest3d(Tensor self, int[3] output_size, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_1, scales_2, scales_3)
+- name: upsample_nearest3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
 
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
@@ -1374,26 +1374,26 @@
   grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float scales_1=-1.0) -> Tensor
-  grad_output: upsample_linear1d(grad, output_size, align_corners, scales_1)
+- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
+  grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
 
-- name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_1, scales_2)
+- name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_h, scales_w)
 
-- name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_1, scales_2)
+- name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_1, scales_2, scales_3)
+- name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_d, scales_h, scales_w)
 
-- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float scales_1=-1.0) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scales_1)
+- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
+  grad_output: upsample_nearest1d(grad, output_size, scales)
 
-- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float scales_1=-1.0, float scales_2=-1.0) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scales_1, scales_2)
+- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest2d(grad, output_size, scales_h, scales_w)
 
-- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float scales_1=-1.0, float scales_2=-1.0, float scales_3=-1.0) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scales_1, scales_2, scales_3)
+- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest3d(grad, output_size, scales_d, scales_h, scales_w)
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   grad_output: sigmoid_backward(grad, output)
@@ -1407,17 +1407,17 @@
 - name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   log_probs: _cudnn_ctc_loss_backward(grad, result0, result1, zero_infinity)
 
-- name: cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  self, weight, bias: cudnn_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
+- name: cudnn_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  self, weight: cudnn_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
 
-- name: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, groups, benchmark, deterministic, true, grad_input_mask)
+- name: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[2] output_mask) -> (Tensor, Tensor)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], Tensor(), grad_output, weight, self, stride, padding, dilation, true, output_padding, groups, benchmark, deterministic, true, grad_input_mask)
 
-- name: cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  self, weight, bias: cudnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
+- name: cudnn_convolution(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  self, weight: cudnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
 
-- name: cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
+- name: cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[2] output_mask) -> (Tensor, Tensor)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], Tensor(), grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
 
 # The above backward definitions are equivalent to the definitions below.  Why do we bundle
 # everything up?  It's because it's more convenient to define double backwards
@@ -1429,11 +1429,9 @@
 #
 # input: cudnn_convolution_backward_input(input.sizes(), grad.contiguous(), weight, padding, stride, dilation, groups, benchmark, deterministic)
 # weight: cudnn_convolution_backward_weight(weight.sizes(), grad.contiguous(), input, padding, stride, dilation, groups, benchmark, deterministic)
-# bias: cudnn_convolution_backward_bias(grad.contiguous())
 #
 # input: cudnn_convolution_transpose_backward_input(grad.contiguous(), weight, padding, stride, dilation, groups, benchmark, deterministic)
 # weight: cudnn_convolution_transpose_backward_weight(weight.sizes(), grad.contiguous(), input, padding, stride, dilation, groups, benchmark, deterministic)
-# bias: cudnn_convolution_backward_bias(grad.contiguous())
 
 - name: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   self, grid: cudnn_grid_sampler_backward(self, grid, grad)
