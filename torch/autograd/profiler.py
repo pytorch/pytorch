@@ -163,7 +163,7 @@ class EventList(list):
                     next_id += 1
 
             # remove trailing whitespace and comma
-            f.seek(f.tell()-2, os.SEEK_SET)
+            f.seek(f.tell() - 2, os.SEEK_SET)
             f.truncate()
             f.write("]")
 
