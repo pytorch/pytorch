@@ -65,8 +65,8 @@ template <typename T>
 inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() noexcept {
 #if defined(_MSC_VER)
   return extract(
-      "class c10::string_view __cdecl c10::util::detail::fully_qualified_type_name_impl<",
-      ">(void)",
+      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
+      ">(void) noexcept",
       __FUNCSIG__);
 #elif defined(__clang__)
   return extract(

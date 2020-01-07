@@ -880,6 +880,27 @@ class TestAutograd(TestCase):
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
 
+    def test_set_grad_generator_functions(self):
+        @torch.no_grad()
+        def gen_no_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), False)
+                yield i
+
+        with torch.enable_grad():
+            for _ in gen_no_grad():
+                self.assertEqual(torch.is_grad_enabled(), True)
+
+        @torch.enable_grad()
+        def gen_enable_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), True)
+                yield i
+
+        with torch.no_grad():
+            for _ in gen_enable_grad():
+                self.assertEqual(torch.is_grad_enabled(), False)
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -2523,7 +2544,10 @@ class TestAutograd(TestCase):
         x = torch.randn(10, 10)
 
         with profile() as p:
+            self.assertTrue(torch.autograd._profiler_enabled())
             y = x * 2 + 4
+
+        self.assertFalse(torch.autograd._profiler_enabled())
 
         last_end = 0
         names = ['mul', 'add']
@@ -2719,6 +2743,21 @@ class TestAutograd(TestCase):
             f(1, 2)
 
         self.assertTrue('my_func' in str(p))
+
+    def test_record_function_multithreaded(self):
+        rf = record_function("outer")
+        rf.__enter__()
+        with profile():
+            # test that exiting the record function after starting a profile
+            # doesn't throw.
+            rf.__exit__()
+
+        with profile():
+            rf.__enter__()
+        # test that exiting the record function after the profile has ended
+        # doesn't throw.
+        rf.__exit__()
+
 
     def test_dir(self):
         x = torch.randn(10, 10)
