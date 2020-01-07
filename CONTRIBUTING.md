@@ -6,6 +6,8 @@
 - [Writing documentation](#writing-documentation)
   * [Building documentation](#building-documentation)
     + [Tips](#tips)
+    + [Building C++ Documentation](#building-c---documentation)
+  * [Previewing changes](#previewing-changes)
   * [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with--py-spy-)
 - [Managing multiple build trees](#managing-multiple-build-trees)
@@ -221,19 +223,6 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
-For C++ documentation (https://pytorch.org/cppdocs), we use
-[Doxygen](http://www.doxygen.nl/) and then convert it to
-[Sphinx](http://www.sphinx-doc.org/) via
-[Breathe](https://github.com/michaeljones/breathe) and
-[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
-information on the documentation syntax. To build the documentation locally,
-`cd` into `docs/cpp` and then `make html`.
-
-We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
-commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
-
 ### Building documentation
 
 To build the documentation:
@@ -301,6 +290,52 @@ git add index.rst jit.rst
 ...
 ```
 
+#### Building C++ Documentation
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
+
+To build the documentation, follow the same steps as above, but run them from
+`docs/cpp` instead of `docs`.
+
+### Previewing changes
+
+It is helpful when submitting a PR that changes the docs to provide a rendered
+version of the result. You can do this by using GitHub pages to host the docs
+you have built. To do so, follow [these steps](https://help.github.com/en/enterprise/2.13/user/articles/configuring-a-publishing-source-for-github-pages)
+to make a repo to host your changed documentation.
+
+GitHub pages expects to be hosting a Jekyll generated website which does not work
+well with the static resource paths used in the PyTorch documentation. To get around
+this, you must add an empty file called `.nojekyll` to your repo.
+
+```bash
+cd your_github_pages_repo
+touch .nojekyll
+git add .
+git commit
+git push
+```
+
+Then, copy built documentation and push the changes:
+
+```bash
+cd your_github_pages_repo
+cp -r ~/my_pytorch_path/docs/build/html/* .
+git add .
+git commit
+git push
+```
+
+Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
 
 ### Adding documentation tests
 
