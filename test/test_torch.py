@@ -682,6 +682,8 @@ class _TestTorchMixin(object):
         x = torch.randn(sizes)
         with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
             torch.sum(x, 64)
+        with self.assertRaisesRegex(RuntimeError, "PyTorch doesn't support reduction operations for dim>=64"):
+            torch.sum(x, -1)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -6685,6 +6687,36 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 a.bitwise_not_()
 
+    def test_bitwise_and(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
+            expected_res = torch.tensor([0, 0, 3], dtype=dtype, device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor([0, 2, 2], dtype=dtype, device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_and(a, b), expected_res)
+            self.assertEqual(torch.bitwise_and(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_and(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_and(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_and_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_and_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+        self.assertEqual(torch.tensor([False, True, False], device=device),
+                         torch.bitwise_and(torch.tensor([True, True, False], device=device),
+                                           torch.tensor([False, True, False], device=device)))
+
     def test_bitwise_xor(self, device):
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
@@ -10409,6 +10441,28 @@ class TestTorchDeviceType(TestCase):
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
+        # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
+        # Also check that cumsum over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cumsum(dim=dim)
+                # Check that backward does not crash
+                integrated.sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cumsum(dim=-1)
+        # Check that backward does not crash
+        integrated.sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
     def test_cumprod(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumprod(x, 1)
@@ -10629,11 +10683,8 @@ class TestTorchDeviceType(TestCase):
 
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
-            if dt == torch.bfloat16:
-                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-                continue
 
-            if dt == torch.half and device == 'cpu':
+            if dt in {torch.half, torch.bfloat16} and device == 'cpu':
                 # fix once random is implemented for Half on CPU
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             else:
@@ -10723,17 +10774,14 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt == torch.half and device == "cpu":
+                if dt in {torch.half, torch.bfloat16} and device == "cpu":
                     # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
-                    if dt == torch.bfloat16:
-                        self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt))
-                        continue  # Remove once random is supported for bfloat16 on cuda
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
-                if dt != torch.double and dt != torch.float and dt != torch.half:
+                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16}:
                     self.assertRaises(RuntimeError, lambda: torch.rand(shape, device=device, dtype=dt).shape)
 
                 if dt == torch.double or dt == torch.float:
