@@ -1100,7 +1100,10 @@ class DistAutogradTest(RpcAgentTestFixture):
                     if rank % 2 != 0:
                         wait_until_node_failure(rank)
 
-                with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
+                # Shutdown sequence is not very well defined and as a result
+                # we might see either of the exception messages below.
+                with self.assertRaisesRegex(RuntimeError,
+                                            "(Request aborted during client shutdown)|"
                                             "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
@@ -1280,7 +1283,10 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for rank 2 to die.
                 wait_until_node_failure(2)
 
-                with self.assertRaisesRegex(RuntimeError, "(Request aborted during client shutdown)|"
+                # Shutdown sequence is not very well defined and as a result
+                # we might see either of the exception messages below.
+                with self.assertRaisesRegex(RuntimeError,
+                                            "(Request aborted during client shutdown)|"
                                             "(worker.: Error in reponse from worker.: server shutting down)"):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
@@ -1474,13 +1480,11 @@ class DistAutogradTest(RpcAgentTestFixture):
             debug_info = dist_autograd._get_debug_info()
             assert (debug_info is not None)
             backward_passes = int(debug_info['num_current_backward_passes'])
-            threads_blocked = int(debug_info['num_threads_blocked_in_backward'])
 
             # Hard to validate exact numbers because of the distributed nature.
             # We can't use a barrier() here since that would block the single
             # CPU thread available for autograd and can cause deadlocks.
             assert (backward_passes >= 1 and backward_passes <= 4)
-            assert (threads_blocked >= 1 and threads_blocked <= 4)
             return input
 
     @dist_init
@@ -1527,7 +1531,6 @@ class DistAutogradTest(RpcAgentTestFixture):
         debug_info = dist_autograd._get_debug_info()
         assert (debug_info is not None)
         self.assertEqual(0, int(debug_info['num_current_backward_passes']))
-        self.assertEqual(0, int(debug_info['num_threads_blocked_in_backward']))
         self.assertEqual(0, int(debug_info['local_autograd_engine_cpu_queue_size']))
 
         self.assertTrue(_all_contexts_cleaned_up())
@@ -1535,6 +1538,41 @@ class DistAutogradTest(RpcAgentTestFixture):
         # All contexts should be cleaned up.
         debug_info = dist_autograd._get_debug_info()
         self.assertEqual(0, int(debug_info['num_autograd_contexts']))
+
+    @staticmethod
+    def _workload_thread():
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            t3 = rpc.rpc_sync("worker0", torch.add, args=(t1, t2))
+            t4 = rpc.rpc_sync("worker0", torch.mul, args=(t2, t3))
+            t5 = rpc.rpc_sync("worker0", torch.matmul, args=(t3, t4))
+            t6 = rpc.rpc_sync("worker0", torch.add, args=(t4, t5))
+
+            dist_autograd.backward([t6.sum()])
+
+    @dist_init
+    def test_async_dist_autograd(self):
+        '''
+        This test ensures async processing for distributed autograd works
+        appropriately. This is achieved by spawning multiple threads and
+        hammering a single node with a lot of backward() calls.
+        '''
+
+        self._initialize_pg()
+        if self.rank != 0:
+            # All other ranks schedule work on rank 0.
+            threads = []
+            for i in range(20):
+                t = threading.Thread(target=DistAutogradTest._workload_thread)
+                t.start()
+                threads.append(t)
+
+            for thread in threads:
+                thread.join()
+
+        dist.barrier()
+
 
 
 @unittest.skipIf(
