@@ -36,6 +36,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/C++17.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -65,6 +66,12 @@ static constexpr int launch_bound2 = 4;
 
 namespace at { namespace native {
 
+// NOTE: @zasdfgbnm is currently working on rewriting the gpu loops.
+// Some of the old codes has been moved to namespace legacy, and
+// new codes will be put into namespace modern. These two namespaces
+// will coexists for a while until the rewrite is done. Once the rewrite
+// is done, we will remove the legacy and modern namespace and everything
+// will be in at::native directly.
 namespace legacy {
 
 template<int nt, int vt, typename func_t>
@@ -167,7 +174,127 @@ invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_
 
 } // namespace legacy
 
+// See the note for namespace legacy above.
 namespace modern {
+
+namespace detail {
+
+template <typename func_t, typename array_t, std::size_t... I>
+__device__ inline constexpr decltype(auto) apply_impl(func_t f, array_t t, std::index_sequence<I...>)
+{
+    return f(t[I]...);
+}
+
+template <typename func_t, typename array_t>
+__device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
+  constexpr std::size_t arity = function_traits<func_t>::arity;
+  return apply_impl(f, a, std::make_index_sequence<arity>{});
+}
+
+}  // namespace detail
+
+template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
+C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+  // Assumption:
+  // all arguments have the same type, which could be different from the return type
+  // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using arg_t = typename traits::template arg<0>::type;
+  constexpr int arity = traits::arity;
+
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+
+  // compute base pointers
+  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
+  arg_t *args_base[arity];
+  #pragma unroll
+  for (int i = 0; i < arity; i++) {
+    args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
+  }
+
+  // fetch data
+  return_t results[vt];
+  at::detail::Array<arg_t, arity> args[vt];
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      #pragma unroll
+      for (int j = 0; j < arity; j++) {
+        args[i][j] = *(args_base[j] + i * nt);
+      }
+    }
+  }
+
+  // compute
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      results[i] = detail::array_apply(f, args[i]);
+    }
+  }
+
+  // store data
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      *(result_base + i * nt) = results[i];
+    }
+  }
+}
+
+template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
+C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+  // Assumption:
+  // all arguments have the same type, which could be different from the return type
+  // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+
+  // compute base pointers
+  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
+  return_t results[vt];
+
+  // compute
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      results[i] = f();
+    }
+  }
+
+  // store data
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      *(result_base + i * nt) = results[i];
+    }
+  }
+}
+
+// TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
+template<int nt, int vt, typename func_t, typename array_t>
+static void launch_kernel(int64_t N, const func_t& f, array_t data) {
+  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  if (N == 0) {
+    return;
+  }
+  dim3 block(nt);
+  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f, data);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
 
 } // namespace modern
 
@@ -204,6 +331,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
+    } else if (iter.has_contiguous_first_dim()) {
+      modern::launch_kernel<launch_size_1d, 1>(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
