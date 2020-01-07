@@ -256,24 +256,6 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
                    *r_data = *t_data < *src_data ? *t_data : *src_data;);
 }
 
-void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumsum = 0;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumsum += t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumsum;
-                       });
-}
-
 void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 {
   dimension = at::maybe_wrap_dim(dimension, t);

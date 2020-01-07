@@ -5237,12 +5237,12 @@
 - func: _cumsum(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: legacy::cpu::_th_cumsum
+    CPU: _cumsum_cpu
     CUDA: legacy::cuda::_th_cumsum
 
 - func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cumsum_out
+    CPU: _cumsum_out_cpu
     CUDA: legacy::cuda::_th_cumsum_out
 
 - func: _cumprod(Tensor self, int dim) -> Tensor

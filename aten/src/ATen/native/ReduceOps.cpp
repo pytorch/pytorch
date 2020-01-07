@@ -9,6 +9,8 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/Parallel.h>
 
 #include <algorithm>
 #include <functional>
@@ -178,6 +180,58 @@ static TensorIterator make_reduction(
     return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
   }
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
+}
+
+template<typename scalar_t>
+void _cumsum_out_cpu_template(Tensor& result, const Tensor& self, int64_t dim) {
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK((0 <= wrap_dim && wrap_dim < self.dim())
+              || (0 == wrap_dim && wrap_dim == self.dim()) , "invaild dim to reduce");
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
+  if (self.numel() == 0) {
+    return;
+  }
+  if (self.dim() == 0) {
+    result.copy_(self);
+    return;
+  }
+  if (self.dim() == 1) {
+    scalar_t sum = 0;
+    auto iter = TensorIterator::unary_op(result, self);
+    cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+      sum += i;
+      return sum;
+    });
+    return;
+  }
+  auto reduce_dim = self.dim() - wrap_dim - 1;
+  auto n = self.size(reduce_dim);
+  parallel_for(0, n, 1, [&](int64_t begin, int64_t end) {
+    for (int64_t f = begin; f < end; ++f) {
+      Tensor in = self.select(reduce_dim, f);
+      Tensor out = result.select(reduce_dim, f);
+      scalar_t sum = 0;
+      auto iter = TensorIterator::unary_op(out, in);
+      cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+        sum += i;
+        return sum;
+      });
+    }
+  });
+}
+
+Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::native::_cumsum_out_cpu(result, self, dim);
+}
+
+Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumsum_out_cpu", [&] {
+    _cumsum_out_cpu_template<scalar_t>(result, self, dim);
+  });
+  return result;
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
