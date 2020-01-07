@@ -3,6 +3,7 @@
 
 #include "c10/macros/Macros.h"
 #include "c10/util/StringUtil.h"
+#include "c10/util/Deprecated.h"
 
 #include <cstddef>
 #include <exception>
@@ -113,6 +114,12 @@ class C10_API IndexError : public Error {
   using Error::Error;
 };
 
+
+// Used in ATen for non finite indices.  These turn into
+// ExitException when they cross to Python.
+class C10_API EnforceFiniteError : public Error {
+  using Error::Error;
+};
 
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
@@ -321,38 +328,38 @@ namespace c10 { namespace detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")]]
+C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg) instead.")
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")]]
+C10_DEPRECATED_MESSAGE("AT_INDEX_ERROR(msg) is deprecated, use TORCH_CHECK_INDEX(false, msg) instead.")
 */
 inline void deprecated_AT_INDEX_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_WARN is deprecated, use TORCH_WARN instead.")]]
+C10_DEPRECATED_MESSAGE("AT_WARN is deprecated, use TORCH_WARN instead.")
 */
 inline void deprecated_AT_WARN() {}
 
-[[deprecated("AT_CHECK is deprecated, use TORCH_CHECK instead.")]]
+C10_DEPRECATED_MESSAGE("AT_CHECK is deprecated, use TORCH_CHECK instead.")
 inline void deprecated_AT_CHECK() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
+C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
+C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
