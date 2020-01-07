@@ -115,6 +115,12 @@ class C10_API IndexError : public Error {
 };
 
 
+// Used in ATen for non finite indices.  These turn into
+// ExitException when they cross to Python.
+class C10_API EnforceFiniteError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
