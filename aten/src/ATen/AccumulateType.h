@@ -22,6 +22,7 @@ struct AccumulateType { };
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <> struct AccumulateType<half, true> { using type = float; };
+template <> struct AccumulateType<BFloat16, true> {using type = float; };
 #endif
 template <> struct AccumulateType<Half, true> { using type = float; };
 template <> struct AccumulateType<float, true> { using type = float; };
