@@ -297,7 +297,7 @@ void slow_conv_transpose3d_out_cuda_template(
     ones.fill_(1);
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "slow_conv_transpose3d_out_cuda", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -531,7 +531,7 @@ void slow_conv_transpose3d_backward_out_cuda_template(
       {n_output_plane * kernel_width * kernel_height * kernel_depth,
        input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "slow_conv_transpose3d_backward_out_cuda", [&] {
         // Helpers
         Tensor grad_input_n;
@@ -761,7 +761,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
   columns.resize_({n_output_plane * kernel_width * kernel_height * kernel_depth,
                    input_depth * input_height * input_width});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(),
       "slow_conv_transpose3d_acc_grad_parameters_cuda",
       [&] {
