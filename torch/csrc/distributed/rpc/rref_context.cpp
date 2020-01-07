@@ -19,6 +19,7 @@ RRefContext& RRefContext::getInstance() {
 
 void RRefContext::destroyInstance(bool ignoreRRefLeak) {
   auto& ctx = RRefContext::getInstance();
+  ctx.delAllUsers();
   {
     std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
     ctx.destroyed_ = true;
@@ -148,6 +149,18 @@ void RRefContext::delUser(
                        const c10::optional<utils::FutureError>& futErr) {
       RRefContext::handleException(futErr);
     });
+
+    users_.erase(forkId);
+  }
+}
+
+void RRefContext::delAllUsers() {
+  for (auto user : users_) {
+    auto rref_ptr = user.second.lock();
+    if (rref_ptr == nullptr) {
+      continue;
+    }
+    rref_ptr->tryDel();
   }
 }
 
@@ -357,8 +370,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   users_.emplace(
       std::piecewise_construct,
       std::forward_as_tuple(forkId),
-      std::forward_as_tuple(iter->second)
-  );
+      std::forward_as_tuple(iter->second));
   pendingUsers_.erase(iter);
 }
 

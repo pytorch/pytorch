@@ -109,18 +109,26 @@ UserRRef<T>::UserRRef(
 }
 
 template <typename T>
-UserRRef<T>::~UserRRef() {
-  try {
-    RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
-  } catch (const std::exception& ex) {
-    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-               << ex.what();
-  } catch (...) {
-    LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-               << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
-               << "unknown error";
+void UserRRef<T>::tryDel() {
+  bool valid = valid_.exchange(false);
+  if (valid) {
+    try {
+      RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
+    } catch (const std::exception& ex) {
+      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+                 << ex.what();
+    } catch (...) {
+      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
+                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+                 << "unknown error";
+    }
   }
+}
+
+template <typename T>
+UserRRef<T>::~UserRRef() {
+  tryDel();
 }
 
 template <typename T>

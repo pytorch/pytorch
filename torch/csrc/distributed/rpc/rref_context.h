@@ -119,6 +119,8 @@ class RRefContext {
       const RRefId& rrefId,
       const ForkId& forkId);
 
+  void delAllUsers();
+
   std::unordered_map<std::string, std::string> getDebugInfo();
 
  private:

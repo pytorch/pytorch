@@ -207,6 +207,8 @@ class RRef : public RRefInterface {
     return rrefId_;
   }
 
+  virtual void tryDel() {}
+
   // returns true if this RRef holds an py::object, false if IValue
   virtual bool isPyObj() = 0;
 
@@ -248,6 +250,8 @@ class UserRRef final : public RRef {
   // yet, this call will block.
   T toHere();
 
+  void tryDel() override;
+
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;
 
@@ -257,6 +261,9 @@ class UserRRef final : public RRef {
   UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
 
   const ForkId forkId_;
+
+  // Indicates if this fork has sent delete message to it's owner.
+  std::atomic<bool> valid_{true};
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
