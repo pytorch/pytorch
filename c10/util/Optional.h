@@ -75,6 +75,12 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
   ((CHECK) ? (EXPR) : ([] { assert(!#CHECK); }(), (EXPR)))
 #endif
 
+#if defined(__CUDA_ARCH__)
+#define TR2_OPTIONAL_HOST_CONSTEXPR
+#else
+#define TR2_OPTIONAL_HOST_CONSTEXPR constexpr
+#endif
+
 namespace detail_ {
 
 // VS doesn't handle constexpr well, so we need to skip these stuff.
@@ -443,25 +449,25 @@ class optional : private OptionalBase<T> {
     return initialized();
   }
 
-  constexpr T const* operator->() const {
+  TR2_OPTIONAL_HOST_CONSTEXPR T const* operator->() const {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(initialized(), dataptr());
   }
 
-  constexpr T* operator->() {
+  TR2_OPTIONAL_HOST_CONSTEXPR T* operator->() {
     assert(initialized());
     return dataptr();
   }
 
-  constexpr T const& operator*() const& {
+  TR2_OPTIONAL_HOST_CONSTEXPR T const& operator*() const& {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(initialized(), contained_val());
   }
 
-  constexpr T& operator*() & {
+  TR2_OPTIONAL_HOST_CONSTEXPR T& operator*() & {
     assert(initialized());
     return contained_val();
   }
 
-  constexpr T&& operator*() && {
+  TR2_OPTIONAL_HOST_CONSTEXPR T&& operator*() && {
     assert(initialized());
     return constexpr_move(contained_val());
   }
@@ -582,11 +588,11 @@ class optional<T&> {
   }
 
   // 20.5.5.3, observers
-  constexpr T* operator->() const {
+  TR2_OPTIONAL_HOST_CONSTEXPR T* operator->() const {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(ref, ref);
   }
 
-  constexpr T& operator*() const {
+  TR2_OPTIONAL_HOST_CONSTEXPR T& operator*() const {
     return TR2_OPTIONAL_ASSERTED_EXPRESSION(ref, *ref);
   }
 
@@ -938,5 +944,6 @@ struct hash<c10::optional<T&>> {
 
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
+#undef TR2_OPTIONAL_HOST_CONSTEXPR
 
 #endif // C10_UTIL_OPTIONAL_H_
