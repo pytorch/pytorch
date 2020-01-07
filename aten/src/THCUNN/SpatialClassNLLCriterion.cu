@@ -123,8 +123,7 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
           T *output,
           T *total_weight)
 {
-  if (*total_weight > 0)
-    *output = THCNumerics<T>::div(*output, *total_weight);
+  *output = THCNumerics<T>::div(*output, *total_weight);
 }
 
 template<typename T>
