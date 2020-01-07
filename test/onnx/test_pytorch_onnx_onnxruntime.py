@@ -223,6 +223,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_reshape_constant_fold(self):
+        class Reshape(torch.nn.Module):
+            def __init__(self, ):
+                super(Reshape, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                scale_1 = self.weight.reshape(1, -1, 1, 1)
+                return x * scale_1
+
+        x = torch.randn(4, 5)
+        self.run_test(Reshape(), (x,), rtol=1e-3, atol=1e-5)
+
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
@@ -783,6 +796,24 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.arange(2 * 5).to(torch.float).view(2, 5)
         self.run_test(IndexPutModel6(), (x, update))
 
+        class IndexPutModel7(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
+        self.run_test(IndexPutModel7(), (x, update))
+
+        class IndexPutModel8(torch.nn.Module):
+            def forward(self, x, update):
+                x[:3, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(3 * 5).to(torch.float).view(3, 5)
+        self.run_test(IndexPutModel8(), (x, update))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_ellipsis(self):
         class IndexPutModel(torch.nn.Module):
@@ -945,13 +976,13 @@ class TestONNXRuntime(unittest.TestCase):
                         torch.nn.functional.interpolate(x, mode=mode, size=size_array)
                 if align_corners:
                     return torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale,
-                                                           align_corners=True, use_scale_factor=True), \
+                                                           align_corners=True, recompute_scale_factor=False), \
                         torch.nn.functional.interpolate(x, mode=mode, scale_factor=scale_array,
-                                                        align_corners=True, use_scale_factor=True)
+                                                        align_corners=True, recompute_scale_factor=False)
                 return torch.nn.functional.interpolate(x, mode=mode,
-                                                       scale_factor=scale, use_scale_factor=True), \
+                                                       scale_factor=scale, recompute_scale_factor=False), \
                     torch.nn.functional.interpolate(x, mode=mode,
-                                                    scale_factor=scale_array, use_scale_factor=True)
+                                                    scale_factor=scale_array, recompute_scale_factor=False)
 
         self.run_test(MyModel(), x)
 
@@ -988,13 +1019,13 @@ class TestONNXRuntime(unittest.TestCase):
                         torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
                 if self.align_corners:
                     return torch.nn.functional.interpolate(x, mode=self.mode,
-                                                           scale_factor=self.scale, use_scale_factor=True), \
+                                                           scale_factor=self.scale, recompute_scale_factor=False), \
                         torch.nn.functional.interpolate(x, mode=self.mode,
-                                                        scale_factor=self.scale_array, use_scale_factor=True)
+                                                        scale_factor=self.scale_array, recompute_scale_factor=False)
                 return torch.nn.functional.interpolate(x, mode=self.mode,
-                                                       scale_factor=self.scale, use_scale_factor=True), \
+                                                       scale_factor=self.scale, recompute_scale_factor=False), \
                     torch.nn.functional.interpolate(x, mode=self.mode,
-                                                    scale_factor=self.scale_array, use_scale_factor=True)
+                                                    scale_factor=self.scale_array, recompute_scale_factor=False)
 
         model = MyModel(mode, use_size, is_upsample, align_corners)
         self.run_test(model, x, atol=1e-6)
@@ -2296,7 +2327,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
         self.run_test(Pad(), (x, y))
 
-
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -2314,6 +2344,17 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_im2col(self):
+        class Unfold(torch.nn.Module):
+            def forward(self, input):
+                return torch.nn.functional.unfold(input, kernel_size=(10, 15), dilation=2, padding=5, stride=3), \
+                    torch.nn.functional.unfold(input, kernel_size=(2, 2), dilation=1, padding=0, stride=3), \
+                    torch.nn.functional.unfold(input, kernel_size=(1, 1), dilation=5, padding=2, stride=3)
+
+        x = torch.rand(1, 1, 200, 100)
+        self.run_test(Unfold(), x)
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -2582,7 +2623,7 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
-# opset 9 tests, with keep_initializers_as_inputs=False for 
+# opset 9 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
@@ -2590,7 +2631,7 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    keep_initializers_as_inputs=False))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for 
+# opset 10 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
@@ -2598,7 +2639,7 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     keep_initializers_as_inputs=False))
 
 
-# opset 11 tests, with keep_initializers_as_inputs=False for 
+# opset 11 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
