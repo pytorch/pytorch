@@ -1371,11 +1371,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly, this test should not be passing \
-    because bias is not handled properly, the reason is passes is because the \
-    parameters of bn are initialized to default values and the recomputed bias \
-    for conv is zero, which is equivalent to no bias")
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1383,6 +1378,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1413,8 +1409,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly")
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1452,8 +1446,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
-    @unittest.skip("Temporarily turn off fold_convbn tests until \
-    constants are handled properly")
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -3879,7 +3871,9 @@ class TestScript(JitTestCase):
                 self.foo = foo
 
         m = M(5)
-        with self.assertRaises(AttributeError):
+        # m has a constant attribute, but we can't
+        # assign to it
+        with self.assertRaises(RuntimeError):
             m.foo = 6
 
 
@@ -10096,6 +10090,24 @@ a")
             return b
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+    def test_trace_with_tensor_list_output(self):
+        def f():
+            return [torch.zeros(1), torch.zeros(5)]
+        traced_f = torch.jit.trace(f, [])
+        self.assertEqual(traced_f(), f())
+
+    def test_trace_with_number_list_output(self):
+        def f():
+            return [1, 5]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_tensor_list_output(self):
+        def f():
+            return [[torch.zeros(1)], [torch.zeros(5)]]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
 
     def test_script_copy(self):
         class M(torch.nn.Module):
