@@ -22,6 +22,7 @@ using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
 using at::Storage;
+using at::Layout;
 
 ${py_method_dispatch}
 
