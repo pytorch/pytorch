@@ -3372,6 +3372,49 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    def test_reentrant_with_callbacks(self):
+        counter = [0]
+
+        def inc_counter():
+            counter[0] += 1
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Add a callback to execute.
+                Variable._execution_engine.queue_callback(inc_counter)
+
+                return input
+
+        class MyReentrantFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Reentrant backward call.
+                tmp_inp = input.detach().requires_grad_()
+                with torch.enable_grad():
+                    tmp_out = (MyFunc.apply(tmp_inp)).sum()
+                tmp_out.backward()
+                return input
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = MyReentrantFunc.apply(t1)
+        t3 = t2.sum()
+        torch.autograd.backward([t3])
+
+        # Verify callback is called only once.
+        self.assertEquals(1, counter[0])
+
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
