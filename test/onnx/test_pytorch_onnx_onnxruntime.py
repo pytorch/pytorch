@@ -260,32 +260,42 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     def get_image_from_url(self, url):
-        import requests
+        import sys
+        import os
+        if sys.version_info < (3,):
+            from urlparse import urlsplit
+            import urllib2
+            request = urllib2
+            error = urllib2
+        else:
+            from urllib.parse import urlsplit
+            from urllib import request
         from PIL import Image
-        from io import BytesIO
         from torchvision import transforms
+        from torch._utils_internal import get_writable_path
 
-        data = requests.get(url)
-        image = Image.open(BytesIO(data.content)).convert("RGB")
+        filename = os.path.basename(urlsplit(url)[2])
+        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
+        path = os.path.join(data_dir, filename)
+        data = request.urlopen(url, timeout=15).read()
+        with open(path, 'wb') as f:
+            f.write(data)
+        image = Image.open(path).convert("RGB")
         image = image.resize((300, 200), Image.BILINEAR)
-
         to_tensor = transforms.ToTensor()
         return to_tensor(image)
 
     def get_test_images(self):
         image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
         image = self.get_image_from_url(url=image_url)
-        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
-        image2 = self.get_image_from_url(url=image_url2)
         images = [image]
-        test_images = [image2]
-        return images, test_images
+        return images
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
-        images, _ = self.get_test_images()
+        images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -303,7 +313,7 @@ class TestONNXRuntime(unittest.TestCase):
                 #       For now we are testing all the output of KeypointRCNN except keypoints_scores.
                 #       Enable When Argmax is updated in ONNX Runtime.
                 return output[0]['boxes'], output[0]['labels'], output[0]['scores'], output[0]['keypoints']
-        images, _ = self.get_test_images()
+        images = self.get_test_images()
         self.run_test(KeyPointRCNN(), (images,), rtol=1e-3, atol=1e-5)
 
     def test_word_language_model_RNN_TANH(self):
