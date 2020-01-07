@@ -177,19 +177,25 @@ void DistEngine::computeDependencies(
   autogradContext->setGraphTask(std::move(graphTask));
 }
 
-std::shared_ptr<FutureVariableList> DistEngine::runEngineAndAccumulateGradients(
+std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
   auto futureGrads = engine_.execute_with_graph_task(
       autogradContext->retrieveGraphTask(), graphRoot);
 
+  // Build a future that waits for the callbacks to execute (since callbacks
+  // execute after the original future is completed). This ensures we return a
+  // future that waits for all gradient accumulation to finish.
+  auto accumulateGradFuture = std::make_shared<rpc::FutureMessage>();
+
   futureGrads->addCallback(
-      [autogradContext, outputEdges](
+      [autogradContext, outputEdges, accumulateGradFuture](
           const variable_list& grads,
           const c10::optional<torch::utils::FutureError>& error) {
         if (error) {
           // Don't accumulate gradients if we receive an error.
+          accumulateGradFuture->setError(error->what());
           return;
         }
 
@@ -208,9 +214,11 @@ std::shared_ptr<FutureVariableList> DistEngine::runEngineAndAccumulateGradients(
             autogradContext->accumulateGrad(variable, grads[i]);
           }
         }
+
+        accumulateGradFuture->markCompleted(rpc::Message());
       });
 
-  return futureGrads;
+  return accumulateGradFuture;
 }
 
 std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
@@ -238,12 +246,11 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
         autogradContext, dummyRoot, outputEdges);
 
     // Build the 'uber' future that waits for everything.
-    std::shared_ptr<rpc::FutureMessage> callbackFuture =
-        std::make_shared<rpc::FutureMessage>();
+    auto callbackFuture = std::make_shared<rpc::FutureMessage>();
 
     futureGrads->addCallback(
         [autogradContext, callbackFuture](
-            const variable_list& grads,
+            const rpc::Message& message /* unused */,
             const c10::optional<torch::utils::FutureError>& error) {
           // Clear the context id once we're done with the autograd engine
           // processing.
