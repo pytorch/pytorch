@@ -144,11 +144,38 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::clamp op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False))
+    def test_qclamp(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
+
     """Tests the correctness of the scalar addition."""
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
-                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
-           b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
         import copy
         add_scalar = torch.ops.quantized.add_scalar
@@ -2004,7 +2031,7 @@ class TestComparatorOps(TestCase):
     @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
-           b=st.floats(allow_infinity=False, allow_nan=False))
+           b=hu.floats(allow_infinity=False, allow_nan=False))
     def test_compare_tensor_scalar(self, A, b):
         A, (scale_a, zero_point_a, dtype_a) = A
         tA = torch.from_numpy(A)

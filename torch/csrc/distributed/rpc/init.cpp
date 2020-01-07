@@ -1,11 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -193,12 +191,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  auto futureMessage =
-      shared_ptr_class_<FutureMessage>(module, "FutureMessage")
-          .def(
-              "wait",
-              [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-              py::call_guard<py::gil_scoped_release>());
+  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+                    .def(
+                        "wait",
+                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        py::call_guard<py::gil_scoped_release>(),
+                        R"(
+Wait on future to complete and return the object it completed with.
+If the future completes with an error, an exception is thrown.
+              )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)

@@ -83,10 +83,6 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     case MessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
-    case MessageType::EXCEPTION: {
-      std::string err(response.payload().begin(), response.payload().end());
-      throw std::runtime_error(err);
-    }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
@@ -177,6 +173,27 @@ static const char* kMeta = "meta";
 static const char* kPayload = "payload";
 }; // namespace
 
+c10::List<at::Tensor> cloneSparseTensors(
+    const std::vector<at::Tensor>& tensors) {
+  // Sanity-check: If the majority of bits don't need to go over the wire,
+  // force a clone(). Some Tensors are effectively small views, only using
+  // ~1% of the underlying Storage.
+  auto worthRecopying = [](const at::Tensor& t) -> bool {
+    auto storageSize = t.storage().elementSize() * t.storage().numel();
+    auto usefulSize = t.element_size() * t.numel();
+    constexpr size_t kMinMultiple = 2;
+    constexpr size_t kMinRecopyBytes = 8 * 1024;
+    return storageSize >= kMinRecopyBytes &&
+        storageSize >= usefulSize * kMinMultiple;
+  };
+  c10::List<at::Tensor> pTensors;
+  pTensors.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    pTensors.push_back(worthRecopying(t) ? t.clone() : t);
+  }
+  return pTensors;
+}
+
 std::string wireSerialize(
     const std::vector<char>& payload,
     const std::vector<at::Tensor>& tensors) {
@@ -201,7 +218,7 @@ std::string wireSerialize(
         },
         nullptr);
     pickler.protocol();
-    pickler.pushIValue(tensors);
+    pickler.pushIValue(cloneSparseTensors(tensors));
     pickler.stop();
     // tensorData is in function scope so that the data() pointers stay valid.
     tensorData = pickler.tensorData();
@@ -255,8 +272,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (metaDataPos >= metaData.second || n == 0) {
         return 0;
       }
-      size_t toCopy =
-        std::min(metaDataPos + n, metaData.second) - metaDataPos;
+      size_t toCopy = std::min(metaDataPos + n, metaData.second) - metaDataPos;
       memcpy(buf, metaData.first + metaDataPos, toCopy);
       metaDataPos += toCopy;
       return toCopy;
