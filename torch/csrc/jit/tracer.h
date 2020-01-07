@@ -226,6 +226,10 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
     Node* n,
