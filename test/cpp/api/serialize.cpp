@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+using namespace torch::test;
 using namespace torch::nn;
 using namespace torch::optim;
 using namespace torch::serialize;
@@ -54,6 +55,7 @@ void is_optimizer_state_equal(
   const std::vector<torch::Tensor>& rhs_params,
   const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& rhs_state) {
 
+  ASSERT_TRUE(lhs_params.size() == rhs_params.size());
   ASSERT_TRUE(lhs_state.size() == rhs_state.size());
   for (int i = 0; i < lhs_params.size(); i++) {
     const auto& state1 = lhs_state.at(c10::guts::to_string(lhs_params[i].unsafeGetTensorImpl()));
@@ -148,6 +150,30 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
     ASSERT_TRUE(
         param1[name].norm().item<float>() != param2[name].norm().item<float>());
   }
+}
+
+// Utility function to save a vector of buffers.
+template <typename BufferContainer>
+void write_to_archive(
+    torch::serialize::OutputArchive& archive,
+    const std::string& key,
+    const BufferContainer& buffers) {
+  archive.write(
+      key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
+  for (size_t index = 0; index < buffers.size(); ++index) {
+    archive.write(
+        key + "/" + c10::to_string(index), buffers[index]);
+  }
+}
+
+#define OLD_SERIALIZATION_LOGIC_WARNING_CHECK(archive, funcname, filename) \
+{ \
+  std::stringstream buffer;\
+  CerrRedirect cerr_redirect(buffer.rdbuf());\
+  archive.funcname(filename);\
+  auto expected_warning_msg = "Your serialized Adagrad optimizer is still\
+   using the old serialization format. You should re-save your Adagrad optimizer to use the new serialization format.";\
+  ASSERT_EQ(count_substr_occurrences(buffer.str(), expected_warning_msg), 1);\
 }
 
 TEST(SerializeTest, Basic) {
@@ -390,6 +416,7 @@ TEST(SerializeTest, Optim) {
 
 TEST(SerializeTest, Optim_Adagrad) {
   test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
+
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto optim1 = torch::optim::Adagrad(
@@ -418,21 +445,12 @@ TEST(SerializeTest, Optim_Adagrad) {
   // write sum_buffers and step buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  output_archive.write(
-      "sum_buffers/size", torch::tensor(static_cast<int64_t>(sum_buffers.size())));
-  for (size_t index = 0; index < sum_buffers.size(); ++index) {
-    output_archive.write(
-        "sum_buffers/" + c10::to_string(index), sum_buffers[index], /*is_buffer=*/true);
-  }
-  output_archive.write(
-      "step_buffers/size", torch::tensor(static_cast<int64_t>(step_buffers.size())));
-  for (size_t index = 0; index < step_buffers.size(); ++index) {
-    output_archive.write(
-        "step_buffers/" + c10::to_string(index), torch::tensor(step_buffers[index]), /*is_buffer=*/true);
-  }
+  write_to_archive(output_archive, "sum_buffers", sum_buffers);
+  write_to_archive(output_archive, "step_buffers", step_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
+
   torch::serialize::InputArchive input_archive;
-  input_archive.load_from(optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(input_archive, load_from, optim_tempfile_old_format.name);
   torch::load(optim1_2, optim_tempfile_old_format.name);
 
   is_optimizer_state_equal<AdagradParamState>(
