@@ -631,8 +631,11 @@ at::Tensor _convolution(
       auto dilation = params.dilation;
       if (params.use_cudnn_depthwise(input, weight)) {
         output = at::cudnn_convolution(
-            input.contiguous(cudnn_memory_format), weight, bias,
+            input.contiguous(cudnn_memory_format), weight,
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
+        if (bias.defined()) {
+          output = output + reshape_bias(input.dim(), bias);
+        }
 
       } else if (params.use_miopen(input)){
         output = at::miopen_depthwise_convolution(
@@ -651,12 +654,18 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input.contiguous(cudnn_memory_format), weight, bias,
+          input.contiguous(cudnn_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      if (bias.defined()) {
+        output = output + reshape_bias(input.dim(), bias);
+      }
     } else {
       output = at::cudnn_convolution(
-          input.contiguous(cudnn_memory_format), weight, bias,
+          input.contiguous(cudnn_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      if (bias.defined()) {
+        output = output + reshape_bias(input.dim(), bias);
+      }
     }
   } else if (params.use_miopen(input)) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
