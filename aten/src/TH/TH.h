@@ -9,7 +9,6 @@
 #endif
 
 #include <TH/THVector.h>
-#include <TH/THSize.h>
 #include <TH/THStorageFunctions.h>
 #include <TH/THTensor.h>
 #include <TH/THTensorApply.h>

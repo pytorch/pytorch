@@ -93,10 +93,10 @@ class C10_API intrusive_ptr_target {
 #  pragma GCC diagnostic ignored "-Wterminate"
 #  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
-    AT_ASSERTM(
+    TORCH_DCHECK(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    AT_ASSERTM(
+    TORCH_DCHECK(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -185,7 +185,7 @@ class intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_refcount = ++target_->refcount_;
-      AT_ASSERTM(
+      TORCH_DCHECK(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
     }
@@ -369,7 +369,7 @@ class intrusive_ptr final {
    */
   static intrusive_ptr unsafe_reclaim_from_nonowning(TTarget* raw_ptr) {
     // See Note [Stack allocated intrusive_ptr_target safety]
-    AT_ASSERTM(
+    TORCH_DCHECK(
         raw_ptr == NullType::singleton() || raw_ptr->refcount_.load() > 0,
         "intrusive_ptr: Can only reclaim pointers that are owned by someone");
     auto ptr = reclaim(raw_ptr); // doesn't increase refcount
@@ -442,7 +442,7 @@ class weak_intrusive_ptr final {
   void retain_() {
     if (target_ != NullType::singleton()) {
       size_t new_weakcount = ++target_->weakcount_;
-      AT_ASSERTM(
+      TORCH_DCHECK(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
     }
@@ -620,7 +620,7 @@ class weak_intrusive_ptr final {
     // if refcount > 0, weakcount must be >1 for weak references to exist.
     // see weak counting explanation at top of this file.
     // if refcount == 0, weakcount only must be >0.
-    AT_ASSERTM(
+    TORCH_DCHECK(
         owning_weak_ptr == NullType::singleton() ||
         owning_weak_ptr->weakcount_.load() > 1 ||
             (owning_weak_ptr->refcount_.load() == 0 &&
