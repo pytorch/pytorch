@@ -36,44 +36,36 @@ torch::Tensor save_and_load(torch::Tensor input) {
 } // namespace
 
 template <typename DerivedOptions>
-bool is_optimizer_param_groups_equal(const OptimizerParamGroup& lhs, const OptimizerParamGroup& rhs) {
-  const auto& lhs_params= lhs.params();
+void is_optimizer_param_groups_equal(const OptimizerParamGroup& lhs, const OptimizerParamGroup& rhs) {
+  const auto& lhs_params = lhs.params();
   const auto& rhs_params = rhs.params();
-  if(lhs_params.size() != rhs_params.size()) {
-    return false;
+
+  ASSERT_TRUE(lhs_params.size() == rhs_params.size());
+  for (size_t j = 0; j < lhs_params.size(); j++) {
+    ASSERT_TRUE(torch::equal(lhs_params[j], rhs_params[j]));
   }
-  for (int64_t j=0; j<lhs_params.size(); j++) {
-    if(!torch::equal(lhs_params[j], rhs_params[j]))
-      return false;
-  }
-  if(!(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()))) {
-    return false;
-  }
-  return true;
+  ASSERT_TRUE(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()));
 }
 
 template <typename DerivedOptimizerParamState>
-bool is_optimizer_state_equal(
+void is_optimizer_state_equal(
   const std::vector<torch::Tensor>& lhs_params,
   const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& lhs_state,
   const std::vector<torch::Tensor>& rhs_params,
   const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& rhs_state) {
 
-  for (int i=0; i<lhs_params.size(); i++) {
-    auto key1 = c10::guts::to_string(lhs_params[i].unsafeGetTensorImpl());
+  ASSERT_TRUE(lhs_state.size() == rhs_state.size());
+  for (int i = 0; i < lhs_params.size(); i++) {
     const auto& state1 = lhs_state.at(c10::guts::to_string(lhs_params[i].unsafeGetTensorImpl()));
     const auto& state2 = rhs_state.at(c10::guts::to_string(rhs_params[i].unsafeGetTensorImpl()));
     const DerivedOptimizerParamState& lhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(state1.get()));
     const DerivedOptimizerParamState& rhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(state2.get()));
-    if(!(lhs_curr_state == rhs_curr_state)) {
-      return false;
-    }
+    ASSERT_TRUE(lhs_curr_state == rhs_curr_state);
   }
-  return true;
 }
 
 template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
-bool test_serialize_optimizer(DerivedOptimizerOptions options) {
+void test_serialize_optimizer(DerivedOptimizerOptions options) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
@@ -88,9 +80,8 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
   auto param2 = model2->named_parameters();
   auto param3 = model3->named_parameters();
   for (const auto& p : param1) {
-    if(!p->allclose(param2[p.key()]) && param2[p.key()].allclose(param3[p.key()])) {
-      return false;
-    }
+    ASSERT_TRUE(p->allclose(param2[p.key()]));
+    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
   }
   // Make some optimizers
   auto optim1 = OptimizerClass(
@@ -135,22 +126,16 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
   const auto& optim1_state = optim1.state();
 
   //optim3_2 and optim1 should have param_groups and state of same size
-  if(!((optim3_2_param_groups.size() == optim1_param_groups.size()) &&
-     (optim3_2_state.size() == optim1_state.size()))) {
-    return false;
-  }
+  ASSERT_TRUE(optim3_2_param_groups.size() == optim1_param_groups.size());
+  ASSERT_TRUE(optim3_2_state.size() == optim1_state.size());
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
-  for(int i=0; i<optim3_2_param_groups.size(); i++) {
-    if(!is_optimizer_param_groups_equal<DerivedOptimizerOptions>(
-      optim3_2_param_groups[i], optim1_param_groups[i])) {
-      return false;
-    }
-    if(!is_optimizer_state_equal<DerivedOptimizerParamState>(
+  for (int i = 0; i < optim3_2_param_groups.size(); i++) {
+    is_optimizer_param_groups_equal<DerivedOptimizerOptions>(
+      optim3_2_param_groups[i], optim1_param_groups[i]);
+    is_optimizer_state_equal<DerivedOptimizerParamState>(
       optim3_2_param_groups[i].params(), optim3_2_state,
-      optim1_param_groups[i].params(), optim1_state)) {
-      return false;
-    }
+      optim1_param_groups[i].params(), optim1_state);
   }
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
@@ -158,12 +143,11 @@ bool test_serialize_optimizer(DerivedOptimizerOptions options) {
   for (const auto& p : param1) {
     const auto& name = p.key();
     // Model 1 and 3 should be the same
-    if(!((param1[name].norm().item<float>() == param3[name].norm().item<float>()) &&
-          (param1[name].norm().item<float>() != param2[name].norm().item<float>()))) {
-      return false;
-    }
+    ASSERT_TRUE(
+        param1[name].norm().item<float>() == param3[name].norm().item<float>());
+    ASSERT_TRUE(
+        param1[name].norm().item<float>() != param2[name].norm().item<float>());
   }
-  return true;
 }
 
 TEST(SerializeTest, Basic) {
@@ -405,8 +389,7 @@ TEST(SerializeTest, Optim) {
 }
 
 TEST(SerializeTest, Optim_Adagrad) {
-  auto ret = test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
-  ASSERT_TRUE(ret);
+  test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto optim1 = torch::optim::Adagrad(
@@ -426,7 +409,7 @@ TEST(SerializeTest, Optim_Adagrad) {
   std::vector<int64_t> step_buffers; // fill up with optim1 state_buffers
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for(size_t i=0; i<params_.size(); i++) {
+  for (size_t i = 0; i < params_.size(); i++) {
     auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
     const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
     sum_buffers.push_back(curr_state_.sum());
@@ -452,9 +435,9 @@ TEST(SerializeTest, Optim_Adagrad) {
   input_archive.load_from(optim_tempfile_old_format.name);
   torch::load(optim1_2, optim_tempfile_old_format.name);
 
-  ASSERT_TRUE(is_optimizer_state_equal<AdagradParamState>(
+  is_optimizer_state_equal<AdagradParamState>(
     optim1.param_groups()[0].params(), optim1.state(),
-    optim1_2.param_groups()[0].params(), optim1_2.state()));
+    optim1_2.param_groups()[0].params(), optim1_2.state());
 }
 
 TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {

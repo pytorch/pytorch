@@ -63,28 +63,27 @@ void Adagrad::step() {
         continue;
       }
       auto grad = p.grad().data();
-      // TODO: assert that `state_[p.unsafeGetTensorImpl()]` exists and is not a null pointer, before dereferencing it
-      TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != NULL, "state found NULL for the Tensor ", p);
+      TORCH_INTERNAL_ASSERT(state_[c10::guts::to_string(p.unsafeGetTensorImpl())] != nullptr, "state found NULL for the Tensor ", p);
       auto& state = static_cast<AdagradParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
       auto& options = static_cast<AdagradOptions&>(group.options());
 
       state.step(state.step() + 1);
 
-      if(options.weight_decay() != 0) {
+      if (options.weight_decay() != 0) {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
         grad = grad.add(p.data(), options.weight_decay());
       }
       const auto clr = options.learning_rate() /
           (1 + (state.step() - 1) * options.lr_decay());
 
-      if(grad.is_sparse()) {
+      if (grad.is_sparse()) {
         grad = grad.coalesce();
         auto grad_indices = grad._indices();
         auto grad_values = grad._values();
         auto size = grad.sizes();
 
         auto make_sparse = [&] (Tensor values) -> Tensor /*confirm*/ {
-          if(grad_indices.dim() == 0 || values.dim() == 0) {
+          if (grad_indices.dim() == 0 || values.dim() == 0) {
             return torch::empty({0}, grad.options()).resize_as_(grad);
           }
           return torch::sparse_coo_tensor(grad_indices, values, size, grad.options());
@@ -130,12 +129,15 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 
 void Adagrad::load(serialize::InputArchive& archive) {
   auto keys_ = archive.keys();
-  for(int i=0; i<keys_.size(); i++) {
-    if(keys_[i] == "pytorch_version") {
+  for (int i = 0; i < keys_.size(); i++) {
+    if (keys_[i] == "pytorch_version") {
       serialize(*this, archive);
       return;
     }
   }
+  TORCH_WARN(
+    "Your serialized Adagrad optimizer is still using the old serialization format. ",
+    "You should re-save your Adagrad optimizer to use the new serialization format.");
   // deserializing archives saved in old format (prior to version 1.5.0)
   std::vector<Tensor> sum_buffers;
   std::vector<int64_t> step_buffers;
@@ -143,8 +145,8 @@ void Adagrad::load(serialize::InputArchive& archive) {
   torch::optim::serialize(archive, "step_buffers", step_buffers);
   // since there were no param_groups before, assuming all tensors are now in one param_group
   std::vector<Tensor> params = param_groups_[0].params();
-  for(size_t idx = 0; idx<params.size(); idx++) {
-    auto state = c10::guts::make_unique<AdagradParamState>();
+  for (size_t idx = 0; idx < params.size(); idx++) {
+    auto state = std::make_unique<AdagradParamState>();
     state->step(step_buffers[idx]);
     state->sum(sum_buffers[idx]);
     state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);

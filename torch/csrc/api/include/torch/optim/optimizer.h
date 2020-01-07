@@ -42,7 +42,7 @@ class TORCH_API OptimizerParamState {
 template <typename Derived>
 class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
   std::unique_ptr<OptimizerParamState> clone() const override {
-    return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
+    return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
 };
 
@@ -57,7 +57,7 @@ class TORCH_API OptimizerOptions {
 template <typename Derived>
 class TORCH_API OptimizerCloneableOptions : public OptimizerOptions {
   std::unique_ptr<OptimizerOptions> clone() const override {
-    return c10::guts::make_unique<Derived>(static_cast<const Derived&>(*this));
+    return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
 };
 

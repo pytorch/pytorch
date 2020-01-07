@@ -47,7 +47,7 @@ public:
 class TORCH_API Adagrad : public Optimizer {
  public:
   explicit Adagrad(std::vector<OptimizerParamGroup> param_groups,
-      AdagradOptions defaults) : Optimizer(std::move(param_groups), c10::guts::make_unique<AdagradOptions>(defaults)) {
+      AdagradOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<AdagradOptions>(defaults)) {
     TORCH_CHECK(defaults.learning_rate() >= 0, "Invalid learning rate: ", defaults.learning_rate());
     TORCH_CHECK(defaults.lr_decay() >= 0, "Invalid lr_decay value: ", defaults.lr_decay());
     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
@@ -56,7 +56,7 @@ class TORCH_API Adagrad : public Optimizer {
 
     for (const auto& group : param_groups_) {
       for (const auto& p : group.params()) {
-        auto state = c10::guts::make_unique<AdagradParamState>();
+        auto state = std::make_unique<AdagradParamState>();
         state->step(0);
         state->sum(torch::full_like(p.data(), defaults.initial_accumulator_value()));
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
