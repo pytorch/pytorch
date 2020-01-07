@@ -63,12 +63,11 @@ namespace torch { namespace autograd {
   if (device_of(var)->is_cuda()) {
     // Accumulation, if necessary, always happens on the consumer stream.
     opt_accumulate_stream = opt_consumer_stream;
-    // It's possible var resides on a different device from opt_producer_stream.
-    // For example, if the Node we're currently evaluating is a CopyBackward that spans
-    // two devices, opt_producer_stream will be the stream on which the original forward-pass
-    // output was created, which resides on a different device from var.  var itself will have
-    // been created on the current stream of the original forward-pass input's device.
+    // Stream that we expect was used to populate var, with which the accumulate
+    // stream must be synced.  opt_var_stream is different depending whether
+    // we hit case (2) or case (3), as explained below.
     c10::optional<c10::Stream> opt_var_stream = c10::nullopt;
+
     const auto on_producer = opt_producer_stream
                         && device_of(var) == opt_producer_stream->device();
     const auto on_consumer = opt_consumer_stream
@@ -78,10 +77,25 @@ namespace torch { namespace autograd {
       opt_var_stream = opt_producer_stream;
     } else {
       // (3) CUDA variable with multiple devices
-      // get_current_stream_helper is a hack to access the current stream on var's device
-      // that will compile even if the build is CPU-only.
-      const auto get_current_stream_helper = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-      opt_var_stream = get_current_stream_helper.getStream(*device_of(var));
+      // The current stream for each device is thread local.  User-side calls that set streams affect the
+      // current stream in the main thread.  However, backward is executed on new threads (one per device).
+      // Therefore, we expect that the ambient current stream in backward-pass threads is the default stream,
+      // unless it's been explicitly changed by something on that same thread (e.g. the stream guard in
+      // Engine::evaluate_function).  For cross-device backward ops in particular, however, that stream guard
+      // only sets the stream on the producer device (opt_producer_stream).  If the gradient (var) that the op
+      // created is on a different device, that device wasn't affected by the stream guard.
+      // Therefore, var's device's current stream should be the ambient current stream that the backward
+      // thread holds for var's device, which should be that device's default stream.
+      //
+      // tldr: for case (3) we assume var was populated on its device's default stream.
+
+      //  get_stream_helper is a hack to access streams that will compile even if the build is CPU-only.
+      const auto get_stream_helper = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+
+      // double check our belief that the current stream on var's device is the default stream
+      TORCH_INTERNAL_ASSERT(get_stream_helper.getStream(*device_of(var)) ==
+                            get_stream_helper.getDefaultStream(*device_of(var)));
+      opt_var_stream = get_stream_helper.getDefaultStream(*device_of(var));
     }
 
     // If the consumer's original forward-pass output was on a particular device,
@@ -98,9 +112,9 @@ namespace torch { namespace autograd {
       auto event = c10::Event{c10::DeviceType::CUDA};
       event.record(*opt_var_stream);
       opt_consumer_stream->wait(event);
-      // I think we need a
+      // TODO:  I think we need a
       // c10::cuda::CUDACachingAllocator::recordStream(var.storage().data_ptr(), opt_consumer_stream);
-      // here but I'm not sure if this will allow a CPU-only build to compile.
+      // but I'm not sure if a call to c10::cuda::xyz here will allow a CPU-only build to compile.
     }
   }
 
