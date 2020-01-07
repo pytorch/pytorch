@@ -14,17 +14,16 @@
 namespace at {
 namespace native {
 
-DEFINE_DISPATCH(qsigmoid_stub);
+DEFINE_DISPATCH(qtanh_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-// This ALWAYS outputs scale=1.0/256, dtype=quint8
-// The zero_point is 0 for qint32 and quint8, but -128 for qint8.
-Tensor qnnpack_sigmoid(Tensor input) {
-  TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
+// This ALWAYS outputs scale=2.0/256, zp=128, dtype=quint8
+Tensor qnnpack_tanh(Tensor input) {
+  TORCH_CHECK(input.ndimension() > 0, "qnnpack_tanh(): Got empty input tensor");
 
   Tensor qy;
-  constexpr float output_scale = 1.0f / 256.0f;
-  constexpr int32_t output_zero_point = 0;
+  constexpr float output_scale = 2.0f / 256.0f;
+  constexpr int32_t output_zero_point = 128;
 
   initQNNPACK();
 
@@ -34,8 +33,8 @@ Tensor qnnpack_sigmoid(Tensor input) {
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
 
-  pytorch_qnnp_operator_t sigmoid_op{nullptr};
-  const pytorch_qnnp_status createStatus = pytorch_qnnp_create_sigmoid_nc_q8(
+  pytorch_qnnp_operator_t tanh_op{nullptr};
+  const pytorch_qnnp_status createStatus = pytorch_qnnp_create_tanh_nc_q8(
     num_elems /* channels */,
     zero_point /* input zero point */,
     scale /* input scale */,
@@ -44,46 +43,46 @@ Tensor qnnpack_sigmoid(Tensor input) {
     std::numeric_limits<uint8_t>::min() /* output min */,
     std::numeric_limits<uint8_t>::max() /* output max */,
     0 /* flags */,
-    &sigmoid_op);
+    &tanh_op);
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
-                        "failed to create QNNPACK sigmoid operator");
+                        "failed to create QNNPACK TanH operator");
   qy = at::_empty_affine_quantized(
     input_contig.sizes(),
     input.options(),
     output_scale,
     output_zero_point);
 
-  const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_sigmoid_nc_q8(
-    sigmoid_op,
+  const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_tanh_nc_q8(
+    tanh_op,
     input_contig.size(0) /* batch size */,
     (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
     num_elems /* input stride */,
     (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
     num_elems /* output stride */);
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
-                        "failed to setup QNNPACK sigmoid operator");
+                        "failed to setup QNNPACK TanH operator");
 
   pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
 
   const pytorch_qnnp_status runStatus =
-    pytorch_qnnp_run_operator(sigmoid_op, threadpool);
+    pytorch_qnnp_run_operator(tanh_op, threadpool);
 
   TORCH_INTERNAL_ASSERT(
     runStatus == pytorch_qnnp_status_success,
-    "failed to run QNNPACK sigmoid operator");
+    "failed to run QNNPACK TanH operator");
   return qy;
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_sigmoid(const Tensor& qx) {
+Tensor quantized_tanh(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx);
+    return qnnpack_tanh(qx);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
-  qsigmoid_stub(qx.device().type(), qx, qy);
+  qtanh_stub(qx.device().type(), qx, qy);
   return qy;
 }
 }}  // namespace at::native
