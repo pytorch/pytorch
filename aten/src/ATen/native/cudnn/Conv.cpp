@@ -868,7 +868,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, 0, input.suggest_memory_format(true)==at::MemoryFormat::ChannelsLast);
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1011,7 +1011,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, 0, grad_output.suggest_memory_format(true)==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1176,7 +1176,7 @@ void raw_cudnn_convolution_backward_weight_out(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight);
+  args.wdesc.set(grad_weight, 0, input.suggest_memory_format(true)==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 

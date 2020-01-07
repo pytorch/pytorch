@@ -102,7 +102,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool check_nhwc) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -110,7 +110,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous(t.suggest_memory_format(/*channels_last_strides_exact_match=*/true))) {
+  if (!t.is_contiguous(t.suggest_memory_format(/*channels_last_strides_exact_match=*/check_nhwc))) {
     // NB: It is possible for this test to be insufficient, because the
     // Tensor passed in to set the filter descriptor may not be the actual
     // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
@@ -126,7 +126,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   }
   dim = std::max(dim, pad);
   cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
-  if (t.suggest_memory_format(/*channels_last_strides_exact_match=*/true) == at::MemoryFormat::ChannelsLast) {
+  if (t.suggest_memory_format(/*channels_last_strides_exact_match=*/check_nhwc) == at::MemoryFormat::ChannelsLast) {
     filter_format = CUDNN_TENSOR_NHWC;
   }
   set(getDataType(t), (int) dim, size, filter_format);

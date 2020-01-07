@@ -3603,9 +3603,13 @@ class TestNN(NNTestCase):
                      ref_conv.weight.size(2)).float().to(device)
         # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
         conv.load_state_dict(ref_conv.state_dict())
-        conv.weight.data = conv.weight.contiguous(memory_format=weight_format)
-        input = inp.clone().contiguous(memory_format=input_format).requires_grad_()
+        weight_data = conv.weight.detach().clone().contiguous(memory_format=weight_format)
+        conv.weight.data = weight_data.resize_(weight_data.size(), memory_format=weight_format)
+        input = inp.clone().contiguous(memory_format=input_format)
+        input.resize_(input.size(), memory_format=input_format)
+        input = input.requires_grad_()
         grad = grad.contiguous(memory_format=grad_format)
+        grad.resize_(grad.size(), memory_format=grad_format)
         out = conv(input)
         out.backward(grad)
         self.assertTrue(out.is_contiguous(memory_format=output_format))
@@ -3628,10 +3632,6 @@ class TestNN(NNTestCase):
                     output_format = input_format
                     # Older versions of CudNN have Channels Last support disabled
                     if torch.backends.cudnn.version() < 7603:
-                        output_format = torch.contiguous_format
-                    # Can't derrive desired format because of the input shape, rolling back to contiguous
-                    if ref_input.is_contiguous() and ref_input.is_contiguous(
-                            memory_format=torch.channels_last):
                         output_format = torch.contiguous_format
                     self._run_conv(layer, device, data, grad, ref_conv, ref_input,
                                    ref_out, input_format, w_f, g_f, output_format)

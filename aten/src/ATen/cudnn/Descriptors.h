@@ -35,6 +35,21 @@ inline int dataSize(cudnnDataType_t dataType)
 // function modifies 'stride' in place so this invariant holds.
 static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
   int64_t z = 1;
+  if (dim == 4) {
+    std::vector<int64_t> size_v = {size[0], size[1], size[2], size[3]};
+    std::vector<int64_t> stride_v = {stride[0], stride[1], stride[2], stride[3]};
+    if (get_channels_last_strides(size_v) == stride_v) {
+      // spetial stride correction for channels last;
+      for(auto&d : {1, 3, 2, 0}) {
+        if (size[d] == 1) {
+          stride[d] = z;
+        } else {
+          z *= size[d];
+        }
+      }
+      return;
+    }
+  }
   for(int d = dim-1; d >= 0; d--)
   {
     if (size[d] == 1) {
@@ -137,7 +152,7 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+  void set(const at::Tensor &t, int64_t pad = 0, bool check_nhwc = false);
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
