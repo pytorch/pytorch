@@ -276,13 +276,12 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
 
   const int64_t n = result.size(0);
   int64_t m = self.size(1);
-  const int block_x = 64;
+  const int block_x = 16;
   // NB: be careful with changing block_y; as it's currently written, grid_y is limited to be 2^16.
-  // From binary search, block_y of 16 gives us max pdist dim0 of 1449,
-  //                     block_y of  4 gives us max pdist dim0 of  725.
-  const int block_y = 16;
-  const int grid_x = (m + block_x * 8 - 1) / (block_x * 8);
-  const int grid_y = (dist.numel() + block_y - 1) / block_y;
+  // block_y of 64 gives us max pdist dim1 of 2**24
+  const int block_y = 64;
+  const int grid_x = (dist.numel() + block_x - 1) / block_x;
+  const int grid_y = (m + block_y * 8 - 1) / (block_y * 8);
   const dim3 grid(grid_x, grid_y);
   const dim3 block(block_x, block_y);
   // https://github.com/pytorch/pytorch/issues/15511 demonstrated we need to do
