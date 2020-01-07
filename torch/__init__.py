@@ -64,7 +64,8 @@ def _load_global_deps():
     ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
-if USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL'):
+if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
+        platform.system() != 'Windows':
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -81,12 +82,20 @@ if USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL'):
     # you load consistently use the same libstdc++, or you may have
     # mysterious segfaults.
     #
-    if platform.system() != 'Windows':
-        old_flags = sys.getdlopenflags()
-        sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
-        from torch._C import *
-        sys.setdlopenflags(old_flags)
-        del old_flags
+    import os as _dl_flags
+    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
+        try:
+            # next try if DLFCN exists
+            import DLFCN as _dl_flags
+        except ImportError:
+            # as a last attempt, use compile-time constants
+            import torch._dl as _dl_flags
+    old_flags = sys.getdlopenflags()
+    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    from torch._C import *
+    sys.setdlopenflags(old_flags)
+    del old_flags
+    del _dl_flags
 
 else:
     # Easy way.  You want this most of the time, because it will prevent
