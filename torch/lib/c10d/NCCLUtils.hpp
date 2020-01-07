@@ -58,6 +58,7 @@ class NCCLComm {
   NCCLComm() : NCCLComm(nullptr) {}
 
   ~NCCLComm() noexcept {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (ncclComm_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
@@ -86,6 +87,7 @@ class NCCLComm {
 
   // Move constructable
   NCCLComm(NCCLComm&& other) {
+    std::unique_lock<std::mutex> lock(mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
@@ -109,8 +111,8 @@ class NCCLComm {
   }
 
   void ncclCommAbort() {
-#ifdef ENABLE_NCCL_ERROR_CHECKING
     std::unique_lock<std::mutex> lock(mutex_);
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
       // Should not abort twice.
       return;
@@ -131,12 +133,13 @@ class NCCLComm {
   }
 
   bool isAborted() const {
+    std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
   }
 
   ncclResult_t checkForNcclError() {
-#ifdef ENABLE_NCCL_ERROR_CHECKING
     std::unique_lock<std::mutex> lock(mutex_);
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
     }
