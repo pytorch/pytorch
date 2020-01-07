@@ -137,15 +137,16 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) {
-    if (bytes_read + len > pickle_size) {
-      return false;
+  auto reader = [&](char* buffer, size_t len) -> size_t {
+    if (bytes_read >= pickle_size) {
+      return 0;
     }
+    len = std::min(pickle_size - bytes_read, len);
     // Copy len bytes into buffer
     const char* start = data + bytes_read;
     std::memcpy(buffer, start, len);
     bytes_read += len;
-    return true;
+    return len;
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
@@ -186,7 +187,7 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai =
-      caffe2::make_unique<IStreamAdapter>(&in);
+      std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }
@@ -194,7 +195,7 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }

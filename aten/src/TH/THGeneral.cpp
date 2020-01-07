@@ -188,21 +188,6 @@ void THFree(void *ptr)
   c10::free_cpu(ptr);
 }
 
-double THLog1p(const double x)
-{
-#if (defined(_MSC_VER) || defined(__MINGW32__))
-  volatile double y = 1 + x;
-  return log(y) - ((y-1)-x)/y ;  /* cancels errors with IEEE arithmetic */
-#else
-  return log1p(x);
-#endif
-}
-
-double THLog2(const double x)
-{
-  return log2(x);
-}
-
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;

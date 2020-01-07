@@ -5,7 +5,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dimname.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <torch/csrc/utils/variadic.h>
 
@@ -63,7 +62,7 @@ struct TORCH_API TracingState
   void setValue(const IValue& v, Value* value);
   void delValue(const IValue& var);
   Value* getValue(const IValue& var);
-  Value* getOutput(const IValue& var);
+  Value* getOutput(const IValue& var, size_t i);
   bool hasValue(const IValue& var) const;
 
 private:
@@ -205,34 +204,12 @@ TORCH_API std::function<void()> pauseTracing();
 
 TORCH_API Value* getValueTrace(const IValue& var);
 
-struct TypedStack : public std::pair<Stack, TupleTypePtr>
-{
-  using pair::pair;
-
-  // NB: The inherited default constructor gives nullptr for |type|,
-  //     so we provide a saner one.
-  TypedStack()
-    : pair({}, TupleType::create({}))
-  {}
-
-  Stack& stack() {
-    return this->first;
-  }
-  TupleTypePtr& types() {
-    return this->second;
-  }
-  size_t size() {
-    auto s = stack().size();
-    AT_ASSERT(s == types()->elements().size());
-    return s;
-  }
-};
-
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
+    Stack inputs,
+    const std::function<Stack(Stack)>& traced_fn,
+    std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool force_outplace = false,
     script::Module* self = nullptr);
-
-TORCH_API void exit(const Stack& outputs);
 
 TORCH_API void abandon();
 
@@ -249,6 +226,10 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
     Node* n,
@@ -281,10 +262,16 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
-#ifdef BUILD_NAMEDTENSOR
 TORCH_API void addInputs(Node* n, const char* name, c10::optional<at::DimnameList> value);
-#endif
 TORCH_API void addInputs(
     Node* n,
     const char* name,

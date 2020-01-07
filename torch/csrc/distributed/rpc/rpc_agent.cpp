@@ -6,13 +6,32 @@ namespace rpc {
 
 constexpr size_t WorkerInfo::MAX_NAME_LEN;
 
-RpcAgent::RpcAgent(WorkerInfo workerId, std::unique_ptr<RequestCallback> cb)
-    : workerInfo_(std::move(workerId)), cb_(std::move(cb)) {}
+RpcAgent::RpcAgent(
+    WorkerInfo workerId,
+    std::unique_ptr<RequestCallback> cb,
+    std::chrono::milliseconds rpcTimeout)
+    : workerInfo_(std::move(workerId)),
+      cb_(std::move(cb)),
+      rpcTimeout_(rpcTimeout) {}
 
 RpcAgent::~RpcAgent() = default;
 
 const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
+}
+
+std::shared_ptr<RpcAgent> RpcAgent::defaultRpcAgent_ = nullptr;
+
+std::shared_ptr<RpcAgent> RpcAgent::getDefaultRpcAgent() {
+  TORCH_INTERNAL_ASSERT(
+      defaultRpcAgent_, "Default rpc agent is not initialized!");
+  return defaultRpcAgent_;
+}
+
+void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
+  TORCH_INTERNAL_ASSERT(
+      !defaultRpcAgent_, "Default rpc agent is already initialized!");
+  defaultRpcAgent_ = std::move(defaultRpcAgent);
 }
 
 } // namespace rpc

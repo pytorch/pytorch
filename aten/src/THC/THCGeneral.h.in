@@ -3,8 +3,6 @@
 
 #include <TH/THGeneral.h>
 #include <TH/THAllocator.h>
-#undef log1p
-#undef log2
 
 #include <c10/cuda/CUDAStream.h>
 
@@ -19,8 +17,9 @@
 # define THC_EXTERNC extern "C"
 
 // TH & THC are now part of the same library as ATen and Caffe2
-#define THC_API THC_EXTERNC CAFFE2_API
-#define THC_CLASS CAFFE2_API
+// NB: However, we are planning to split it out to a torch_cuda library
+#define THC_API THC_EXTERNC TORCH_CUDA_API
+#define THC_CLASS TORCH_CUDA_API
 
 #ifndef THAssert
 #define THAssert(exp)                                                   \
@@ -35,10 +34,6 @@ typedef struct THCState THCState;
 struct THCState;
 
 typedef struct _THCCudaResourcesPerDevice {
-  /* cuBLAS handle is lazily initialized */
-  cublasHandle_t blasHandle;
-  /* cuSparse handle is lazily initialized */
-  cusparseHandle_t sparseHandle;
   /* Size of scratch space per each stream on this device available */
   size_t scratchSpacePerStream;
 } THCCudaResourcesPerDevice;
@@ -62,10 +57,6 @@ THC_API int THCState_getNumDevices(THCState* state);
 
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
-
-/* BLAS and sparse handles */
-THC_API cublasHandle_t THCState_getCurrentBlasHandle(THCState *state);
-THC_API cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state);
 
 /* For the current device and stream, returns the allocated scratch space */
 THC_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);

@@ -19,6 +19,7 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
+SAVE_STATE_WARNING = "Please also save or load the state of the optimzer when saving or loading the scheduler."
 
 class _LRScheduler(object):
 
@@ -117,7 +118,7 @@ class _LRScheduler(object):
                 warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
                               "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
                               "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
-                              "will result in PyTorch skipping the first value of the learning rate schedule."
+                              "will result in PyTorch skipping the first value of the learning rate schedule. "
                               "See more details at "
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
@@ -140,7 +141,7 @@ class _LRScheduler(object):
                 self.last_epoch += 1
                 values = self.get_lr()
             else:
-                warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
+                warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = self._get_closed_form_lr()
@@ -196,6 +197,84 @@ class LambdaLR(_LRScheduler):
         The learning rate lambda functions will only be saved if they are callable objects
         and not if they are functions or lambdas.
         """
+
+        warnings.warn(SAVE_STATE_WARNING, UserWarning)
+        state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
+        state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
+
+        for idx, fn in enumerate(self.lr_lambdas):
+            if not isinstance(fn, types.FunctionType):
+                state_dict['lr_lambdas'][idx] = fn.__dict__.copy()
+
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        """Loads the schedulers state.
+
+        Arguments:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+
+        warnings.warn(SAVE_STATE_WARNING, UserWarning)
+        lr_lambdas = state_dict.pop('lr_lambdas')
+        self.__dict__.update(state_dict)
+
+        for idx, fn in enumerate(lr_lambdas):
+            if fn is not None:
+                self.lr_lambdas[idx].__dict__.update(fn)
+
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn("To get the last learning rate computed by the scheduler, "
+                          "please use `get_last_lr()`.")
+
+        return [base_lr * lmbda(self.last_epoch)
+                for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
+
+
+class MultiplicativeLR(_LRScheduler):
+    """Multiply the learning rate of each parameter group by the factor given
+    in the specified function. When last_epoch=-1, sets initial lr as lr.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        lr_lambda (function or list): A function which computes a multiplicative
+            factor given an integer parameter epoch, or a list of such
+            functions, one for each group in optimizer.param_groups.
+        last_epoch (int): The index of last epoch. Default: -1.
+
+    Example:
+        >>> # Assuming optimizer has two groups.
+        >>> lmbda = lambda epoch: 0.95
+        >>> scheduler = LambdaLR(optimizer, lr_lambda=lmbda)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+    """
+
+    def __init__(self, optimizer, lr_lambda, last_epoch=-1):
+        self.optimizer = optimizer
+
+        if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
+            self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
+        else:
+            if len(lr_lambda) != len(optimizer.param_groups):
+                raise ValueError("Expected {} lr_lambdas, but got {}".format(
+                    len(optimizer.param_groups), len(lr_lambda)))
+            self.lr_lambdas = list(lr_lambda)
+        self.last_epoch = last_epoch
+        super(MultiplicativeLR, self).__init__(optimizer, last_epoch)
+
+    def state_dict(self):
+        """Returns the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        The learning rate lambda functions will only be saved if they are callable objects
+        and not if they are functions or lambdas.
+        """
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
         state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
 
@@ -222,10 +301,13 @@ class LambdaLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.")
+                          "please use `get_last_lr()`.", UserWarning)
 
-        return [base_lr * lmbda(self.last_epoch)
-                for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
+        if self.last_epoch > 0:
+            return [group['lr'] * lmbda(self.last_epoch)
+                    for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
+        else:
+            return [base_lr for base_lr in self.base_lrs]
 
 
 class StepLR(_LRScheduler):
@@ -262,7 +344,7 @@ class StepLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         if (self.last_epoch == 0) or (self.last_epoch % self.step_size != 0):
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -307,7 +389,7 @@ class MultiStepLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch not in self.milestones:
             return [group['lr'] for group in self.optimizer.param_groups]
@@ -336,7 +418,7 @@ class ExponentialLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
             return self.base_lrs
@@ -354,8 +436,8 @@ class CosineAnnealingLR(_LRScheduler):
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
-        \eta_{t+1} = \eta_{min} + (\eta_t - \eta_{min})\frac{1 +
-        \cos(\frac{T_{cur}+1}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)},
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
         T_{cur} \neq (2k+1)T_{max};\\
         \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
         \cos(\frac{1}{T_{max}}\pi)}{2},
@@ -367,8 +449,8 @@ class CosineAnnealingLR(_LRScheduler):
     solely by this scheduler, the learning rate at each step becomes:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{max}}\pi))
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_. Note that this only
@@ -392,7 +474,7 @@ class CosineAnnealingLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         if self.last_epoch == 0:
             return self.base_lrs
@@ -511,7 +593,7 @@ class ReduceLROnPlateau(object):
         if epoch is None:
             epoch = self.last_epoch + 1
         else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, DeprecationWarning)
+            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
@@ -584,7 +666,7 @@ class ReduceLROnPlateau(object):
 
 
 class CyclicLR(_LRScheduler):
-    """Sets the learning rate of each parameter group according to
+    r"""Sets the learning rate of each parameter group according to
     cyclical learning rate policy (CLR). The policy cycles the learning
     rate between two boundaries with a constant frequency, as detailed in
     the paper `Cyclical Learning Rates for Training Neural Networks`_.
@@ -595,13 +677,11 @@ class CyclicLR(_LRScheduler):
     `step` should be called after a batch has been used for training.
 
     This class has three built-in policies, as put forth in the paper:
-    "triangular":
-        A basic triangular cycle w/ no amplitude scaling.
-    "triangular2":
-        A basic triangular cycle that scales initial amplitude by half each cycle.
-    "exp_range":
-        A cycle that scales initial amplitude by gamma**(cycle iterations) at each
-        cycle iteration.
+
+    * "triangular": A basic triangular cycle without amplitude scaling.
+    * "triangular2": A basic triangular cycle that scales initial amplitude by half each cycle.
+    * "exp_range": A cycle that scales initial amplitude by :math:`\text{gamma}^{\text{cycle iterations}}`
+      at each cycle iteration.
 
     This implementation was adapted from the github repo: `bckenstler/CLR`_
 
@@ -775,7 +855,7 @@ class CyclicLR(_LRScheduler):
 
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         cycle = math.floor(1 + self.last_epoch / self.total_size)
         x = 1. + self.last_epoch / self.total_size - cycle
@@ -815,11 +895,11 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     of epochs between two warm restarts in SGDR:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{i}}\pi))
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{i}}\pi\right)\right)
 
     When :math:`T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
-    When :math:`T_{cur}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
+    When :math:`T_{cur}=0` after restart, set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
@@ -852,7 +932,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                 for base_lr in self.base_lrs]
@@ -866,12 +946,12 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             >>> for epoch in range(20):
             >>>     for i, sample in enumerate(dataloader):
             >>>         inputs, labels = sample['inputs'], sample['labels']
-            >>>         scheduler.step(epoch + i / iters)
             >>>         optimizer.zero_grad()
             >>>         outputs = net(inputs)
             >>>         loss = criterion(outputs, labels)
             >>>         loss.backward()
             >>>         optimizer.step()
+            >>>         scheduler.step(epoch + i / iters)
 
         This function can be called in an interleaved way.
 
@@ -941,19 +1021,15 @@ class OneCycleLR(_LRScheduler):
 
     This scheduler is not chainable.
 
-    This class has two built-in annealing strategies:
-    "cos":
-        Cosine annealing
-    "linear":
-        Linear annealing
-
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
-    1) A value for total_steps is explicitly provided.
-    2) A number of epochs (epochs) and a number of steps per epoch
+
+    #. A value for total_steps is explicitly provided.
+    #. A number of epochs (epochs) and a number of steps per epoch
        (steps_per_epoch) are provided.
        In this case, the number of total steps is inferred by
        total_steps = epochs * steps_per_epoch
+
     You must either provide a value for total_steps or provide a value for both
     epochs and steps_per_epoch.
 
@@ -977,7 +1053,8 @@ class OneCycleLR(_LRScheduler):
             increasing the learning rate.
             Default: 0.3
         anneal_strategy (str): {'cos', 'linear'}
-            Specifies the annealing strategy.
+            Specifies the annealing strategy: "cos" for cosine annealing, "linear" for
+            linear annealing.
             Default: 'cos'
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
             to learning rate between 'base_momentum' and 'max_momentum'.
@@ -1073,9 +1150,9 @@ class OneCycleLR(_LRScheduler):
         max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
-                group['lr'] = max_lrs[idx] / div_factor
+                group['initial_lr'] = max_lrs[idx] / div_factor
                 group['max_lr'] = max_lrs[idx]
-                group['min_lr'] = group['lr'] / final_div_factor
+                group['min_lr'] = group['initial_lr'] / final_div_factor
 
         # Initialize momentum variables
         self.cycle_momentum = cycle_momentum
@@ -1119,7 +1196,7 @@ class OneCycleLR(_LRScheduler):
     def get_lr(self):
         if not self._get_lr_called_within_step:
             warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+                          "please use `get_last_lr()`.", UserWarning)
 
         lrs = []
         step_num = self.last_epoch

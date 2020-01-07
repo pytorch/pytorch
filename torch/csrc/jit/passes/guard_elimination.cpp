@@ -13,10 +13,13 @@ namespace jit {
 struct GuardElimination {
   GuardElimination(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)),
-        aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
+        aliasDb_(std::make_unique<AliasDb>(graph_)) {}
 
   void run() {
-    moveGuardsToDefs(graph_->block());
+    const size_t MAX_ATTEMPTS = 5;
+    size_t attempts = MAX_ATTEMPTS;
+    while (attempts-- && moveGuardsToDefs(graph_->block())) {
+    }
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
@@ -24,7 +27,16 @@ struct GuardElimination {
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
 
-  void moveGuardsToDefs(Block* b) {
+  static bool isLoweredGradOf(Node* n) {
+    if (n->kind() != prim::If) {
+      return false;
+    }
+
+    return n->input(0)->node()->kind() == prim::AutogradAnyNonZero;
+  }
+
+  bool moveGuardsToDefs(Block* b) {
+    bool changed = false;
     for (auto it = b->nodes().begin(); it != b->nodes().end();) {
       auto n = *it;
       if (n->kind() == prim::Guard) {
@@ -39,6 +51,7 @@ struct GuardElimination {
           guardee = *n->owningBlock()->nodes().begin();
         }
         bool moved = aliasDb_->moveAfterTopologicallyValid(n, guardee);
+        changed |= moved;
         if (moved) {
           GRAPH_UPDATE(
               "Moved ",
@@ -53,6 +66,21 @@ struct GuardElimination {
         }
       }
     }
+
+    if (b->owningNode() &&
+        isLoweredGradOf(
+            b->owningNode()) /*b->owningNode()->kind() == prim::If*/) {
+      for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+        auto block_node = *it++;
+        if (block_node->kind() != prim::Guard) {
+          break;
+        }
+        block_node->moveBefore(b->owningNode());
+        changed = true;
+      }
+    }
+
+    return changed;
   }
 
   void coalesceGuards(Block* b) {
@@ -183,7 +211,6 @@ private:
   //   Guards can be removed if all inputs are guarded and `isSummarized()`
   //   returns
   //   false or inputs are `prim::Constant`
-  //
   bool removableGuard(Node *n) {
 
     const static auto no_exceptions = std::unordered_set<size_t>{};
@@ -208,6 +235,17 @@ private:
     case aten::neg:
     case prim::ConstantChunk:
     case aten::size:
+    case aten::abs:
+    case aten::sign:
+    case aten::pow:
+    case aten::relu:
+    case aten::threshold:
+    case aten::avg_pool2d:
+    case prim::AutogradAdd:
+    case prim::AutogradZero:
+    case aten::rand_like:
+    case aten::erf:
+    case aten::erfc:
       return checkInputs(n, no_exceptions);
     case aten::cat:
       // check that the dimension argument is constant
@@ -240,7 +278,27 @@ private:
         }
       }
       return false;
+
+    // this is checked by one of the tests in test_jit_fuser.py
+    case prim::ListUnpack: {
+      // check if the input is a constant chunk
+      // used for LSTM fusions
+      auto chunk = n->input(0)->node();
+      if (chunk->kind() != aten::chunk) {
+        return false;
+      }
+      return checkInputs(chunk, no_exceptions);
+    }
+    // this is checked by one of the tests in test_jit_fuser.py
+    case aten::broadcast_tensors: {
+      auto list_construct = n->input(0)->node();
+      if (list_construct->kind() != prim::ListConstruct) {
+        return false;
+      }
+      return checkInputs(list_construct, no_exceptions);
+    }
     case prim::Guard:
+    case prim::GradOf:
       return true;
     default:
       GRAPH_DEBUG("cannot remove ", n->kind().toQualString());

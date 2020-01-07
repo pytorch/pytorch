@@ -5,9 +5,11 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name
+    is_optional, _qualified_name, Any
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
+    DeviceObjType
+
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
@@ -28,15 +30,6 @@ class Module(object):
             raise RuntimeError("Module {} has no member called {}".format(self.name, name))
 
 
-_eval_env = {
-    'torch': Module('torch', {'Tensor': torch.Tensor}),
-    'Tensor': torch.Tensor,
-    'typing': Module('typing', {'Tuple': Tuple}),
-    'Tuple': Tuple,
-    'List': List,
-    'Dict': Dict,
-    'Optional': Optional,
-}
 class EvalEnv(object):
     env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
@@ -101,10 +94,7 @@ def get_num_params(fn, loc):
     elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
         return None
     else:
-        num_params = len(py_def.args.args)
-        if inspect.ismethod(fn):
-            num_params = num_params - 1
-        return num_params
+        return len(py_def.args.args)
 
 
 def parse_type_line(type_line, rcb, loc):
@@ -160,15 +150,15 @@ def get_type_line(source):
     # https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code
     return_line = None
     parameter_type_lines = []
-    for line_num, line in reversed(type_lines):
+    for line_num, line in type_lines:
         if '# type: (...) -> ' in line:
             return_line = (line_num, line)
+            break
         elif type_comment in line:
-            if return_line is None:
-                raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
-                                   "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
-            if line_num < return_line[0]:
-                parameter_type_lines.insert(0, line)
+            parameter_type_lines.append(line)
+    if return_line is None:
+        raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
+                           "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -247,10 +237,16 @@ def ann_to_type(ann, resolver=None):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
+    elif ann is Any:
+        return AnyType.get()
+    elif ann is type(None):
+        return NoneType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
     elif hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
+    elif ann is torch.device:
+        return DeviceObjType.get()
     elif resolver is not None:
         # Maybe resolve a NamedTuple to a Tuple Type
         rcb, loc = resolver
@@ -261,6 +257,7 @@ def ann_to_type(ann, resolver=None):
 
 
 __all__ = [
+    'Any',
     'List',
     'BroadcastingList1',
     'BroadcastingList2',
@@ -277,6 +274,7 @@ __all__ = [
     'ListType',
     'StringType',
     'DictType',
+    'AnyType',
     'Module',
     # TODO: Consider not exporting these during wildcard import (reserve
     # that for the types; for idiomatic typing code.)

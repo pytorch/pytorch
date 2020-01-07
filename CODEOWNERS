@@ -4,10 +4,10 @@
 /docs/cpp @goldsborough @ebetica @yf225
 /torch/csrc/api/ @ebetica @goldsborough @yf225
 /test/cpp/api/ @ebetica @goldsborough @yf225
-/torch/lib/c10d/ @pietern @mrshenli
-/torch/csrc/distributed/ @pietern @mrshenli
-/torch/distributed/ @apaszke @pietern @mrshenli
-/test/test_c10d.py @pietern @mrshenli
+/torch/lib/c10d/ @pietern @mrshenli @zhaojuanmao
+/torch/csrc/distributed/ @pietern @mrshenli @zhaojuanmao
+/torch/distributed/ @apaszke @pietern @mrshenli @zhaojuanmao
+/test/test_c10d.py @pietern @mrshenli @zhaojuanmao
 /torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
 
 # Not there to stricly require the approval, but to be tagged as a reviewer
@@ -19,3 +19,10 @@
 /torch/autograd/ @apaszke
 /torch/jit/ @apaszke
 /torch/utils/data/ @apaszke
+
+# Distributed RPC Framework.
+/torch/csrc/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/csrc/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini

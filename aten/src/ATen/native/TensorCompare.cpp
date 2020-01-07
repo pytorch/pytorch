@@ -8,7 +8,6 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>
@@ -87,6 +86,16 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isfinite(const Tensor& self) {
+  // Integral tensor types are finite
+  if (!self.is_floating_point()) {
+    return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
+    return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
+  });
+}
+
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
   AT_ASSERT(n >= 0);
@@ -99,6 +108,8 @@ bool is_nonzero(const Tensor& self) {
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
+  } else if (localScalar.isComplex()) {
+     return localScalar.to<std::complex<double>>() != std::complex<double>(0.0, 0.0);
   } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
   } else if (localScalar.isBoolean()) {
@@ -122,8 +133,9 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_ALL_TYPES(ret.scalar_type(), "where_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(ret.scalar_type(), "where_cpu", [&] {
     where_cpu<scalar_t>(ret, condition, self, other);
   });
   return ret;
@@ -137,8 +149,8 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
+           "mode only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
@@ -146,15 +158,11 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
     return std::forward_as_tuple(values, indices);
   } else {
     auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
       NoNamesGuard guard;
-#endif
       return at::_mode_out(values, indices, self, dim, keepdim);
     }();
-#ifdef BUILD_NAMEDTENSOR
     namedinference::propagate_names_for_reduction(std::get<0>(result), self, dim, keepdim);
     namedinference::propagate_names_for_reduction(std::get<1>(result), self, dim, keepdim);
-#endif
     return result;
   }
 }
@@ -189,8 +197,8 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
+           "max only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     AT_ASSERT(max.dim() == 0);
@@ -208,15 +216,11 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
 std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return max_out_impl(max, max_indices, self, dim, keepdim);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(max, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(max_indices, self, dim, keepdim);
-#endif
   return result;
 }
 
@@ -249,8 +253,8 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
+           "min only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     AT_ASSERT(min.dim() == 0);
@@ -268,20 +272,15 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
 std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
                                     const Tensor& self, int64_t dim, bool keepdim) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     return min_out_impl(min, min_indices, self, dim, keepdim);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_for_reduction(min, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(min_indices, self, dim, keepdim);
-#endif
   return result;
 }
 
 
-#ifdef BUILD_NAMEDTENSOR
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
@@ -314,6 +313,5 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, Dimname dim, bool keepdim) {
   return at::mode_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
-#endif
 
 }} // namespace at::native

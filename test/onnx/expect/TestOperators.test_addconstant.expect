@@ -1,9 +1,10 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     output: "1"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -18,6 +19,7 @@ graph {
     input: "0"
     input: "1"
     output: "2"
+    name: "Add_1"
     op_type: "Add"
   }
   name: "torch-jit-export"

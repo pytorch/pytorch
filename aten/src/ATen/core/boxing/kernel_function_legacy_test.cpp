@@ -20,7 +20,7 @@
 using c10::RegisterOperators;
 using c10::TensorTypeId;
 using c10::Stack;
-using c10::guts::make_unique;
+using std::make_unique;
 using c10::intrusive_ptr;
 using c10::Dict;
 using at::Tensor;
@@ -43,6 +43,8 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
 }
 
 void expectCallsIncrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -52,6 +54,8 @@ void expectCallsIncrement(TensorTypeId type_id) {
 }
 
 void expectCallsDecrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -905,10 +909,12 @@ std::string concatKernel(const Tensor& tensor1, std::string a, const std::string
 }
 
 void expectCallsConcatUnboxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, type_id, dummyTensor(type_id), "1", "2", 3);
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(type_id), "1", "2", 3);
   EXPECT_EQ("123", result);
 }
 

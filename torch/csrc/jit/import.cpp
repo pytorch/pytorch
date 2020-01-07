@@ -54,6 +54,46 @@ void postSetStateValidate(const IValue& v) {
   }
 }
 
+IValue readArchiveAndTensors(
+    const std::string& archive_name,
+    c10::optional<ClassResolver> class_resolver,
+    c10::optional<ObjLoader> obj_loader,
+    c10::optional<at::Device> device,
+    PyTorchStreamReader& stream_reader) {
+  std::string picklename = archive_name + ".pkl";
+  at::DataPtr pickle_ptr;
+  size_t pickle_size;
+  std::tie(pickle_ptr, pickle_size) = stream_reader.getRecord(picklename);
+
+  size_t bytes_read = 0;
+  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
+  auto reader = [&](char* buffer, size_t len) -> size_t {
+    if (bytes_read >= pickle_size) {
+      return 0;
+    }
+    len = std::min(pickle_size - bytes_read, len);
+    // Copy len bytes into buffer
+    const char* start = data + bytes_read;
+    std::memcpy(buffer, start, len);
+    bytes_read += len;
+    return len;
+  };
+
+  std::string archive_name_plus_slash = archive_name + "/";
+  auto read_record = [&](const std::string& name) {
+    std::string ss = archive_name_plus_slash + name;
+    return std::get<0>(stream_reader.getRecord(ss));
+  };
+
+  Unpickler unpickler(
+      reader,
+      class_resolver ? std::move(*class_resolver) : nullptr,
+      obj_loader ? std::move(*obj_loader) : nullptr,
+      std::move(read_record),
+      device);
+  return unpickler.parse_ivalue();
+}
+
 namespace {
 
 
@@ -75,7 +115,8 @@ class ScriptModuleDeserializer final {
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
-            }) {}
+            },
+            reader_->version()) {}
 
   script::Module deserialize(
       c10::optional<at::Device> device,
@@ -93,25 +134,6 @@ class ScriptModuleDeserializer final {
 };
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) {
-    if (bytes_read + len > pickle_size) {
-      return false;
-    }
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return true;
-  };
-
   auto class_resolver = [&](const c10::QualifiedName& qn) {
     auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
@@ -128,7 +150,16 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       // XXX: Do not optimize __setstate__, so that we don't try to
       // specialize the class before it is initialized.
       setGraphExecutorOptimize(false);
-      (*type.type_->getMethod("__setstate__"))({obj, input});
+      Function* set_state = type.type_->getMethod("__setstate__");
+      // since we are in the middle of unpickling we might still have lists and
+      // dicts that do not have accurate tags (e.g. they report they are
+      // List[Any]). But we need to run __setstate__ which will check the input
+      // type and may access the tags. Since setstate has a known input type, we
+      // can correctly restore the tags now by apply the input type of set_state
+      // to the state object being passed.
+      restoreAccurateTypeTags(
+          input, set_state->getSchema().arguments().at(1).type());
+      (*set_state)({obj, input});
       setGraphExecutorOptimize(true);
       postSetStateValidate(obj);
       return obj;
@@ -142,16 +173,8 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
 
-  auto read_record = [&](const std::string& name) {
-    std::stringstream ss;
-    ss << archive_name << "/" << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
-  };
-
-  Unpickler unpickler(
-      reader, std::move(class_resolver), std::move(obj_loader),
-      std::move(read_record), device_);
-  return unpickler.parse_ivalue();
+  return readArchiveAndTensors(
+      archive_name, class_resolver, obj_loader, device_, *reader_.get());
 }
 
 script::Module ScriptModuleDeserializer::deserialize(
@@ -222,7 +245,7 @@ script::Module load(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai =
-      caffe2::make_unique<IStreamAdapter>(&in);
+      std::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
@@ -231,7 +254,7 @@ script::Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }

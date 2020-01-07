@@ -106,7 +106,7 @@ public final class TensorImageUtils {
 
     final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
     bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.newFloat32Tensor(new long[]{1, 3, height, width}, floatBuffer);
+    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, height, width});
   }
 
   /**
@@ -146,7 +146,7 @@ public final class TensorImageUtils {
         tensorWidth,
         tensorHeight,
         normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.newFloat32Tensor(new long[]{1, 3, tensorHeight, tensorWidth}, floatBuffer);
+    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, tensorHeight, tensorWidth});
   }
 
   /**

@@ -14,7 +14,7 @@ FunctionSchema defaultSchemaFor(const Function& function) {
   for (size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
-                                         : ("argument_" + std::to_string(i));
+                                         : ("argument_" + c10::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
   for (size_t i = 0; i < g.outputs().size(); ++i) {

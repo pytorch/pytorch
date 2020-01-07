@@ -40,6 +40,9 @@ for test in $(find "$cpp_test_dir" -executable -type f); do
         LD_LIBRARY_PATH="$ld_library_path" "$test"
       fi
       ;;
+    */*_benchmark)
+      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+      ;;
     *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
@@ -64,7 +67,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
   exit 0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
+# if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
   # See comments on
   # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
@@ -74,9 +77,9 @@ if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
   sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
   sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
   sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
-else
-  pip install --user --no-cache-dir hypothesis==3.59.0
-fi
+# else
+#   pip install --user --no-cache-dir hypothesis==3.59.0
+# fi
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -93,6 +96,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
+
+  # This test has been flaky in ROCm CI (but note the tests are
+  # cpu-only so should be unrelated to ROCm)
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/blobs_queue_db_test.py")
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
@@ -100,8 +107,13 @@ fi
 echo "Running Python tests.."
 if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   # locale setting is required by click package with py3
-  export LC_ALL=C.UTF-8
-  export LANG=C.UTF-8
+  for loc in "en_US.utf8" "C.UTF-8"; do
+    if locale -a | grep "$loc" >/dev/null 2>&1; then
+      export LC_ALL="$loc"
+      export LANG="$loc"
+      break;
+    fi
+  done
 fi
 
 pip install --user pytest-sugar
@@ -115,6 +127,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
   ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
@@ -131,8 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev905
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.0.0.dev1123
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi
-

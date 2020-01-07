@@ -52,8 +52,10 @@ to speed up computations on CPU.
 
 ATen, MKL and MKL-DNN support intra-op parallelism and depend on the
 following parallelization libraries to implement it:
- * OpenMP_ - a standard (and a library, usually shipped with a compiler), widely used in external libraries;
- * TBB_ - a newer parallelization library optimized for task-based parallelism and concurrent environments.
+
+* OpenMP_ - a standard (and a library, usually shipped with a compiler), widely used in external libraries;
+* TBB_ - a newer parallelization library optimized for task-based parallelism and concurrent environments.
+
 OpenMP historically has been used by a large number of libraries. It is known
 for a relative ease of use and support for loop-based parallelism and other primitives.
 At the same time OpenMP is not known for a good interoperability with other threading

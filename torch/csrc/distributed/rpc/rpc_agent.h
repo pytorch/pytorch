@@ -1,18 +1,24 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct RpcBackendOptions {
+  RpcBackendOptions() = default;
+  std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
+};
+
 // A globally unique ID to identify an RpcAgent
-struct WorkerInfo {
+struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
@@ -39,6 +45,10 @@ struct WorkerInfo {
         name_);
   }
 
+  bool operator==(const WorkerInfo& rhs) {
+    return (id_ == rhs.id_) && (name_ == rhs.name_);
+  }
+
   static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
@@ -50,7 +60,7 @@ struct WorkerInfo {
 // will invoke the given ``RequestCallback`` to process received requests. It
 // should immediately become ready to serve request and accept response after
 // construction.
-class RpcAgent {
+class TORCH_API RpcAgent {
  public:
   // `WorkerInfo` is the globally unique identifier for this RpcAgent instance.
   // It contains a ``name_`` field and an ``id_`` field. ``name_`` is the
@@ -62,7 +72,13 @@ class RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
-  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
+  // NB: RpcAgent implementations should not start serving requests until
+  // ``start()`` is called, as there could be other contexts that have not been
+  // initialized yet at this time.
+  RpcAgent(
+      WorkerInfo id,
+      std::unique_ptr<RequestCallback> cb,
+      std::chrono::milliseconds rpcTimeout);
 
   virtual ~RpcAgent();
 
@@ -70,9 +86,9 @@ class RpcAgent {
   // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
-  // when the response arrives. For other message types, the Future should be
-  // ignored by the caller.
+  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
+  // completed when the response arrives. For other message types, the Future
+  // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) = 0;
@@ -89,6 +105,18 @@ class RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
+
+  // Retrieve the timeout for all RPCs.
+  inline std::chrono::milliseconds getRpcTimeout() const {
+    return rpcTimeout_.load();
+  }
+
+  // Set the timeout for all RPCs
+  inline void setRpcTimeout(const std::chrono::milliseconds& rpcTimeout) {
+    rpcTimeout_.store(rpcTimeout);
+  }
+
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
   virtual void join() = 0;
@@ -97,12 +125,45 @@ class RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
+  // start accepting requests
+  virtual void start() = 0;
+
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
+
+  // Set the default rpc agent.
+  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+
+  // Retrieve the default rpc agent.
+  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
+  // Retrive metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
+
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+  std::atomic<std::chrono::milliseconds> rpcTimeout_;
+
+ private:
+  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
 };
 
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::distributed::rpc::WorkerInfo> {
+  std::size_t operator()(
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
+    return worker_info.id_;
+  }
+};
+} // namespace std

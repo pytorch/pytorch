@@ -19,8 +19,8 @@
             elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
               retry apt-get update
               retry apt-get -y install expect moreutils
-              conda install -y -c eumetsat expect
-              conda install -y cmake
+              retry conda install -y -c eumetsat expect
+              retry conda install -y cmake
             fi
     - run:
         name: Update compiler to devtoolset7
@@ -41,6 +41,16 @@
         no_output_timeout: "1h"
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
+    - run:
+        name: save binary size
+        no_output_timeout: "5m"
+        command: |
+            source /env
+            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+            pip3 install requests && \
+            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
+            python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -130,7 +140,7 @@
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -158,7 +168,7 @@
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -199,7 +209,7 @@
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -223,7 +233,7 @@
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -232,20 +242,26 @@
     - run_brew_for_ios_build
     - run:
         name: Build
-        contxt: org-member
         no_output_timeout: "1h"
         command: |
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
+    - run:
+        name: Test
+        no_output_timeout: "30m"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
+          cat "$script"
+          source "$script"
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
-  
-  binary_ios_upload: 
+
+  binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
     - attach_workspace:
         at: ~/workspace

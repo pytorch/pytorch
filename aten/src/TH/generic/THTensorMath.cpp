@@ -2,7 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
 
@@ -23,39 +22,6 @@
 // sense (rather than just having cut the file down the middle, which is
 // what I did when I split these up originally).
 
-void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)src;
-  return THError("cbitand is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; i++) {
-          rp[i] = tp[i] & sp[i];
-        }
-      });
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;);
-  }
-#endif
-}
 
 void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
 {
@@ -87,67 +53,6 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
     }
   } else {
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;);
-  }
-#endif
-}
-
-void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)src;
-  return THError("cbitxor is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; i++) {
-          rp[i] = tp[i] ^ sp[i];
-        }
-      });
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;);
-  }
-#endif
-}
-
-void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)value;
-  return THError("bitxor is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        rp[i] = tp[i] ^ value;
-      }
-    });
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data ^ value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 #endif
 }
@@ -215,6 +120,11 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
       at::Tensor t_wrap = THTensor_wrap(t);
       at::native::copy_(r__wrap, t_wrap);
     }
+  }
+
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
   }
 
   // n == 1 || ldc >= max(1, m)
@@ -326,14 +236,10 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
 
 void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
-#endif
 }
 
 static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
@@ -411,14 +317,10 @@ static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTen
 
 void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
   {
-#ifdef BUILD_NAMEDTENSOR
     at::NoNamesGuard guard;
-#endif
     THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
   }
-#ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-#endif
 }
 
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
@@ -753,49 +655,6 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #endif
 
   }
-}
-
-void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
-{
-  int64_t N1 = m1->size(0);
-  int64_t N2 = m2->size(0);
-  int64_t dim;
-  scalar_t *m1_p;
-  scalar_t *m2_p;
-  scalar_t *r_p;
-
-  THTensor_(resize2d)(r_, N1, N2);
-
-  m1 = THTensor_(newContiguous)(m1);
-  m2 = THTensor_(newContiguous)(m2);
-
-  THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
-  THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
-
-  dim = m1->size(1);
-  THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
-
-  m1_p = m1->data<scalar_t>();
-  m2_p = m2->data<scalar_t>();
-  r_p = r_->data<scalar_t>();
-
-  at::parallel_for(0, N1, 0,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t j, k;
-      for (j = 0; j < N2; j++) {
-        scalar_t sum = 0;
-        for (k = 0; k < dim; k++) {
-          scalar_t term = m1_p[i * dim + k] - m2_p[j * dim + k];
-          sum += term * term;
-        }
-        r_p[i * N2 + j] = gain * sum;
-      }
-    }
-  });
-
-  c10::raw::intrusive_ptr::decref(m1);
-  c10::raw::intrusive_ptr::decref(m2);
 }
 
 void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)

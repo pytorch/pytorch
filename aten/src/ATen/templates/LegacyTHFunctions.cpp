@@ -7,7 +7,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 ${th_headers}
 ${extra_cuda_headers}
 
@@ -28,8 +27,7 @@ namespace {
   TensorOptions options(ScalarType s) {
     return TensorOptions().dtype(s)
                           .device(DeviceType::${DeviceType})
-                          .layout(kStrided)
-                          .is_variable(false);
+                          .layout(kStrided);
   }
 
   Allocator* allocator() {

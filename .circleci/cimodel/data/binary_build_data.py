@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 This module models the tree of configuration variants
 for "smoketest" builds.

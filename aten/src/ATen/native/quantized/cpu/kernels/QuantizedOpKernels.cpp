@@ -192,6 +192,42 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
+void qclamp_kernel(
+    const Tensor& qx,
+    Scalar min_scalar,
+    Scalar max_scalar,
+    Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        qx.suggest_memory_format());
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    auto min = min_scalar.to<float>();
+    auto max = max_scalar.to<float>();
+    scalar_t min_q =
+        at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), min);
+    scalar_t max_q =
+        at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(), max);
+    auto min_vec = Vec(min_q);
+    auto max_vec = Vec(max_q);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          underlying_t min_clamped =
+              std::max<underlying_t>(value.val_, min_q.val_);
+          return scalar_t(std::min<underlying_t>(min_clamped, max_q.val_));
+        },
+        [&](Vec val) -> Vec {
+          auto min_clamped = val.maximum(min_vec);
+          return min_clamped.minimum(max_vec);
+        });
+  });
+}
+
 // Note: out is assumed to be the same size as self and other.
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
@@ -524,18 +560,16 @@ void qavg_pool2d_nhwc_kernel(
         hend = std::min(hend, inputHeight);
         wend = std::min(wend, inputWidth);
 
-        int64_t size;
+        int64_t size = (hend - hstart) * (wend - wstart);
         int64_t divide_factor;
         if (divisor_override.has_value()) {
           divide_factor = divisor_override.value();
-          size = (hend - hstart) * (wend - wstart);
         } else {
           if (count_include_pad) {
             divide_factor = pool_size;
           } else {
             divide_factor = (hend - hstart) * (wend - wstart);
           }
-          size = divide_factor;
         }
 
         int64_t c = 0;
@@ -655,16 +689,18 @@ void qupsample_bilinear2d_nhwc_kernel(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(
       input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
         auto* idata = static_cast<scalar_t*>(input.data_ptr());
         auto* odata = static_cast<scalar_t*>(output.data_ptr());
         float inverse_scale = output.q_scale() / input.q_scale();
         const auto rheight = area_pixel_compute_scale<float>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_h);
         const auto rwidth = area_pixel_compute_scale<float>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_w);
 
         for (int64_t b = 0; b < nbatch; ++b) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
@@ -814,6 +850,7 @@ void qtopk_kernel(Tensor& values,
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);

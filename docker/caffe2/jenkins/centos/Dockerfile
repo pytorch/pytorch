@@ -6,6 +6,13 @@ ARG EC2
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
+# Install devtoolset
+ARG DEVTOOLSET_VERSION
+ADD ./install_devtoolset.sh install_devtoolset.sh
+RUN bash ./install_devtoolset.sh
+RUN rm install_devtoolset.sh
+ENV BASH_ENV "/etc/profile"
+
 # Compile/install ccache for faster builds
 ADD ./install_ccache.sh install_ccache.sh
 RUN bash ./install_ccache.sh && rm install_ccache.sh

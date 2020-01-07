@@ -47,10 +47,6 @@ struct Argument {
         kwarg_only_(kwarg_only),
         alias_info_(std::move(alias_info)),
         is_inferred_type_(is_inferred_type) {
-    if (default_value_ && default_value_->isTensor()) {
-      auto t = default_value_->toTensor();
-      AT_ASSERT(!t.defined() || t.is_variable());
-    }
   }
   const std::string& name() const {
     return name_;
@@ -145,7 +141,9 @@ struct FunctionSchema {
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret) {}
+        is_varret_(is_varret) {
+    checkSchema();
+  }
 
   FunctionSchema(
       Symbol name,
@@ -160,7 +158,9 @@ struct FunctionSchema {
             std::move(arguments),
             std::move(returns),
             is_vararg,
-            is_varret) {}
+            is_varret) {
+    checkSchema();
+  }
 
   // check whether this schema is backward compatible with the old one.
   // the following conditions are considered as this schema is backward
@@ -176,9 +176,9 @@ struct FunctionSchema {
   //      this schema must provide default values.
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
-      std::ostream* why_not=nullptr) const;
+      std::ostream* why_not = nullptr) const;
 
-private:
+ private:
   OperatorName name_;
   std::vector<Argument> arguments_;
   std::vector<Argument> returns_;
@@ -190,7 +190,31 @@ private:
   bool is_varret_;
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
+  void checkSchema() const {
+    bool seen_default_arg = false;
+    for (const auto& arg : arguments()) {
+      if (arg.default_value()) {
+        seen_default_arg = true;
+      } else {
+        // we have historically serialized broadcasting lists wo/default values,
+        // so to not break BC allow lists here
+        if (arg.type()->kind() == ListType::Kind) {
+          continue;
+        }
+        TORCH_INTERNAL_ASSERT(
+            !seen_default_arg || arg.kwarg_only(),
+            "Non-default positional argument follows default argument. Parameter ",
+            arg.name(),
+            " in ",
+            *this);
+      }
+    }
+  }
+
 public:
+
+  void dump() const;
+
   const OperatorName& operator_name() const {
     return name_;
   }
@@ -233,6 +257,15 @@ public:
         overload_name(),
         std::move(new_arguments),
         returns(),
+        is_vararg(),
+        is_varret());
+  }
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        arguments(),
+        std::move(new_returns),
         is_vararg(),
         is_varret());
   }

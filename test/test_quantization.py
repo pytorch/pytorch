@@ -6,19 +6,27 @@ import torch.nn.quantized as nnq
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+from torch.nn.utils.rnn import PackedSequence
 from torch.quantization import \
-    QConfig, QConfigDynamic, default_observer, default_weight_observer, get_observer_dict,\
+    QConfigDynamic, get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
-    default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver,\
-    RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
-    QuantWrapper
+    default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
+    PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
+    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn
 
+from torch.quantization import QConfig
+from torch.quantization import default_histogram_observer
+from torch.quantization import default_observer
+from torch.quantization import default_per_channel_weight_observer
+from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
+    AnnotatedConvModel, ConvModel, \
+    AnnotatedConvBnModel, ConvBnModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ModelWithSequentialFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModelWithFunctionals, \
@@ -30,11 +38,10 @@ from common_quantization import QuantizationTestCase, \
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
-from jit_utils import _tmp_donotuse_dont_inline_everything
-
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 import io
 import copy
 
@@ -42,7 +49,6 @@ import copy
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
 class EagerModePostTrainingQuantTest(QuantizationTestCase):
-    @no_deadline
     @given(qconfig=st.sampled_from((torch.quantization.default_qconfig, torch.quantization.default_per_channel_qconfig)))
     def test_single_layer(self, qconfig):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
@@ -495,6 +501,31 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_per_channel_quantize(self):
+        r"""Test quantization for per_channel dynamic quantization
+        """
+        model = NestedModel().eval()
+        qconfig_dict = {
+            torch.nn.Linear: per_channel_dynamic_qconfig
+        }
+
+        prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            test_only_eval_fn(model, self.calib_data)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+
+        checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
+
     def test_quantized_rnn(self):
         d_in, d_hid = 2, 2
         model = LSTMDynamicModel().eval()
@@ -600,8 +631,96 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
         torch.testing.assert_allclose(output_fp16, ref_out)
         self.assertEqual(output_fp16, ref_out)
-        for out, ref in zip(final_hiddens_fp16, ref_hid):
-            torch.testing.assert_allclose(out, ref)
+        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref_val)
+
+        # Test tracing
+        # TODO: TorchScript overloads don't work without this wrapper
+        cell_trace = torch.jit.trace(ScriptWrapper(cell_int8), (x, (hx, cx)))
+        out_script, hid_script = cell_trace(x, hiddens)
+        for out_val, ref_val in zip(out_script, ref_out):
+            torch.testing.assert_allclose(out_val, ref_val)
+
+        # print(cell_trace.code)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_trace, b)
+        b.seek(0)
+        loaded = torch.jit.load(b)
+        out_loaded, hid_loaded = loaded(x, hiddens)
+        for loaded_val, ref_val in zip(out_loaded, ref_out):
+            torch.testing.assert_allclose(loaded_val, ref_val)
+
+        # Compare fp16 quantized to unquantized
+        output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+
+        torch.testing.assert_allclose(output_fp16, ref_out)
+        self.assertEqual(output_fp16, ref_out)
+        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+            torch.testing.assert_allclose(out, ref_val)
+
+        class ScriptWrapperPacked(torch.nn.Module):
+            def __init__(self, cell):
+                super(ScriptWrapperPacked, self).__init__()
+                self.cell = cell
+
+            def forward(self,
+                        x,  # type: PackedSequence
+                        hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
+                        ):
+                # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                return self.cell(x, hiddens)
+
+        cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
+        packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+        ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
+        output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
+
+        for packed_val, ref_val in zip(output_packed, ref_out_packed):
+            if isinstance(packed_val, torch.Tensor):
+                torch.testing.assert_allclose(packed_val, ref_val)
+            else:
+                self.assertEqual(packed_val, ref_val)
+
+        # Test save/load
+        b = io.BytesIO()
+        torch.jit.save(cell_packed, b)
+        b.seek(0)
+        loaded_packed = torch.jit.load(b)
+        out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
+        for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
+            if isinstance(packed_val, torch.Tensor):
+                torch.testing.assert_allclose(packed_val, ref_val)
+            else:
+                self.assertEqual(packed_val, ref_val)
+
+        # Test default instantiation
+        seq_len = 128
+        batch = 16
+        input_size = 3
+        hidden_size = 7
+        num_layers = 2
+        bias = True
+        bidirectional = False
+
+        x = torch.rand(seq_len, batch, input_size)
+        h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+        c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+
+        dtype = torch.qint8
+
+        cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                  hidden_size=hidden_size,
+                                                  num_layers=num_layers,
+                                                  bias=bias,
+                                                  batch_first=False,
+                                                  dropout=0.0,
+                                                  bidirectional=bidirectional,
+                                                  dtype=dtype)
+
+        y, (h, c) = cell_dq(x, (h, c))
+
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -668,8 +787,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     " with instruction set support avx2 or newer.",
 )
 class GraphModePostTrainingQuantTest(QuantizationTestCase):
-    @_tmp_donotuse_dont_inline_everything
-    def test_single_layer(self):
+    def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
         """
@@ -683,26 +801,146 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         model_eager = quantize(annotated_linear_model, test_only_eval_fn,
                                self.calib_data)
 
+        qconfig_dict = {'': default_qconfig}
+        model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+        model_script = torch.jit.script(linear_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+    def test_observer_with_ignored_function(self):
+        r"""Test observers with ignored function and make sure it works in
+        graph mode
+        """
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
+        for qconfig in [
+                QConfig(
+                    activation=default_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_histogram_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_observer,
+                    weight=default_per_channel_weight_observer),
+        ]:
+            annotated_linear_model.qconfig = qconfig
+            linear_model = SingleLayerLinearModel().eval()
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+            model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                                   self.calib_data)
+
+            qconfig_dict = {'': qconfig}
+            model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
+            model_script = torch.jit.script(linear_model)
+            result_eager = model_eager(self.calib_data[0][0])
+            for model_under_test in [model_traced, model_script]:
+                model_quantized = quantize_script(
+                    model_under_test,
+                    qconfig_dict,
+                    test_only_eval_fn,
+                    [self.calib_data],
+                    inplace=False)
+                self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
+
+    def test_conv(self):
+        r"""Compare the result of quantizing conv layer in
+        eager mode and graph mode
+        """
+        # eager mode
+        annotated_conv_model = AnnotatedConvModel().eval()
+        conv_model = ConvModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+        model_eager = quantize(annotated_conv_model, default_eval_fn,
+                               self.img_data)
+        qconfig_dict = {'': default_qconfig}
+        model_traced = torch.jit.trace(conv_model, self.img_data[0][0])
+        model_script = torch.jit.script(conv_model)
+        result_eager = model_eager(self.img_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                default_eval_fn,
+                [self.img_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.img_data[0][0]), result_eager)
+
+    @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
+    def test_conv_bn(self):
+        r"""Compare the result of quantizing conv + bn layer in
+        eager mode and graph mode
+        """
+        # eager mode
+        conv_model = AnnotatedConvBnModel().eval()
+        conv_model_to_script = ConvBnModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
+        fuse_modules(conv_model, ['conv', 'bn'], inplace=True)
+        model_eager = quantize(conv_model, default_eval_fn,
+                               self.img_data)
         qconfig_dict = {
-            '': QConfig(
-                activation=default_observer,
-                weight=default_weight_observer)
+            '': default_qconfig
         }
         model_script = quantize_script(
-            torch.jit.script(linear_model),
+            torch.jit.script(conv_model_to_script),
             qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
+            default_eval_fn,
+            [self.img_data],
             inplace=False)
-        result_eager = model_eager(self.calib_data[0][0])
-        torch._C._jit_pass_quant_fusion(model_script._c._get_module('fc1')._get_method('forward').graph)
-        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+        result_eager = model_eager(self.img_data[0][0])
+        result_script = model_script(self.img_data[0][0])
         self.assertEqual(result_eager, result_script)
+
+    def test_nested(self):
+        # Eager mode
+        eager_model = AnnotatedNestedModel()
+
+        # Graph mode
+        script_model = NestedModel()
+        # Copy weights for eager_model
+        script_model.sub1.fc.weight = torch.nn.Parameter(eager_model.sub1.fc.weight.detach())
+        script_model.sub1.fc.bias = torch.nn.Parameter(eager_model.sub1.fc.bias.detach())
+        script_model.sub2.fc1.weight = torch.nn.Parameter(eager_model.sub2.fc1.module.weight.detach())
+        script_model.sub2.fc1.bias = torch.nn.Parameter(eager_model.sub2.fc1.module.bias.detach())
+        script_model.sub2.fc2.weight = torch.nn.Parameter(eager_model.sub2.fc2.weight.detach())
+        script_model.sub2.fc2.bias = torch.nn.Parameter(eager_model.sub2.fc2.bias.detach())
+        script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
+        script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
+
+        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        qconfig_dict = {
+            'sub2.fc1': default_per_channel_qconfig,
+            'fc3': default_qconfig
+        }
+        model_traced = torch.jit.trace(script_model, self.calib_data[0][0])
+        model_script = torch.jit.script(script_model)
+        result_eager = model_eager(self.calib_data[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_script(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            self.assertEqual(model_quantized(self.calib_data[0][0]), result_eager)
 
 
 class FunctionalModuleTest(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
-    @no_deadline
     @given(train_mode=st.booleans())
     def test_functional_module(self, train_mode):
         model = ModelWithFunctionals()
@@ -724,9 +962,9 @@ class FunctionalModuleTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEquals(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
 
         checkQuantized(model)
         self.checkScriptable(model, [(xq, xq)], check_save_load=True)
@@ -1127,12 +1365,11 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         observer_dict = {}
         get_observer_dict(model, observer_dict)
 
-        self.assertTrue('fc1.module.observer' in observer_dict.keys(),
+        self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
                         'observer is not recorded in the dict')
-        self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
-        self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
+        self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
+        self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
     def test_observer_scriptable(self, qdtype, qscheme):
@@ -1149,7 +1386,6 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
-    @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())

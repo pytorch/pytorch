@@ -1,3 +1,4 @@
+import collections
 import io
 import tempfile
 import unittest
@@ -23,7 +24,7 @@ from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -43,8 +44,11 @@ if not TEST_CUDA:
 TEST_MAGMA = TEST_CUDA
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
+TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
+                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -91,6 +95,49 @@ class TestCuda(TestCase):
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
+
+    def _check_memory_stat_consistency(self):
+        snapshot = torch.cuda.memory_snapshot()
+
+        expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
+
+        for segment in snapshot:
+            expected = expected_each_device[segment["device"]]
+            pool_str = segment["segment_type"] + "_pool"
+
+            expected["segment.all.current"] += 1
+            expected["segment." + pool_str + ".current"] += 1
+
+            expected["allocated_bytes.all.current"] += segment["allocated_size"]
+            expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
+
+            expected["reserved_bytes.all.current"] += segment["total_size"]
+            expected["reserved_bytes." + pool_str + ".current"] += segment["total_size"]
+
+            expected["active_bytes.all.current"] += segment["active_size"]
+            expected["active_bytes." + pool_str + ".current"] += segment["active_size"]
+
+            is_split = len(segment["blocks"]) > 1
+            for block in segment["blocks"]:
+                if block["state"] == "active_allocated":
+                    expected["allocation.all.current"] += 1
+                    expected["allocation." + pool_str + ".current"] += 1
+
+                if block["state"].startswith("active_"):
+                    expected["active.all.current"] += 1
+                    expected["active." + pool_str + ".current"] += 1
+
+                if block["state"] == "inactive" and is_split:
+                    expected["inactive_split.all.current"] += 1
+                    expected["inactive_split." + pool_str + ".current"] += 1
+                    expected["inactive_split_bytes.all.current"] += block["size"]
+                    expected["inactive_split_bytes." + pool_str + ".current"] += block["size"]
+
+        for device, expected in expected_each_device.items():
+            stats = torch.cuda.memory_stats(device)
+            for k, v in expected.items():
+                self.assertEqual(v, stats[k])
+
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
         if device is None:
@@ -99,8 +146,8 @@ class TestCuda(TestCase):
         m0 = torch.cuda.memory_allocated(device)
         last_m_arr = [torch.cuda.memory_allocated(device)]
         max_m_arr = [torch.cuda.max_memory_allocated(device)]
-        last_c_arr = [torch.cuda.memory_cached(device)]
-        max_c_arr = [torch.cuda.max_memory_cached(device)]
+        last_r_arr = [torch.cuda.memory_reserved(device)]
+        max_r_arr = [torch.cuda.max_memory_reserved(device)]
 
         def alloc(*size):
             with torch.cuda.device(device):
@@ -111,7 +158,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
+        def assert_change(comp=1, empty_cache=False, reset_peak=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -128,44 +175,37 @@ class TestCuda(TestCase):
             last_m_arr[0] = new_m
             max_m_arr[0] = new_max_m
 
-            new_c = torch.cuda.memory_cached(device)
-            new_max_c = torch.cuda.max_memory_cached(device)
+            new_r = torch.cuda.memory_reserved(device)
+            new_max_r = torch.cuda.max_memory_reserved(device)
             # emptying cache may happen (due to allocation or empty_cache), so
             # we can't assert new_c >= last_c
-            self.assertLessEqual(new_c, new_max_c)
-            self.assertGreaterEqual(new_max_c, max_c_arr[0])
-            last_c_arr[0] = new_c
-            max_c_arr[0] = new_max_c
+            self.assertLessEqual(new_r, new_max_r)
+            self.assertGreaterEqual(new_max_r, max_r_arr[0])
+            last_r_arr[0] = new_r
+            max_r_arr[0] = new_max_r
 
             if empty_cache:
                 torch.cuda.empty_cache()
-                new_c = torch.cuda.memory_cached(device)
-                new_max_c = torch.cuda.max_memory_cached(device)
-                self.assertLessEqual(new_c, last_c_arr[0])
-                self.assertLessEqual(new_c, new_max_c)
-                self.assertEqual(new_max_c, max_c_arr[0])
-                last_c_arr[0] = new_c
+                new_r = torch.cuda.memory_reserved(device)
+                new_max_r = torch.cuda.max_memory_reserved(device)
+                self.assertLessEqual(new_r, last_r_arr[0])
+                self.assertLessEqual(new_r, new_max_r)
+                self.assertEqual(new_max_r, max_r_arr[0])
+                last_r_arr[0] = new_r
 
-            if reset_max_alloc:
-                torch.cuda.reset_max_memory_allocated(device)
+            if reset_peak:
+                torch.cuda.reset_peak_memory_stats(device)
                 self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
                 self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
                 max_m_arr[0] = last_m_arr[0]
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
-
-            if reset_max_cached:
-                torch.cuda.reset_max_memory_cached(device)
-                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
-                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
-                max_c_arr[0] = last_c_arr[0]
+                self.assertEqual(torch.cuda.memory_reserved(device), last_r_arr[0])
+                self.assertEqual(torch.cuda.max_memory_reserved(device), last_r_arr[0])
+                max_r_arr[0] = last_r_arr[0]
 
         assert_change(0)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_peak=True)
         assert_change(0)
         yield
 
@@ -185,7 +225,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
+            assert_change(1, reset_peak=(i % 2 == 0))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -205,7 +245,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         yield
 
         for i in range(int(N / 2)):
@@ -220,24 +260,23 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1, reset_max_cached=True)
+        assert_change(-1, reset_peak=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1, reset_max_alloc=True)
+        assert_change(-1, reset_peak=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache and reset_max_memory_*
+        # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
-            pass
+            self._check_memory_stat_consistency()
 
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
@@ -433,9 +472,9 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy, q, 0)
         q_copy[0].fill_(5)
         self.assertEqual(q_copy[0], q_copy[2], 0)
-        self.assertTrue(isinstance(q_copy[0], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
-        self.assertTrue(isinstance(q_copy[2], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
@@ -443,19 +482,19 @@ class TestCuda(TestCase):
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
-        self.assertIsInstance(x.cuda(), torch.cuda.DoubleTensor)
+        self.assertIsInstance(x.cuda().double(), torch.cuda.DoubleTensor)
         self.assertIsInstance(x.cuda().float(), torch.cuda.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu(), torch.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu().int(), torch.IntTensor)
 
         y = x.storage()
         self.assertIsInstance(y.float(), torch.FloatStorage)
-        self.assertIsInstance(y.cuda(), torch.cuda.DoubleStorage)
+        self.assertIsInstance(y.cuda().double(), torch.cuda.DoubleStorage)
         self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @unittest.skip("was disabled due to not enough memory, but actually it always fail")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
 
@@ -694,6 +733,17 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_memory_format_scatter_gather(self):
+        nhwc = torch.randn((10, 3, 32, 32), device='cpu').contiguous(memory_format=torch.channels_last)
+        results = torch.cuda.comm.scatter(nhwc, (0, 1), None, 0)
+        for result in results:
+            self.assertFalse(result.is_contiguous())
+            self.assertTrue(result.is_contiguous(memory_format=torch.channels_last))
+
+        gathered = torch.cuda.comm.gather(results)
+        self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
+
     def test_torch_manual_seed_seeds_cuda_devices(self):
         with freeze_rng_state():
             x = torch.zeros(4, 4).float().cuda()
@@ -911,9 +961,9 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # copy 10 MB tensor from CPU-GPU which should take some time
+        # Operate on 10 MB tensor which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(non_blocking=True)
+        tensor2 = tensor1.cuda(non_blocking=True) + 1
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1341,6 +1391,38 @@ class TestCuda(TestCase):
             tmp3 = torch.cuda.FloatTensor(t.size())
             self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
 
+    def test_record_stream_on_shifted_view(self):
+        # See issue #27366
+
+        # This test detects unexpected block reallocation. For reliable test,
+        # the stream to allocate tensors is isolated. The allocator will not
+        # reuse free blocks which were allocated from another stream.
+        stream_alloc = torch.cuda.Stream()
+        with torch.cuda.stream(stream_alloc):
+            base = torch.cuda.FloatTensor([10, 10])
+
+        # Record another stream on a shifted view tensor.
+        view = base[5:]
+        assert view.storage_offset() > 0
+
+        stream_record = torch.cuda.Stream()
+        with torch.cuda.stream(stream_record):
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+
+        view.record_stream(stream_record)
+
+        # Delete those tensors to make the block free soon.
+        data_ptr = base.data_ptr()
+        del base, view
+
+        # A new tensor should not be allocated to the block above.
+        stream_alloc.synchronize()
+
+        with torch.cuda.stream(stream_alloc):
+            try_realloc = torch.cuda.FloatTensor([10, 10])
+
+        self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
@@ -1644,7 +1726,7 @@ class TestCuda(TestCase):
     def test_bincount_ext(self):
         # ensure CUDA code coverage
         input_size = (5000,)
-        w = torch.randn(input_size, device='cuda')
+        w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
@@ -1832,6 +1914,167 @@ t1.start()
 t2.start()
 """])
 
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cublas_multiple_threads_same_device(self):
+        # Note, these parameters should be very carefully tuned
+        # Too small number makes it hard for the racing condition
+        # to happen, while too large number sometimes cause hang
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 100
+
+        weight = torch.ones((size, size), device='cuda')
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = torch.mm(results[t], weight)
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cudnn_multiple_threads_same_device(self):
+        # This function is intended to test the lazy creation and reuse of per-thread
+        # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
+        # Failure here likely indicates something wrong with that logic.
+        weight = torch.ones((1, 1, 2, 2), device='cuda')
+
+        results = {}
+
+        num_threads = 2
+        trials = 3
+        test_iters = 1000
+        barrier = threading.Barrier(num_threads)
+
+        with torch.backends.cudnn.flags(enabled=True):
+            def _worker(t):
+                my_stream = torch.cuda.Stream()
+                # Hard sync so we don't need to worry about creating and using tensors
+                # across streams or the fact that default streams are thread-local.
+                # Those issues are not the target of this test.
+                torch.cuda.synchronize()
+                # Line up threads to increase likelihood of race conditions.
+                barrier.wait()
+                with torch.cuda.stream(my_stream):
+                    for _ in range(test_iters):
+                        # If all threads are sharing the same cudnn handle,
+                        # the following sequence may occur:
+                        # thread 0 calls setCuDNNStreamToCurrent()
+                        # thread 1 calls setCuDNNStreamToCurrent()
+                        # thread 0 launches its raw convolution, which it thinks is in
+                        #          its own stream, but is actually in thread 1's stream.
+                        # thread 0 enqueues its div_, which IS is its own stream,
+                        #          but now races with its convolution.
+                        results[t] = torch.nn.functional.conv2d(results[t], weight, padding=0)
+                        results[t].div_(4.0)
+                torch.cuda.synchronize()
+
+            for _ in range(trials):
+                for t in range(num_threads):
+                    results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
+
+                threads = [threading.Thread(target=_worker,
+                                            args=(t,)) for t in range(num_threads)]
+
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+
+                for t in range(num_threads):
+                    self.assertEqual(results[t].sum().item(),
+                                     (2048 - test_iters) * (2048 - test_iters))
+
+    @skipIfRocm
+    @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
+    def test_cusparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device='cuda')
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device='cuda')
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
 
 if __name__ == '__main__':
     run_tests()

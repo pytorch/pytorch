@@ -32,26 +32,9 @@ PicklerClass getClass(const std::string& str) {
   AT_ERROR("Unknown class name for unpickler: ", str);
 }
 
-static void postSetStateValidate(const IValue& v) {
-  auto obj = v.toObject();
-  const auto& objType = obj->type();
-  for (size_t i = 0; i < objType->numAttributes(); i++) {
-    const auto& attrType = objType->getAttribute(i);
-    const auto& attrName = objType->getAttributeName(i);
-    const auto& slot = obj->getSlot(i);
-    // const auto attrType = objType->getAttribute(i);
-    // Verify that all the non-optional attributes have been initialized
-    // TODO: Issue #20497
-    if (attrType->kind() != TypeKind::OptionalType) {
-      TORCH_CHECK(
-          !slot.isNone(),
-          "The field '",
-          attrName,
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          attrType->python_str(),
-          "'");
-    }
+static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
+  if (root.isObject()) {
+    restoreAccurateTypeTags(root, root.type());
   }
 }
 
@@ -63,18 +46,15 @@ static void postSetStateValidate(const IValue& v) {
 // object being unpickled, because we have a record of the type of the
 // objects it contains as attributes.
 // `IfPossible` - we can only do this recovery when we have an object as
-// the top-level unpickled thing (which is guarenteed for Modules, but
+// the top-level unpickled thing (which is guaranteed for Modules, but
 // not for torch.load/torch,save). Otherwise we do not know the types
 // of the contained objects and cannot restore the tags.
-static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
-  if (!root.isObject()) {
-    return;
-  }
+void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   struct Work {
     TypePtr static_type;
     IValue value;
   };
-  std::vector<Work> to_process = {{root.type(), root}};
+  std::vector<Work> to_process = {{type_tag, root}};
   std::unordered_set<const void*> scanned;
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
@@ -103,6 +83,9 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case QSchemeType::Kind:
+      case LayoutType::Kind:
+      case ScalarTypeType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
@@ -396,164 +379,7 @@ PickleOpCode Unpickler::readInstruction() {
       // Module name, it's not needed for anything
       auto module_name = readString();
       auto class_name = readString();
-      // TODO [unpickler refactor] __main__ isn't used by the pickler anymore
-      if (module_name == "__main__") {
-        auto pickler_class = getClass(class_name);
-        globals_.emplace_back([this, pickler_class] {
-          // TODO: [unpickler refactor]
-          auto setitem_data = stack_.back();
-          stack_.pop_back();
-          switch (pickler_class) {
-            case PicklerClass::TENSOR:
-              TORCH_INTERNAL_ASSERT(
-                  tensor_table_,
-                  "Pickler tried to write a tensor but had no tensor table to write to");
-              stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
-              break;
-            case PicklerClass::INTLIST:
-              stack_.emplace_back(toSpecializedList<int64_t>(setitem_data));
-              break;
-            default:
-              AT_ERROR("Unknown pickler class id", pickler_class);
-          }
-        });
-      } else if (module_name == "torch.jit._pickle") {
-        auto pickler_class = getClass(class_name);
-        globals_.emplace_back([this, pickler_class] {
-          // Pop reduce arg off the stack
-          auto data = stack_.back().toTuple()->elements().at(0);
-          stack_.pop_back();
-          switch (pickler_class) {
-            case PicklerClass::TENSOR:
-              TORCH_CHECK(
-                  tensor_table_,
-                  "Found a tensor table reference but Unpickler"
-                  " has no tensor table\n");
-              stack_.emplace_back(tensor_table_->at(data.toInt()));
-              break;
-            case PicklerClass::INTLIST:
-              stack_.emplace_back(toSpecializedList<int64_t>(data));
-              break;
-            case PicklerClass::TENSORLIST:
-              stack_.emplace_back(toSpecializedList<at::Tensor>(data));
-              break;
-            case PicklerClass::DOUBLELIST:
-              stack_.emplace_back(toSpecializedList<double>(data));
-              break;
-            case PicklerClass::BOOLLIST:
-              stack_.emplace_back(toSpecializedList<bool>(data));
-              break;
-            default:
-              AT_ERROR("Unknown pickler class id");
-          }
-        });
-      } else if (
-          module_name == "torch._utils" &&
-          (class_name == "_rebuild_tensor_v2" ||
-           class_name == "_rebuild_qtensor")) {
-        bool quantized = class_name == "_rebuild_qtensor";
-        globals_.emplace_back([this, quantized] {
-          auto tup = pop(stack_).toTuple();
-          const auto& elements = tup->elements();
-          size_t idx = 0;
-          auto storage_tensor = elements.at(idx++).toTensor();
-          int64_t storage_offset = elements.at(idx++).toInt();
-          std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
-          std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
-          at::Tensor result;
-          if (quantized) {
-            auto qparams_tuple = elements.at(idx++).toTuple();
-            const auto& qparams = qparams_tuple->elements();
-            auto qscheme = static_cast<at::QScheme>(qparams.at(0).toInt());
-            switch (qscheme) {
-              case at::kPerTensorAffine: {
-                double q_scale = qparams.at(1).toDouble();
-                int64_t q_zero_point = qparams.at(2).toInt();
-                result = at::_empty_affine_quantized(
-                    {0}, storage_tensor.options(), q_scale, q_zero_point);
-              } break;
-              case at::kPerChannelAffine: {
-                const auto& scales_list = qparams.at(1).toDoubleList();
-                std::vector<double> scales(
-                    scales_list.begin(), scales_list.end());
-                const auto& zero_points_list = qparams.at(2).toIntList();
-                std::vector<int64_t> zero_points(
-                    zero_points_list.begin(), zero_points_list.end());
-                int64_t axis = qparams.at(3).toInt();
-                result = _empty_per_channel_affine_quantized(
-                    {0},
-                    at::tensor(scales),
-                    at::tensor(zero_points),
-                    axis,
-                    storage_tensor.options());
-              } break;
-              default:
-                TORCH_CHECK(
-                    false,
-                    "Unsupported tensor quantization type in serialization ",
-                    toString(qscheme));
-                break;
-            }
-          } else {
-            result = at::empty({0}, storage_tensor.options());
-          }
-          bool requires_grad = elements.at(idx++).toBool();
-          // elements[idx++] is empty backwards hooks
-          at::TensorImpl* impl = result.unsafeGetTensorImpl();
-          impl->set_storage(storage_tensor.storage());
-          impl->set_storage_offset(storage_offset);
-          impl->set_sizes_and_strides(size, stride);
-          result = autograd::make_variable(result, requires_grad);
-          stack_.push_back(std::move(result));
-        });
-      } else if (module_name == "collections" && class_name == "OrderedDict") {
-        globals_.emplace_back([this] {
-          // drop the Tuple that was argument to OrderedDict, and replace it
-          // with None OrderedDicts only appear in tensor deserialization and
-          // their value is never used
-          stack_.back() = IValue();
-        });
-      } else if (module_name == "torch") {
-        // Try to manually resolve several global enums
-        // NOTE: this does not put a global into the global table,
-        // like the other branches here because no REDUCE or BUILD will
-        // be called on this value. Instead, we just put it on the stack
-        // and return early
-        c10::optional<c10::ScalarType> scalar_type;
-#define CHECK_SCALAR(_, name)          \
-  if (class_name == #name "Storage") { \
-    scalar_type = c10::k##name;        \
-  }
-        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
-#undef CHECK_SCALAR
-        if (scalar_type.has_value()) {
-          stack_.emplace_back(int64_t(*scalar_type));
-          return opcode;
-        }
-
-        c10::optional<at::QScheme> qscheme;
-        for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
-          if (class_name == toString(static_cast<at::QScheme>(i))) {
-            qscheme = static_cast<at::QScheme>(i);
-          }
-        }
-        if (qscheme.has_value()) {
-          stack_.emplace_back(int64_t(*qscheme));
-          return opcode;
-        }
-        TORCH_CHECK(false, "class name not understood: torch.", class_name);
-      } else {
-        AT_ASSERT(class_resolver_);
-        at::StrongTypePtr type =
-            class_resolver_(c10::QualifiedName(module_name, class_name));
-        globals_.emplace_back([this, type] {
-          auto val = stack_.back();
-          stack_.pop_back();
-          auto obj = obj_loader_(type, val);
-          stack_.emplace_back(std::move(obj));
-        });
-      }
-      stack_.emplace_back(int64_t(globals_.size() - 1));
+      readGlobal(module_name, class_name);
     } break;
     case PickleOpCode::NEWOBJ: {
       // pop empty tuple, the actual action is stored in the globals_stack_
@@ -621,12 +447,238 @@ PickleOpCode Unpickler::readInstruction() {
   return opcode;
 }
 
+void Unpickler::readGlobal(
+    const std::string& module_name,
+    const std::string& class_name) {
+  // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
+  // is only here for bc-compatibility reasons
+  if (module_name == "__main__") {
+    auto pickler_class = getClass(class_name);
+    globals_.emplace_back([this, pickler_class] {
+      // TODO: [unpickler refactor]
+      auto setitem_data = stack_.back();
+      stack_.pop_back();
+      switch (pickler_class) {
+        case PicklerClass::TENSOR:
+          TORCH_INTERNAL_ASSERT(
+              tensor_table_,
+              "Pickler tried to write a tensor but had no tensor table to write to");
+          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+          break;
+        case PicklerClass::INTLIST:
+          stack_.emplace_back(toSpecializedList<int64_t>(setitem_data));
+          break;
+        default:
+          AT_ERROR("Unknown pickler class id", pickler_class);
+      }
+    });
+  } else if (module_name == "torch.jit._pickle") {
+    // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
+    auto pickler_class = getClass(class_name);
+    globals_.emplace_back([this, pickler_class] {
+      // Pop reduce arg off the stack
+      auto data = stack_.back().toTuple()->elements().at(0);
+      stack_.pop_back();
+      switch (pickler_class) {
+        case PicklerClass::TENSOR:
+          TORCH_CHECK(
+              tensor_table_,
+              "Found a tensor table reference but Unpickler"
+              " has no tensor table\n");
+          stack_.emplace_back(tensor_table_->at(data.toInt()));
+          break;
+        case PicklerClass::INTLIST:
+          stack_.emplace_back(toSpecializedList<int64_t>(data));
+          break;
+        case PicklerClass::TENSORLIST:
+          stack_.emplace_back(toSpecializedList<at::Tensor>(data));
+          break;
+        case PicklerClass::DOUBLELIST:
+          stack_.emplace_back(toSpecializedList<double>(data));
+          break;
+        case PicklerClass::BOOLLIST:
+          stack_.emplace_back(toSpecializedList<bool>(data));
+          break;
+        default:
+          AT_ERROR("Unknown pickler class id");
+      }
+    });
+  } else if (
+      module_name == "torch._utils" &&
+      (class_name == "_rebuild_tensor_v2" ||
+       class_name == "_rebuild_qtensor")) {
+    // Unpickle a tensor
+    bool quantized = class_name == "_rebuild_qtensor";
+    rebuildTensor(quantized);
+  } else if (module_name == "collections" && class_name == "OrderedDict") {
+    // collections.OrderedDict is used in tensor serialization for a tensor's
+    // backward hooks (but they are not actually saved with this Pickler)
+    globals_.emplace_back([this] {
+      // drop the Tuple that was argument to OrderedDict, and replace it
+      // with None OrderedDicts only appear in tensor deserialization and
+      // their value is never used
+      stack_.back() = IValue();
+    });
+  } else if (module_name == "torch" && class_name == "device") {
+      globals_.emplace_back([this] {
+        auto device_string = stack_.back().toTuple()->elements().at(0);
+        stack_.pop_back();
+        stack_.emplace_back(c10::Device(device_string.toStringRef()));
+      });
+      stack_.emplace_back(int64_t(globals_.size() - 1));
+      return;
+  } else if (module_name == "torch") {
+    // Try to manually resolve several global enums
+    // NOTE: this does not put a global into the global table,
+    // like the other branches here because no REDUCE or BUILD will
+    // be called on this value. Instead, we just put it on the stack
+    // and return early
+    c10::optional<c10::ScalarType> scalar_type;
+#define CHECK_SCALAR(_, name)          \
+  if (class_name == #name "Storage") { \
+    scalar_type = c10::k##name;        \
+  }
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
+#undef CHECK_SCALAR
+    if (scalar_type.has_value()) {
+      stack_.emplace_back(int64_t(*scalar_type));
+      return;
+    }
+
+    c10::optional<at::QScheme> qscheme;
+    for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
+      if (class_name == toString(static_cast<at::QScheme>(i))) {
+        qscheme = static_cast<at::QScheme>(i);
+      }
+    }
+    if (qscheme.has_value()) {
+      stack_.emplace_back(int64_t(*qscheme));
+      return;
+    }
+    TORCH_CHECK(
+        false,
+        "Unpickler found unknown torch global, 'torch.",
+        class_name,
+        "'");
+  } else {
+    AT_ASSERT(class_resolver_);
+    at::StrongTypePtr type =
+        class_resolver_(c10::QualifiedName(module_name, class_name));
+    globals_.emplace_back([this, type] {
+      auto val = stack_.back();
+      stack_.pop_back();
+      auto obj = obj_loader_(type, val);
+      stack_.emplace_back(std::move(obj));
+    });
+  }
+  stack_.emplace_back(int64_t(globals_.size() - 1));
+}
+
+void Unpickler::rebuildTensor(bool quantized) {
+  globals_.emplace_back([this, quantized] {
+    auto tup = pop(stack_).toTuple();
+    const auto& elements = tup->elements();
+    size_t idx = 0;
+    auto storage_tensor = elements.at(idx++).toTensor();
+    int64_t storage_offset = elements.at(idx++).toInt();
+    std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+    std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
+    at::Tensor result;
+    if (quantized) {
+      auto qparams_tuple = elements.at(idx++).toTuple();
+      const auto& qparams = qparams_tuple->elements();
+      auto qscheme = static_cast<at::QScheme>(qparams.at(0).toInt());
+      switch (qscheme) {
+        case at::kPerTensorAffine: {
+          double q_scale = qparams.at(1).toDouble();
+          int64_t q_zero_point = qparams.at(2).toInt();
+          result = at::_empty_affine_quantized(
+              {0}, storage_tensor.options(), q_scale, q_zero_point);
+        } break;
+        case at::kPerChannelAffine: {
+          const auto& scales_list = qparams.at(1).toDoubleList();
+          std::vector<double> scales(scales_list.begin(), scales_list.end());
+          const auto& zero_points_list = qparams.at(2).toIntList();
+          std::vector<int64_t> zero_points(
+              zero_points_list.begin(), zero_points_list.end());
+          int64_t axis = qparams.at(3).toInt();
+          result = _empty_per_channel_affine_quantized(
+              {0},
+              at::tensor(scales),
+              at::tensor(zero_points),
+              axis,
+              storage_tensor.options());
+        } break;
+        default:
+          TORCH_CHECK(
+              false,
+              "Unsupported tensor quantization type in serialization ",
+              toString(qscheme));
+          break;
+      }
+    } else {
+      result = at::empty({0}, storage_tensor.options());
+    }
+    bool requires_grad = elements.at(idx++).toBool();
+    // elements[idx++] is empty backwards hooks
+    at::TensorImpl* impl = result.unsafeGetTensorImpl();
+    impl->set_storage(storage_tensor.storage());
+    impl->set_storage_offset(storage_offset);
+    impl->set_sizes_and_strides(size, stride);
+    result = autograd::make_variable(result, requires_grad);
+    stack_.push_back(std::move(result));
+  });
+}
+
+void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
+  // First, read any partial from buffer (may be 0).
+  // We explicitly assume that sz > buffer_remaining_,
+  // and that sz is never bigger than buffer_.size().
+  AT_ASSERT(sz > buffer_remaining_);
+  const size_t from_old_buf = buffer_remaining_;
+  if (from_old_buf != 0) {
+    memcpy(dest, buffer_.data() + buffer_pos_, from_old_buf);
+  }
+  const size_t needed = sz - from_old_buf;
+  // Full read into the buffer. The calls here all explicitly
+  // assume that one buffer will be enough for any sz.
+  AT_ASSERT(sz <= buffer_.size());
+  buffer_remaining_ = reader_(buffer_.data(), buffer_.size());
+  if (buffer_remaining_ < needed) {
+    AT_ERROR("Unexpected end of pickler archive.");
+  }
+  memcpy(dest + from_old_buf, buffer_.data(), needed);
+  buffer_pos_ = needed;  // assignment (0'ed from read)
+  buffer_remaining_ -= needed;
+}
+
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
   std::string data(length, 0);
-  // This is fine since C++11 has contiguous strings
-  if (!reader_(&data[0], length)) {
-    AT_ERROR("Unexpected end of pickler archive.");
+  static const size_t kSmallString = 64;
+  if (length <= buffer_remaining_) {
+    // Fast-path: entirely in buffer.
+    memcpy(&data[0], buffer_.data() + buffer_pos_, length);
+    buffer_pos_ += length;
+    buffer_remaining_ -= length;
+  } else if (length <= kSmallString) {
+    // If the string is smallish, do a full buffer read,
+    // and read out of that buffer.
+    readSlowWithBuffer(&data[0], length);
+  } else {
+    // Otherwise, for larger strings, read what we can from
+    // the buffer, and then read directly to the destination.
+    const size_t from_old_buf = buffer_remaining_;
+    if (from_old_buf != 0) {
+      memcpy(&data[0], buffer_.data() + buffer_pos_, from_old_buf);
+    }
+    const size_t needed = length - from_old_buf;
+    size_t nread = reader_(&data[from_old_buf], needed);
+    if (nread != needed) {
+      AT_ERROR("Unexpected end of pickler archive.");
+    }
+    buffer_remaining_ = 0;
+    // buffer_pos_ has no meaning with buffer_remaining_ == 0.
   }
   return data;
 }
@@ -682,14 +734,13 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  std::stringstream ss;
+  std::string ss;
   while (true) {
     char c = read<char>();
     if (c == '\n') {
       break;
     }
-
-    ss << c;
+    ss.push_back(c);
 
     // Simple check just in case there is no terminating '\n'
     TORCH_CHECK(
@@ -699,11 +750,7 @@ std::string Unpickler::readString() {
         "' in string, ",
         "strings must be qualified Python identifiers");
   }
-  return ss.str();
-}
-
-PickleOpCode Unpickler::readOpCode() {
-  return static_cast<PickleOpCode>(read<uint8_t>());
+  return ss;
 }
 
 } // namespace jit

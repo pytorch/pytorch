@@ -107,7 +107,8 @@ struct TORCH_API CompilationUnit {
   void define_interface(
       const c10::QualifiedName& qualifiedName,
       const ClassDef& classDef,
-      ResolverPtr rcb);
+      ResolverPtr rcb,
+      bool is_module = false);
 
   Function* create_function(
       c10::QualifiedName name,

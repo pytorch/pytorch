@@ -3,7 +3,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <atomic>
@@ -15,11 +15,10 @@ namespace rpc {
 // Manages RRef lifetime and keeps track of RRef forks.
 class RRefContext {
  public:
-  static void initInstance(std::shared_ptr<RpcAgent>);
-  static std::unique_ptr<RRefContext>& getInstance();
-  static void destroyInstance();
+  static RRefContext& getInstance();
+  static void destroyInstance(bool ignoreRRefLeak = true);
 
-  static void handleException(const Message& message);
+  static void handleException(const c10::optional<utils::FutureError>& futErr);
 
   RRefContext(const RRefContext&) = delete;
   RRefContext(RRefContext&& other) = delete;
@@ -62,6 +61,26 @@ class RRefContext {
   template <typename T>
   std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
+  // Create an empty owner rref of type T.
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+
+  template <typename T>
+  std::shared_ptr<OwnerRRef<T>> getOwnerRRef(const RRefId& rrefId);
+
+  // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
+  // making a remote call to self, which as for now, still goes through serde
+  // and invokes request callback. In this case, the OwnerRRef has already been
+  // created on the send side, and we need to pass it to the receive side,
+  // instead of creating a new OwnerRRef. This is done by adding the OwnerRRef
+  // into owners_. However, that alone is not enough, as it could be deleted
+  // when all UserRRef die, which would then remove the OwnerRRef from owners_
+  // and this could happen before the self remote call finishes. To prevent
+  // that, this API adds the RRefId as a ForkId, which will then delete the
+  // ForkId when the self remote is done.
+  template <typename T>
+  void addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref);
+
   // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
@@ -95,6 +114,13 @@ class RRefContext {
   void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
+  void delUser(
+      const worker_id_t owner,
+      const RRefId& rrefId,
+      const ForkId& forkId);
+
+  std::unordered_map<std::string, std::string> getDebugInfo();
+
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
@@ -107,15 +133,28 @@ class RRefContext {
   void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
   // If there is any leak on any RRef, this method will throw an error.
-  void checkRRefLeaks();
+  void checkRRefLeaks(bool ignoreRRefLeak);
 
-  static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;
 
   const std::shared_ptr<RpcAgent> agent_;
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  // A conditional variable to block getOwnerRRef() calls until the
+  // corresponding OwnerRRef has been created and inserted into the owners_ map.
+  // The method getOwnerRRef() is triggered by rref.to_here() messages. The
+  // reason for having this CV is because rref.to_here() message and rpc.remote
+  // message may arrive in any order, and to_here() can only be served when the
+  // RRef value is ready. In the previous version, we used to block the
+  // to_here() call by waiting on the CV member variable in OwnerRRef. However,
+  // that means the to_here() call has to first create the OwnerRRef, which
+  // would require knowing the IValue type when if we want to make RRef an
+  // IValue. Instead of sending serialized TypePtr in every to_here() message,
+  // we decided to only create OwnerRRef when processing remote calls.
+  // TODO: As OwnerRRef::getValue() is always called after
+  // OwnerRRef::setValue(), we should be able to remove the CV from OwnerRRef.
+  std::condition_variable ownerCV_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<
       RRefId,
@@ -142,6 +181,9 @@ class RRefContext {
   //     owner learns about the forked child.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
+
+  std::mutex destroyedMutex_;
+  bool destroyed_;
 };
 
 } // namespace rpc

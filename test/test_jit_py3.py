@@ -1,10 +1,12 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, List, Optional, Any
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
+import jit_utils
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -63,6 +65,13 @@ class TestScriptPy3(JitTestCase):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
+
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
             float_features: float
@@ -110,6 +119,8 @@ class TestScriptPy3(JitTestCase):
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
     def test_named_tuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -177,7 +188,7 @@ class TestScriptPy3(JitTestCase):
 
         mm = MyMod()
         mm.save('foo.zip')
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
         loaded = torch.jit.load('foo.zip')
 
         out = mm()
@@ -226,6 +237,16 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
+    def test_any_in_class_fails(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : Any
+            b : float
+            c : List[int]
+        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
+            @torch.jit.script
+            def foo():
+                return MyCoolNamedTuple(4, 5.5, [3])
+            print(foo.graph)
 
 if __name__ == '__main__':
     run_tests()

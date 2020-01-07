@@ -27,12 +27,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-# These functions are written manually in templates/VariableType.cpp
-MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
-}
-
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
 # of proper scopes, where subsequent compilation passes can ask for the unfolding
@@ -48,8 +42,41 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'zero': 'zeros_like',
-    'fill': 'full_like',
+    'zero': 'zeros_like',  # replacing aten::zero_ with aten::zeros_like
+    'fill': 'full_like',  # replacing aten::fill_ with aten::full_like
+}
+
+# `torch.jit.trace` have undocumented keyword argument `_force_outplace`,
+# which force jit to replace functions with outplace variants (for
+# example `aten::add_` becomes `aten::add`).
+#
+# This replacement implemented in-place with minimum modifications of
+# arguments stack (as it assumes that outplace call has the same arguments
+# as inplace version).
+#
+# However there are no such substitutions available for `aten::fill_`
+# and `aten::zero_` operators, as we never implemented `aten::fill`
+# and `aten::zero`. So jit tracing hack replacing `aten::zero_` with
+# `aten::zeros_like` and replacing `aten::fill_` with `aten::full_like`.
+#
+# But as they potentially can have different arguments, we also have
+# to hack into the stack and add missing ones.
+#
+# A possible alternative would be:
+#
+#  - Add `aten::fill` and `aten::zero`
+#
+#  - Or keep `aten::zeros_like` arguments aligned with `aten::zero_`
+# arguments (inside of the `native_functions.yaml`)
+RENAME_TRACE_ADD_ARGS = {
+    'fill': '''\
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
+    'zero': '''\
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
 }
 
 # (declaration name, argument name) -> attribute name
@@ -102,7 +129,7 @@ if (${tensor_name}_storage_saved.has_value())
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (Tensor tensor : ${tensorlist_name})
+for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
 """)
@@ -153,17 +180,10 @@ ${return_type} ${api_name}(${type_method_formals}) {
 }
 """)
 
-LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -178,7 +198,7 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 UNPACK_OPTIONS = CodeTemplate("""\
-auto ${arg_name}_ = TensorOptions(${arg_name}).is_variable(false);""")
+auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
@@ -239,6 +259,7 @@ RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::pee
 """)
 
 SELECT = CodeTemplate("""\
+
 if (${cond}) {
   ${true}
 } else {
@@ -283,6 +304,11 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 #ifndef NDEBUG
 ${statements}
 #endif
+""")
+
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
 
@@ -415,7 +441,21 @@ def format_prerecord_trace(declaration):
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
     local['set_op_name'] = format_trace_op_name(declaration)
-    local['add_trace_inputs'] = format_trace_inputs(declaration)
+
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+    add_args = ''
+    if is_inplace:
+        api_name = uninplace_api_name(declaration['api_name'])
+        add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
+    if add_args:
+        select_params = {}
+        select_params['cond'] = 'tracer_state->force_outplace'
+        select_params['true'] = add_args
+        select_params['false'] = ''
+        additional_inputs = SELECT.substitute(select_params)
+    else:
+        additional_inputs = ''
+    local['add_trace_inputs'] = format_trace_inputs(declaration) + additional_inputs
 
     local['inplace_guard'] = ''
     if is_inplace:
@@ -461,6 +501,18 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
+    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
+    registration_declarations = []
+
+    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
+    for declaration in aten_declarations:
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+
+    env = {
+        'registration_declarations': registration_declarations,
+    }
+    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -473,20 +525,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
-        if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
+        if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        if declaration['use_c10_dispatcher'] == 'full':
-            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
-        elif declaration['use_c10_dispatcher'] == 'unboxed_only':
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
-        else:
-            assert declaration['use_c10_dispatcher'] == 'no'
-            wrapper_registrations.append(LEGACY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
+            if declaration['use_c10_dispatcher'] == 'full':
+                wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -509,7 +558,7 @@ def emit_body(declaration):
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
-    returns_void = len(returns) == 1 and returns[0]['type'] == 'void'
+    returns_void = len(returns) == 0
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
@@ -759,12 +808,10 @@ def emit_body(declaration):
                 output_var = return_info['name']
                 if output_idx in view_info_dict:
                     stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                elif 'Tensor' in return_info['type']:
-                    stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable(std::move({}))'.format(call), []
+            return 'std::move({})'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []

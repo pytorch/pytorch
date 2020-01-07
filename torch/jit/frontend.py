@@ -141,9 +141,11 @@ def _uses_true_division(fn):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method independently
+    # Get defs for each method within the current class independently
+    # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
+
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
@@ -193,7 +195,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
@@ -245,6 +248,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
+    if fn is None:
+        return {}
+
     if PY2:
         argspec = inspect.getargspec(fn)
         if argspec.defaults is not None:
@@ -290,6 +296,10 @@ class StmtBuilder(Builder):
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
         return Assign([lhs], rhs, the_type)
+
+    @staticmethod
+    def build_Delete(ctx, stmt):
+        return Delete(build_expr(ctx, stmt.targets[0]))
 
     @staticmethod
     def build_Return(ctx, stmt):

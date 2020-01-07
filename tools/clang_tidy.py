@@ -18,6 +18,7 @@ import argparse
 import collections
 import fnmatch
 import json
+import os
 import os.path
 import re
 import shlex
@@ -100,7 +101,7 @@ def filter_files(files, file_patterns):
                 yield file
                 continue
         if VERBOSE:
-            print("{} ommitted due to file filters".format(file))
+            print("{} omitted due to file filters".format(file))
 
 
 def get_changed_files(revision, paths):
@@ -172,7 +173,7 @@ def run_clang_tidy(options, line_filters, files):
 
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
-            command += ["-config", json.dumps(yaml.load(config))]
+            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.FullLoader))]
     command += options.extra_args
 
     if line_filters:
@@ -293,8 +294,13 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    print(run_clang_tidy(options, line_filters, files), file=sys.stderr)
+    pwd = os.getcwd() + "/"
+    clang_tidy_output = run_clang_tidy(options, line_filters, files)
+    formatted_output = []
 
+    for line in clang_tidy_output.splitlines():
+        if line.startswith(pwd):
+            print(line[len(pwd):])
 
 if __name__ == "__main__":
     main()

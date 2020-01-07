@@ -16,7 +16,7 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  return lhs.type() == rhs.type() && lhs.equal(rhs);
+  return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
 bool tensorListEqual(
@@ -112,10 +112,22 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
 size_t HashNode::operator()(const Node* k) const {
   AT_ASSERT(k != nullptr);
+  size_t constant_hash = 0;
+  if (k->kind() == prim::Constant) {
+    TypePtr type = k->output()->type();
+    if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::i) {
+      constant_hash = std::hash<int64_t>{}(k->i(attr::value));
+    } else if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::f) {
+      constant_hash = std::hash<float>{}(k->f(attr::value));
+    } else if (type->isSubtypeOf(BoolType::get())) {
+      constant_hash = std::hash<bool>{}(k->i(attr::value));
+    }
+  }
   return get_hash(
       k->kind(),
       fmap(k->outputs(), [](const Value* v) { return v->type()->kind(); }),
-      fmap(k->inputs(), [](const Value* v) { return v->unique(); }));
+      fmap(k->inputs(), [](const Value* v) { return v->unique(); }),
+      constant_hash);
 };
 
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {

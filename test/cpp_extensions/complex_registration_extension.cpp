@@ -10,7 +10,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/ATenDispatch.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <cstddef>
 #include <functional>
@@ -20,8 +20,8 @@
 #include <ATen/Config.h>
 
 namespace at {
-
-static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+namespace {
+Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
   AT_ASSERT(options.device().is_cpu());
 
@@ -45,11 +45,13 @@ static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10
   }
   return tensor;
 }
+}
 
-static auto& complex_empty_registration = globalATenDispatch().registerOp(
-    TensorTypeId::ComplexCPUTensorId,
-    "aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-    &empty_complex);
+static auto complex_empty_registration = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
+    .impl_unboxedOnlyKernel<decltype(empty_complex), &empty_complex>(TensorTypeId::ComplexCPUTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 
 }
 

@@ -69,12 +69,3 @@ TEST(TestParallel, IntraOpLaunchFuture) {
 
   ASSERT_TRUE(v1 == 1 && v2 == 2);
 }
-
-TEST(TestParallel, MultipleSetNumThreadsCalls) {
-#if !AT_PARALLEL_NATIVE
-  set_num_threads(5);
-  ASSERT_TRUE(get_num_threads() == 5);
-  set_num_threads(10);
-  ASSERT_TRUE(get_num_threads() == 10);
-#endif
-}

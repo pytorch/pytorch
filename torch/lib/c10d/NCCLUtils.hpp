@@ -1,23 +1,46 @@
 #pragma once
 
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR < 4)
-#error "Need NCCL version 2.4+"
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
-#error "Need NCCL version 2.4+"
-#endif
+#include <stdio.h>
+#include <stdlib.h>
 
-#include <nccl.h>
 #include <memory>
 
-#define C10D_NCCL_CHECK(cmd)                                                \
-  do {                                                                      \
-    ncclResult_t error = cmd;                                               \
-    if (error != ncclSuccess) {                                             \
-      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +   \
-          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(error); \
-      throw std::runtime_error(err);                                        \
-    }                                                                       \
+#include <nccl.h>
+
+// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
+// and ncclCommGetAsyncError() are not supported in earlier versions.
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 4)
+#define ENABLE_NCCL_ERROR_CHECKING
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_ERROR_CHECKING
+#endif
+
+// Macro to throw on a non-successful NCCL return value.
+#define C10D_NCCL_CHECK(cmd)                                                 \
+  do {                                                                       \
+    ncclResult_t result = cmd;                                               \
+    if (result != ncclSuccess) {                                             \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +    \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result); \
+      throw std::runtime_error(err);                                         \
+    }                                                                        \
+  } while (0)
+
+// Macro to print and abort on a non-successful NCCL return value.
+#define C10D_NCCL_ASSERT(cmd)                            \
+  do {                                                   \
+    ncclResult_t result = cmd;                           \
+    if (result != ncclSuccess) {                         \
+      std::string err = ncclGetErrorWithVersion(result); \
+      fprintf(                                           \
+          stderr,                                        \
+          "NCCL error in: %s:%d, %s\n",                  \
+          __FILE__,                                      \
+          __LINE__,                                      \
+          err.c_str());                                  \
+      abort();                                           \
+    }                                                    \
   } while (0)
 
 namespace c10d {
@@ -33,11 +56,16 @@ class NCCLComm {
 
   NCCLComm() : NCCLComm(nullptr) {}
 
-  ~NCCLComm() noexcept(false) {
+  ~NCCLComm() noexcept {
     if (ncclComm_ && !aborted_) {
-      // Use ncclCommAbort instead of ncclCommDestroy here since ncclCommDestroy
-      // could block forever waiting for work to complete on the communicator.
-      ncclCommAbort();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+      // Use ncclCommAbort instead of ncclCommDestroy here since
+      // ncclCommDestroy could block forever waiting for work to complete on
+      // the communicator.
+      C10D_NCCL_ASSERT(::ncclCommAbort(ncclComm_));
+#else
+      C10D_NCCL_ASSERT(::ncclCommDestroy(ncclComm_));
+#endif
     }
   }
 
@@ -78,6 +106,7 @@ class NCCLComm {
   }
 
   void ncclCommAbort() {
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
       // Should not abort twice.
       return;
@@ -91,6 +120,10 @@ class NCCLComm {
     if (ncclAsyncErr_ == ncclSuccess) {
       ncclAsyncErr_ = ncclSystemError;
     }
+#else
+    // This is a NOOP, if error checks are disabled.
+    return;
+#endif
   }
 
   bool isAborted() const {
@@ -98,11 +131,16 @@ class NCCLComm {
   }
 
   ncclResult_t checkForNcclError() {
+#ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
     }
     C10D_NCCL_CHECK(ncclCommGetAsyncError(ncclComm_, &ncclAsyncErr_));
     return ncclAsyncErr_;
+#else
+    // Always return success, if error checks are disabled.
+    return ncclSuccess;
+#endif
   }
 
  protected:

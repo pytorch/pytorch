@@ -20,8 +20,6 @@ $storage_tensor_headers
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/ATenDispatch.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstddef>
 #include <functional>

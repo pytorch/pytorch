@@ -4,13 +4,35 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace {
+
+py::object getFunction(const py::object& module, const char* name) {
+  py::object fn = module.attr(name);
+  TORCH_CHECK(
+      py::isinstance<py::function>(fn),
+      "attribute ",
+      name,
+      " is not a function");
+  return fn;
+}
+
+} // namespace
+
 PythonRpcHandler::PythonRpcHandler() {
-  AutoGIL ag;
-  py::object module =
-      py::module::import("torch.distributed.internal_rpc_utils");
-  runUDFFunction_ = module.attr("run_python_udf_internal");
-  loadResultFunction_ = module.attr("load_python_udf_result_internal");
-  serializeFunction_ = module.attr("serialize");
+  pybind11::gil_scoped_acquire ag;
+  py::object module = py::module::import("torch.distributed.rpc.internal");
+  pyRunFunction_ = getFunction(module, "_run_function");
+  pyLoadReturnValue_ = getFunction(module, "_load_return_value");
+  pySerialize_ = getFunction(module, "serialize");
+  pyHandleException_ = getFunction(module, "_handle_exception");
+}
+
+void PythonRpcHandler::cleanup() {
+  pybind11::gil_scoped_acquire ag;
+  pyRunFunction_ = py::none();
+  pyLoadReturnValue_ = py::none();
+  pySerialize_ = py::none();
+  pyHandleException_ = py::none();
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
@@ -22,11 +44,9 @@ std::vector<char> PythonRpcHandler::generatePythonUDFResult(
     const std::vector<char>& pickledPayload,
     const std::vector<torch::Tensor>& requestTensorTable,
     std::vector<torch::Tensor>& responseTensorTable) {
-  AutoGIL ag;
+  pybind11::gil_scoped_acquire ag;
   auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
-  py::tuple pres =
-      serializeFunction_(runUDFFunction_(pargs, requestTensorTable));
+  py::tuple pres = pySerialize_(pyRunFunction_(pargs, requestTensorTable));
   const auto& presStr = pres[0].cast<std::string>();
   responseTensorTable = pres[1].cast<std::vector<torch::Tensor>>();
   std::vector<char> payload(presStr.begin(), presStr.end());
@@ -36,30 +56,34 @@ std::vector<char> PythonRpcHandler::generatePythonUDFResult(
 py::object PythonRpcHandler::loadPythonUDFResult(
     const std::vector<char>& pickledPayload,
     const std::vector<torch::Tensor>& tensorTable) {
-  AutoGIL ag;
+  pybind11::gil_scoped_acquire ag;
   auto pargs = py::bytes(pickledPayload.data(), pickledPayload.size());
-  TORCH_CHECK(loadResultFunction_ != nullptr, "loadResultFunction_ is nullptr");
-  return loadResultFunction_(pargs, tensorTable);
+  return pyLoadReturnValue_(pargs, tensorTable);
 }
 
 py::object PythonRpcHandler::runPythonUDF(
     const SerializedPyObj& serializedObj) {
-  AutoGIL ag;
-  return runUDFFunction_(
+  pybind11::gil_scoped_acquire ag;
+  return pyRunFunction_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
 
 SerializedPyObj PythonRpcHandler::serialize(const py::object& obj) {
-  AutoGIL ag;
-  py::tuple t = serializeFunction_(obj);
+  pybind11::gil_scoped_acquire ag;
+  py::tuple t = pySerialize_(obj);
   return SerializedPyObj(
       t[0].cast<std::string>(), t[1].cast<std::vector<torch::Tensor>>());
 }
 
 py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
-  AutoGIL ag;
-  return loadResultFunction_(
+  pybind11::gil_scoped_acquire ag;
+  return pyLoadReturnValue_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
+}
+
+void PythonRpcHandler::handleException(const py::object& obj) {
+  pybind11::gil_scoped_acquire ag;
+  pyHandleException_(obj);
 }
 
 } // namespace rpc

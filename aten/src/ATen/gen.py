@@ -16,7 +16,6 @@ import preprocess_declarations
 import function_wrapper
 
 from code_template import CodeTemplate
-from env import BUILD_NAMEDTENSOR
 
 
 # This file is the top-level entry point for code generation in ATen.
@@ -124,7 +123,6 @@ SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDer
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
 
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
@@ -164,8 +162,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'c10_ops_already_moved_from_aten_to_c10': [],
-    'c10_ops_not_moved_from_aten_to_c10_yet': [],
+    'list_of_aten_ops': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -174,7 +171,6 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
-    'registration_declarations': [],
 }
 
 
@@ -336,7 +332,7 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'NativeFunctions.h', 'RegistrationDeclarations.h']
+             'Functions.h', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -364,14 +360,6 @@ def filter_by_extension(files, *extensions):
     return filtered_files
 
 
-def is_namedtensor_only_decl(decl):
-    if 'Dimname' in decl['schema_string']:
-        return True
-    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
-        return True
-    return False
-
-
 def generate_outputs():
     cwrap_files = filter_by_extension(options.files, '.cwrap')
     nn_files = filter_by_extension(options.files, 'nn.yaml', '.h')
@@ -392,14 +380,6 @@ def generate_outputs():
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
-    # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
-    # and TensorMethods.h, all of which are checked in to the codebase and therefore
-    # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
-    if not BUILD_NAMEDTENSOR:
-        declarations = [decl for decl in declarations
-                        if not is_namedtensor_only_decl(decl)]
-
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)
 
@@ -414,7 +394,6 @@ def generate_outputs():
 
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
-    file_manager.write('RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
 

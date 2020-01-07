@@ -5,7 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <c10/util/math_compat.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -20,8 +20,6 @@
 #include <assert.h>
 #include <cpuinfo.h>
 #include <float.h>
-
-#include <TH/THMath.h>
 
 namespace {
 /*
@@ -57,6 +55,7 @@ namespace {
 
 
 int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
+  TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
@@ -113,11 +112,11 @@ namespace at {
 namespace native {
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
-  return at::empty_like(self).bernoulli_(self, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
 }
 
 Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
-  return at::empty_like(self).bernoulli_(p, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
@@ -125,16 +124,12 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
   result.resize_(self.sizes()).bernoulli_(self, gen);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
@@ -322,7 +317,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
-  multinomial_stub(result.type().device_type(), result, self, n_sample, with_replacement, gen);
+  multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
 

@@ -4,9 +4,10 @@ import torch
 
 import hypothesis
 from hypothesis import assume
+from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
-from hypothesis.searchstrategy import SearchStrategy
+from hypothesis.strategies import SearchStrategy
 
 from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
 
@@ -40,12 +41,17 @@ def _get_valid_min_max(qparams):
     max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
     return np.float32(min_value), np.float32(max_value)
 
-# This wrapper around `st.floats` checks the version of `hypothesis`, and if
+# This wrapper wraps around `st.floats` and checks the version of `hypothesis`, if
 # it is too old, removes the `width` parameter (which was introduced)
 # in 3.67.0
 def _floats_wrapper(*args, **kwargs):
     if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
         kwargs.pop('width')
+    return st.floats(*args, **kwargs)
+
+def floats(*args, **kwargs):
+    if 'width' not in kwargs:
+        kwargs['width'] = 32
     return st.floats(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
@@ -109,7 +115,7 @@ def qparams(draw, dtypes=None, scale_min=None, scale_max=None,
         scale_min = torch.finfo(torch.float).eps
     if scale_max is None:
         scale_max = torch.finfo(torch.float).max
-    scale = draw(_floats_wrapper(min_value=scale_min, max_value=scale_max, width=32))
+    scale = draw(floats(min_value=scale_min, max_value=scale_max, width=32))
 
     return scale, zero_point, quantized_type
 
@@ -165,15 +171,15 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
         _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
-            elements = _floats_wrapper(-1e6, 1e6, allow_nan=False, width=32)
+            elements = floats(-1e6, 1e6, allow_nan=False, width=32)
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
-        elements = _floats_wrapper(min_value, max_value, allow_infinity=False,
-                                   allow_nan=False, width=32)
+        elements = floats(min_value, max_value, allow_infinity=False,
+                          allow_nan=False, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_qparams(X, qparams[2])
@@ -190,15 +196,15 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
         _shape = draw(st.sampled_from(shapes))
     if qparams is None:
         if elements is None:
-            elements = st.floats(-1e6, 1e6, allow_nan=False)
+            elements = floats(-1e6, 1e6, allow_nan=False, width=32)
         X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
         assume(not (np.isnan(X).any() or np.isinf(X).any()))
         return X, None
     qparams = draw(qparams)
     if elements is None:
         min_value, max_value = _get_valid_min_max(qparams)
-        elements = st.floats(min_value, max_value, allow_infinity=False,
-                             allow_nan=False)
+        elements = floats(min_value, max_value, allow_infinity=False,
+                          allow_nan=False, width=32)
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape))
     # Recompute the scale and zero_points according to the X statistics.
     scale, zp = _calculate_dynamic_per_channel_qparams(X, qparams[2])
@@ -214,17 +220,23 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
 
     return X, (scale, zp, axis, qparams[2])
 
-"""Strategy for generating test cases for tensors used in Conv2D.
+"""Strategy for generating test cases for tensors used in Conv.
 The resulting tensors is in float32 format.
 
 Args:
-    min_batch, max_batch: Range to generate `nbatch`.
-    min_in_channels, max_in_channels: Range to generate `iChannels`.
-    min_out_channels, max_out_channels: Range to generate `oChannels`.
-    H_range, W_range: Ranges to generate height and width of matrix. Must be
-                      tuples of `(min, max)`.
-    kH_range, kW_range: Ranges to generate kernel height and width. Must be
-                        tuples of `(min, max)`.
+    spatial_dim: Spatial Dim for feature maps.
+    batch_size_range: Range to generate `batch_size`.
+                      Must be tuple of `(min, max)`.
+    input_channels_per_group_range:
+        Range to generate `input_channels_per_group`.
+        Must be tuple of `(min, max)`.
+    output_channels_per_group_range:
+        Range to generate `output_channels_per_group`.
+        Must be tuple of `(min, max)`.
+    feature_map_range: Range to generate feature map size for each spatial_dim.
+                       Must be tuple of `(min, max)`.
+    kernel_range: Range to generate kernel size for each spatial_dim. Must be
+                  tuple of `(min, max)`.
     max_groups: Maximum number of groups to generate.
     elements: Elements to generate from for the returned data type.
               If None, the strategy resolves to float within range [-1e6, 1e6].
@@ -232,49 +244,53 @@ Args:
              Could be either a single strategy (used for all) or a list of
              three strategies for X, w, b.
 Generates:
-    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
-        X: (`nbatch, iChannels, H, W`)
-        w: (`oChannels, iChannels // groups, kH, kW)
-        b: `(oChannels,)`
-        g: Number of groups the input is divided into
-Note: X, w, b are tuples of (Tensor, qparams), where qparams could be either
+    (X, W, b, g): Tensors of type `float32` of the following drawen shapes:
+        X: (`batch_size, input_channels, H, W`)
+        W: (`output_channels, input_channels_per_group) + kernel_shape
+        b: `(output_channels,)`
+        groups: Number of groups the input is divided into
+Note: X, W, b are tuples of (Tensor, qparams), where qparams could be either
       None or (scale, zero_point, quantized_type)
 
 
 Example:
-    @given(tensor_conv2d(
-        min_batch=1, max_batch=3,
-        min_in_channels=1, max_in_channels=7,
-        min_out_channels=1, max_out_channels=7,
-        H_range=(6, 12), W_range=(6, 12),
-        kH_range=(3, 5), kW_range=(3, 5),
+    @given(tensor_conv(
+        spatial_dim=2,
+        batch_size_range=(1, 3),
+        input_channels_per_group_range=(1, 7),
+        output_channels_per_group_range=(1, 7),
+        feature_map_range=(6, 12),
+        kernel_range=(3, 5),
         max_groups=4,
         elements=st.floats(-1.0, 1.0),
         qparams=qparams()
     ))
 """
 @st.composite
-def tensor_conv2d(draw,
-                  min_batch=1, max_batch=3,
-                  min_in_channels=3, max_in_channels=7,
-                  min_out_channels=3, max_out_channels=7,
-                  H_range=(6, 12), W_range=(6, 12),
-                  kH_range=(3, 7), kW_range=(3, 7),
-                  max_groups=1, elements=None,
-                  qparams=None):
+def tensor_conv(
+    draw, spatial_dim=2, batch_size_range=(1, 4),
+    input_channels_per_group_range=(3, 7),
+    output_channels_per_group_range=(3, 7), feature_map_range=(6, 12),
+    kernel_range=(3, 7), max_groups=1, elements=None, qparams=None
+):
 
     # Resolve the minibatch, in_channels, out_channels, iH/iW, iK/iW
-    _minibatch = draw(st.integers(min_batch, max_batch))
-    _in_channels = draw(st.integers(min_in_channels, max_in_channels))
-    _out_channels = draw(st.integers(min_out_channels, max_out_channels))
-    g = draw(st.integers(1, max_groups))
-    assume(_in_channels % g == 0)
-    assume(_out_channels % g == 0)
+    batch_size = draw(st.integers(*batch_size_range))
+    input_channels_per_group = draw(
+        st.integers(*input_channels_per_group_range))
+    output_channels_per_group = draw(
+        st.integers(*output_channels_per_group_range))
+    groups = draw(st.integers(1, max_groups))
+    input_channels = input_channels_per_group * groups
+    output_channels = output_channels_per_group * groups
 
-    _iH = draw(st.integers(H_range[0], H_range[1]))
-    _iW = draw(st.integers(W_range[0], W_range[1]))
-    _kH = draw(st.integers(kH_range[0], kH_range[1]))
-    _kW = draw(st.integers(kW_range[0], kW_range[1]))
+    feature_map_shape = []
+    for i in range(spatial_dim):
+        feature_map_shape.append(draw(st.integers(*feature_map_range)))
+
+    kernels = []
+    for i in range(spatial_dim):
+        kernels.append(draw(st.integers(*kernel_range)))
 
     # Resolve the tensors
     if qparams is not None:
@@ -283,19 +299,32 @@ def tensor_conv2d(draw,
         else:
             qparams = [qparams] * 3
 
-    X = draw(tensor(shapes=((_minibatch, _in_channels, _iH, _iW),),
-                    elements=elements, qparams=qparams[0]))
-    w = draw(tensor(shapes=((_out_channels, _in_channels // g, _kH, _kW),),
-                    elements=elements, qparams=qparams[1]))
-    b = draw(tensor(shapes=(_out_channels,), elements=elements,
+    X = draw(tensor(shapes=(
+        (batch_size, input_channels) + tuple(feature_map_shape),),
+        elements=elements, qparams=qparams[0]))
+    W = draw(tensor(shapes=(
+        (output_channels, input_channels_per_group) + tuple(kernels),),
+        elements=elements, qparams=qparams[1]))
+    b = draw(tensor(shapes=(output_channels,), elements=elements,
                     qparams=qparams[2]))
-    return X, w, b, g
 
+    return X, W, b, groups
 
-# Disable deadline testing if this version of hypthesis supports it, otherwise
-# just return the original function
-def no_deadline(fn):
-    try:
-        return hypothesis.settings(deadline=None)(fn)
-    except hypothesis.errors.InvalidArgument:
-        return fn
+# We set the deadline in the currently loaded profile.
+# Creating (and loading) a separate profile overrides any settings the user
+# already specified.
+hypothesis_version = hypothesis.version.__version_info__
+current_settings = settings._profiles[settings._current_profile].__dict__
+current_settings['deadline'] = None
+if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
+    current_settings['timeout'] = hypothesis.unlimited
+def assert_deadline_disabled():
+    assert settings().deadline is None
+    if hypothesis_version < (3, 27, 0):
+        import warnings
+        warning_message = (
+            "Your version of hypothesis is outdated. "
+            "To avoid `DeadlineExceeded` errors, please update. "
+            "Current hypothesis version: {}".format(hypothesis.__version__)
+        )
+        warnings.warn(warning_message)

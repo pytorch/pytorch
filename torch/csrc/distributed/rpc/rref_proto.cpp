@@ -77,18 +77,48 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
+Message ScriptRRefFetchCall::toMessage() && {
+  std::vector<at::IValue> ivalues;
+  ivalues.reserve(2);
+  ivalues.emplace_back(rrefId_.toIValue());
+  ivalues.emplace_back(fromWorkerId_);
+  return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL);
+}
+
 std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
     const Message& message) {
-  return c10::guts::make_unique<ScriptRRefFetchCall>(
-      RRefId::fromIValue(RRefMessageBase::fromMessage(
-          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_CALL);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
+  auto id = values[1].toInt();
+  TORCH_INTERNAL_ASSERT(
+      id >= std::numeric_limits<worker_id_t>::min() &&
+          id <= std::numeric_limits<worker_id_t>::max(),
+      "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
+  return std::make_unique<ScriptRRefFetchCall>(
+      worker_id_t(id), RRefId::fromIValue(values[0]));
+}
+
+Message PythonRRefFetchCall::toMessage() && {
+  std::vector<at::IValue> ivalues;
+  ivalues.reserve(2);
+  ivalues.emplace_back(rrefId_.toIValue());
+  ivalues.emplace_back(fromWorkerId_);
+  return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL);
 }
 
 std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
     const Message& message) {
-  return c10::guts::make_unique<PythonRRefFetchCall>(
-      RRefId::fromIValue(RRefMessageBase::fromMessage(
-          message, MessageType::PYTHON_RREF_FETCH_CALL)));
+  auto values = toIValues(message, MessageType::PYTHON_RREF_FETCH_CALL);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
+  auto id = values[1].toInt();
+  TORCH_INTERNAL_ASSERT(
+      id >= std::numeric_limits<worker_id_t>::min() &&
+          id <= std::numeric_limits<worker_id_t>::max(),
+      "PythonRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
+  return std::make_unique<PythonRRefFetchCall>(
+      worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
 const std::vector<at::IValue>& RRefFetchRet::values() {
@@ -101,33 +131,36 @@ Message RRefFetchRet::toMessage() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(
-      std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
+  return Message(std::move(payload), std::move(tensor_table), type_);
 }
 
-std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(
+std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
     const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
-  auto payload_size = message.payload().size();
+  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 1,
+      "RRef of IValue should contain a single IValue, but got ",
+      values.size());
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
+}
 
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  auto values = value.toTuple()->elements();
-
-  return c10::guts::make_unique<RRefFetchRet>(std::move(values));
+std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
+    const Message& message) {
+  return std::make_unique<PythonRRefFetchRet>(
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
     const Message& message) {
   auto pair =
       ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
-  return c10::guts::make_unique<RRefUserDelete>(
+  return std::make_unique<RRefUserDelete>(
       RRefUserDelete(pair.first, pair.second));
 }
 
 std::unique_ptr<RemoteRet> RemoteRet::fromMessage(const Message& message) {
   auto pair = ForkMessageBase::fromMessage(message, MessageType::REMOTE_RET);
-  return c10::guts::make_unique<RemoteRet>(pair.first, pair.second);
+  return std::make_unique<RemoteRet>(pair.first, pair.second);
 }
 
 const ForkId& RRefChildAccept::forkId() const {
@@ -143,15 +176,14 @@ std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
   auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return c10::guts::make_unique<RRefChildAccept>(
-      ForkId::fromIValue(values.back()));
+  return std::make_unique<RRefChildAccept>(ForkId::fromIValue(values.back()));
 }
 
 std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
     const Message& message) {
   auto pair =
       ForkMessageBase::fromMessage(message, MessageType::RREF_FORK_REQUEST);
-  return c10::guts::make_unique<RRefForkRequest>(pair.first, pair.second);
+  return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
 Message RRefAck::toMessage() && {
@@ -165,7 +197,7 @@ std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
       MessageType::RREF_ACK,
       ", but got ",
       message.type());
-  return c10::guts::make_unique<RRefAck>();
+  return std::make_unique<RRefAck>();
 }
 
 } // namespace rpc

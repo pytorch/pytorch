@@ -31,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
@@ -129,6 +130,7 @@ class Pickler {
       : writer_(writer),
         tensor_table_(tensor_table),
         memorized_class_types_(memorized_class_types) {}
+  ~Pickler();
 
   // Push protocol onto the stack
   void protocol();
@@ -152,6 +154,7 @@ class Pickler {
 
  private:
   void pushIValueImpl(const IValue& ivalue);
+  void pushBool(bool value);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
@@ -161,6 +164,7 @@ class Pickler {
   void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
+  void pushDevice(const IValue& ivalue);
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);
@@ -183,18 +187,41 @@ class Pickler {
 
   const void* getPointer(const IValue& ivalue);
 
+  // Caller checks that bufferPos_ > 0
+  void flushNonEmpty() {
+    writer_(buffer_.data(), bufferPos_);
+    bufferPos_ = 0;
+  }
+
+  void flush() {
+    if (bufferPos_ != 0) {
+      flushNonEmpty();
+    }
+  }
+
   // These convert values to bytes and add them to the stack (NB: since T is to
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
+  static constexpr size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
-    writer_(begin, sizeof(T));
+    if (bufferPos_ + sizeof(T) > buffer_.size()) {
+      flushNonEmpty();
+    }
+    static_assert(sizeof(T) <= kBufferSize, "Buffer size assumption");
+    memcpy(buffer_.data() + bufferPos_, begin, sizeof(T));
+    bufferPos_ += sizeof(T);
   }
 
   // Stream to write binary data to
+  // Code shouldn't call writer_ directly without first flush()ing.
   std::function<void(const char*, size_t)> writer_;
+
+  // Buffer to avoid calling a writer_ on a per-byte basis.
+  std::array<char, kBufferSize> buffer_;
+  size_t bufferPos_{0};
 
   // Stack of opcodes/data
   std::vector<char> stack_;
@@ -227,6 +254,7 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
+  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

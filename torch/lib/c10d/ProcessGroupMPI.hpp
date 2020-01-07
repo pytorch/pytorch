@@ -88,7 +88,9 @@ class ProcessGroupMPI : public ProcessGroup {
 
     int sourceRank() const override;
 
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
    protected:
     void populateException();
@@ -125,6 +127,11 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
