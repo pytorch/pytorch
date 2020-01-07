@@ -23,6 +23,7 @@
 #include <algorithm>
 
 #include <stdio.h>
+#include<iostream>
 
 
 namespace at {
@@ -325,7 +326,6 @@ __global__ void depthwiseConv3dUpdateGradWeight(
 }
 
 
-// 5D tensor B x D x T x H x w
 static void conv_depthwise3d_cuda_template(
   Tensor& output,
   const Tensor& input_,
@@ -340,6 +340,7 @@ static void conv_depthwise3d_cuda_template(
     checkAllSameGPU(
       "conv_depthwise3d_cuda_template", {input_arg, output_arg});
 
+    
     for (int64_t i = 0; i < input_.ndimension(); i++) {
       TORCH_CHECK(
           input_.size(i) > 0,
@@ -349,14 +350,20 @@ static void conv_depthwise3d_cuda_template(
     }
     
     TORCH_CHECK(
-        (input_.ndimension() == 4),
-        "non-empty 5D tensor expected for input");
+        (input_.ndimension() == 5),
+        "non-empty 5D tensor expected for input "
+        "but input has size ", input_.ndimension());
 
     // We should allocate the tensor somewhere here
     auto options = input_.options();
-    auto output_size = internal::get_output_size<4>(
-      input_, kernel_size, stride_size, pad_size, dilation_size);
-    output = at::empty(output_size, options);
+    // output = at::empty(output_size, options);
+
+    // input sizes
+    int64_t sizeB  = input_.size(0);
+    int64_t sizeD = input_.size(1);
+    int64_t isizeT = input_.size(2);
+    int64_t isizeH = input_.size(3);
+    int64_t isizeW = input_.size(4);
 
     // 0th dimension is batchsize
     int64_t osizeD = output.size(1);  // num out channels
@@ -364,18 +371,10 @@ static void conv_depthwise3d_cuda_template(
     int64_t osizeH = output.size(3);  // output height
     int64_t osizeW = output.size(4);  // output width
 
-    int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
-    //int64_t istrideD, istrideT, istrideH, istrideW;
     int64_t totalZ;
     
-    sizeB  = input_.size(0);
-    sizeD = input_.size(1);
-    isizeT = input_.size(2);
-    isizeH = input_.size(3);
-    isizeW = input_.size(4);
-
     const Tensor& input = input_.contiguous();
-    output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
+    // output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
     // total num elements
     totalZ = sizeB * sizeD * osizeT;
 
@@ -779,22 +778,6 @@ Tensor _conv_depthwise3d_forward_cuda(
 
 }
 
-// // Don't need OOP calls?
-// Tensor conv3d_depthwise3d_forward_cuda(
-//   at::Tensor const& input,
-//   IntList kernel_size,
-//   IntList stride_size,
-//   IntList pad_size,
-//   IntList dilation_size
-// )
-// {
-//   auto output = at::empty({0}, input.options());
-//   conv3d_depthwise3d_forward_out_cuda_template(
-//     output, input, kernel_size, stride_size, pad_size, dilation_size
-//   );
-//   return output;
-// }
-
 Tensor _conv3d_depthwise3d_backward_input_cuda(
   Tensor& gradInput,
   const Tensor& gradOutput,
@@ -834,7 +817,7 @@ Tensor _conv3d_depthwise3d_backward_weight_cuda(
 // Publicly exposed functions
 
 Tensor conv_depthwise3d_cuda(
-  const Tensor& input,
+  const Tensor& input, // b, c, n, h, w
   const Tensor& weight,
   const Tensor& bias,
   IntArrayRef kernel_size,
@@ -842,8 +825,49 @@ Tensor conv_depthwise3d_cuda(
   IntArrayRef pad_size,
   IntArrayRef dilation_size) {
 
-    auto output_size = internal::get_output_size<4>(input, kernel_size, stride_size, pad_size, dilation_size);
-    auto output = at::empty(output_size, input.options());
+    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+
+    int64_t kernel_temp = kernel_size[0];
+    int64_t kernel_height = kernel_size[1];
+    int64_t kernel_width = kernel_size[2];
+    int64_t dilation_temp = dilation_size[0];
+    int64_t dilation_height = dilation_size[1];
+    int64_t dilation_width = dilation_size[2];
+    int64_t pad_temp = pad_size[0];
+    int64_t pad_height = pad_size[1];
+    int64_t pad_width = pad_size[2];
+    int64_t stride_temp = stride_size[0];
+    int64_t stride_height = stride_size[1];
+    int64_t stride_width = stride_size[2];
+    
+    int64_t batch_size = input.size(0);
+    int64_t n_input_plane = input.size(1);
+    int64_t input_temp = input.size(2);
+    int64_t input_height = input.size(3);
+    int64_t input_width = input.size(4);
+
+    int64_t output_height = (input_height + 2 * pad_height - 
+                            (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
+    int64_t output_width = (input_width + 2 * pad_width -
+                           (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
+    int64_t output_temp = (input_temp + 2 * pad_width -
+                          (dilation_temp * (kernel_temp - 1) + 1)) / stride_temp + 1;
+
+    int64_t n_output_plane = n_input_plane;
+
+  
+  output.resize_({batch_size, n_output_plane, output_temp, output_height, output_width});
+  output.zero_();
+
+
+    // // std::cout << input.size << std::endl;
+    // std::cout << batch_size << std::endl; 
+    // std::cout << n_output_plane << std::endl; 
+    // std::cout << output_temp << std::endl;
+    // std::cout << output_height << std::endl;
+    // std::cout << output_width << std::endl;
+    // std::cout << output_width << std::endl;
+    // std::cout << output << std::endl;
 
     _conv_depthwise3d_forward_cuda(
       output, input, weight, bias, kernel_size, stride_size, pad_size, dilation_size
@@ -863,6 +887,7 @@ std::tuple<at::Tensor,at::Tensor> conv_depthwise3d_backward_cuda(
 
     auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
     auto grad_weight = at::zeros_like(weight, at::MemoryFormat::Contiguous);
+
 
     if (output_mask[0]) {
         _conv3d_depthwise3d_backward_input_cuda(
