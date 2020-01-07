@@ -1094,13 +1094,14 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-            rpc.shutdown(graceful=False)
+            rpc.shutdown(graceful=True)
         else:
+            api._ignore_rref_leak = False
             with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-                rpc.shutdown(graceful=False)
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
