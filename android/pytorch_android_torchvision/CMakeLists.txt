@@ -19,11 +19,7 @@ target_compile_options(pytorch_vision_jni PRIVATE
 
 set(BUILD_SUBDIR ${ANDROID_ABI})
 
-set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
-set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
-
-add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
-
 target_link_libraries(pytorch_vision_jni
-    fbjni
+  android
+  log
 )
