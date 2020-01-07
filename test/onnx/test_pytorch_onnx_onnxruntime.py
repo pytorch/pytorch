@@ -266,7 +266,6 @@ class TestONNXRuntime(unittest.TestCase):
             from urlparse import urlsplit
             import urllib2
             request = urllib2
-            error = urllib2
         else:
             from urllib.parse import urlsplit
             from urllib import request
