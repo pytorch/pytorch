@@ -112,7 +112,7 @@ class basic_string_view final {
     if (C10_UNLIKELY(pos >= size_)) {
       throw std::out_of_range(
         "string_view::operator[] or string_view::at() out of range. Index: " +
-        c10::guts::::to_string(pos) + ", size: " + c10::guts::::to_string(size()));
+        c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()));
     }
 #endif
     return at_(pos);
@@ -192,7 +192,7 @@ class basic_string_view final {
     if (C10_UNLIKELY(pos > size_)) {
       throw std::out_of_range(
         "basic_string_view::substr parameter out of bounds. Index: " +
-        c10::guts::::to_string(pos) + ", size: " + c10::guts::::to_string(size()));
+        c10::guts::to_string(pos) + ", size: " + c10::guts::to_string(size()));
     }
 #endif
     return substr_(pos, count);
