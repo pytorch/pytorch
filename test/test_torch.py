@@ -11369,6 +11369,16 @@ class TestTorchDeviceType(TestCase):
         for dtype in [torch.float32, torch.float64]:
             test_pdist_single((1000, 2), device, 2, dtype, False)
 
+        # use dim0>=46342 for forward and dim0>=1449 for backward, see:
+        # https://github.com/pytorch/pytorch/issues/30583
+        # https://github.com/pytorch/pytorch/pull/31593
+        # Forward test
+        test_dist_single((50000, 1), device, 2, torch.float32, False)
+        # backward test
+        x = torch.randn(1500, 1, device=device, requires_grad=True)
+        torch.pdist(x).mean().backward()
+        self.assertIsNotNone(x.grad)
+
     def test_atan2(self, device):
         def _test_atan2_with_size(size, device):
             a = torch.rand(size=size, device=device, dtype=torch.double)
