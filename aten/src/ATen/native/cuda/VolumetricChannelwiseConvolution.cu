@@ -355,8 +355,38 @@ static void conv_depthwise3d_cuda_template(
         "but input has size ", input_.ndimension());
 
     // We should allocate the tensor somewhere here
-    auto options = input_.options();
-    // output = at::empty(output_size, options);
+
+    int64_t kernel_temp = kernel_size[0];
+    int64_t kernel_height = kernel_size[1];
+    int64_t kernel_width = kernel_size[2];
+    int64_t dilation_temp = dilation_size[0];
+    int64_t dilation_height = dilation_size[1];
+    int64_t dilation_width = dilation_size[2];
+    int64_t pad_temp = pad_size[0];
+    int64_t pad_height = pad_size[1];
+    int64_t pad_width = pad_size[2];
+    int64_t stride_temp = stride_size[0];
+    int64_t stride_height = stride_size[1];
+    int64_t stride_width = stride_size[2];
+    
+    int64_t batch_size = input_.size(0);
+    int64_t n_input_plane = input_.size(1);
+    int64_t input_temp = input_.size(2);
+    int64_t input_height = input_.size(3);
+    int64_t input_width = input_.size(4);
+
+    int64_t output_height = (input_height + 2 * pad_height - 
+                            (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
+    int64_t output_width = (input_width + 2 * pad_width -
+                           (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
+    int64_t output_temp = (input_temp + 2 * pad_width -
+                          (dilation_temp * (kernel_temp - 1) + 1)) / stride_temp + 1;
+
+    int64_t n_output_plane = n_input_plane;
+
+  
+    output.resize_({batch_size, n_output_plane, output_temp, output_height, output_width});
+
 
     // input sizes
     int64_t sizeB  = input_.size(0);
@@ -758,7 +788,6 @@ void conv_depthwise3d_backward_weight_cuda_template(
 
 } // namespace
 
-
 Tensor _conv_depthwise3d_forward_cuda(
   Tensor& output,
   const Tensor& input,
@@ -825,50 +854,8 @@ Tensor conv_depthwise3d_cuda(
   IntArrayRef pad_size,
   IntArrayRef dilation_size) {
 
-    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
-
-    int64_t kernel_temp = kernel_size[0];
-    int64_t kernel_height = kernel_size[1];
-    int64_t kernel_width = kernel_size[2];
-    int64_t dilation_temp = dilation_size[0];
-    int64_t dilation_height = dilation_size[1];
-    int64_t dilation_width = dilation_size[2];
-    int64_t pad_temp = pad_size[0];
-    int64_t pad_height = pad_size[1];
-    int64_t pad_width = pad_size[2];
-    int64_t stride_temp = stride_size[0];
-    int64_t stride_height = stride_size[1];
-    int64_t stride_width = stride_size[2];
-    
-    int64_t batch_size = input.size(0);
-    int64_t n_input_plane = input.size(1);
-    int64_t input_temp = input.size(2);
-    int64_t input_height = input.size(3);
-    int64_t input_width = input.size(4);
-
-    int64_t output_height = (input_height + 2 * pad_height - 
-                            (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
-    int64_t output_width = (input_width + 2 * pad_width -
-                           (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
-    int64_t output_temp = (input_temp + 2 * pad_width -
-                          (dilation_temp * (kernel_temp - 1) + 1)) / stride_temp + 1;
-
-    int64_t n_output_plane = n_input_plane;
-
-  
-  output.resize_({batch_size, n_output_plane, output_temp, output_height, output_width});
-  output.zero_();
-
-
-    // // std::cout << input.size << std::endl;
-    // std::cout << batch_size << std::endl; 
-    // std::cout << n_output_plane << std::endl; 
-    // std::cout << output_temp << std::endl;
-    // std::cout << output_height << std::endl;
-    // std::cout << output_width << std::endl;
-    // std::cout << output_width << std::endl;
-    // std::cout << output << std::endl;
-
+    auto options = input.options();
+    Tensor output = at::empty({0}, options);
     _conv_depthwise3d_forward_cuda(
       output, input, weight, bias, kernel_size, stride_size, pad_size, dilation_size
     );
