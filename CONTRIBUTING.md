@@ -249,28 +249,6 @@ cd docs
 make html
 ```
 
-4. To view HTML files, you must start an HTTP server. For example
-
-```bash
-# Start a server from the current directory (Python 3 only)
-cd docs/build/html
-python -m http.server
-```
-
-If you are developing on a remote machine, you can set up an SSH tunnel so that
-you can access the HTTP server on the remote machine on your local machine. To map
-remote port 8086 to local port 8086, use either of the following commands.
-
-```bash
-# For SSH
-ssh my_machine -L 8086:my_machine:8086
-
-# For Eternal Terminal
-et my_machine -t="8086:8086"
-```
-
-Then navigate to `localhost:8086` in your web browser.
-
 #### Tips
 
 The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
