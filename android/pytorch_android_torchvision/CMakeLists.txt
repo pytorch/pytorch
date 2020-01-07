@@ -19,7 +19,4 @@ target_compile_options(pytorch_vision_jni PRIVATE
 
 set(BUILD_SUBDIR ${ANDROID_ABI})
 
-target_link_libraries(pytorch_vision_jni
-  android
-  log
-)
+target_link_libraries(pytorch_vision_jni)

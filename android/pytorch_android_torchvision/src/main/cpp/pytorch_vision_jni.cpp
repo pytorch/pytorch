@@ -4,21 +4,11 @@
 
 #include "jni.h"
 
-#if defined(__ANDROID__)
-
-#include <android/log.h>
-#define ALOGI(...) \
-  __android_log_print(ANDROID_LOG_INFO, "pytorch-vision-jni", __VA_ARGS__)
-
-#endif
 #define clamp0255(x) x > 255 ? 255 : x < 0 ? 0 : x
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace pytorch_vision_jni {
 
-JNIEXPORT void JNICALL
-Java_org_pytorch_torchvision_TensorImageUtils_00024NativePeer_imageYUV420CenterCropToFloatBuffer(
+static void imageYUV420CenterCropToFloatBuffer(
     JNIEnv* jniEnv,
     jclass,
     jobject yBuffer,
@@ -124,7 +114,29 @@ Java_org_pytorch_torchvision_TensorImageUtils_00024NativePeer_imageYUV420CenterC
     }
   }
 }
+} // namespace pytorch_vision_jni
 
-#ifdef __cplusplus
+JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
+  JNIEnv* env;
+  if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+    return JNI_ERR;
+  }
+
+  jclass c =
+      env->FindClass("org/pytorch/torchvision/TensorImageUtils$NativePeer");
+  if (c == nullptr)
+    return JNI_ERR;
+
+  static const JNINativeMethod methods[] = {
+      {"imageYUV420CenterCropToFloatBuffer",
+       "(Ljava/nio/ByteBuffer;IILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIII[F[FLjava/nio/Buffer;I)V",
+       (void*)pytorch_vision_jni::imageYUV420CenterCropToFloatBuffer},
+  };
+  int rc = env->RegisterNatives(
+      c, methods, sizeof(methods) / sizeof(JNINativeMethod));
+
+  if (rc != JNI_OK)
+    return rc;
+
+  return JNI_VERSION_1_6;
 }
-#endif
