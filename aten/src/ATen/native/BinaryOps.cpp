@@ -15,6 +15,7 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_xor_stub);
 DEFINE_DISPATCH(logical_and_stub);
 DEFINE_DISPATCH(logical_or_stub);
@@ -28,17 +29,10 @@ DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 
-static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
-  TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
-              "Boolean alpha only supported for Boolean results.");
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true),
-              "For integral input tensors, argument alpha must not be a floating point number.");
-}
-
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -47,7 +41,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -109,21 +103,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
-// Basic checking for all sub functions.
-static inline void sub_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-}
-
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -133,7 +117,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -249,6 +233,53 @@ Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& bitwise_and_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  bitwise_and_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_and(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  at::bitwise_and_out(result, self, other);
+  return result;
+}
+
+Tensor& bitwise_and_(Tensor& self, const Tensor& other) {
+  return at::bitwise_and_out(self, self, other);
+}
+
+Tensor& bitwise_and_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::bitwise_and_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_and(const Tensor& self, Scalar other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_and_out(result, self, other);
+}
+
+Tensor& bitwise_and_(Tensor& self, Scalar other) {
+  return at::bitwise_and_out(self, self, other);
+}
+
+// Legacy and interfaces. They are aliased to bitwise_and* functions
+Tensor __and__(const Tensor& self, const Tensor& other) {
+  return at::bitwise_and(self, other);
+}
+
+Tensor __and__(const Tensor& self, Scalar other) {
+  return at::bitwise_and(self, other);
+}
+
+Tensor& __iand__(Tensor& self, const Tensor& other) {
+  return self.bitwise_and_(other);
+}
+
+Tensor& __iand__(Tensor& self, Scalar other) {
+  return self.bitwise_and_(other);
 }
 
 Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {

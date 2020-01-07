@@ -67,7 +67,7 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
 #if defined(_MSC_VER)
   return extract(
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
-      ">(void)",
+      ">(void) noexcept",
       string_view(__FUNCSIG__, sizeof(__FUNCSIG__) - 1));
 #elif defined(__clang__)
   return extract(

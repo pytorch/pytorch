@@ -18,6 +18,8 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/Backend.h>
+#include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
@@ -319,6 +321,33 @@ Tensor legacy_new_from_sequence(
   return internal_new_from_data(type_id, scalar_type, std::move(device), data, false, false, false);
 }
 
+// "base" here refers to the Tensor type on which the function was invoked, e.g.:
+// in x.new(y), 'x' is the base.
+void check_base_legacy_new(c10::TensorTypeId type_id, at::Layout expected_layout) {
+  if (expected_layout == c10::kStrided) {
+    TORCH_CHECK(type_id == c10::TensorTypeId::CPUTensorId
+                || type_id == c10::TensorTypeId::CUDATensorId
+                || type_id == c10::TensorTypeId::HIPTensorId
+                || type_id == c10::XLATensorId(),
+                "new(): expected TensorTypeId: ", c10::TensorTypeId::CPUTensorId,
+                " or ", c10::TensorTypeId::CUDATensorId,
+                " or ", c10::TensorTypeId::HIPTensorId,
+                " or ", c10::TensorTypeId::XLATensorId,
+                " but got: ", type_id);
+  } else if(expected_layout == c10::kSparse) {
+    // NOTE: no sparse XLA
+    TORCH_CHECK(type_id == c10::TensorTypeId::SparseCPUTensorId
+                || type_id == c10::TensorTypeId::SparseCUDATensorId
+                || type_id == c10::TensorTypeId::SparseHIPTensorId,
+                "new(): expected TensorTypeId: ", c10::TensorTypeId::SparseCPUTensorId,
+                " or ", c10::TensorTypeId::SparseCUDATensorId,
+                " or ", c10::TensorTypeId::SparseHIPTensorId,
+                " but got: ", type_id);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unexpected layout");
+  }
+}
+
 void check_legacy_ctor_device(c10::TensorTypeId type_id, c10::optional<Device> device) {
   if (device.has_value()) {
     TORCH_CHECK(computeDeviceType(type_id) == device.value().type(),
@@ -362,7 +391,8 @@ Tensor legacy_sparse_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scala
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
+      throw TypeError("torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                      "or construct a strided tensor and convert it to sparse via to_sparse.");
     }
     return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
@@ -377,6 +407,7 @@ Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar
     "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
     "new(IntArrayRef size, *, Device? device=None)",
   });
+  check_base_legacy_new(type_id, c10::kSparse);
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -408,7 +439,8 @@ Tensor legacy_sparse_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type_id, scalar_type, deviceOptional, r.pyobject(0));
+      throw TypeError("SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                      "or construct a strided tensor and convert it to sparse via to_sparse.");
     }
     return new_with_sizes(type_id, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
@@ -488,6 +520,7 @@ Tensor legacy_tensor_new(c10::TensorTypeId type_id, at::ScalarType scalar_type, 
     return legacy_sparse_tensor_new(type_id, scalar_type, args, kwargs);
   }
 
+  check_base_legacy_new(type_id, c10::kStrided);
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
