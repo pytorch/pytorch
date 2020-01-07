@@ -116,7 +116,7 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
