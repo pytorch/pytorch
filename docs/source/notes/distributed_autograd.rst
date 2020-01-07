@@ -321,8 +321,8 @@ file called "dist_autograd_simple.py", it can be run with the command
 
 .. code::
 
-  import multiprocessing as mp
   import torch
+  import torch.multiprocessing as mp
   import torch.distributed.autograd as dist_autograd
   from torch.distributed import rpc
   from torch import optim
@@ -362,21 +362,14 @@ file called "dist_autograd_simple.py", it can be run with the command
           # Run the distributed optimizer step.
           dist_optim.step()
 
-  def run_process(rank, dst_rank, world_size):
+  def run_process(rank, world_size):
+      dst_rank = (rank + 1) % world_size
       _run_process(rank, dst_rank, world_size)
       rpc.shutdown()
 
-  processes = []
-
-  # Run world_size workers.
-  world_size = 2
-  for i in range(world_size):
-      p = mp.Process(target=run_process, args=(i, (i + 1) % 2, world_size))
-      p.start()
-      processes.append(p)
-
-  for p in processes:
-      p.join()
-
+  if __name__ == '__main__':
+    # Run world_size workers
+    world_size = 2
+    mp.spawn(run_process, args=(world_size,), nprocs=world_size)
 
 .. _RFC: https://github.com/pytorch/pytorch/issues/23110
