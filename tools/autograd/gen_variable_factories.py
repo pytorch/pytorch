@@ -14,34 +14,45 @@ TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_ut
 # Please see [Use only optional version of tensor options when getting them from TensorOptions object]
 # In the tracking issue https://github.com/pytorch/pytorch/issues/30405
 FUNCTION_TEMPLATE_ARANGE = CodeTemplate("""\
-inline at::Tensor ${name}(${collapsed_formals}) {
+inline at::Tensor _${name}(${formals}) {
   ${pre_record_trace}
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    auto currDtype = options.dtype_opt();
-    if (currDtype.has_value()) {
+    if (dtype.has_value()) {
       return at::_arange(${uncollapsed_actuals});
     }
     return at::_arange(${uncollapsed_actuals_nullptr});
   })();
   at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/options.requires_grad());
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/requires_grad.value());
   ${post_record_trace}
   return result;
+}
+
+inline at::Tensor ${name}(${collapsed_formals}) {
+  if (options.has_dtype()) {
+    return torch::_$name(${options_calls});
+  } else {
+    return torch::_$name(${options_calls_nullptr});
+  }
 }
 """)
 
 FUNCTION_TEMPLATE_TENSOR_OPTIONS = CodeTemplate("""\
-inline at::Tensor ${name}(${collapsed_formals}) {
+inline at::Tensor _${name}(${formals}) {
   ${pre_record_trace}
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     return at::_${name}(${uncollapsed_actuals});
   })();
   at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/options.requires_grad());
+    autograd::make_variable(std::move(tensor), /*requires_grad=*/requires_grad.value());
   ${post_record_trace}
   return result;
+}
+
+inline at::Tensor ${name}(${collapsed_formals}) {
+    return torch::_$name(${options_calls});
 }
 """)
 
@@ -89,6 +100,8 @@ def turn_actuals_into_option_calls(actuals):
     collapsed[index + 1] = 'options.layout()'
     collapsed[index + 2] = 'options.device()'
     collapsed[index + 3] = 'options.pinned_memory()'
+    collapsed.insert(index + 4, 'options.requires_grad()')
+    #collapsed[index + 4] = 'options.requires_grad()'
     return collapsed
 
 def process_function(decl, has_tensor_options, disable_autograd):
@@ -99,17 +112,20 @@ def process_function(decl, has_tensor_options, disable_autograd):
 
         default = " = {}".format(argument["default"]) if "default" in argument else ""
         if "default" in argument:
-            if argument["default"] == 'False' or argument["default"] == 'True':
-                default = default.lower()
+            default = default.replace("False", "false")
+            default = default.replace("True", "true")
 
         formals.append("{} {}{}".format(type, argument["name"], default))
+
+        if argument['name'] == 'pin_memory' and has_tensor_options:
+            #insert grad before MemoryFormat
+            formals.append("c10::optional<bool> requires_grad = c10::nullopt")
 
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
             actual = "at::TensorOptions({})".format(actual)
         actuals.append(actual)
 
-    requires_grad = "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
         # Insert TensorOptions before MemoryFormat
         actuals.insert(-1, 'at::typeMetaToScalarType({}.options().dtype())'.format(actuals[0]))
@@ -120,17 +136,13 @@ def process_function(decl, has_tensor_options, disable_autograd):
     if not disable_autograd:
         pre_record_trace, post_record_trace = format_trace(decl)
         if has_tensor_options:
-            pre_record_trace = pre_record_trace.replace("jit::tracer::addInputs(node, \"dtype\", dtype);",
-                                                        "jit::tracer::addInputs(node, \"options\", options);")
-            pre_record_trace = pre_record_trace.replace("jit::tracer::addInputs(node, \"layout\", layout);",
-                                                        "")
-            pre_record_trace = pre_record_trace.replace("jit::tracer::addInputs(node, \"device\", device);",
-                                                        "")
             pre_record_trace = pre_record_trace.replace("jit::tracer::addInputs(node, \"pin_memory\", pin_memory);",
-                                                        "")
+                                                        "jit::tracer::addInputs(node, \"pin_memory\", pin_memory);" \
+                                                        "\n  jit::tracer::addInputs(node, \"requires_grad\", requires_grad);")
     else:
         pre_record_trace, post_record_trace = '', ''
 
+    requires_grad = "false"
     if not has_tensor_options:
         return FUNCTION_TEMPLATE.substitute(
             name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad,
@@ -140,28 +152,36 @@ def process_function(decl, has_tensor_options, disable_autograd):
         options_calls = turn_actuals_into_option_calls(actuals)
         collapsed_formals = TOUtils.collapse_formals(formals)
 
+
         if decl['name'] == 'arange':
-            uncollapsed_actuals_nullptr = options_calls[:]
-            index = options_calls.index('at::typeMetaToScalarType(options.dtype())')
+            uncollapsed_actuals_nullptr = actuals[:]
+            index = actuals.index('dtype')
             uncollapsed_actuals_nullptr[index] = 'c10::nullopt'
+
+            options_calls_nullptr = options_calls[:]
+            index = options_calls.index('at::typeMetaToScalarType(options.dtype())')
+            options_calls_nullptr[index] = 'c10::nullopt'
 
             return FUNCTION_TEMPLATE_ARANGE.substitute(
                 name=decl["name"],
+                formals=formals,
                 collapsed_formals=collapsed_formals,
                 actuals=actuals,
-                uncollapsed_actuals=options_calls,
+                options_calls=options_calls,
+                options_calls_nullptr=options_calls_nullptr,
+                uncollapsed_actuals=actuals,
                 uncollapsed_actuals_nullptr=uncollapsed_actuals_nullptr,
-                requires_grad=requires_grad,
                 pre_record_trace=pre_record_trace,
                 post_record_trace=post_record_trace
             )
         else:
             return FUNCTION_TEMPLATE_TENSOR_OPTIONS.substitute(
                 name=decl["name"],
+                formals=formals,
                 collapsed_formals=collapsed_formals,
                 actuals=actuals,
-                uncollapsed_actuals=options_calls,
-                requires_grad=requires_grad,
+                options_calls=options_calls,
+                uncollapsed_actuals=actuals,
                 pre_record_trace=pre_record_trace,
                 post_record_trace=post_record_trace
             )

@@ -66,6 +66,7 @@ TYPE_MAP = {
     'int64_t': 'int',
     'int64_t?': 'int?',
     'double': 'float',
+    'double?': 'float?',
     'bool': 'bool',
     'bool?': 'bool?',
     'Generator': 'Generator?',
@@ -118,6 +119,7 @@ FROM_IVALUE = {
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
+    'double?': '{}.toOptional<double>()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
@@ -150,9 +152,9 @@ const auto options = TensorOptions()
         .device(${device})
         .pinned_memory(${pin_memory});
 #ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
+    auto result_ = at::${name}(${args_with_tensor_options_disp});
 #else
-    auto result_ = torch::${name}(${args_with_tensor_options});
+    auto result_ = torch::_${name}(${args_with_tensor_options});
 #endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
@@ -295,18 +297,28 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
             pin_memory = args[tensor_options_arg_index + 3]
-            args_with_tensor_options = args[:tensor_options_arg_index] + \
+
+            args_with_tensor_options_disp = args[:tensor_options_arg_index] + \
                 ['options'] + args[(tensor_options_arg_index + 4):]
+            args_with_tensor_options = args[:tensor_options_arg_index] + \
+                ['at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad()'] + args[(tensor_options_arg_index + 4):]
+
+            if decl['name'] == 'new_full' or 'to' or 'new_zeros':
+                print("\n\n\n HELO")
+                print("name: ", decl['name'])
+                print("is_namespace_function: ", is_namespace_function)
+
             if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
                     name=decl['name'], dtype=dtype, layout=layout,
                     device=device, pin_memory=pin_memory,
-                    args_with_tensor_options=pack_arguments(args_with_tensor_options))
+                    args_with_tensor_options=pack_arguments(args_with_tensor_options),
+                    args_with_tensor_options_disp=pack_arguments(args_with_tensor_options_disp))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
                     name=decl['name'], dtype=dtype, layout=layout,
                     device=device, pin_memory=pin_memory,
-                    args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
+                    args_with_tensor_options=pack_arguments(args_with_tensor_options_disp[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
         else:
             if is_namespace_function:

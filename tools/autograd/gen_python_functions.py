@@ -346,6 +346,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
+        'c10::optional<double>': 'toDoubleOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',
@@ -455,6 +456,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # skip output
                 arg_idx += 1
 
+            #[CHECK THIS]
             if has_tensor_options and arg['name'] in ['dtype', 'layout', 'device', 'pin_memory']:
                 expr, formal = parse_arg(arg, arg_idx)
                 actuals.append(arg['name'])
@@ -572,19 +574,27 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
-            env['dispatch_call'] = 'self.{}'.format(declaration['name'])
+            if has_tensor_options:
+                env['dispatch_call'] = 'self._{}'.format(declaration['name'])
+            else:
+                env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
             namespace = 'torch' if (has_tensor_options or declaration['name'].endswith('_like')) else 'at'
-            env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
+            if has_tensor_options:
+                env['dispatch_call'] = '{}::_{}'.format(namespace, declaration['name'])
+            else:
+                env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
         if has_tensor_options:
             env['initialize_cuda'] = 'torch::utils::maybe_initialize_cuda(options);'
-            env['dispatch_args'] = TOUtils.collapse_actuals(env['dispatch_args'])
             if add_requires_grad:
                 env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
                     .layout(layout).pinned_memory(pin_memory).requires_grad(requires_grad);"
+
+                if not 'Tensor' in declaration['method_of']:
+                    env['dispatch_args'].insert(env['dispatch_args'].index('pin_memory') + 1, 'requires_grad')
             else:
                 env['tensor_options'] = "const auto options = TensorOptions().dtype(dtype).device(device) \
                     .layout(layout).pinned_memory(pin_memory);"
