@@ -209,7 +209,7 @@ private:
     at::Tensor
   >;
 
-  using StorageT = guts::conditional_t<
+  using StorageT = std::conditional_t<
     guts::typelist::contains<types_with_direct_list_implementation, T>::value,
     T, // The types listed in types_with_direct_list_implementation store the list as std::vector<T>
     IValue  // All other types store the list as std::vector<IValue>

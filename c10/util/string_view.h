@@ -7,6 +7,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <algorithm>
 
 namespace c10 {
 
@@ -179,7 +180,7 @@ class basic_string_view final {
           c10::guts::to_string(pos) +
           ", size: " + c10::guts::to_string(size()));
     }
-    size_type copy_length = c10::guts::min(count, size_ - pos);
+    size_type copy_length = guts::min(count, size_ - pos);
     for (auto iter = begin() + pos, end = iter + copy_length; iter != end;) {
       *(dest++) = *(iter++);
     }
@@ -204,7 +205,7 @@ class basic_string_view final {
   constexpr int compare(basic_string_view rhs) const noexcept {
 #if __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster.
-    for (size_t i = 0, end = c10::guts::min(size(), rhs.size()); i < end; ++i) {
+    for (size_t i = 0, end = guts::min(size(), rhs.size()); i < end; ++i) {
       if (at_(i) < rhs.at_(i)) {
         return -1;
       } else if (at_(i) > rhs.at_(i)) {
@@ -377,7 +378,7 @@ class basic_string_view final {
     }
 
     if (v.size() <= size()) {
-      pos = c10::guts::min(size() - v.size(), pos);
+      pos = guts::min(size() - v.size(), pos);
       do {
         if (v.at_(0) == at_(pos) &&
             v.substr_(1).equals_(substr_(pos + 1, v.size() - 1))) {
@@ -523,7 +524,7 @@ class basic_string_view final {
 
   constexpr basic_string_view substr_(size_type pos = 0, size_type count = npos)
       const {
-    return basic_string_view{begin_ + pos, c10::guts::min(count, size() - pos)};
+    return basic_string_view{begin_ + pos, guts::min(count, size() - pos)};
   }
 
   template <class Condition>
@@ -555,7 +556,7 @@ class basic_string_view final {
 #if __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster.
     if (size() > 0) {
-      pos = c10::guts::min(size() - 1, pos);
+      pos = guts::min(size() - 1, pos);
       do {
         if (condition(at_(pos))) {
           return pos;

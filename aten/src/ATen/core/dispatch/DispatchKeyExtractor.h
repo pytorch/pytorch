@@ -94,22 +94,16 @@ namespace detail {
     }
   };
 
-
-  // NOTE: [schema mismatch in native_functions.yaml]
-  // Due to this issue we have to check for two sets of TensorOptions types:
-  // optinal and non-optional.
-  // issue https://github.com/pytorch/pytorch/issues/30763
-  // issue https://github.com/pytorch/pytorch/issues/30405
   template<class Arg> using arg_is_tensor_option_arg = guts::typelist::contains<
-     guts::typelist::typelist<ScalarType, Layout, Device, bool>,
-     guts::remove_const_t<guts::remove_reference_t<Arg>>>;
+   guts::typelist::typelist<ScalarType, Layout, Device, bool>,
+   std::remove_const_t<std::remove_reference_t<Arg>>>;
 
   template<class Arg> using arg_is_tensor_option_opt_arg = guts::typelist::contains<
      guts::typelist::typelist<c10::optional<ScalarType>,
                               c10::optional<Layout>,
                               c10::optional<Device>,
                               c10::optional<bool>>,
-     guts::remove_const_t<guts::remove_reference_t<Arg>>>;
+     std::remove_const_t<std::remove_reference_t<Arg>>>;
 
   template<class... Args> using args_have_tensor_options = guts::disjunction<
      arg_is_tensor_option_arg<Args>..., arg_is_tensor_option_opt_arg<Args>...>;
@@ -126,9 +120,10 @@ namespace detail {
         type_set(tensorOptions);
       }
     }
+
     return type_set.ts;
   }
- }
+}
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
