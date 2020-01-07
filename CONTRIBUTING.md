@@ -309,15 +309,8 @@ To build the documentation, follow the same steps as above, but run them from
 
 ### Previewing changes
 
-To view HTML files, you must start an HTTP server. For example
-
-```bash
-# Start a server from the current directory (Python 3 only)
-cd docs/build/html
-python -m http.server
-```
-
-Then navigate to `localhost:8000` in your web browser.
+To view HTML files locally, you can open the files in your web browser. For example,
+navigate to [file:///your_pytorch_folder/docs/build/html/index.html](file:///your_pytorch_folder/docs/build/html/index.html).
 
 If you are developing on a remote machine, you can set up an SSH tunnel so that
 you can access the HTTP server on the remote machine from your local machine. To map
