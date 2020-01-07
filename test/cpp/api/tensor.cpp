@@ -724,6 +724,8 @@ TEST(TensorTest, FromBlob) {
   ASSERT_EQ(tensor[0].item<double>(), 1);
   ASSERT_EQ(tensor[1].item<double>(), 2);
   ASSERT_EQ(tensor[2].item<double>(), 3);
+  // Above syntax did not copy the data, and has nullptr deleter context.
+  ASSERT_EQ(tensor.storage().data_ptr().get_context(), nullptr);
 }
 
 TEST(TensorTest, FromBlobUsesDeleter) {
