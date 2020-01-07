@@ -265,13 +265,13 @@ script::Module load(
     script::ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
   // (marked by the 0x80 0x02 bytes at the start)
-  char first_short[2];
+  uint8_t first_short[2];
   rai->read(
       /*pos=*/0,
       /*buf=*/&first_short,
       /*n=*/2,
       /*what=*/"checking archive");
-  if (first_short[0] == -128 && first_short[1] == 2) {
+  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
     // NB: zip files by spec can start with any data, so technically they might
     // start with 0x80 0x02, but in practice zip files start with a file entry
     // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
