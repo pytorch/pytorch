@@ -117,7 +117,8 @@ class NLLLoss(_WeightedLoss):
         l_n = - w_{y_n} x_{n,y_n}, \quad
         w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
-    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
+    :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then
 
     .. math::
