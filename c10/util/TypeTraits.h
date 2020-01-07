@@ -120,5 +120,16 @@ template<template<class> class C>
 struct is_type_condition<C, std::enable_if_t<std::is_same<bool, std::remove_cv_t<decltype(C<int>::value)>>::value>> : std::true_type {};
 
 
+/**
+ * is_fundamental<T> is true_type iff the lambda type T is a fundamental type (that is, arithmetic type, void, or nullptr_t).
+ * Example:
+ *  is_fundamental<int> // true
+ * We define it here to resolve a MSVC bug.
+ * See https://github.com/pytorch/pytorch/issues/30932 for details.
+ */
+template <class T>
+struct is_fundamental : std::is_fundamental<T> {};
+
+
 }
 }
