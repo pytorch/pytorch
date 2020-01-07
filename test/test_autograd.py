@@ -3343,17 +3343,6 @@ for shape in [(1,), ()]:
         # with respect to view tracking and inplace operation on the output.
 
         def run_test(grad_mode, requires_grad, is_view, should_raise_tuple):
-            def get_view_as():
-                inp = torch.rand(2, requires_grad=requires_grad).clone()
-                with torch.set_grad_enabled(grad_mode):
-                    return inp.view_as(inp)
-
-
-            def get_unbind():
-                inp = torch.rand(2, requires_grad=requires_grad).clone()
-                with torch.set_grad_enabled(grad_mode):
-                    return inp.unbind()
-
             def maybe_check_raise(fn, should_raise):
                 self.assertTrue(should_raise is None or isinstance(should_raise, str))
                 if should_raise is not None:
@@ -3362,29 +3351,30 @@ for shape in [(1,), ()]:
                 else:
                     fn()
 
+            inp = torch.rand(2, requires_grad=requires_grad).clone()
+            with torch.set_grad_enabled(grad_mode):
+                out = inp.view_as(inp)
             # Are they differentiable views?
-            out = get_view_as()
             self.assertTrue(out._is_view() == is_view)
-
-            out = get_unbind()
-            self.assertTrue(out[0]._is_view() == is_view)
-            self.assertTrue(out[1]._is_view() == is_view)
-
             # Are inplace allowed?
-            out = get_view_as()
             maybe_check_raise(lambda: out.add_(1), should_raise_tuple[0])
 
-            out = get_unbind()
+            inp = torch.rand(2, requires_grad=requires_grad).clone()
+            with torch.set_grad_enabled(grad_mode):
+                out = inp.unbind()
+            # Are they differentiable views?
+            self.assertTrue(out[0]._is_view() == is_view)
+            self.assertTrue(out[1]._is_view() == is_view)
+            # Are inplace allowed?
             maybe_check_raise(lambda: out[0].add_(1), should_raise_tuple[1])
             maybe_check_raise(lambda: out[1].add_(1), should_raise_tuple[2])
-
 
         # should_raise contains None if it should not raise
         # should_raise contains a string of the error if it should raise
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below
+        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
@@ -3395,20 +3385,18 @@ for shape in [(1,), ()]:
                  should_raise_tuple=(None, None, None))
 
 
-    def test_autograd_views_python(self):
+    def test_autograd_simple_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
         # and not silent. The TODOs below mark the places with unexpected behavior.
         # Note that any change in these test will be BC-breaking and should be done carefully.
 
-        # I) This checks the autograd.Function behavior when we return one or multiple outputs
+        # This checks the autograd.Function behavior when we return one or multiple outputs
         # while one of these is an input, a view of an input or of a temporary tensor.
-        # II) This checks that multiples views in the forward are properly traced and how they
-        # behave with respect to inplace operations.
 
-
-        # I) Simple views
+        # This indicator is used to track how many times the backward function was called
         bw_called = [0]
+        # This indicator is used to check if the argument `ga` contains non-zero values
         ga_nz = [False]
 
         class IdOneOutput(Function):
@@ -3512,7 +3500,15 @@ for shape in [(1,), ()]:
                     self.assertTrue(bw_called[0] == expected_called)
                     self.assertTrue(ga_nz[0] == expected_ga_nz)
 
-        # II) Complex views
+    def test_autograd_complex_views_python(self):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        # This checks that multiples views in the forward are properly traced and how they
+        # behave with respect to inplace operations.
+
         class ComplexView(Function):
             @staticmethod
             def forward(ctx, a, idx):
