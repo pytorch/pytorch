@@ -141,9 +141,6 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
 
 # Used to run the same test with different tensor types
 def repeat_test_for_types(dtypes):
@@ -289,6 +286,20 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# bfloat16 bringup is currently only available on ROCm
+# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
+# when bfloat16 bringup is complete on all platforms
+if TEST_WITH_ROCM:
+    ALL_TENSORTYPES2 = [torch.float,
+                        torch.double,
+                        torch.half,
+                        torch.bfloat16]
+else:
+    ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
 def skipIfRocm(fn):
     @wraps(fn)
