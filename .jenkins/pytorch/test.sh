@@ -117,8 +117,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # its dependencies (most notably, libc++.so).  Adding libtorch_python.so
     # to your LD_PRELOAD isn't really a good idea though, because it
     # depends on a ton of dynamic libraries that most programs aren't gonna
-    # have.
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    # have.  I do add libstdc++ to the preload set so that we don't get
+    # errors from function pointer type mismatches related to types in
+    # the C++ standard library, however.
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:/usr/lib/x86_64-linux-gnu/libstdc++.so.6
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
