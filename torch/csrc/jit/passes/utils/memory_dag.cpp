@@ -74,8 +74,8 @@ bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayContainAlias(
-    const at::ArrayRef<Element*>& a,
-    const at::ArrayRef<Element*>& b) const {
+    const at::ArrayRef<Element*> a,
+    const at::ArrayRef<Element*> b) const {
   if (a.size() == 0 || b.size() == 0) {
     return false;
   }

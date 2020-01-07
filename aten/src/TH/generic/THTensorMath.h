@@ -74,8 +74,6 @@ TH_API void THTensor_(div)(THTensor *r_, THTensor *t, scalar_t value);
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
 
-TH_API void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value);
-TH_API void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src);
 
@@ -91,7 +89,6 @@ TH_API void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src);
 TH_API void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value);
 TH_API void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value);
 
-TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(take)(THTensor *tensor, THTensor *src, THLongTensor *index);
 TH_API void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate);
@@ -148,8 +145,6 @@ TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
 
-TH_API void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);
-TH_API void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim);
 TH_API void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, int keepdim);
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
 TH_API accreal THTensor_(dist)(THTensor *a, THTensor *b, scalar_t value);
