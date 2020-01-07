@@ -39,9 +39,10 @@ Java_org_pytorch_torchvision_TensorImageUtils_00024NativePeer_imageYUV420CenterC
     jint outOffset) {
   float* outData = (float*)jniEnv->GetDirectBufferAddress(outBuffer);
 
-  auto normMeanRGB = jniEnv->GetFloatArrayElements(jnormMeanRGB, 0);
-  auto normStdRGB = jniEnv->GetFloatArrayElements(jnormStdRGB, 0);
-
+  jfloat normMeanRGB[3];
+  jfloat normStdRGB[3];
+  jniEnv->GetFloatArrayRegion(jnormMeanRGB, 0, 3, normMeanRGB);
+  jniEnv->GetFloatArrayRegion(jnormStdRGB, 0, 3, normStdRGB);
   int widthAfterRtn = imageWidth;
   int heightAfterRtn = imageHeight;
   bool oddRotation = rotateCWDegrees == 90 || rotateCWDegrees == 270;
