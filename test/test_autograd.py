@@ -3372,7 +3372,9 @@ for shape in [(1,), ()]:
 
         inp = torch.rand(3, requires_grad=True)
 
+        # Case where original==False
         MyFunction.apply(inp).sum().backward()
+        # Case where original==True
         MyFunction.apply(inp).sum().backward(create_graph=True)
 
 def index_variable(shape, max_indices):
