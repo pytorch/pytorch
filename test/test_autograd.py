@@ -3509,6 +3509,9 @@ for shape in [(1,), ()]:
         # This checks that multiples views in the forward are properly traced and how they
         # behave with respect to inplace operations.
 
+        # This indicator is used to track how many times the backward function was called
+        bw_called = [0]
+
         class ComplexView(Function):
             @staticmethod
             def forward(ctx, a, idx):
@@ -3621,7 +3624,7 @@ for shape in [(1,), ()]:
 
         # The input is a view
         c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        with self.assertRaisesRegex(TypeError, "missing 1 required positional argument: \'gab\'"):
+        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'"):
             # TODO: CopySlices does not handle Function with multiple outputs
             (c * d).sum().backward()
 
