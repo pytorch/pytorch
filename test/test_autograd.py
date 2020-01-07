@@ -3663,7 +3663,8 @@ for shape in [(1,), ()]:
 
         # The input is a view
         c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'"):
+        # The "python_error" is for python 2.7 for which current error handling is not perfect.
+        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
             # TODO: CopySlices does not handle Function with multiple outputs
             (c * d).sum().backward()
 
