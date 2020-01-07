@@ -81,13 +81,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
-    # NB: We load libtorch.so with RTLD_LOCAL.  This means that if
-    # it gets loaded multiple times (as is the case with C++ extensions)
-    # we will have multiple copies of the vptr floating around.  This
-    # doesn't usually cause problems (as we try hard not to use RTTI)
-    # but when UBSAN is turned on, it will do a bunch of virtual pointer
-    # consistency checks which won't work correctly.  When this happens,
-    # you get a violation like:
+    export TORCH_USE_RTLD_GLOBAL=1
+    # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
+    # default behavior.
+    #
+    # The reason for this is that without RTLD_GLOBAL, if we load multiple
+    # libraries that depend on libtorch (as is the case with C++ extensions), we
+    # will get multiple copies of libtorch in our address space.  When UBSAN is
+    # turned on, it will do a bunch of virtual pointer consistency checks which
+    # won't work correctly.  When this happens, you get a violation like:
     #
     #    member call on address XXXXXX which does not point to an object of
     #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
@@ -100,27 +102,17 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # don't pointer compare equal.  See also
     #   https://github.com/google/sanitizers/issues/1175
     #
-    # This didn't use to be necessary, because historically we loaded
-    # _C.so (and transitively, libtorch.so) using RTLD_GLOBAL. We
-    # stopped doing that to promote better hygiene of C++ symbols,
-    # but that means all weak symbols are going to get duplicated--this
-    # especially applies to type info, which is almost always weak.  This
-    # has implications for RTTI (which UBSAN is rightly flagging won't
-    # work), but in our codebase, we don't use RTTI (because it doesn't
-    # work in mobile).  However, UBSAN relies on UBSAN to detect vptr
-    # confusion, so at least in this environment, we need our ducks in
-    # order!
+    # UBSAN is kind of right here: if we relied on RTTI across C++ extension
+    # modules they would indeed do the wrong thing;  but in our codebase, we
+    # don't use RTTI (because it doesn't work in mobile).  To appease
+    # UBSAN, however, it's better if we ensure all the copies agree!
     #
-    # By the way, if you arrange for libtorch.so to be loaded globally (e.g.,
-    # using LD_PRELOAD), that would ensure subsequent loads of C++
-    # extension modules consistently reference the type info in libtorch.so and
-    # its dependencies (most notably, libc++.so).  Adding libtorch_python.so
-    # to your LD_PRELOAD isn't really a good idea though, because it
-    # depends on a ton of dynamic libraries that most programs aren't gonna
-    # have.  I do add libstdc++ to the preload set so that we don't get
-    # errors from function pointer type mismatches related to types in
-    # the C++ standard library, however.
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so:/usr/lib/x86_64-linux-gnu/libstdc++.so.6
+    # By the way, an earlier version of this code attempted to load
+    # libtorch_python.so with LD_PRELOAD, which has a similar effect of causing
+    # it to be loaded globally.  This isn't really a good idea though, because
+    # it depends on a ton of dynamic libraries that most programs aren't gonna
+    # have, and it applies to child processes.
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 

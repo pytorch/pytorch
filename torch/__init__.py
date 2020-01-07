@@ -15,7 +15,8 @@ import sys
 import platform
 import ctypes
 from ._utils import _import_dotted_name
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
+    USE_RTLD_GLOBAL_WITH_LIBTORCH
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -60,18 +61,41 @@ def _load_global_deps():
     here = os.path.abspath(__file__)
     lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    # NB: If the library doesn't exist, don't fail.  In some settings
-    # (especially in fbcode) there may not be this library, but it doesn't
-    # matter because in those settings you're expected to have setup the
-    # dynamic dependencies properly to start with
-    if os.path.exists(lib_path):
-        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
-# See Note [Global dependencies]
-_load_global_deps()
+if USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL'):
+    # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
+    # few circumstances:
+    #
+    #   1. You're in a build environment (e.g., fbcode) where
+    #      libtorch_global_deps is not available, but you still need
+    #      to get mkl to link in with RTLD_GLOBAL or it will just
+    #      not work.
+    #
+    #   2. You're trying to run PyTorch under UBSAN and you need
+    #      to ensure that only one copy of libtorch is loaded, so
+    #      vptr checks work properly
+    #
+    # If you're using this setting, you must verify that all the libraries
+    # you load consistently use the same libstdc++, or you may have
+    # mysterious segfaults.
+    #
+    if platform.system() != 'Windows':
+        old_flags = sys.getdlopenflags()
+        sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
+        from torch._C import *
+        sys.setdlopenflags(old_flags)
+        del old_flags
 
-from torch._C import *
+else:
+    # Easy way.  You want this most of the time, because it will prevent
+    # C++ symbols from libtorch clobbering C++ symbols from other
+    # libraries, leading to mysterious segfaults.
+    #
+    # See Note [Global dependencies]
+    _load_global_deps()
+    from torch._C import *
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
