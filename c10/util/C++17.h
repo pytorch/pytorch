@@ -240,6 +240,24 @@ struct _if_constexpr<false> final {
  *       It is used to force the compiler to delay type checking, because the compiler
  *       doesn't know what kind of _ is passed in. Without it, the compiler would fail
  *       when you try to access t.value but the member doesn't exist.
+ *
+ * Note: A reference implementation of if_constexpr in C++17 would look like this:
+ *   template<bool Condition, class ThenCallback, class ElseCallback>
+ *   decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+ *     if constexpr(Condition) {
+ *       if constexpr (function_takes_identity_argument<ThenCallback>::value) {
+ *         return std::forward<ThenCallback>(thenCallback)(_identity());
+ *       } else {
+ *         return std::forward<ThenCallback>(thenCallback)();
+ *       }
+ *     } else {
+ *       if constexpr (function_takes_identity_argument<ElseCallback>::value) {
+ *         return std::forward<ElseCallback>(elseCallback)(_identity());
+ *       } else {
+ *         return std::forward<ElseCallback>(elseCallback)();
+ *       }
+ *     }
+ *   }
  */
 template<bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {

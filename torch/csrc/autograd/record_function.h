@@ -97,6 +97,10 @@ struct TORCH_API RecordFunction {
     return parent_;
   }
 
+  bool active() const {
+    return initialized_;
+  }
+
   void setRunSampled(bool run_sampled) {
     run_sampled_ = run_sampled;
   }
