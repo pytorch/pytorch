@@ -146,10 +146,10 @@ __global__ void depthwiseConv3DOutput(
                 ScalarConvert<T, accT>::to(input[offset])));
           }
           ++weightOffset;
-        }
-      }
+        } // for width
+      } // for height
       output[linearIndex] = ScalarConvert<accT, T>::to(value);
-    }
+    } // for time
   }
 }
 
@@ -428,7 +428,7 @@ static void conv_depthwise3d_cuda_template(
     bool bias_flag = !bias.defined();
 
     // settring up the CUDA dispatch
-    unsigned int n = output.numel() / sizeB;
+    unsigned int n = output.numel();
     dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
 
@@ -448,7 +448,7 @@ static void conv_depthwise3d_cuda_template(
             weight_data,
             bias_data,
             bias_flag, // if true, bias is not null
-            totalZ, // totalElements
+            n, // totalElements
             osizeD, // ouptut_channels
             isizeW, isizeH, isizeT, // input
             osizeW, osizeH, osizeT, // output

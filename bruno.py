@@ -68,6 +68,8 @@ def test_sep():
     print("output_grad_size",i.grad.data.size())
     print("reference_grad_size",torch.cat([i1.grad.data, i2.grad.data], 1).size())
 
+    print(output, torch.cat([output1, output2], 1))
+
 
 test_depth()
 test_sep()
