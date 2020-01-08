@@ -195,6 +195,56 @@ struct QuantizedCellParamsDynamic {
   }
 };
 
+struct QuantizedCellParamsStatic {
+  QuantizedCellParamsStatic(const Tensor& _packed_w_ih,
+                            const Tensor& _packed_w_hh,
+                            const Scalar& _output_scale_ih,
+                            const Scalar& _output_scale_hh,
+                            const Scalar& _output_zp_ih,
+                            const Scalar& _output_zp_hh)
+    : packed_w_ih(_packed_w_ih), packed_w_hh(_packed_w_hh),
+      output_scale_ih(_output_scale_ih), output_scale_hh(_output_scale_hh),
+      output_zp_ih(_output_zp_ih), output_zp_hh(_output_zp_hh) {};
+
+  // use linear_prepack to get the packed weights.
+  const Tensor& packed_w_ih;
+  const Tensor& packed_w_hh;
+  const Scalar& output_scale_ih;
+  const Scalar& output_scale_hh;
+  const Scalar& output_zp_ih;
+  const Scalar& output_zp_hh;
+
+  Tensor matmul_ih(Tensor input) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor matmul_hh(Tensor h) const {
+    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+  }
+  Tensor linear_ih(Tensor input) const {
+    const auto kFuncName = "quantized::linear";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_ih_list =
+        callOp(kFuncName, kOvrldName, input, packed_w_ih, output_scale_ih, output_zp_ih);
+    TORCH_INTERNAL_ASSERT(
+        output_ih_list.size() == 1,
+        "The output vector should have exactly one element");
+    const Tensor output_ih = output_ih_list[0].toTensor();
+    return output_ih;
+  }
+  Tensor linear_hh(Tensor h) const {
+    const auto kFuncName = "quantized::linear";
+    const auto kOvrldName = "";
+    const std::vector<c10::IValue> output_hh_list =
+        callOp(kFuncName, kOvrldName, h, packed_w_hh, output_scale_hh, output_zp_hh);
+    TORCH_INTERNAL_ASSERT(
+        output_hh_list.size() == 1,
+        "The output vector should have exactly one element");
+    const Tensor output_hh = output_hh_list[0].toTensor();
+    return output_hh;
+  }
+}
+
+
 struct QuantizedCellParamsFP16 {
   QuantizedCellParamsFP16(const Tensor &_packed_ih, const Tensor &_packed_hh,
                           const Tensor &_b_ih, const Tensor &_b_hh)
@@ -297,6 +347,25 @@ static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
 #else // USE_FBGEMM
   TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN wihtout FBGEMM!")
 #endif // USE_FBGEMM
+}
+
+static std::vector<QuantizedCellParamsStatic> gather_quantized_params_static(
+    TensorList params) {
+  static at::Tensor undefined;
+  std::vector<QuantizedCellParamsStatic> result;
+  TORCH_CHECK(params.size() % 6 == 0,
+              "Got an incorrect number of quantized RNN parameters. "
+              "Expecting 6 (w, out_scale, out_zp)*2, but got "
+              params.size());
+  for (size_t i = 0; i < params.size()) {
+    results.emplace_back(params[i],       // packed weight + bias ih
+                         params[i + 1],   // packed weight + bias hh
+                         params[i + 2],   // output scale ih
+                         params[i + 3],   // output scale hh
+                         params[i + 4],   // output zero_point ih
+                         params[i + 5]);  // output zero_point hh
+  }
+  return result;
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
@@ -420,7 +489,59 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     auto hy = outgate * cy.tanh();
     return std::make_tuple(std::move(hy), std::move(cy));
   }
+};
 
+struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
+  using hidden_type = std::tuple<Tensor, Tensor>;
+
+  hidden_type operator()(
+      const Tensor& input,
+      const hidden_type& hidden,
+      const QuantizedCellParamsStatic& params,
+      bool pre_compute_input = false) const override {
+    const auto& hx = std::get<0>(hidden);
+    const auto& cx = std::get<1>(hidden);
+
+    // quantization `add` expects the inputs to be of the same shape.
+    // i@w_ih shape: [batch_num, 4*hsize]
+    // h@w_hh shape: [num_layers*num_directions, batch_num, 4*hsize]
+    // need to `expand` the input.
+    // Note: we don't want to use `repeat`, to avoid the copy
+    const auto _input = pre_compute_input ? input : params.linear_ih(input);
+    const auto h_w_hh = params.linear_hh(hx);  // qint8
+    const auto i_w_ih = _input.expand({hx.size(0), -1, -1});  // qint8
+    const auto gates = at::add(i_w_ih, h_w_hh, 0.0625, 0);  // qint8
+
+    auto chunked_gates = gates.chunk(4, 1);
+    auto ingate = at::sigmoid(chunked_gates[0]);  // quint8, z = 0
+    auto forgetgate = at::sigmoid(chunked_gates[1]);  // quint8, z = 0
+    auto cellgate = at::tanh(chunked_gates[2]);  // quint8, z = 128
+    auto outgate = at::sigmoid(chunked_gates[3]);  // quint8, z = 0
+
+    auto in_cell = multiply(ingate, cellgate, 0.0078125, 0);  // qint8
+    auto d_in_cell = in_cell.dequantize();
+    auto d_forgetgate = forgetgate.dequantize();
+    auto d_cx = cx.dequantize();
+
+    auto f_cy = (d_forgetgate * d_cx) + d_in_cell;
+    auto cy = at::quantize_per_tensor(f_cy, 5.96e-8, 0, at::kQint32);
+    auto hy = multiply(outgate, at::tanh(cy), 0.0078125, 0);
+    return std::make_tuple(std::move(hy), std::move(cy));
+  }
+
+private:
+  Tensor multiply(Tensor qa, Tensor qb, Scalar out_scale, Scalar out_zero_point,
+                  at::ScalarType qtype) {
+    const auto kFuncName = "quantized::mul_out";
+    const auto kOvrldName = "";
+
+    Tensor out = at::_empty_affine_quantized(qa.sizes(),
+      at::device(at::kCPU).dtype(kQInt8), out_scale, out_zero_point);
+
+    const std::vector<c10::IValue> output_ih_list =
+        callOp(kFuncName, kOvrldName, qa, qb, out);
+    return out;
+  }
 };
 
 template <typename cell_params>
@@ -432,18 +553,9 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda()) {
-      TORCH_CHECK(!pre_compute_input);
-      auto igates = params.matmul_ih(input);
-      auto hgates = params.matmul_hh(hidden);
-      auto result = at::_thnn_fused_gru_cell(
-          igates, hgates, hidden, params.b_ih, params.b_hh);
-      // Slice off the workspace argument (it's needed only for AD).
-      return std::move(std::get<0>(result));
-    }
     const auto chunked_igates = pre_compute_input
-        ? input.chunk(3, 1)
-        : params.linear_ih(input).chunk(3, 1);
+                                ? input.chunk(3, 1)
+                                : params.linear_ih(input).chunk(3, 1);
     auto chunked_hgates = params.linear_hh(hidden).chunk(3, 1);
     const auto reset_gate =
         chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
@@ -1168,7 +1280,12 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       "dtype is not supported");
 
   std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+  if (result_dtype == at::kQInt8 && !use_dynamic) {
+    auto params = gather_quantized_params_static(_params);
+    results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
+      input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+  } else if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     if (use_dynamic) {
       auto params = gather_quantized_params_dynamic(_params);
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
