@@ -55,7 +55,10 @@ def save_to_s3(tags):
     table_content = ""
     client = boto3.client("s3")
     for t in tags:
-        table_content += "<tr><td>{repo}</td><td>{tag}</td><td>{size}</td><td>{last_updated_at}</td><td>{last_updated_by}</td></tr>".format(
+        table_content += (
+            "<tr><td>{repo}</td><td>{tag}</td><td>{size}</td>"
+            "<td>{last_updated_at}</td><td>{last_updated_by}</td></tr>"
+        ).format(
             repo=t.repo,
             tag=t.tag,
             size=t.size,
@@ -69,9 +72,12 @@ def save_to_s3(tags):
                 href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
                 integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh"
                 crossorigin="anonymous">
-            <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.20/css/jquery.dataTables.css">
-            <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-            <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.10.20/js/jquery.dataTables.js"></script>
+            <link rel="stylesheet" type="text/css"
+                href="https://cdn.datatables.net/1.10.20/css/jquery.dataTables.css">
+            <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js">
+            </script>
+            <script type="text/javascript" charset="utf8"
+                src="https://cdn.datatables.net/1.10.20/js/jquery.dataTables.js"></script>
             <title> docker image info</title>
         </head>
         <body>
