@@ -40,12 +40,8 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   auto N = input.numel();
 
 #ifdef USE_FBGEMM
-  if (GetCpuId().avx2()) {
-    fbgemm::FloatToFloat16_avx2(
-        data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
-  } else {
-    FloatToFloat16_ref(data, out, N, clip_);
-  }
+  fbgemm::FloatToFloat16_simd(
+      data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
 #else
   FloatToFloat16_ref(data, out, N, clip_);
 #endif
@@ -63,12 +59,8 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   auto N = input.numel();
 
 #ifdef USE_FBGEMM
-  if (GetCpuId().avx2()) {
-    fbgemm::Float16ToFloat_avx2(
-        reinterpret_cast<const fbgemm::float16*>(data), out, N);
-  } else {
-    Float16ToFloat_ref(data, out, N);
-  }
+  fbgemm::Float16ToFloat_simd(
+      reinterpret_cast<const fbgemm::float16*>(data), out, N);
 #else
   Float16ToFloat_ref(data, out, N);
 #endif
