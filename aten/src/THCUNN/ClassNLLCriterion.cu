@@ -32,7 +32,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
     Dtype cur_weight = weights ? weights[t] : ScalarConvert<int, Dtype>::to(1);
     *output = -cur_weight * input[t];
     *total_weight = cur_weight;
-    if (size_average) {
+    if (size_average && *total_weight > 0) {
       *output /= *total_weight;
     }
   }
@@ -125,7 +125,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
     }
     *total_weight = ScalarConvert<Acctype, Dtype>::to(total_weightAcc);
     *output = ScalarConvert<Acctype, Dtype>::to(outputAcc);
-    if (size_average) {
+    if (size_average && *total_weight >= 0) {
       *output = ScalarConvert<Acctype, Dtype>::to(outputAcc / total_weightAcc);
     }
 
@@ -143,7 +143,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   int n_classes,
   int64_t ignore_index)
 {
-  if (*total_weight < 0) {
+  if (*total_weight <= 0) {
     return;
   }
   Dtype norm = size_average ? (ScalarConvert<int, Dtype>::to(1) / *total_weight) : ScalarConvert<int, Dtype>::to(1);
@@ -167,7 +167,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   int n_classes,
   int64_t ignore_index)
 {
-  if (*total_weight < 0) {
+  if (*total_weight <= 0) {
     return;
   }
   int i, t;

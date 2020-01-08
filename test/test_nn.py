@@ -10454,7 +10454,7 @@ class TestNNDeviceType(NNTestCase):
         target = torch.randint(C, (N,), device=device)
         test_nll_loss(x, target)
 
-        # 2-D scenarios
+        # # 2-D scenarios
         for N in [0, 10]:
             for H in [0, 10]:
                 for W in [0, 10]:

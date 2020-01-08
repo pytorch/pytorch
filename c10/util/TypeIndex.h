@@ -43,6 +43,11 @@ namespace detail {
 #error "You're running a too old version of GCC. We need GCC 5 or later."
 #endif
 
+#if defined(__clang__) && __clang_major__ < 4
+// Getting __PRETTY_FUNCTION__ at compile time only works with Clang >= 4
+#error "You're running a too old version of Clang. We need Clang 4 or later."
+#endif
+
 inline constexpr string_view extract(
     string_view prefix,
     string_view suffix,
@@ -57,7 +62,7 @@ inline constexpr string_view extract(
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view fully_qualified_type_name_impl() noexcept {
+inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() noexcept {
 #if defined(_MSC_VER) && !defined(__clang__)
   return extract(
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
