@@ -11,7 +11,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
     DeviceObjType
 
 from textwrap import dedent
-from torch._six import builtins
+from torch._six import builtins, PY2
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -51,50 +51,92 @@ class EvalEnv(object):
             return self.rcb(name)
         return getattr(builtins, name, None)
 
-def get_signature(fn, rcb, loc):
+def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
+    signature = None
     if PY35:
-        sig = try_real_annotations(fn)
-        if sig is not None:
-            return sig
+        signature = try_real_annotations(fn)
+        if signature is not None and is_method:
+            # If this is a method, then the signaure will include a type for
+            # `self`, but type comments do not contain a `self`. So strip it
+            # away here so everything is consistent (`inspect.ismethod` does
+            # not work here since `fn` is unbound at this point)
+            param_types, return_type = signature
+            param_types = param_types[1:]
+            signature = (param_types, return_type)
 
-    type_line, source = None, None
-    try:
-        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
-        type_line = get_type_line(source)
-    except TypeError:
-        pass
-    # This might happen both because we failed to get the source of fn, or
-    # because it didn't have any annotations.
-    if type_line is None:
-        return None
+    if signature is None:
+        type_line, source = None, None
+        try:
+            source = dedent(''.join(get_source_lines_and_file(fn)[0]))
+            type_line = get_type_line(source)
+        except TypeError:
+            pass
+        # This might happen both because we failed to get the source of fn, or
+        # because it didn't have any annotations.
+        if type_line is not None:
+            signature = parse_type_line(type_line, rcb, loc)
 
-    return parse_type_line(type_line, rcb, loc)
+    return signature
 
 
-# This is essentially a weaker form of get_signature(), where we don't care if
-# we have the types, we just care that we can figure out how many parameters
-# a function takes.
-def get_num_params(fn, loc):
+def is_function_or_method(the_callable):
+    # A stricter version of `inspect.isroutine` that does not pass for built-in
+    # functions
+    return inspect.isfunction(the_callable) or inspect.ismethod(the_callable)
+
+
+def is_vararg(the_callable):
+    if not is_function_or_method(the_callable) and hasattr(the_callable, '__call__'):  # noqa: B004
+        # If `the_callable` is a class, de-sugar the call so we can still get
+        # the signature
+        the_callable = the_callable.__call__
+
+    if is_function_or_method(the_callable):
+        if PY2:
+            # [inspect args]
+            # `inspect.getfullargspec` is not available in Python 2 but
+            # `inspect.getargspec` is deprecated in Python 3, so we have to
+            # switch over them
+            return inspect.getargspec(the_callable).varargs is not None
+        else:
+            return inspect.getfullargspec(the_callable).varargs is not None
+    else:
+        return False
+
+
+def get_param_names(fn, n_args):
+    if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
+        # De-sugar calls to classes
+        fn = fn.__call__
+
+    if is_function_or_method(fn):
+        if PY2:
+            # see [inspect args]
+            return inspect.getargspec(fn).args
+        else:
+            return inspect.getfullargspec(fn).args
+    else:
+        # The `fn` was not a method or function (maybe a class with a __call__
+        # method, so use a default param name list)
+        return [str(i) for i in range(n_args)]
+
+
+def check_fn(fn, loc):
+    # Make sure the function definition is not a class instantiation
     try:
         source = dedent(''.join(get_source_lines_and_file(fn)[0]))
     except (TypeError, IOError):
-        return None
+        return
     if source is None:
-        return None
+        return
+
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
         raise torch.jit.frontend.FrontendError(
             loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
-    py_def = py_ast.body[0]
-    if py_def.args.vararg is not None:
-        return None
-    elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
-        return None
-    else:
-        return len(py_def.args.args)
 
 
 def parse_type_line(type_line, rcb, loc):
@@ -279,7 +321,8 @@ __all__ = [
     # TODO: Consider not exporting these during wildcard import (reserve
     # that for the types; for idiomatic typing code.)
     'get_signature',
-    'get_num_params',
+    'check_fn',
+    'get_param_names',
     'parse_type_line',
     'get_type_line',
     'split_type_line',
