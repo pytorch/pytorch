@@ -11382,7 +11382,12 @@ class TestTorchDeviceType(TestCase):
 
         # use dim0>=46342 for forward, see:
         # https://github.com/pytorch/pytorch/issues/30583
-        test_pdist_single((50000, 1), device, 2, torch.float32, False)
+        # Compare output using GPU with the CPU implementation, as brute_pdist uses too much memory
+        if 'cuda' in device:
+            x = torch.randn(50000, 1, dtype=torch.float32)
+            expected_cpu = torch.pdist(x, p=2)
+            actual_gpu = torch.pdist(x.to(device), p=2)
+            self.assertTrue(torch.allclose(expected_cpu, actual_gpu.cpu()))
 
     def test_atan2(self, device):
         def _test_atan2_with_size(size, device):
