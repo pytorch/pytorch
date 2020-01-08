@@ -181,7 +181,7 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     static auto cls = TensorHybrid::javaClassStatic();
     facebook::jni::local_ref<facebook::jni::JByteBuffer> jTensorBuffer =
         facebook::jni::JByteBuffer::wrapBytes(
-            (uint8_t*)tensor.storage().data(), tensor.nbytes());
+            (uint8_t*)tensor.data_ptr(), tensor.nbytes());
     jTensorBuffer->order(facebook::jni::JByteOrder::nativeOrder());
 
     static const auto jMethodNewTensor =
