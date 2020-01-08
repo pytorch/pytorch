@@ -383,7 +383,7 @@ SplitAxisWithTail::SplitAxisWithTail(
   // TODO: support factor_on_inner == false;
   CHECK(factor_on_inner) << "only factor_on_inner = True is supported for now";
 
-  int size = this->start() - this->stop();
+  int size = this->stop() - this->start();
   int split_count = size / factor;
   int trail_size = size % factor;
   int output_group_count = (trail_size > 0) ? 2 : 1;
