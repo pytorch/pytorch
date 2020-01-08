@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/unpickler.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <memory>
@@ -49,4 +51,51 @@ TEST(WireSerialize, RecopySparseTensors) {
   auto deser = torch::distributed::rpc::wireDeserialize(ser.data(), ser.size());
   EXPECT_TRUE(torch::equal(tiny, deser.second[0]));
   EXPECT_LT(ser.size(), (tiny.element_size() * k1K) + k1K);
+}
+
+
+TEST(WireSerialize, TestPicklerUnpicklerTensor) {
+  constexpr int kRandTensorSize = 4;
+  std::array<float, 3> kFromBlobTensorBits = {1, 2, 3};
+  for (auto& t :
+       {torch::randn(kRandTensorSize),
+        torch::from_blob(
+            kFromBlobTensorBits.data(), kFromBlobTensorBits.size())}) {
+    std::string data;
+    torch::jit::Pickler pickler(
+        [&](const char* bytes, size_t len) { data.append(bytes, len); },
+        nullptr);
+    pickler.protocol();
+    pickler.pushIValue(t);
+    pickler.stop();
+    auto tdata = pickler.tensorData();
+    EXPECT_EQ(tdata.size(), 1);
+    // Use different sizes to distinguish between from_blob/randn
+    const bool expectDeleter = t.numel() != kFromBlobTensorBits.size();
+    EXPECT_EQ(tdata[0].storageHasDeleter(), expectDeleter);
+
+    size_t pos = 0;
+    torch::jit::Unpickler unpickler(
+        [&](char* buf, size_t n) -> size_t {
+          if (pos >= data.size())
+            return 0;
+          const size_t tocopy = std::min(pos + n, data.size()) - pos;
+          memcpy(buf, data.data() + pos, tocopy);
+          pos += tocopy;
+          return tocopy;
+        },
+        nullptr,
+        nullptr,
+        [&](const std::string& fname) -> at::DataPtr {
+          if (fname == "0") {
+            auto dptr = at::getCPUAllocator()->allocate(tdata[0].sizeInBytes());
+            memcpy(dptr.get(), tdata[0].data(), tdata[0].sizeInBytes());
+            return dptr;
+          }
+          throw std::runtime_error("not found");
+        },
+        {});
+    auto ival = unpickler.parse_ivalue();
+    EXPECT_TRUE(torch::equal(t, ival.toTensor()));
+  }
 }
