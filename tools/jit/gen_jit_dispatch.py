@@ -157,6 +157,18 @@ const auto options = TensorOptions()
     auto result_ = torch::_${name}(${args_with_tensor_options});
 #endif
 """)
+CALL_NAMESPACE_WITH_TENSOR_OPTIONS_ARANGE = CodeTemplate("""\
+const auto options = TensorOptions()
+        .dtype(${dtype})
+        .layout(${layout})
+        .device(${device})
+        .pinned_memory(${pin_memory});
+#ifdef USE_STATIC_DISPATCH
+    auto result_ = at::${name}(${args_with_tensor_options_disp});
+#else
+    auto result_ = options.has_dtype() ? torch::_${name}(${args_with_tensor_options}) : torch::_${name}(${args_with_tensor_options_nullopt});
+#endif
+""")
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
@@ -301,19 +313,26 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             args_with_tensor_options_disp = args[:tensor_options_arg_index] + \
                 ['options'] + args[(tensor_options_arg_index + 4):]
             args_with_tensor_options = args[:tensor_options_arg_index] + \
-                ['at::typeMetaToScalarType(options.dtype()) , options.layout(), options.device(), options.pinned_memory(), options.requires_grad()'] + args[(tensor_options_arg_index + 4):]
-
-            if decl['name'] == 'new_full' or 'to' or 'new_zeros':
-                print("\n\n\n HELO")
-                print("name: ", decl['name'])
-                print("is_namespace_function: ", is_namespace_function)
+                ['at::typeMetaToScalarType(options.dtype())', 'options.layout(), options.device(), options.pinned_memory(), options.requires_grad()'] + args[(tensor_options_arg_index + 4):]
 
             if is_namespace_function:
-                return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout,
-                    device=device, pin_memory=pin_memory,
-                    args_with_tensor_options=pack_arguments(args_with_tensor_options),
-                    args_with_tensor_options_disp=pack_arguments(args_with_tensor_options_disp))
+                if (decl['name'] == 'arange'):
+                    args_with_tensor_options_nullptr = args_with_tensor_options[:]
+                    index = args_with_tensor_options.index('at::typeMetaToScalarType(options.dtype())')
+                    args_with_tensor_options_nullptr[index] = 'c10::nullopt'
+
+                    return CALL_NAMESPACE_WITH_TENSOR_OPTIONS_ARANGE.substitute(
+                        name=decl['name'], dtype=dtype, layout=layout,
+                        device=device, pin_memory=pin_memory,
+                        args_with_tensor_options=pack_arguments(args_with_tensor_options),
+                        args_with_tensor_options_nullopt=pack_arguments(args_with_tensor_options_nullptr),
+                        args_with_tensor_options_disp=pack_arguments(args_with_tensor_options_disp))
+                else:
+                    return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
+                        name=decl['name'], dtype=dtype, layout=layout,
+                        device=device, pin_memory=pin_memory,
+                        args_with_tensor_options=pack_arguments(args_with_tensor_options),
+                        args_with_tensor_options_disp=pack_arguments(args_with_tensor_options_disp))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
                     name=decl['name'], dtype=dtype, layout=layout,

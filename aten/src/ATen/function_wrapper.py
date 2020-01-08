@@ -236,39 +236,13 @@ inline ${return_type} ${api_name}(${collapsed_formals}) {
 COLLAPSED_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
     c10::optional<ScalarType> dtype = c10::nullopt;
-    c10::optional<Layout> layout = c10::nullopt;
-    c10::optional<Device> device = c10::nullopt;
-    c10::optional<bool> pin_memory = c10::nullopt;
-
     if (options.dtype_opt().has_value()) {
         dtype = typeMetaToScalarType(options.dtype());
     }
 
-    layout = options.layout_opt();
-    device = options.device_opt();
-    pin_memory = options.pinned_memory_opt();
-
-    return _${api_name}(${expanded_native_actuals});
-}
-""")
-
-# This is a hack.
-# Please see [Remove special code template for .to from function_wrapper.py] in
-# the tracking issue: https://github.com/pytorch/pytorch/issues/30405
-COLLAPSED_METHOD_TO_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${collapsed_formals}) const {
-    c10::optional<ScalarType> dtype = c10::nullopt;
-    c10::optional<Layout> layout = c10::nullopt;
-    c10::optional<Device> device = c10::nullopt;
-    c10::optional<bool> pin_memory = c10::nullopt;
-
-    if (options.dtype_opt().has_value()) {
-        dtype = typeMetaToScalarType(options.dtype());
-    }
-
-    layout = options.layout_opt();
-    device = options.device_opt();
-    pin_memory = options.pinned_memory_opt();
+    c10::optional<Layout> layout = options.layout_opt();
+    c10::optional<Device> device = options.device_opt();
+    c10::optional<bool> pin_memory = options.pinned_memory_opt();
 
     return _${api_name}(${expanded_native_actuals});
 }
@@ -1289,14 +1263,9 @@ def create_generic(top_env, declarations):
             expanded_native_actuals.remove('options')
             expanded_native_actuals[index:index] = TOUtils.tensor_options_args
 
-            if option['name'] == 'to':
-                fn_definition = COLLAPSED_METHOD_TO_DEFINITION.substitute(option,
-                                                                          collapsed_formals=TOUtils.collapse_formals(option['method_formals']),
-                                                                          expanded_native_actuals=expanded_native_actuals)
-            else:
-                fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option,
-                                                                       collapsed_formals=TOUtils.collapse_formals(option['method_formals']),
-                                                                       expanded_native_actuals=expanded_native_actuals)
+            fn_definition = COLLAPSED_METHOD_DEFINITION.substitute(option,
+                                                                   collapsed_formals=TOUtils.collapse_formals(option['method_formals']),
+                                                                   expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         assert find_formal('Type', formals) is None, \

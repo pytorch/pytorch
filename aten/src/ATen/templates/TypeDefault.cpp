@@ -10,7 +10,9 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
 #include <ATen/Tensor.h>
-#include <c10/core/TensorOptions.h>
+#include <c10/core/Layout.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/Device.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/op_registration/op_registration.h>

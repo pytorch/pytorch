@@ -2,7 +2,9 @@
 
 // ${generated_comment}
 
-#include <c10/core/TensorOptions.h>
+#include <c10/core/Layout.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/Device.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/MemoryFormat.h>
