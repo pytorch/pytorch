@@ -224,23 +224,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
-// AT_CPP14_CONSTEXPR: Make it constexpr if we're in C++14 or later
-#if defined(_MSC_VER) && defined(__CUDACC__) && \
-    (__CUDACC_VER_MAJOR__ >= 10 ||              \
-     (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
-// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
-#define AT_CPP14_CONSTEXPR
-#define AT_IS_CPP14_CONSTEXPR 0
-#else
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#define AT_CPP14_CONSTEXPR constexpr
-#define AT_IS_CPP14_CONSTEXPR 1
-#else
-#define AT_CPP14_CONSTEXPR
-#define AT_IS_CPP14_CONSTEXPR 0
-#endif
-#endif
-
 // We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
 // device code in CUDA to call host constexpr functions. Unfortunately,
 // the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
@@ -258,11 +241,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
 #define C10_HOST_CONSTEXPR_VAR
-#define C10_CPP14_HOST_CONSTEXPR __host__
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
-#define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
 #endif
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
@@ -270,8 +251,26 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define CONSTEXPR_EXCEPT_GCC5
 #define IS_NOT_GCC5_CONSTEXPR 0
 #else
-#define CONSTEXPR_EXCEPT_GCC5 AT_CPP14_CONSTEXPR
-#define IS_NOT_GCC5_CONSTEXPR AT_IS_CPP14_CONSTEXPR
+#define CONSTEXPR_EXCEPT_GCC5 constexpr
+#define IS_NOT_GCC5_CONSTEXPR 1
+#endif
+
+#if defined(__CUDA_ARCH__)
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#endif
+#else
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_
