@@ -311,7 +311,7 @@ auto Engine::thread_main(
     }
 
     if (task.fn_ && !local_graph_task->has_error_.load()) {
-      GradMode::set_enabled(local_graph_task->grad_mode_);
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
       try {
         evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {

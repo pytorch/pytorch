@@ -3465,7 +3465,6 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
-
     def test_autograd_simple_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -3630,8 +3629,6 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
             out.sum().backward()
 
-
-
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -3748,6 +3745,32 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
             # TODO: We are not rebasing the history and so the inplace computation is wrong
             gradcheck(fn, (a, b))
+
+    def test_grad_mode_restored_reentrant(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, go):
+                original = torch._C.is_grad_enabled()
+                with torch.enable_grad():
+                    self.assertTrue(torch._C.is_grad_enabled())
+                    foo = torch.rand(go.size(), requires_grad=True)
+                    grad, = torch.autograd.grad(
+                        foo ** 3, foo, grad_outputs=go
+                    )
+                    self.assertTrue(torch._C.is_grad_enabled())
+                self.assertTrue(torch._C.is_grad_enabled() == original)
+                return grad
+
+        inp = torch.rand(3, requires_grad=True)
+
+        # Case where original==False
+        MyFunction.apply(inp).sum().backward()
+        # Case where original==True
+        MyFunction.apply(inp).sum().backward(create_graph=True)
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
