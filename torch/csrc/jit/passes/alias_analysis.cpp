@@ -884,7 +884,7 @@ bool AliasDb::mayContainAlias(
     return false;
   }
   // now both elements must contain mutable elements, so if we cannot check
-  // containment we must return false
+  // containment we must return true
   if (a_cannot_check_containment || b_cannot_check_containment) {
     return true;
   }
