@@ -18,6 +18,7 @@ def load_tags_for_projects(workflow_config):
     return {
         v["ecr_gc_job"]["project"]: v["ecr_gc_job"]["tags_to_keep"]
         for v in workflow_config["workflows"]["ecr_gc"]["jobs"]
+        if isinstance(v, dict) and "ecr_gc_job" in v
     }
 
 
