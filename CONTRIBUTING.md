@@ -308,7 +308,12 @@ Then navigate to `localhost:8000` in your web browser.
 #### Submitting changes for review
 
 It is helpful when submitting a PR that changes the docs to provide a rendered
-version of the result. You can do this by using GitHub pages to host the docs
+version of the result. If your change is small, you can add a screenshot of the
+changed docs to your PR.
+
+If your change to the docs is large and affects multiple pages, you can host
+the docs yourself with the following steps, then add a link to the output in your
+PR. These instructions use GitHub pages to host the docs
 you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
 to make a repo to host your changed documentation.
 
