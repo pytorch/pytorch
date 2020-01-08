@@ -193,43 +193,65 @@ void _cumsum_out_cpu_template(Tensor& result, const Tensor& self, int64_t dim) {
   if (self.numel() == 0) {
     return;
   }
-  if (self.dim() == 0) {
+  const auto input_shape = self.sizes();
+  const auto input_ndim = self.dim();
+
+  if (input_ndim == 0) {
     result.copy_(self);
     return;
   }
-  if (self.dim() == 1) {
-    scalar_t sum = 0;
-    auto iter = TensorIterator::unary_op(result, self);
-    cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-      sum += i;
-      return sum;
-    });
-    return;
+ 
+  auto temp_tensor = result;
+  if (!result.is_contiguous()) {
+    temp_tensor = temp_tensor.contiguous();
   }
-  auto reduce_dim = self.dim() - wrap_dim - 1;
-  auto n = self.size(reduce_dim);
-  parallel_for(0, n, 1, [&](int64_t begin, int64_t end) {
+
+  auto n = input_shape[wrap_dim];
+  const int64_t M = std::accumulate(
+      input_shape.cbegin(),
+      input_shape.cbegin() + wrap_dim,
+      1LL,
+      std::multiplies<int64_t>()
+      );
+  const int64_t N = std::accumulate(
+      input_shape.cbegin() + wrap_dim + 1,
+      input_shape.cend(),
+      1LL,
+      std::multiplies<int64_t>()
+      );
+
+  auto self_ptr = self.data_ptr<scalar_t>();
+  auto out_ptr = temp_tensor.data_ptr<scalar_t>();
+  auto offset = N * n;
+  parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
+    auto s_index =  offset * begin;
     for (int64_t f = begin; f < end; ++f) {
-      Tensor in = self.select(reduce_dim, f);
-      Tensor out = result.select(reduce_dim, f);
-      scalar_t sum = 0;
-      auto iter = TensorIterator::unary_op(out, in);
-      cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
-        sum += i;
-        return sum;
-      });
+      for (auto j = 0; j < N; j++ ) {
+        scalar_t sum = 0;
+        auto index = s_index;
+        for (auto k =0; k < n; k++) {
+          sum += self_ptr[index + j];
+          out_ptr[index + j] = sum;
+          index += N;
+        }
+      }
+      s_index += offset;
     }
   });
+
+  if (!result.is_contiguous()) {
+    result.copy_(temp_tensor);
+  }
 }
 
 Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
   return at::native::_cumsum_out_cpu(result, self, dim);
 }
 
 Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumsum_out_cpu", [&] {
-    _cumsum_out_cpu_template<scalar_t>(result, self, dim);
+    _cumsum_out_cpu_template<scalar_t>(result, self.contiguous(), dim);
   });
   return result;
 }
