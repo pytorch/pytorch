@@ -70,7 +70,7 @@ BINARY_OP_NAMES = [
     '__or__', '__ror__', '__ior__',
 ]
 
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
+PY_VARIABLE_METHOD_VARARGS = CodeTemplate(r"""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -80,6 +80,10 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.signature.deprecated) {
+    TORCH_WARN("This signature for ", r.signature.name, " is deprecated:\n",
+        "${name}", r.signature.toString());
+  }
   ${check_has_torch_function}
   ${declare_namedtuple_return_types}
   ${dispatch}
@@ -340,6 +344,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
+        'c10::optional<double>': 'toDoubleOptional',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',

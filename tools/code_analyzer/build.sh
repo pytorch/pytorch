@@ -108,6 +108,17 @@ analyze_torch_mobile() {
 
   # Analyze dependency
   call_analyzer
+
+  if [ -n "${DEPLOY}" ]; then
+    DEST="${BUILD_ROOT}/torch_deps.py"
+    cat > ${DEST} <<- EOM
+# Generated for selective build without using static dispatch.
+# Manually run the script to update:
+# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
+EOM
+    printf "TORCH_DEPS = " >> ${DEST}
+    cat "${OUTPUT}" >> ${DEST}
+  fi
 }
 
 analyze_test_project() {
@@ -128,6 +139,10 @@ analyze_test_project() {
 
   # Analyze dependency
   call_analyzer
+
+  if [ -n "${CHECK_RESULT}" ]; then
+    check_test_result
+  fi
 }
 
 check_test_result() {
@@ -149,7 +164,4 @@ if [ -n "${ANALYZE_TEST}" ]; then
   build_torch_mobile
   build_test_project
   analyze_test_project
-  if [ -n "${CHECK_RESULT}" ]; then
-    check_test_result
-  fi
 fi
