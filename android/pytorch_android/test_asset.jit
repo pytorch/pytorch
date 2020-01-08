@@ -83,3 +83,10 @@ def testAliasWithOffset(self):
     x = torch.tensor([100, 200])
     a = [x[0], x[1]]
     return a
+
+def testNonContiguous(self):
+    x = torch.tensor([100, 200, 300])[::2]
+    assert not x.is_contiguous()
+    assert x[0] == 100
+    assert x[1] == 300
+    return x

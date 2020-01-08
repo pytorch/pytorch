@@ -148,7 +148,12 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
   }
 
   static facebook::jni::local_ref<TensorHybrid::javaobject>
-  newJTensorFromAtTensor(const at::Tensor& tensor) {
+  newJTensorFromAtTensor(const at::Tensor& input_tensor) {
+    // Java wrapper currently only supports contiguous tensors.
+    at::Tensor tensor = input_tensor.is_contiguous()
+      ? input_tensor
+      : input_tensor.contiguous();
+
     const auto scalarType = tensor.scalar_type();
     int jdtype = 0;
     if (at::kFloat == scalarType) {
