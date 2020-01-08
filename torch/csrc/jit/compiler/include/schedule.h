@@ -185,7 +185,7 @@ class LoopAxisTransform : public Cloneable<LoopAxisTransform, ScheduleObject> {
   void set_output_group(
       int group_index,
       const std::vector<LoopAxis*>& outputs) {
-    CHECK(group_index >= 0 && group_index <= outputs_.size());
+    CHECK(group_index >= 0 && group_index < outputs_.size());
     outputs_[group_index] = outputs;
     for (LoopAxis* output : outputs) {
       output->set_output_group_index(group_index);
@@ -518,7 +518,7 @@ Object* LookUpCloneObject(Object* object) {
 
 template <class Object>
 Object* CloneObject(Object* object) {
-  if (object != nullptr) {
+  if (object == nullptr) {
     return nullptr;
   }
   ScheduleNode* schedule = object->schedule();
