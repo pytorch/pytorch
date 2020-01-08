@@ -259,20 +259,6 @@ struct TensorRShiftConstantOp {
   const T val;
 };
 
-template <typename T>
-struct TensorBitOrConstantOp {
-  TensorBitOrConstantOp(T v) : val(v) {}
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = *in | val;
-  }
-
-  __device__ __forceinline__ void operator()(T* v) {
-    *v |= val;
-  }
-
-  const T val;
-};
-
 #include <THC/generic/THCTensorMathPairwise.cu>
 #include <THC/THCGenerateAllTypes.h>
 

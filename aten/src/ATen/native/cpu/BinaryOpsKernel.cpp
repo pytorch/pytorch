@@ -96,10 +96,10 @@ void div_kernel(TensorIterator& iter) {
 void bitwise_and_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
-          iter,
-          [](bool a, bool b) {
-            return a && b;
-          });
+        iter,
+        [](bool a, bool b) {
+          return a && b;
+        });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_and_cpu", [&]() {
       cpu_kernel_vec(
@@ -109,6 +109,27 @@ void bitwise_and_kernel(TensorIterator& iter) {
           },
           [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
             return a & b;
+          });
+    });
+  }
+}
+
+void bitwise_or_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(
+        iter,
+        [](bool a, bool b) {
+          return a || b;
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_or_cpu", [&]() {
+      cpu_kernel_vec(
+          iter,
+          [](scalar_t a, scalar_t b) -> scalar_t {
+            return a | b;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a | b;
           });
     });
   }
@@ -363,6 +384,7 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
+REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
