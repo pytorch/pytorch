@@ -13,16 +13,10 @@ struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)), changed_(false) {}
 
-  void extendLiveness(Block* b, const SparseBitVector& loop_block) {
-    for (Node* lit : b->nodes()) {
-      changed_ = changed_ | (liveness_sets_.at(lit) |= loop_block);
-      for (Block* ib : lit->blocks()) {
-        extendLiveness(ib, loop_block);
-      }
-    }
-  }
-
   std::unordered_map<Node*, std::vector<Value*>> run() {
+    // we implement the canonical fixed-point liveness
+    // the analysis is run until there are no more changes
+    // to liveness sets for each node
     do {
       changed_ = false;
       processBlock(graph_->block(), SparseBitVector{});
@@ -95,12 +89,13 @@ struct LivenessAnalyzer {
       // kill outputs
       liveness -= toSparseBitVector(it->outputs());
       if (it->kind() == prim::Loop) {
-        auto loop_block = liveness;
+        LoopView lv(it);
+        // N.B. merge in changes from the loop header
+        auto loop_header = *lv.bodyBlock()->nodes().begin();
+        auto loop_block = liveness | liveness_sets_[loop_header];
         // loop's outputs aren't live inside the loop
         // loop's block outputs, OTOH, will be considered
         // as uses
-
-        LoopView lv(it);
         WithInsertPoint guard(*lv.bodyBlock()->nodes().end());
         // temporary make loop counts live for the duration of the loop
         // as they are needed by BailOuts in the loop
@@ -108,16 +103,16 @@ struct LivenessAnalyzer {
         graph_->insertNode(ctc);
         auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
         graph_->insertNode(mtc);
-        loop_block = processBlock(it->blocks()[0], loop_block);
+        loop_block = processBlock(lv.bodyBlock(), loop_block);
         ctc->destroy();
         mtc->destroy();
         // loop block's inputs die outside loop's block
-        loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
-        extendLiveness(lv.bodyBlock(), loop_block);
+        loop_block -= toSparseBitVector(lv.bodyBlock()->inputs());
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
-        auto true_liveness = processBlock(it->blocks()[0], liveness);
-        auto false_liveness = processBlock(it->blocks()[1], liveness);
+        IfView iv(it);
+        auto true_liveness = processBlock(iv.thenBlock(), liveness);
+        auto false_liveness = processBlock(iv.elseBlock(), liveness);
         liveness |= true_liveness;
         liveness |= false_liveness;
       }
