@@ -19,6 +19,7 @@
     + [Use Ninja](#use-ninja)
     + [Use CCache](#use-ccache)
     + [Use a faster linker](#use-a-faster-linker)
+  * [C++ frontend development tips](#c---frontend-development-tips)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
@@ -603,6 +604,16 @@ The easiest way to use `lld` this is download the
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
+
+### C++ frontend development tips
+
+We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
+tests are a great way to see how certain components are intended to be used.
+When compiling PyTorch from source, the test runner binary will be written to
+`build/bin/test_api`. The tests use the [GoogleTest](https://github.com/google/googletest/blob/master/googletest)
+framework, which you can read up about to learn how to configure the test runner. When
+submitting a new feature, we care very much that you write appropriate tests.
+Please follow the lead of the other tests to see how to write a new test case.
 
 ## CUDA development tips
 
