@@ -240,11 +240,19 @@ def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules
     """
-    return torch._C.export_opnames(m._c)
+    return torch._C._export_opnames(m._c)
 
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """
+    .. warning::
+        This function is internal-only and should only be used by the ONNX
+        exporter. If you are trying to get a graph through tracing, please go
+        through the public API instead::
+
+            trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+            trace_graph = trace.graph
+
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
     also returns the trace inputs as part of the tuple
@@ -1505,7 +1513,7 @@ if _enabled:
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):
         """
-        ``ScriptModule``\s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``\s
+        ``ScriptModule``s wrap a C++ ``torch::jit::script::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """

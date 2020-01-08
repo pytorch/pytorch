@@ -41,7 +41,7 @@ public:
   TensorTypeSet()
     : repr_(0) {}
   TensorTypeSet(Full)
-    : repr_(-1) {}
+    : repr_(std::numeric_limits<decltype(repr_)>::max()) {}
   // Public version of TensorTypeSet(uint64_t) API; external users
   // must be explicit when they do this!
   TensorTypeSet(Raw, uint64_t x)
