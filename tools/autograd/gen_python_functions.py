@@ -804,7 +804,7 @@ def is_noarg_binding(overloads):
 
 
 # python binding for all overloads of a particular function/method
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
+PY_VARIABLE_METHOD_VARARGS = CodeTemplate(r"""\
 // ${name}
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
@@ -815,6 +815,10 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
+  if (_r.signature.deprecated) {
+    TORCH_WARN("This signature for ", _r.signature.name, " is deprecated:\n",
+        "${name}", _r.signature.toString());
+  }
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
