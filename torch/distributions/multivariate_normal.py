@@ -221,4 +221,3 @@ class MultivariateNormal(Distribution):
             return H
         else:
             return H.expand(self._batch_shape)
-
