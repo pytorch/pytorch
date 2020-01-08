@@ -201,11 +201,16 @@ class MultivariateNormal(Distribution):
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
-    def log_prob(self, value):
+    def mahalanobis(self, value):
+        r"""Compute the squared mahalanobis distance."""
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
         M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+        return M
+
+    def log_prob(self, value):
+        M = self.mahalanobis(value)
         half_log_det = self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
 
@@ -216,3 +221,4 @@ class MultivariateNormal(Distribution):
             return H
         else:
             return H.expand(self._batch_shape)
+

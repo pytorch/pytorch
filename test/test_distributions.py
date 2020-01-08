@@ -1793,6 +1793,24 @@ class TestDistributions(TestCase):
         MultivariateNormal(x.new_zeros(10), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_multivariate_normal_mahalanobis(self):
+        mean = torch.randn(3)
+        l_factor = torch.randn(3, 3)
+        cov = torch.matmul(l_factor, l_factor.t())
+        prec = cov.inverse()
+
+        dist1 = MultivariateNormal(mean, cov)
+        prec_np = prec.numpy()
+
+        mean_np = mean.numpy()
+        test_point = torch.randn(3)
+        test_point_np = test_point.numpy()
+
+        mh_dist_np = scipy.spatial.distance.mahalanobis(test_point_np, mean_np, prec_np)
+        mh_dist = dist1.mahalanobis(test_point).sqrt()
+        self.assertAlmostEqual(mh_dist_np, mh_dist.item(), places=3)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
