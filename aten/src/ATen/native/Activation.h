@@ -12,6 +12,8 @@ namespace native {
 
 using activation_fn = void (*)(TensorIterator&);
 using activation_backward_fn = void (*)(TensorIterator&);
+using softplus_fn = void (*)(TensorIterator&, Scalar, Scalar);
+using softplus_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using threshold_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using hardtanh_backward_fn = void (*)(TensorIterator&, Scalar, Scalar);
 using shrink_fn = void (*)(TensorIterator&, Scalar);
@@ -22,6 +24,8 @@ using leaky_relu_backward_fn = void (*)(TensorIterator&, Scalar);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_fn, elu_backward_stub);
+DECLARE_DISPATCH(softplus_fn, softplus_stub);
+DECLARE_DISPATCH(softplus_backward_fn, softplus_backward_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(activation_fn, GeluKernel);
 DECLARE_DISPATCH(activation_backward_fn, GeluBackwardKernel);

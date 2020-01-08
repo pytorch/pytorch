@@ -6,7 +6,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/LogSigmoid.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/MultiLabelMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/MultiMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/RReLU.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu

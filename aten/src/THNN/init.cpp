@@ -69,6 +69,3 @@
 
 #include <THNN/generic/LogSigmoid.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftPlus.c>
-#include <TH/THGenerateFloatTypes.h>

@@ -15,6 +15,8 @@ static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);
+DEFINE_DISPATCH(softplus_stub);
+DEFINE_DISPATCH(softplus_backward_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
@@ -249,6 +251,43 @@ Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Gen
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
+}
+
+Tensor & softplus_out(Tensor& result, const Tensor& self, Scalar beta, Scalar threshold) {
+  auto iter = TensorIterator::unary_op(result, self);
+  softplus_stub(iter.device_type(), iter, beta, threshold);
+  return result;
+}
+
+Tensor softplus(const Tensor& self, Scalar beta, Scalar threshold) {
+  Tensor result;
+  auto iter = TensorIterator::unary_op(result, self);
+  softplus_stub(iter.device_type(), iter, beta, threshold);
+  return iter.output();
+}
+
+Tensor & softplus_backward_out(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    Scalar beta,
+    Scalar threshold,
+    const Tensor& output) {
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
+  return grad_input;
+}
+
+Tensor softplus_backward(
+    const Tensor& grad_output,
+    const Tensor& self,
+    Scalar beta,
+    Scalar threshold,
+    const Tensor& output) {
+  Tensor grad_input;
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
+  softplus_backward_stub(iter.device_type(), iter, beta, threshold);
+  return iter.output();
 }
 
 // computes `result = self <= threshold ? value : other`

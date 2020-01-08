@@ -217,32 +217,4 @@ THC_API void THNN_(RReLU_updateGradInput)(
                   double upper,
                   bool train,
                   bool inplace);
-
-THC_API void THNN_(SoftPlus_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal beta,
-                  accreal threshold);
-
-THC_API void THNN_(SoftPlus_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output,
-                  accreal beta,
-                  accreal threshold);
-
-THC_API void THNN_(Tanh_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output);
-
-THC_API void THNN_(Tanh_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output);
-
 #endif
