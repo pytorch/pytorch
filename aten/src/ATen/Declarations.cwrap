@@ -1380,21 +1380,6 @@
     - THGenerator* generator
 ]]
 [[
-  name: _th_cauchy_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: cauchy
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double median
-    - double sigma
-    - THGenerator* generator
-]]
-[[
   name: _th_log_normal_
   cname: logNormal
   variants: function
