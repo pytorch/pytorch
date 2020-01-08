@@ -4,7 +4,6 @@ from textwrap import dedent
 
 import torch
 import unittest
-from common_device_type import skipCPUIfNoLapack, dtypes
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
