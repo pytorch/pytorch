@@ -944,6 +944,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
+
+    @dist_init
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1056,7 +1066,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1084,16 +1094,18 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-
-        rpc.shutdown()
+            rpc.shutdown(graceful=True)
+        else:
+            api._ignore_rref_leak = False
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
@@ -1131,7 +1143,7 @@ class RpcTest(RpcAgentTestFixture):
             )
 
         from torch.distributed.rpc import _rref_context_get_debug_info
-        # Check 1: local RRef does not update owners_ map
+        # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
         rref1 = RRef(self.rank)
@@ -1139,9 +1151,10 @@ class RpcTest(RpcAgentTestFixture):
         # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
+        self.assertIn("num_pending_users", info)
         # RRef on local value is not added to context until shared across RPC
         self.assertEqual(0, int(info["num_owner_rrefs"]))
-
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after the check 1
         dist.barrier()
 
@@ -1161,7 +1174,8 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
-
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after check 2
         dist.barrier()
 
@@ -1189,15 +1203,23 @@ class RpcTest(RpcAgentTestFixture):
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
 
         # barrier after check 3
         dist.barrier()
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/31112")
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
@@ -1208,7 +1230,10 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["num_pending_requests"]), 0)
         self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
-
+        # for the above check, add a barrier to ensure that another worker
+        # cannot send a request before we check num_idle_threads, since we'd
+        # use up an idle thread if we start processing that request.
+        dist.barrier()
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
             "worker{}".format(dst_rank),
@@ -1228,14 +1253,6 @@ class RpcTest(RpcAgentTestFixture):
         # as we cannot know for sure whether the send thread has returned, there
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
-
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
 
         # add a barrier to make sure the request is not finished before checking
         # num_pending_requests
@@ -1287,6 +1304,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
+    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
@@ -1307,7 +1325,7 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")

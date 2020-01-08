@@ -365,46 +365,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(bool a) -> int",
-         [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (int)b);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(float a) -> int",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (int64_t)d);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(Scalar a) -> int",
-         [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isInt()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<int64_t>(scalar.toDouble()));
-           }
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::Float(Tensor a) -> float",
          [](Stack& stack) {
            at::Tensor a;
@@ -1637,7 +1597,7 @@ template <typename T> int maxList(Stack &stack) {
 }
 
 template <typename T>
-int listPop(Stack& stack) {
+int listPopImpl(Stack& stack, const char* empty_message) {
   int64_t idx = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
@@ -1645,7 +1605,7 @@ int listPop(Stack& stack) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
-    AT_ERROR("pop from empty list");
+    AT_ERROR(empty_message);
   }
 
   push(stack, getItem(list, idx));
@@ -1655,12 +1615,25 @@ int listPop(Stack& stack) {
 }
 
 template <typename T>
+int listPop(Stack& stack) {
+  return listPopImpl<T>(stack, "pop from empty list");
+}
+
+template <typename T>
 int listClear(Stack& stack) {
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
   list.clear();
   return 0;
 }
+
+template <typename T>
+int listDelete(Stack& stack) {
+  listPopImpl<T>(stack, "pop index out of range");
+  pop(stack);
+  return 0;
+}
+
 
 template <typename T>
 int listInsert(Stack& stack) {
@@ -2256,6 +2229,13 @@ int dictPop(Stack& stack) {
   return 0;
 }
 
+int dictDelete(Stack& stack) {
+  dictPop<false>(stack);
+  // pop pushes an item on the stack but delete does not, so get rid of it
+  pop(stack);
+  return 0;
+}
+
 int dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.size() == 0) {
@@ -2414,12 +2394,12 @@ RegisterOperators reg2({
           listSelect<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type                \
+          "aten::append." decl_type "(" decl_type "[](a!) self, " decl_type   \
           "(c -> *) el) -> " decl_type "[](a!)",                              \
           listAppend<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
-          "aten::reverse(" decl_type "[](a!) self) -> ()",                   \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",                    \
           listReverse<value_type>,                                            \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -2441,6 +2421,10 @@ RegisterOperators reg2({
       Operator(                                                               \
           "aten::clear( " decl_type "[](a!) self) -> ()",                     \
           listClear<value_type>,                                              \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
+          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",           \
+          listDelete<value_type>,                                             \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::insert( " decl_type                                          \
@@ -2524,6 +2508,10 @@ RegisterOperators reg2({
       Operator(                                                                \
           "aten::clear( " decl_type "[](a!) self) -> ()",                      \
           listClear<value_type>,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      Operator(                                                                \
+          "aten::Delete( " decl_type "[](a!) self, int idx) -> ()",            \
+          listDelete<value_type>,                                              \
           aliasAnalysisFromSchema()),                                          \
       Operator(                                                                \
           "aten::insert( " decl_type                                           \
@@ -3106,6 +3094,11 @@ RegisterOperators reg2({
           dictSetDefault,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
+          "aten::Delete(Dict(" key_type ", t)(a!) self, " key_type            \
+          " key) -> ()",                                                    \
+          dictDelete,                                                         \
+          aliasAnalysisFromSchema()),                                         \
+      Operator(                                                               \
           "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
           " key) -> t(*)",                                                    \
           dictPop<false>,                                                     \
@@ -3372,7 +3365,7 @@ at::Tensor interpolate(
     const IValue& scale_factors,
     const std::string& mode,
     c10::optional<bool> align_corners,
-    c10::optional<bool> use_scale_factor) {
+    c10::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error(
@@ -3395,40 +3388,40 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if(!scale_factors.isNone() && use_scale_factor == c10::nullopt) {
-    use_scale_factor = false;
-    bool warn_use_scale_factor = false;
+  if(!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+    recompute_scale_factor = true;
+    bool warn_recompute_scale_factor = false;
 
     if (scale_factors.isDouble()) {
       // only warn when the scales have floating values since
-      // the result for ints is the same with/without use_scale_factor
+      // the result for ints is the same with/without recompute_scale_factor
       if (_is_floating_value(scale_factors.toDouble())){
-        warn_use_scale_factor = true;
+        warn_recompute_scale_factor = true;
       }
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
 
       for (const auto & scales : scale_factors_list) {
         // only warn when the scales have floating values since
-        // the result for ints is the same with/without use_scale_factor
+        // the result for ints is the same with/without recompute_scale_factor
         if(_is_floating_value(scales)) {
-          warn_use_scale_factor = true;
+          warn_recompute_scale_factor = true;
           break;
         }
       }
     }
 
-    if(warn_use_scale_factor) {
+    if(warn_recompute_scale_factor) {
       AT_WARN(
         "The default behavior for interpolate/upsample with float scale_factor will change "
         "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
         "instead of relying on the computed output size. "
-        "If you wish to keep the old behavior, please set use_scale_factor=False. "
+        "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
         "See the documentation of nn.Upsample for details.");
     }
   }
 
-  if(use_scale_factor) {
+  if(recompute_scale_factor == false) {
     if (scale_factors.isDouble()) {
       scale_factors_1 = scale_factors.toDouble();
       scale_factors_2 = scale_factors.toDouble();
@@ -3514,10 +3507,10 @@ Operation interpolate_op(const Node* n) {
     IValue scale_factors;
     std::string mode;
     IValue align_corners;
-    IValue use_scale_factor;
-    pop(stack, input, size, scale_factors, mode, align_corners, use_scale_factor);
+    IValue recompute_scale_factor;
+    pop(stack, input, size, scale_factors, mode, align_corners, recompute_scale_factor);
     at::Tensor res = interpolate(
-        input, size, scale_factors, mode, align_corners.toOptional<bool>(), use_scale_factor.toOptional<bool>());
+        input, size, scale_factors, mode, align_corners.toOptional<bool>(), recompute_scale_factor.toOptional<bool>());
     push(stack, std::move(res));
     return 0;
   };
@@ -3585,19 +3578,19 @@ int upsample_bilinear_op(Stack& stack) {
 
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 

@@ -272,6 +272,26 @@ class TestNamedTensor(TestCase):
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
 
+    def test_max_pooling(self):
+        def check_tuple_return(op, inputs, expected_names):
+            values, indices = op(*inputs)
+            self.assertEqual(values.names, expected_names)
+            self.assertEqual(indices.names, expected_names)
+
+        for device in torch.testing.get_all_device_types():
+
+            named_tensor_1d = torch.zeros(2, 3, 5, device=device, names=list('ABC'))
+            named_tensor_2d = torch.zeros(2, 3, 5, 7, device=device, names=list('ABCD'))
+            named_tensor_3d = torch.zeros(2, 3, 5, 7, 9, device=device, names=list('ABCDE'))
+
+            self.assertEqual(F.max_pool1d(named_tensor_1d, 2).names, named_tensor_1d.names)
+            self.assertEqual(F.max_pool2d(named_tensor_2d, [2, 2]).names, named_tensor_2d.names)
+            self.assertEqual(F.max_pool3d(named_tensor_3d, [2, 2, 2]).names, named_tensor_3d.names)
+
+            check_tuple_return(F.max_pool1d_with_indices, [named_tensor_1d, 2], named_tensor_1d.names)
+            check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
+            check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
+
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
         buf = io.BytesIO()
@@ -1045,6 +1065,11 @@ class TestNamedTensor(TestCase):
 
         # takes positional dim
         out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 

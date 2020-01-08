@@ -9,7 +9,7 @@ namespace utils {
 // FutureError inherits from std::exception, it can return const char* or
 // std::string error message
 class TORCH_API FutureError final : public std::exception {
-public:
+ public:
   FutureError(std::string errorMsg) : errorMsg_(std::move(errorMsg)) {}
 
   FutureError() = default;
@@ -18,7 +18,7 @@ public:
     return errorMsg_.c_str();
   }
 
-private:
+ private:
   std::string errorMsg_;
 };
 
@@ -33,8 +33,7 @@ class TORCH_API Future final {
 
   Future() = default;
 
-  Future(T value)
-  : completed_(true), value_(std::move(value)) {}
+  Future(T value) : completed_(true), value_(std::move(value)) {}
 
   const T& wait() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -108,6 +107,11 @@ class TORCH_API Future final {
     return error_ ? true : false;
   }
 
+  c10::optional<FutureError> error() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return error_;
+  }
+
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback) {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -128,5 +132,5 @@ class TORCH_API Future final {
   c10::optional<FutureError> error_;
 };
 
-}
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch
