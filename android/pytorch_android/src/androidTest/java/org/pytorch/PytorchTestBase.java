@@ -304,5 +304,15 @@ public abstract class PytorchTestBase {
     assertEquals(200, tensors[1].getDataAsLongArray()[0]);
   }
 
+  @Test
+  public void testNonContiguous() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue output = module.runMethod("testNonContiguous");
+    assertTrue(output.isTensor());
+    Tensor value = output.toTensor();
+    assertArrayEquals(new long[]{2}, value.shape());
+    assertArrayEquals(new long[]{100, 300}, value.getDataAsLongArray());
+  }
+
   protected abstract String assetFilePath(String assetName) throws IOException;
 }
