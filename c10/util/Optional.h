@@ -472,19 +472,19 @@ class optional : private OptionalBase<T> {
     return constexpr_move(contained_val());
   }
 
-  constexpr T const& value() const& {
+  TR2_OPTIONAL_HOST_CONSTEXPR T const& value() const& {
     return initialized()
         ? contained_val()
         : (throw bad_optional_access("bad optional access"), contained_val());
   }
 
-  constexpr T& value() & {
+  TR2_OPTIONAL_HOST_CONSTEXPR T& value() & {
     return initialized()
         ? contained_val()
         : (throw bad_optional_access("bad optional access"), contained_val());
   }
 
-  constexpr T&& value() && {
+  TR2_OPTIONAL_HOST_CONSTEXPR T&& value() && {
     if (!initialized())
       throw bad_optional_access("bad optional access");
     return std::move(contained_val());
