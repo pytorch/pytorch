@@ -518,14 +518,14 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     auto cellgate = at::tanh(chunked_gates[2]);  // quint8, z = 128
     auto outgate = at::sigmoid(chunked_gates[3]);  // quint8, z = 0
 
-    auto in_cell = multiply(ingate, cellgate, 0.0078125, 0);  // qint8
+    auto in_cell = multiply(ingate, cellgate, 0.0078125, 0, at::kQInt8);  // qint8
     auto d_in_cell = in_cell.dequantize();
     auto d_forgetgate = forgetgate.dequantize();
     auto d_cx = cx.dequantize();
 
     auto f_cy = (d_forgetgate * d_cx) + d_in_cell;
-    auto cy = at::quantize_per_tensor(f_cy, 5.96e-8, 0, at::kQint32);
-    auto hy = multiply(outgate, at::tanh(cy), 0.0078125, 0);
+    auto cy = at::quantize_per_tensor(f_cy, 5.96e-8, 0, at::kQInt32);
+    auto hy = multiply(outgate, at::tanh(cy), 0.0078125, 0, at::kQInt8);
     return std::make_tuple(std::move(hy), std::move(cy));
   }
 
