@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from torch.distributions import constraints
@@ -89,8 +88,7 @@ class MixtureSameFamily(Distribution):
 
     def expand(self, batch_shape, _instance=None):
         batch_shape = torch.Size(batch_shape)
-        batch_shape_comp = torch.Size(list(batch_shape)
-                                      + [self._num_component])
+        batch_shape_comp = batch_shape + (self._num_component,)
         new = self._get_checked_instance(MixtureSameFamily, _instance)
         new._component_distribution = \
             self._component_distribution.expand(batch_shape_comp)
@@ -143,22 +141,29 @@ class MixtureSameFamily(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
-            # [n, B]
+            sample_len = len(sample_shape)
+            batch_len = len(self.batch_shape)
+            gather_dim = sample_len + batch_len
+            es = self.event_shape
+
+            # mixture samples [n, B]
             mix_sample = self.mixture_distribution.sample(sample_shape)
-            # [n, B, k, E]
-            comp_sample = self.component_distribution.sample(sample_shape)
-            # [n, B, k]
-            mask = F.one_hot(mix_sample, self._num_component)
-            # [n, B, k, E]
-            mask = self._pad_mixture_dimensions(mask)
-            return torch.sum(comp_sample * mask.to(comp_sample.dtype),
-                             dim=-1 - self._event_ndims)  # [n, B, E]
+            mix_shape = mix_sample.shape
+
+            # component samples [n, B, k, E]
+            comp_samples = self.component_distribution.sample(sample_shape)
+
+            # Gather along the k dimension
+            mix_sample_r = mix_sample.reshape(
+                mix_shape + torch.Size([1] * (len(es) + 1)))
+            mix_sample_r = mix_sample_r.repeat(
+                torch.Size([1] * len(mix_shape)) + torch.Size([1]) + es)
+
+            samples = torch.gather(comp_samples, gather_dim, mix_sample_r)
+            return samples.squeeze(gather_dim)
 
     def _pad(self, x):
-        d = len(x.shape) - self._event_ndims
-        s = x.shape
-        x = x.reshape(s[:d] + (1,) + s[d:])
-        return x
+        return x.unsqueeze(-1 - self._event_ndims)
 
     def _pad_mixture_dimensions(self, x):
         dist_batch_ndims = self.batch_shape.numel()
