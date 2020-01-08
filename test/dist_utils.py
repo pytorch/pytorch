@@ -155,7 +155,7 @@ def wait_until_node_failure(rank):
     while True:
         try:
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
-            time.sleep(0.1)
+            time.sleep(0.5)
         except Exception:
             break
 

@@ -1296,27 +1296,38 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(autograd_info)
         self.assertEqual(expected.keys(), info.keys())
 
-    @dist_init(clean_shutdown=False)
+    @dist_init(setup_rpc=False)
     def test_sender_exceptions(self):
+        print("FOOOOOOOO")
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[
+                dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
-        dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
         dist.barrier()
 
-        if self.rank == 0:
+        if self.rank == 1:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker = "worker{}".format(dst_rank)
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)
+            fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
                 else "(Request aborted during client shutdown)|"
                      "(worker.: Error in reponse from worker.: server shutting down)")
             with self.assertRaisesRegex(RuntimeError, error_str):
-                rpc.rpc_sync(dst_worker, torch.add, args=(torch.ones(1), 3))
-        else:
-            pass  # exit all other nodes
+                fut.wait()
+        # exit all workers non-gracefully.
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
