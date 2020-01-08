@@ -1239,7 +1239,7 @@ def create_generic(top_env, declarations):
                 if option['use_c10_dispatcher'] == 'full':
                     top_env['function_registrations'].append(DEFAULT_FUNCTION_REGISTRATION.substitute(option))
                 else:
-                    assert option['use_c10_dispatcher'] == 'unboxed_only'
+                    assert option['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_boxing_wrapper']
                     top_env['function_registrations'].append(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
 
         # generate the at::native function declarations (i.e. what the user will implement)
@@ -1630,7 +1630,7 @@ def create_derived(backend_type_env, declarations):
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     else:
-                        assert option['use_c10_dispatcher'] == 'unboxed_only'
+                        assert option['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_boxing_wrapper']
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
 
