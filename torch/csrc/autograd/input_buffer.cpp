@@ -98,10 +98,6 @@ namespace torch { namespace autograd {
       opt_var_stream = get_stream_helper.getDefaultStream(*device_of(var));
     }
 
-    // If the consumer's original forward-pass output was on a particular device,
-    // I think we can safely say it expects the grad for that output to be on the same device
-    TORCH_INTERNAL_ASSERT(opt_var_stream->device() == opt_consumer_stream->device());
-
     if (opt_var_stream != opt_consumer_stream) {
       // Sync consumer with var stream
       // Events are associated with the current device on construction, and
