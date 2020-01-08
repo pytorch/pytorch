@@ -68,7 +68,7 @@ jit_test_functions = [
     '_TorchScriptTesting_Foo::__init__',
 ]
 for fn in jit_test_functions:
-    white_list.append(fn, datetime.date(2020, 3, 1))
+    white_list.append((fn, datetime.date(2020, 3, 1)))
 
 
 def white_listed(schema, white_list):
