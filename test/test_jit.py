@@ -11508,6 +11508,7 @@ a")
                 def foo(x : Tensor, y : Tensor[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
                     return x, x
             ''')
+            print(cu.foo.graph)
 
     def test_parser_type_annotations_incompatible_expression(self):
         with self.assertRaisesRegex(RuntimeError, r'Expression of type \+ cannot be used in a type expression'):

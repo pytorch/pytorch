@@ -16,6 +16,25 @@ from torch._utils_internal import get_source_lines_and_file
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
+def createResolutionCallbackFromEnv(lookup_base):
+    def env(qualified_name, module):
+        print('resolving', qualified_name)
+        # We may need to resolve a qualified name, something like `torch.device`
+        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
+        # over scope, then proceed to use the looked-up value to go down the
+        # chain.
+        if '.' in qualified_name:
+            parts = qualified_name.split('.')
+            base = parts[0]
+            remainding_pieces = '.'.join(parts[1:])
+            module_value = getattr(module, base)
+            return env(remainding_pieces, module_value)
+        else:
+            return getattr(module, qualified_name)
+
+    return lambda key: env(key, lookup_base)
+
+
 def createResolutionCallbackFromFrame(frames_up=0):
     """
     Creates a function which, given a string variable name,
@@ -52,15 +71,14 @@ def createResolutionCallbackFromFrame(frames_up=0):
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
-    def env(key):
-        if key in f_locals:
-            return f_locals[key]
-        elif key in f_globals:
-            return f_globals[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
+    class env(object):
+        def __getattr__(self, key):
+            if key in f_locals:
+                return f_locals[key]
+            elif key in f_globals:
+                return f_globals[key]
 
-    return env
+    return createResolutionCallbackFromEnv(env())
 
 
 def get_closure(fn):
@@ -135,21 +153,7 @@ def createResolutionCallbackFromClosure(fn):
                 return getattr(builtins, key)
             return None
 
-    def env(qualified_name, module):
-        # We may need to resolve a qualified name, something like `torch.device`
-        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
-        # over scope, then proceed to use the looked-up value to go down the
-        # chain.
-        if '.' in qualified_name:
-            parts = qualified_name.split('.')
-            base = parts[0]
-            remainding_pieces = '.'.join(parts[1:])
-            module_value = getattr(module, base)
-            return env(remainding_pieces, module_value)
-        else:
-            return getattr(module, qualified_name)
-
-    return lambda key: env(key, closure_lookup())
+    return createResolutionCallbackFromEnv(closure_lookup())
 
 
 def can_compile_class(cls):
@@ -551,16 +555,22 @@ try:
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+        if not hasattr(ann, '__module__'):
+            return False
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Tuple or
              getattr(ann, '__origin__', None) is tuple)
 
     def is_list(ann):
+        if not hasattr(ann, '__module__'):
+            return False
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.List or
              getattr(ann, '__origin__', None) is list)
 
     def is_dict(ann):
+        if not hasattr(ann, '__module__'):
+            return False
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.Dict or
              getattr(ann, '__origin__', None) is dict)
@@ -573,6 +583,9 @@ try:
             if not inspect.isclass(the_type):
                 return False
             return issubclass(the_type, super_type)
+
+        if not hasattr(ann, '__module__'):
+            return False
 
         union_optional = False
         if ann.__module__ == 'typing' and \

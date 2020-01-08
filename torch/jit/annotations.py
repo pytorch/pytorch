@@ -257,7 +257,7 @@ def try_ann_to_type(ann, resolver=None):
 
 
 def ann_to_type(ann, resolver=None):
-    the_type = ann_to_type(ann, resolver)
+    the_type = try_ann_to_type(ann, resolver)
     if the_type is not None:
         return the_type
     raise ValueError("Unknown type annotation: '{}'".format(ann))

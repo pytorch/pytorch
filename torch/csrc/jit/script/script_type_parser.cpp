@@ -67,12 +67,6 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto value_type = parseTypeFromExpr(subscript.subscript_exprs()[1]);
     return DictType::create(key_type, value_type);
   } else {
-    if (resolver_) {
-      if (auto typePtr = resolver_->resolveType(typeName, subscript.range())) {
-        std::cout << "Resolved type\n";
-        return typePtr;
-      }
-    }
     throw ErrorReport(subscript.range())
         << "Unknown type constructor " << typeName;
   }
