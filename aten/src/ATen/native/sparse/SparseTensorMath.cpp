@@ -1416,4 +1416,32 @@ Tensor any_sparse(const Tensor& self) {
   return at::any(self._values());
 }
 
+Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
+  Tensor result;
+  return bmm_out_sparse_cpu(result, self, mat2);
+}
+
+Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+  TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
+
+  TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
+  TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
+  TORCH_CHECK(mat2.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2.dim());
+
+  TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
+  TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+
+  int64_t dim0_size = self.size(0);
+
+  result = at::empty({dim0_size, self.size(1), mat2.size(2)}, mat2.options());
+
+  std::vector<Tensor> results;
+
+  for (int64_t dim0_idx = 0; dim0_idx < dim0_size; dim0_idx++) {
+    results.push_back(at::_sparse_mm(self[dim0_idx], mat2[dim0_idx]));
+  }
+
+  return at::stack_out(result, results, 0);
+}
+
 }} // namespace at::native
