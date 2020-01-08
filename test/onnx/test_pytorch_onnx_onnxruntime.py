@@ -2447,8 +2447,11 @@ class TestONNXRuntime(unittest.TestCase):
             @torch.jit.script_method
             def forward(self, input):
                 out = input + 1
-                if input.dim() > 2:
-                    out += 2
+                if out.dim() > 2:
+                    if out.dim() > 3:
+                        out += 3
+                    else:
+                        pass
                 else:
                     pass
                 return out

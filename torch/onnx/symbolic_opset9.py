@@ -2197,11 +2197,6 @@ def _weight_norm(g, weight_v, weight_g, dim):
 
 def dim(g, self):
     '''Implement the dim functionality available for a pytorch tensor in ONNX'''
-    # For tracing we can directly use the shape of the tensor
-    rank = self.type().dim()
-    # For scripting this is not available, and must use ONNX ops
-    if rank is None:
-        # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
-        shape = g.op('Shape', self)
-        rank = g.op('Size', shape)
-    return rank
+    # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    shape = g.op('Shape', self)
+    return g.op('Size', shape)
