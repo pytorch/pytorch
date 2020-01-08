@@ -1146,15 +1146,22 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+        m = wrap_cpp_module(m._c)
         # conv1 and conv2 shares the same type, we need to
         # make sure we didn't quantize the type twice
-        assert len([x for x, _ in m.conv1._modules._c.items()
-                    if x.startswith('_observer_')]) == 3, \
+        conv1_observers = [x for x, _ in m.conv1._modules._c.items()
+                           if x.startswith('_observer_')]
+        conv2_observers = [x for x, _ in m.conv2._modules._c.items()
+                           if x.startswith('_observer_')]
+        assert len(conv1_observers) == 3, \
             'Expected to have 3 observer submodules'
-        assert len([x for x, _ in m.conv2._modules._c.items()
-                    if x.startswith('_observer_')]) == 3, \
+        assert len(conv2_observers) == 3, \
             'Expected to have 3 observer submodules'
+        # TODO: non inplace insert observer will produce different ClassTypes for each conv,
+        # we need to fix clone to avoid multiple ClassTypes
+        # assert conv1_observers == conv2_observers, \
+        # 'Expect conv1 and conv2 to have same observers since the class type is shared'
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1247,12 +1254,10 @@ graph(%x : Tensor,
             # interpreter instructions seem to be cached,
             # we need to fix the caching before we can use inplace
             # insert_observers and insert_quant_dequant
-            m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
-            m = wrap_cpp_module(m._c)
+            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
-            m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
-            m = wrap_cpp_module(m._c)
+            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
             m(data)
             # Make sure inserted attributes are the same
             # This needs to be refactored after we know how to get
