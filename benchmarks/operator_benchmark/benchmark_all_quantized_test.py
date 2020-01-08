@@ -5,8 +5,19 @@ from __future__ import unicode_literals
 
 import operator_benchmark as op_bench
 from pt import ( # noqa
-    # Quantized tests
-    qactivation_test, qarithmetic_test, qconv_test, qlinear_test,  qpool_test  # noqa
+    qactivation_test,
+    qarithmetic_test,
+    qcat_test,
+    qcomparators_test,
+    qconv_test,
+    qinterpolate_test,
+    qlinear_test,
+    qobserver_test,
+    qpool_test,
+    qrnn_test,
+    qtensor_method_test,
+    quantization_test,
+    qunary_test,
 )
 
 

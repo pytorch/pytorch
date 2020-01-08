@@ -415,7 +415,8 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
-  if (x.dim() == 0) {
+  // Need to check numel to see if there are no values (such as shape [0,2], and dim to see if x is a scalar.
+  if (x.dim() == 0 || x.numel() == 0) {
     return x;
   }
   auto ret = at::cumsum(-x, dim);
