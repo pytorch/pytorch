@@ -2201,7 +2201,7 @@ def dim(g, self):
     rank = self.type().dim()
     # For scripting this is not available, and must use ONNX ops
     if rank is None:
-        #ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+        # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
         shape = g.op('Shape', self)
         rank = g.op('Size', shape)
     return rank
