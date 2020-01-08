@@ -281,5 +281,17 @@ public abstract class PytorchTestBase {
     }
   }
 
+  @Test
+  public void testEmptyShape() throws IOException {
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final long someNumber = 43;
+    final IValue input = IValue.from(Tensor.fromBlob(new long[]{someNumber}, new long[]{}));
+    final IValue output = module.runMethod("newEmptyShapeWithItem", input);
+    assertTrue(output.isTensor());
+    Tensor value = output.toTensor();
+    assertArrayEquals(new long[]{}, value.shape());
+    assertArrayEquals(new long[]{someNumber}, value.getDataAsLongArray());
+  }
+
   protected abstract String assetFilePath(String assetName) throws IOException;
 }
