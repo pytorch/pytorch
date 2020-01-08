@@ -452,6 +452,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VS2017
+          command: |
+            powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Install Cuda
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
@@ -461,8 +465,6 @@ jobs:
           name: Install Cudnn
           command : |
             cd c:/
-            choco install -y 7zip curl
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
             cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
@@ -490,6 +492,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VS2017
+          command: |
+            powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Test
           no_output_timeout: "30m"
           command: |
@@ -498,8 +504,6 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
-            choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            choco install -y 7zip curl
             .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
@@ -1474,13 +1478,17 @@ jobs:
           no_output_timeout: "2h"
           command: |
             set -e
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then 
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
               echo "not SIMULATOR build, skip it."
               exit 0
             fi
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
+            # Temporarily pin pillow to 6.2.1 as PILLOW_VERSION is replaced by
+            # _version_ in 7.0.0. Long term fix should be making changes to
+            # torchvision to be compatible with both < and >= v7.0.0.
+            pip install pillow==6.2.1
             #install the latest version of PyTorch and TorchVision
             pip install torch torchvision
             #run unit test
@@ -1490,6 +1498,7 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             instruments -s -devices
             fastlane scan
+
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
   # files just store the names of all the files in that folder (which are
@@ -1690,13 +1699,13 @@ workflows:
             - setup
       - pytorch_windows_test:
           name: pytorch_windows_test1
-          test_name: pytorch_windows_test1
+          test_name: pytorch-windows-test1
           requires:
             - setup
             - pytorch_windows_build
       - pytorch_windows_test:
           name: pytorch_windows_test2
-          test_name: pytorch_windows_test2
+          test_name: pytorch-windows-test2
           requires:
             - setup
             - pytorch_windows_build

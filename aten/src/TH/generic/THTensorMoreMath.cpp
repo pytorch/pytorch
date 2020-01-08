@@ -425,13 +425,13 @@ accreal THTensor_(trace)(THTensor *t)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
+  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
 
-  if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
+  if(THTensor_(nDimension)(t) == 1)
   {
     scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_strideLegacyNoScalars(t, 0);
-    int64_t t_size = THTensor_sizeLegacyNoScalars(t, 0);
+    int64_t t_stride_0 = THTensor_(stride)(t, 0);
+    int64_t t_size = THTensor_(size)(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
     scalar_t *r__data;
     int64_t r__stride_0;
@@ -1006,88 +1006,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-
-void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       // Uses Welford's algorithm for numeric stability
-                       accreal mean = 0;
-                       accreal M2 = 0;
-
-                       int64_t i;
-                       for (i = 0; i < t_size; i++)
-                       {
-                         scalar_t z = t_data[i*t_stride];
-                         scalar_t delta = z - mean;
-                         mean += delta / (i + 1);
-                         scalar_t delta2 = z - mean;
-                         M2 += delta * delta2;
-                       }
-
-                       if (!unbiased && t_size >= 2)
-                       {
-                         *r__data = TH_MATH_NAME(sqrt)(M2 / t_size);
-                       } else if (unbiased && t_size >= 2) {
-                         *r__data = TH_MATH_NAME(sqrt)(M2 / (t_size - 1));
-                       } else if (!unbiased && t_size == 1) {
-                         *r__data = 0;
-                       } else {
-                         *r__data = NAN;
-                       });
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       // Uses Welford's algorithm for numeric stability
-                       accreal mean = 0;
-                       accreal M2 = 0;
-
-                       int64_t i;
-                       for (i = 0; i < t_size; i++)
-                       {
-                         scalar_t z = t_data[i*t_stride];
-                         scalar_t delta = z - mean;
-                         mean += delta / (i + 1);
-                         scalar_t delta2 = z - mean;
-                         M2 += delta * delta2;
-                       }
-
-                       if (!unbiased && t_size >= 2)
-                       {
-                         *r__data = M2 / t_size;
-                       } else if (unbiased && t_size >= 2) {
-                         *r__data = M2 / (t_size - 1);
-                       } else if (!unbiased && t_size == 1) {
-                         *r__data = 0;
-                       } else {
-                         *r__data = NAN;
-                       });
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
 
 void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, int keepdim)
 {
