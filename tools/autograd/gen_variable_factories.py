@@ -135,10 +135,6 @@ def process_function(decl, has_tensor_options, disable_autograd):
 
     if not disable_autograd:
         pre_record_trace, post_record_trace = format_trace(decl)
-        if has_tensor_options:
-            pre_record_trace = pre_record_trace.replace("jit::tracer::addInputs(node, \"pin_memory\", pin_memory);",
-                                                        "jit::tracer::addInputs(node, \"pin_memory\", pin_memory);" \
-                                                        "\n  jit::tracer::addInputs(node, \"requires_grad\", requires_grad);")
     else:
         pre_record_trace, post_record_trace = '', ''
 
