@@ -57,6 +57,19 @@ white_list = [
     ('aten::Int', datetime.date(2020, 1, 30)),
 ]
 
+jit_test_functions = [
+    '_TorchScriptTesting_StackString::pop',
+    '_TorchScriptTesting_StackString::push',
+    '_TorchScriptTesting_StackString::__init__',
+    '_TorchScriptTesting_Foo::combine',
+    '_TorchScriptTesting_Foo::add',
+    '_TorchScriptTesting_Foo::increment',
+    '_TorchScriptTesting_Foo::info',
+    '_TorchScriptTesting_Foo::__init__',
+]
+for fn in jit_test_functions:
+    white_list.append((fn, datetime.date(2020, 3, 1)))
+
 
 def white_listed(schema, white_list):
     for item in white_list:
