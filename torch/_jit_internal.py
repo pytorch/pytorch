@@ -125,14 +125,31 @@ def createResolutionCallbackFromClosure(fn):
     """
     closure = get_closure(fn)
 
-    def env(key):
-        if key in closure:
-            return closure[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        return None
+    class closure_lookup(object):
+        # This is a class since `closure` is a dict and it's easier in
+        # `env_helper` if everything just works with `getattr` calls
+        def __getattr__(self, key):
+            if key in closure:
+                return closure[key]
+            elif hasattr(builtins, key):
+                return getattr(builtins, key)
+            return None
 
-    return env
+    def env(qualified_name, module):
+        # We may need to resolve a qualified name, something like `torch.device`
+        # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
+        # over scope, then proceed to use the looked-up value to go down the
+        # chain.
+        if '.' in qualified_name:
+            parts = qualified_name.split('.')
+            base = parts[0]
+            remainding_pieces = '.'.join(parts[1:])
+            module_value = getattr(module, base)
+            return env(remainding_pieces, module_value)
+        else:
+            return getattr(module, qualified_name)
+
+    return lambda key: env(key, closure_lookup())
 
 
 def can_compile_class(cls):

@@ -209,7 +209,7 @@ def try_real_annotations(fn):
     return arg_types, return_type
 
 
-def ann_to_type(ann, resolver=None):
+def try_ann_to_type(ann, resolver=None):
     # resolver should be a Tuple[Callable, SourceRange] where the Callable
     # is a resolutionCallback
     if ann is None:
@@ -253,6 +253,13 @@ def ann_to_type(ann, resolver=None):
         the_type = torch._C._resolve_type(ann.__name__, loc, rcb)
         if the_type is not None:
             return the_type
+    return None
+
+
+def ann_to_type(ann, resolver=None):
+    the_type = ann_to_type(ann, resolver)
+    if the_type is not None:
+        return the_type
     raise ValueError("Unknown type annotation: '{}'".format(ann))
 
 
@@ -284,5 +291,6 @@ __all__ = [
     'get_type_line',
     'split_type_line',
     'try_real_annotations',
+    'try_ann_to_type',
     'ann_to_type',
 ]

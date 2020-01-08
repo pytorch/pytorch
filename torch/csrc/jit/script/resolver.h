@@ -40,6 +40,7 @@ struct Resolver {
 
   // Resolve `name` to a TypePtr.
   virtual TypePtr resolveType(const std::string& name, const SourceRange& loc) {
+    std::cout << "Base resolver\n";
     return nullptr;
   }
 };

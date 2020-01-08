@@ -107,6 +107,12 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+
+    auto annotation_type = py::module::import("torch.jit.annotations").attr("try_ann_to_type")(obj);
+    if (!annotation_type.is_none()) {
+      return py::cast<TypePtr>(annotation_type);
+    }
+
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
     if (!py::cast<bool>(isClass)) {
       return nullptr;
