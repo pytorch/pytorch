@@ -1158,10 +1158,8 @@ graph(%x : Tensor,
             'Expected to have 3 observer submodules'
         assert len(conv2_observers) == 3, \
             'Expected to have 3 observer submodules'
-        # TODO: non inplace insert observer will produce different ClassTypes for each conv,
-        # we need to fix clone to avoid multiple ClassTypes
-        # assert conv1_observers == conv2_observers, \
-        # 'Expect conv1 and conv2 to have same observers since the class type is shared'
+        assert conv1_observers == conv2_observers, \
+            'Expect conv1 and conv2 to have same observers since the class type is shared'
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
