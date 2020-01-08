@@ -774,7 +774,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:
-  // 1. Primitive Values of the Same Type (Ints, Doubles, None, Bools) return value equality
+  // 1. Immutable primitive values of the same type (Int, Double, None, Bool, Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
   // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
@@ -797,6 +797,8 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
     return this->toInt() == rhs.toInt();
   } else if (this->isDouble() && rhs.isDouble()) {
     return this->toDouble() == rhs.toDouble();
+  } else if (this->isString() && rhs.isString()) {
+    return this->toStringRef() == rhs.toStringRef();
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr
