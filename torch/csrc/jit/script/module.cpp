@@ -201,6 +201,7 @@ Module Module::clone_impl(
     }
   }
 
+  // only clone the methods if the ClassType is not cloned before
   if (!type_already_cloned) {
     // Clone methods remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
