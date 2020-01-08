@@ -1,6 +1,9 @@
 ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
+# set this to noninteractive so that the installer knows
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
