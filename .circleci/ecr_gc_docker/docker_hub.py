@@ -4,6 +4,7 @@ from collections import namedtuple
 
 import boto3
 import requests
+import os
 
 
 IMAGE_INFO = namedtuple(
@@ -24,7 +25,9 @@ def build_access_token(username, passwordtr):
 def list_repos(user, token):
     r = requests.get("https://hub.docker.com/v2/repositories/" + user, headers=token)
     r.raise_for_status()
-    ret = sorted(repo["user"] + "/" + repo["name"] for repo in r.json().get("results", []))
+    ret = sorted(
+        repo["user"] + "/" + repo["name"] for repo in r.json().get("results", [])
+    )
     if ret:
         print("repos found:")
         print("".join("\n\t" + r for r in ret))
@@ -105,10 +108,10 @@ def save_to_s3(tags):
         ContentType="text/html",
     )
 
+
 if __name__ == "__main__":
-    # a free user account, has no link to any user, can be changed anytime
-    username = "pytorchhub"
-    password = "D9rrHaz4uCyL5*4&U%2A"
+    username = os.environ.get("DOCKER_HUB_USERNAME")
+    password = os.environ.get("DOCKER_HUB_PASSWORD")
     token = build_access_token(username, password)
     tags = []
     for repo in list_repos("pytorch", token):
