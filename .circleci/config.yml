@@ -690,7 +690,7 @@ jobs:
     - attach_workspace:
         at: /home/circleci/project
     - run:
-        command: ls -l /home/circleci/project
+        command: ls -l /home/circleci/project/final_pkgs/*
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
