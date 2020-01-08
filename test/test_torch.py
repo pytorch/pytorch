@@ -11372,7 +11372,8 @@ class TestTorchDeviceType(TestCase):
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        test_pdist_single(shape, device, p, dtype, trans, grad_check=dtype==torch.float64)
+                        grad_check = dtype == torch.float64
+                        test_pdist_single(shape, device, p, dtype, trans, grad_check=grad_check)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
