@@ -286,7 +286,7 @@ struct CAFFE2_API IValue final {
 
   template<class Key, class Value>
   /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  [[deprecated("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
+  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
   /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 

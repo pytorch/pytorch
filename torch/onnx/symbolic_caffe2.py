@@ -138,7 +138,7 @@ def dequantize(g, input):
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
 
-def upsample_nearest2d(g, input, output_size, align_corners=None, scales_1=-1, scales_2=-1.0):
+def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None, scales_w=None):
     if input not in sym_help._quantized_ops:
         from torch.onnx.symbolic_opset9 import upsample_nearest2d as upsample_nearest2d_impl
         return upsample_nearest2d_impl(g, input, output_size, align_corners)

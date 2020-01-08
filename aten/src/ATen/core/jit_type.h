@@ -1442,8 +1442,8 @@ struct CAFFE2_API ClassType : public NamedType {
 
   const std::vector<Function*>& methods() const;
 
-  TypePtr getAttribute(const std::string& name) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+  TypePtr findAttribute(const std::string& name) const {
+    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
     for (const auto& attr : attributeNames_) {
       if (name == attr) {
@@ -1456,6 +1456,17 @@ struct CAFFE2_API ClassType : public NamedType {
       return nullptr;
     }
     return attributeTypes_[pos];
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    auto type = findAttribute(name);
+    TORCH_CHECK(
+        type,
+        python_str(),
+        " does not have an attribute with name '",
+        name,
+        "'");
+    return type;
   }
 
   size_t numAttributes() const {
@@ -1498,7 +1509,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have a field with the name '",
+        " does not have an attribute with name '",
         name,
         "'");
   }
@@ -1572,13 +1583,39 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const IValue& value);
 
+  c10::optional<size_t> findConstantSlot(const std::string& name) const {
+    TORCH_CHECK(constantNames_.size() == constantValues_.size());
+    size_t slot = 0;
+    for (const auto& constant : constantNames_) {
+      if (name == constant) {
+        return slot;
+      }
+      slot++;
+    }
+    return c10::nullopt;
+  }
+
+  size_t getConstantSlot(const std::string& name) const {
+    if (auto r = findConstantSlot(name)) {
+      return *r;
+    }
+    TORCH_CHECK(
+        false,
+        python_str(),
+        " does not have constant field with the name '",
+        name,
+        "'");
+  }
+
   const std::string& getConstantName(size_t slot) const {
     TORCH_CHECK(constantNames_.size() == constantValues_.size());
     TORCH_CHECK(slot < constantNames_.size());
     return constantNames_[slot];
   }
 
-  c10::optional<IValue> getConstant(const std::string& name) const;
+  IValue getConstant(const std::string& name) const;
+  IValue getConstant(size_t slot) const;
+  c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
     TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
@@ -1592,6 +1629,14 @@ struct CAFFE2_API ClassType : public NamedType {
   at::ArrayRef<IValue> constantValues() const {
     return constantValues_;
   }
+
+  // [Internal Only] Remove constant from the ClassType
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  void unsafeRemoveConstant(const std::string& name);
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
