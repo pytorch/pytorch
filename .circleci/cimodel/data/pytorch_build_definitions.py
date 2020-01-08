@@ -247,7 +247,7 @@ def instantiate_configs():
             parallel_backend=parallel_backend,
         )
 
-        if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (compiler_name == "gcc"
