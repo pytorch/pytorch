@@ -6717,6 +6717,36 @@ class TestTorchDeviceType(TestCase):
                          torch.bitwise_and(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
 
+    def test_bitwise_or(self, device):
+        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
+            expected_res = torch.tensor([3, -1, 3], dtype=dtype, device=device)
+            b_scalar = 2
+            expected_res_scalar = torch.tensor([3, -2, 3], dtype=dtype, device=device)
+
+            # standard version
+            self.assertEqual(torch.bitwise_or(a, b), expected_res)
+            self.assertEqual(torch.bitwise_or(a, b_scalar), expected_res_scalar)
+
+            # out
+            c = torch.empty(0, dtype=dtype, device=device)
+            torch.bitwise_or(a, b, out=c)
+            self.assertEqual(c, expected_res)
+            torch.bitwise_or(a, b_scalar, out=c)
+            self.assertEqual(c, expected_res_scalar)
+
+            # in-place
+            a1 = a.clone()
+            a1.bitwise_or_(b)
+            self.assertEqual(a1, expected_res)
+            a.bitwise_or_(b_scalar)
+            self.assertEqual(a, expected_res_scalar)
+
+        self.assertEqual(torch.tensor([True, True, False], device=device),
+                         torch.bitwise_or(torch.tensor([True, True, False], device=device),
+                                          torch.tensor([False, True, False], device=device)))
+
     def test_bitwise_xor(self, device):
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
             a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
