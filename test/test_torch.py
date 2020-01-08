@@ -10563,6 +10563,16 @@ class TestTorchDeviceType(TestCase):
                                                 [1, 0, 1],
                                                 [1, 1, 1]]))
 
+        # cummax doesn't support values, indices with a dtype, device type or layout
+        # different from that of input tensor
+        t = torch.randn(10)
+        values = torch.ShortTensor()
+        indices = torch.LongTensor()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'values tensor should have the same dtype as the input tensor. Got short int and float.'):
+            torch.cummax(t, 0, out=(values, indices))
+
         # Check that cummulative max over a zero length dimension doesn't crash on backprop.
         # Also check that cummax over other dimensions in a tensor with a zero-length
         # dimensiuon also works

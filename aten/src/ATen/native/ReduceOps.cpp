@@ -38,6 +38,21 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
   return self.toType(upcast_scalarType);
 }
 
+static inline void check_dtype_device_layout_equal(const TensorOptions& out, const TensorOptions& self, std::string out_name, std::string self_name) {
+  TORCH_CHECK(
+    out.dtype() == self.dtype(),
+    out_name + " tensor should have the same dtype as the " + self_name + " tensor. Got ",
+    out.dtype(), " and ", self.dtype(), ".");
+  TORCH_CHECK(
+    out.device() == self.device(),
+    out_name + " tensor should have the same device type as the " + self_name + " tensor. Got ",
+    out.device(), " and ", self.device(), ".");
+  TORCH_CHECK(
+    out.layout() == self.layout(),
+    out_name + " tensor should have the same layout type as the " + self_name + " tensor. Got ",
+    out.layout(), " and ", self.layout(), ".");
+}
+
 using DimMask = TensorIterator::DimMask;
 
 static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
@@ -218,27 +233,28 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 }
 
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
-   {
+  check_dtype_device_layout_equal(values.options(), self.options(), "values", "input");
+  check_dtype_device_layout_equal(indices.options(), self.options().dtype(at::kLong), "indices", "input");
+  {
     NoNamesGuard guard;
     values.resize_(self.sizes());
-    indices = integer_upcast(indices.resize_(self.sizes()), at::kLong);
+    indices.resize_(self.sizes());
     if(self.dim() == 0) {
       values.fill_(self.item());
       indices.fill_(0);
     }
-    else if(self.numel() != 0){
+    else if(self.numel() != 0) {
       // update values and indices for the first values along the dimension dim
       values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
       indices.narrow(dim, 0, 1).fill_(0);
-      for(int64_t i=1; i<self.size(dim); i++) {
+      for(int i = 1; i < self.size(dim); i++) {
         auto res_at_i = at::max(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
         // values at index i
         values.narrow(dim, i, 1) = std::get<0>(res_at_i);
         // indices at index i
         indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
        }
-   }
-   values=integer_upcast(values, self.scalar_type());
+    }
   }
   namedinference::propagate_names(values, self);
   namedinference::propagate_names(indices, self);
