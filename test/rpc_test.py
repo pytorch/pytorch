@@ -1066,7 +1066,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1094,16 +1094,18 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-
-        rpc.shutdown()
+            rpc.shutdown(graceful=True)
+        else:
+            api._ignore_rref_leak = False
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
@@ -1302,6 +1304,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
+    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests

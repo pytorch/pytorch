@@ -85,21 +85,15 @@ class NCCLComm {
   NCCLComm(const NCCLComm&) = delete;
   NCCLComm& operator=(const NCCLComm&) = delete;
 
+  // Do not support move assignment as there is no valid use case
+  NCCLComm& operator=(NCCLComm&& other) = delete;
+
   // Move constructable
   NCCLComm(NCCLComm&& other) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
-  }
-
-  // Move assignable
-  NCCLComm& operator=(NCCLComm&& other) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    std::swap(ncclComm_, other.ncclComm_);
-    std::swap(aborted_, other.aborted_);
-    std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
-    return *this;
   }
 
   ncclComm_t getNcclComm() {
