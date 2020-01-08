@@ -1107,6 +1107,36 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                             batch_size=BATCH_SIZE, use_gpu=False)
 
     @skipIfUnsupportedOpsetVersion([10])
+    def test_upsample_w_scale(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                scale_factor = 2.0
+                return nn.functional.interpolate(x,
+                                                 scale_factor=scale_factor,
+                                                 mode='nearest',
+                                                 recompute_scale_factor=False)
+
+
+        x_np = np.random.rand(1, 1, 2, 2).astype("float32")
+        model = MyModel()
+
+        sample_inputs = (x_np,)
+        pt_inputs = tuple(torch.from_numpy(x) for x in sample_inputs)
+        input_names = ["x"]
+
+        pytorch_res = model(*pt_inputs)
+        f = io.BytesIO()
+        torch.onnx.export(model, pt_inputs, f, input_names=input_names,
+                          operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        f.seek(0)
+        onnx_model = onnx.load(f)
+        caffe_res = c2.run_model(onnx_model, dict(zip(input_names, sample_inputs)))[0]
+        np.testing.assert_almost_equal(pytorch_res.numpy(), caffe_res, decimal=3)
+
+    @skipIfUnsupportedOpsetVersion([10])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
