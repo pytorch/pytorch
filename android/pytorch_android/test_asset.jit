@@ -74,3 +74,6 @@ def intEq0None(self, input):
 def str3Concat(self, input):
     # type: (str) -> str
     return input + input + input
+
+def newEmptyShapeWithItem(self, input):
+    return torch.tensor([int(input.item())])[0]
