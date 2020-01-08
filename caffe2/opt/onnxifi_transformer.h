@@ -27,6 +27,10 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
 
   // Whether to lower model blob by blob
   bool load_model_by_blob{false};
+
+  // Whether to combine fp32 batched inputs into one tensor and convert it to
+  // fp16 or not
+  bool merge_fp32_inputs_into_fp16{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
