@@ -242,11 +242,12 @@ def _init_rpc_backend(
         world_size=world_size,
         rpc_backend_options=rpc_backend_options,
     )
-    _start_rpc_agent(_agent)
 
     worker_infos = _agent.get_worker_infos()
     global _ALL_WORKER_NAMES
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    _start_rpc_agent(_agent)
 
 
 @_require_initialized
