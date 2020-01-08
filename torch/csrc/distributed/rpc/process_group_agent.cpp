@@ -189,6 +189,7 @@ void ProcessGroupAgent::join() {
       SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
+  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {

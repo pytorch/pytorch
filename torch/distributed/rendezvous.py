@@ -41,8 +41,22 @@ def register_rendezvous_handler(scheme, handler):
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url, **kwargs):
-    global _rendezvous_handlers
+def rendezvous(url, rank=-1, world_size=-1, **kwargs):
+    # Append node-specific arguments.
+    if rank != -1 or world_size != -1:
+        assert (
+            "?" not in url
+        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
+            url=url
+        )
+        parts = []
+        if rank != -1:
+            parts.append("rank={}".format(rank))
+        if world_size != -1:
+            parts.append("world_size={}".format(world_size))
+        if len(parts) > 0:
+            url += "?{parts}".format(parts="&".join(parts))
+
     result = urlparse(url)
     if result.scheme not in _rendezvous_handlers:
         raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))

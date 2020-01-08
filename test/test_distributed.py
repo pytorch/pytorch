@@ -56,7 +56,7 @@ class Net(nn.Module):
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
-        self.no_grad_param = nn.Parameter(torch.Tensor([2, 2]).long(),
+        self.no_grad_param = nn.Parameter(torch.tensor([2, 2]).long(),
                                           requires_grad=False)
 
     def forward(self, x):
@@ -226,6 +226,12 @@ def _build_tensor(size, value=None):
     if value is None:
         value = size
     return torch.FloatTensor(size, size, size).fill_(value)
+
+
+def _build_multidim_tensor(dim, dim_size, value=None):
+    if value is None:
+        value = size
+    return torch.FloatTensor(size=[dim_size for _ in range(dim)]).fill_(value)
 
 
 class Barrier(object):
@@ -1372,6 +1378,105 @@ class _DistTestBase(object):
     def test_all_gather_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_gather_helper(group, group_id, rank)
+
+    def _run_all_gather_coalesced_and_verify(
+        self, output_tensor_lists, input_tensors, expected_tensors, group_id
+    ):
+        """
+        Helper that runs all_gather_coalesced and returns true if output
+        matches expectations.
+        """
+        dist.all_gather_coalesced(
+            output_tensor_lists, input_tensors, group_id)
+
+        for l1, l2 in zip(output_tensor_lists, expected_tensors):
+            for t1, t2 in zip(l1, l2):
+                if not torch.equal(t1, t2):
+                    return False
+        return True
+
+    def _test_all_gather_coalesced_helper(
+        self, group, group_id, rank
+    ):
+        # TODO: Instead we should probably go through _rank_not_in_group
+        # mechanism to disable sending tensors
+        if group_id is not None:
+            for test_case_id in range(2, 5):
+                # Make sure we create tensors of incompatible sizes, e.g.
+                # [1], [2x2], [3x3x3] ... to be sent in one batch
+                input_tensors = [
+                    _build_multidim_tensor(
+                        tensor_id, tensor_id, rank + tensor_id) for tensor_id in range(
+                            1, test_case_id)
+                ]
+                output_tensor_lists = [
+                    [
+                        _build_multidim_tensor(
+                            tensor_id, tensor_id, -1) for tensor_id in range(
+                                1, test_case_id)
+                    ] for _ in group
+                ]
+                expected_tensors = [
+                    [
+                        _build_multidim_tensor(
+                            tensor_id,
+                            tensor_id,
+                            rank_iter + tensor_id) for tensor_id in range(
+                                1, test_case_id)
+                    ] for rank_iter in group
+                ]
+                assert self._run_all_gather_coalesced_and_verify(
+                    output_tensor_lists, input_tensors, expected_tensors, group_id)
+
+        self._barrier()
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_all_gather_coalesced(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @skip_if_small_worldsize
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_all_gather_coalesced_group(self):
+        group, group_id, rank = self._init_group_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_all_gather_coalesced_full_group(self):
+        group, group_id, rank = self._init_full_group_test()
+        self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    def test_all_gather_coalesced_with_empty(self):
+        group, group_id, rank = self._init_global_test()
+        input_tensors = [
+            rank * torch.ones([2, 2]),
+            torch.ones([0]),
+            (rank + 1) * torch.ones([3, 3]),
+            torch.ones([0]),
+            torch.ones([0])
+        ]
+        output_tensors_lists = [
+            [
+                -1 * torch.ones([2, 2]),
+                -1 * torch.ones([0]),
+                -1 * torch.ones([3, 3]),
+                -1 * torch.ones([0]),
+                -1 * torch.ones([0])
+            ] for _ in group
+        ]
+        expected_tensors = [
+            [
+                r * torch.ones([2, 2]),
+                torch.ones([0]),
+                (r + 1) * torch.ones([3, 3]),
+                torch.ones([0]),
+                torch.ones([0])
+            ] for r in group
+        ]
+        assert self._run_all_gather_coalesced_and_verify(
+            output_tensors_lists, input_tensors, expected_tensors, group_id)
+        self._barrier()
 
     # BARRIER
     def _test_barrier_helper(

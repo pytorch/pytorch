@@ -318,6 +318,12 @@ Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const T
   return self.clone().index_add_(dim, index, source);
 }
 
+Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", source.dim(), " dimension(s).");
+  return self.index_fill_(dim, index, source.item());
+}
+
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   return self.clone().index_fill_(dim, index, source);
 }

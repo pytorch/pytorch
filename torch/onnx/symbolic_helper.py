@@ -293,6 +293,10 @@ def _interpolate_get_scales(g, scale_factor, dim):
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
     from torch.onnx.symbolic_opset9 import unsqueeze
     mode = _maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
     _interpolate_warning(mode)
 
     align_corners = _maybe_get_const(align_corners, 'b')

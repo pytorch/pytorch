@@ -3,6 +3,8 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -80,7 +82,7 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return std::move(RemoteRet(src.retRRefId(), src.retForkId())).toMessage();
+      return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -90,10 +92,11 @@ Message RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef<py::object>(rrefId);
+
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
-      return std::move(RemoteRet(rrefId, forkId)).toMessage();
+      return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
@@ -101,8 +104,7 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return std::move(RRefFetchRet(RRefFetchRet({rref->getValue()})))
-          .toMessage();
+      return ScriptRRefFetchRet({rref->getValue()}).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -112,8 +114,7 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return std::move(RRefFetchRet(RRefFetchRet(result.toIValues())))
-          .toMessage();
+      return PythonRRefFetchRet(result.toIValues()).toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
@@ -131,7 +132,7 @@ Message RequestCallbackImpl::processRpc(
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return std::move(RRefAck()).toMessage();
+      return RRefAck().toMessage();
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
@@ -184,6 +185,17 @@ Message RequestCallbackImpl::processRpc(
           autogradContext, sendFunction);
 
       return std::move(PropagateGradientsResp()).toMessage();
+    }
+    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+      auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
+      auto cleanupContextId = cleanupContextReq.getContextId();
+      // release the context if it still exists on this thread. We need to check
+      // if it exists since it may have been deleted by an in-flight RPC.
+      // This can create nested RPCs if there are other nodes that get notified
+      // to clean up their context.
+      DistAutogradContainer::getInstance().releaseContextIfPresent(
+          cleanupContextId);
+      return std::move(CleanupAutogradContextResp()).toMessage();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

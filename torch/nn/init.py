@@ -292,14 +292,14 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
-        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan\_in}}}
+        \text{bound} = \text{gain} \times \sqrt{\frac{3}{\text{fan\_mode}}}
 
     Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (0 for ReLU
-            by default)
+        a: the negative slope of the rectifier used after this layer (only 
+        used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the
@@ -327,14 +327,14 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
-        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan\_in}}}
+        \text{std} = \frac{\text{gain}}{\sqrt{\text{fan\_mode}}}
 
     Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
-        a: the negative slope of the rectifier used after this layer (0 for ReLU
-            by default)
+        a: the negative slope of the rectifier used after this layer (only 
+        used with ``'leaky_relu'``)
         mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the

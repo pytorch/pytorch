@@ -263,4 +263,13 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_CPP14_HOST_CONSTEXPR AT_CPP14_CONSTEXPR
 #endif
 
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 AT_CPP14_CONSTEXPR
+#define IS_NOT_GCC5_CONSTEXPR AT_IS_CPP14_CONSTEXPR
+#endif
+
 #endif // C10_MACROS_MACROS_H_

@@ -217,6 +217,11 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
     }
   }
 
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
+  }
+
   // n == 1 || ldc >= max(1, m)
   #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
 
@@ -753,49 +758,6 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #endif
 
   }
-}
-
-void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
-{
-  int64_t N1 = m1->size(0);
-  int64_t N2 = m2->size(0);
-  int64_t dim;
-  scalar_t *m1_p;
-  scalar_t *m2_p;
-  scalar_t *r_p;
-
-  THTensor_(resize2d)(r_, N1, N2);
-
-  m1 = THTensor_(newContiguous)(m1);
-  m2 = THTensor_(newContiguous)(m2);
-
-  THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
-  THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
-
-  dim = m1->size(1);
-  THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
-
-  m1_p = m1->data<scalar_t>();
-  m2_p = m2->data<scalar_t>();
-  r_p = r_->data<scalar_t>();
-
-  at::parallel_for(0, N1, 0,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t j, k;
-      for (j = 0; j < N2; j++) {
-        scalar_t sum = 0;
-        for (k = 0; k < dim; k++) {
-          scalar_t term = m1_p[i * dim + k] - m2_p[j * dim + k];
-          sum += term * term;
-        }
-        r_p[i * N2 + j] = gain * sum;
-      }
-    }
-  });
-
-  c10::raw::intrusive_ptr::decref(m1);
-  c10::raw::intrusive_ptr::decref(m2);
 }
 
 void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)

@@ -107,6 +107,10 @@ inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
   return ret;
 }
 
+inline Tensor gelu(const Tensor& input) {
+  return torch::gelu(input);
+}
+
 inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }

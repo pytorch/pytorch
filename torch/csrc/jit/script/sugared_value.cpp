@@ -495,9 +495,7 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 
   auto self =
       g.insertNode(
-           g.createTuple(
-                matched_schema.inputs, std::move(qualname), std::move(schema))
-               ->setSourceRange(loc))
+           g.createTuple(matched_schema.inputs, type_)->setSourceRange(loc))
           ->output();
   self->setType(type_);
 

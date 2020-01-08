@@ -26,7 +26,23 @@ void addcdiv_cuda_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
+void smooth_l1_backward_cuda_kernel(TensorIterator& iter, Scalar norm) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_backward_cuda", [&]() {
+      auto norm_val = norm.to<scalar_t>();
+      gpu_kernel(iter, [norm_val]GPU_LAMBDA(scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
+        const auto x = input - target;
+        if (x < scalar_t(-1))
+          return -norm_val * grad_output;
+        else if (x > scalar_t(1))
+          return norm_val * grad_output;
+        else
+          return norm_val * x * grad_output;
+    });
+  });
+}
+
 REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cuda_kernel);
 REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
+REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 
 }} // namespace at::native

@@ -462,7 +462,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -486,7 +486,7 @@ try:
                 database=None,
                 max_examples=100,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(

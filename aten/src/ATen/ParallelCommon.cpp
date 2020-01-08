@@ -28,7 +28,7 @@ const char* get_env_var(
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto* value = std::getenv(var_name)) {
-      int nthreads = std::stoi(value);
+      int nthreads = c10::stoi(value);
       TORCH_CHECK(nthreads > 0);
       return nthreads;
     }

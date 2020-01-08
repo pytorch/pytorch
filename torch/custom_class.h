@@ -60,6 +60,9 @@ detail::types<void, Types...> init() { return detail::types<void, Types...>{}; }
 
 template <class CurClass>
 class class_ {
+  static_assert(std::is_base_of<CustomClassHolder, CurClass>::value,
+    "torch::jit::class_<T> requires T to inherit from CustomClassHolder");
+
   std::string className;
   std::string qualClassName;
   c10::optional<py::class_<CurClass>> pyClass = c10::nullopt;
@@ -70,7 +73,7 @@ class class_ {
   const std::string topModule = "__torch__.torch";
 
  public:
-  class_(string className_) : className(std::move(className_)) {
+  class_(std::string className_) : className(std::move(className_)) {
     // Currently we register everything as a python class just for convenience.
     // We'll want to remove this at some point to get rid of the python
     // dependency. It would require significant changes to class registration,
@@ -90,7 +93,7 @@ class class_ {
       PyObject* rawPyObj = py_object.release().ptr();
       return rawPyObj;
     };
-    getClassConverter()[qualClassName] = castToPython;
+    at::getClassConverter()[qualClassName] = castToPython;
 
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
@@ -100,9 +103,9 @@ class class_ {
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
-                              StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCu, classTypePtr)});
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
-                              StrongTypePtr(classCu, classTypePtr)});
+                              c10::StrongTypePtr(classCu, classTypePtr)});
 
     classCu->register_type(classTypePtr);
   }
@@ -124,7 +127,7 @@ class class_ {
     return *this;
   }
   template <typename Func>
-  class_& def(string name, Func f) {
+  class_& def(std::string name, Func f) {
     auto res = def_(name, f, detail::args_t<decltype(f)>{});
     return *this;
   }
@@ -140,19 +143,19 @@ class class_ {
   std::vector<Value*> addInputs_(
       Func f,
       std::shared_ptr<Graph> graph,
-      guts::index_sequence<arg_indices...>) {
+      at::guts::index_sequence<arg_indices...>) {
     using argTypes =
-        typename guts::infer_function_traits_t<Func>::parameter_types;
+        typename at::guts::infer_function_traits_t<Func>::parameter_types;
     std::vector<Value*> res = {
-        addInput<guts::typelist::element_t<arg_indices, argTypes>>::call(
+        addInput<at::guts::typelist::element_t<arg_indices, argTypes>>::call(
             graph)...};
     return res;
   }
   template <class Func>
   std::vector<Value*> addInputs(Func f, std::shared_ptr<Graph> graph) {
     constexpr auto numArgs =
-        guts::infer_function_traits_t<Func>::number_of_parameters;
-    return addInputs_(f, graph, guts::make_index_sequence<numArgs>());
+        at::guts::infer_function_traits_t<Func>::number_of_parameters;
+    return addInputs_(f, graph, at::guts::make_index_sequence<numArgs>());
   }
 
   template <typename Last>
@@ -192,11 +195,11 @@ class class_ {
     classTypePtr->addMethod(method);
   }
   template <typename Func, typename R, typename... Types>
-  class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
+  class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
 
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
-      return guts::invoke(f, *cur, args...);
+      return at::guts::invoke(f, *cur, args...);
     };
     defineMethod<R>(name, std::move(func), funcInfo.hasRet);
     return *this;

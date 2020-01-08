@@ -215,7 +215,7 @@ if(CAFFE2_USE_CUDNN)
   set_property(
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${CUDNN_INCLUDE_PATH})
-  if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+  if(CUDNN_STATIC AND NOT WIN32)
     target_link_libraries(caffe2::cudnn INTERFACE
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
   endif()

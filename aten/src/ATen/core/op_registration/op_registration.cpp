@@ -37,11 +37,6 @@ private:
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
-  if (options.legacyATenSchema_.has_value()) {
-    // Ignore legacy aten operators, don't add them to c10
-    return;
-  }
-
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
   if (options.schemaOrName_->is_right()) {
     // schema was explicitly specified. Check it matches the inferred one and register the op.

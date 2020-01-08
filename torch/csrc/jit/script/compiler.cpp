@@ -615,7 +615,7 @@ struct to_ir {
   std::vector<DefContext> def_stack_;
   size_t temp_name_count_ = 0;
   std::string createTempName(const std::string& prefix) {
-    return prefix + std::to_string(temp_name_count_++);
+    return prefix + c10::to_string(temp_name_count_++);
   }
 
   void pushFrame(Block* b, bool starts_def = false) {
@@ -2236,7 +2236,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
   }
 
@@ -2279,7 +2279,7 @@ struct to_ir {
       case TK_IN:
         return "__contains__";
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
   }
 
@@ -3253,7 +3253,7 @@ c10::QualifiedName CompilationUnit::mangle(
       // Append the part of the name up to the end of the prefix
       newAtom.append(atom, 0, pos);
       newAtom.append(manglePrefix);
-      newAtom.append(std::to_string(mangleIndex_++));
+      newAtom.append(c10::to_string(mangleIndex_++));
       atom = newAtom;
       return QualifiedName(atoms);
     }
@@ -3261,7 +3261,7 @@ c10::QualifiedName CompilationUnit::mangle(
 
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
-  atoms.insert(atoms.end() - 1, manglePrefix + std::to_string(mangleIndex_++));
+  atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
   return QualifiedName(atoms);
 }
 

@@ -103,12 +103,20 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   }
 
   /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
-  /// Combining with `modules_ordered_dict()`, it enables the following use case:
-  /// `Sequential sequential(modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}}))`
   explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {
       push_back(std::move(item.key()), std::move(item.value()));
+    }
+  }
+
+  /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
+  /// It enables the following use case:
+  /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
+  explicit SequentialImpl(std::initializer_list<NamedAnyModule> named_modules) {
+    modules_.reserve(named_modules.size());
+    for (const auto& named_module : named_modules) {
+      push_back(std::move(named_module.name()), std::move(named_module.module()));
     }
   }
 
@@ -357,6 +365,16 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 /// See the documentation for `SequentialImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
-TORCH_MODULE(Sequential);
+class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
+ public:
+  using torch::nn::ModuleHolder<SequentialImpl>::ModuleHolder;
+
+  Sequential() : ModuleHolder() {}
+
+  /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
+  /// It enables the following use case:
+  /// `Sequential sequential({{"m1", M(1)}, {"m2", M(2)}})`
+  Sequential(std::initializer_list<NamedAnyModule> named_modules) : ModuleHolder(std::make_shared<SequentialImpl>(std::move(named_modules))) {}
+};
 } // namespace nn
 } // namespace torch

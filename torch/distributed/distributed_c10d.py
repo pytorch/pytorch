@@ -393,15 +393,8 @@ def init_process_group(backend,
     else:
         # backward compatible API
         if store is None:
-            url = init_method
-            if world_size != -1 and rank != -1:
-                url += "?rank={}&world_size={}".format(rank, world_size)
-            elif rank != -1:
-                url += "?rank={}".format(rank)
-            elif world_size != -1:
-                url += "?world_size={}".format(world_size)
-
-            store, rank, world_size = next(rendezvous(url))
+            rendezvous_iterator = rendezvous(init_method, rank, world_size)
+            store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
         _default_pg = _new_process_group_helper(
@@ -1163,6 +1156,113 @@ def all_gather(tensor_list,
         return work
     else:
         work.wait()
+
+def _check_lists_of_same_shape(list1, list2):
+    """
+    Helper to check that individual tensors of 'list1' and 'list2' match in
+    shape point-wise.
+
+    Returns:
+        True if list1 matches list2
+    """
+    return (len(list1) == len(list2) and
+            all(t1.size() == t2.size() for t1, t2 in zip(list1, list2)))
+
+
+def _check_input_output(output_tensor_lists, input_tensor_list, param_name):
+    """
+    Helper to check that each element of output_tensor_lists matches input_tensor_list in shape.
+
+    """
+    if not isinstance(output_tensor_lists, list):
+        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+                           "to be of type List[List[torch.Tensor]].".format(param_name))
+    all(_check_tensor_list(
+        output_tensor_list, param_name + " element ") for output_tensor_list in output_tensor_lists)
+    if not all(_check_lists_of_same_shape(
+            output_tensor_list, input_tensor_list) for output_tensor_list in output_tensor_lists):
+        raise RuntimeError("Shape tensor mismatch in {}".format(param_name))
+
+def all_gather_coalesced(output_tensor_lists,
+                         input_tensor_list,
+                         group=group.WORLD,
+                         async_op=False):
+    """
+    Gathers input tensors from the whole group in a list in a coalesced manner.
+
+    Arguments:
+        output_tensor_lists (list[list[Tensor]]): Output list. It should contain
+            correctly-sized tensors to be used for output of the collective.
+        input_tensor_list (list[Tensor]): Tensors to be broadcast from
+            current process. At least one tensor has to be non empty.
+        group (ProcessGroup, optional): The process group to work on
+        async_op (bool, optional): Whether this op should be an async op.
+            currently does not support async_op being True
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    Example:
+        we have 2 process groups, 2 ranks.
+        rank 0 passes:
+            input_tensor_list = [[[1, 1], [1, 1]], [2], [3, 3]]
+            output_tensor_lists =
+               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
+        rank 1 passes:
+            input_tensor_list = [[[3, 3], [3, 3]], [5], [1, 1]]
+            output_tensor_lists =
+               [[[[-1, -1], [-1, -1]], [-1], [-1, -1]],
+                [[[-1, -1], [-1, -1]], [-1], [-1, -1]]]
+        both rank 0 and 1 get:
+            output_tensor_lists =
+               [[[1, 1], [1, 1]], [2], [3, 3]],
+                [[3, 3], [3, 3]], [5], [1, 1]]].
+
+    WARNING: at this time individual shape checking is not implemented across nodes.
+    For example, if the rank 0 node passes [torch.rand(4), torch.rand(2)] and the
+    rank 1 node passes [torch.rand(2), torch.rand(2), torch.rand(2)], the
+    all_gather_coalesced operation will proceed without complaint and return
+    erroneous outputs. This lack of shape checking results in significant
+    performance improvements but users of this function should take extra care
+    to ensure that each node passes in tensors whose shapes match across nodes.
+    """
+    _check_tensor_list(input_tensor_list, "tensor_list")
+    _check_input_output(
+        output_tensor_lists, input_tensor_list, "output_tensor_lists")
+    if _rank_not_in_group(group):
+        return
+
+    # Flatten the input and create a list of flat outputs.
+    input_coalesced = torch.cat([t.flatten() for t in input_tensor_list])
+    output_coalesced = [
+        torch.empty(input_coalesced.numel()) for _ in output_tensor_lists]
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.allgather([output_coalesced], [input_coalesced])
+    else:
+        work = group.allgather([output_coalesced], [input_coalesced])
+
+    if async_op:
+        raise RuntimeError("all_gather_coalesced does not support "
+                           "async mode yet.")
+    else:
+        work.wait()
+        assert len(output_tensor_lists) == len(output_coalesced)
+        # Iterate through flat outputs and store them in output_tensor_lists
+        for rank, rank_output in enumerate(output_coalesced):
+            current_element = 0
+            for index_output, output_tensor in enumerate(
+                    output_tensor_lists[rank]):
+                output_tensor.copy_(
+                    rank_output.narrow(
+                        dim=0,
+                        start=current_element,
+                        length=output_tensor.numel()).reshape(
+                            output_tensor.size()))
+                current_element += output_tensor.numel()
 
 
 def gather(tensor,

@@ -359,64 +359,6 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   self->set_size(dimension2, z);
 }
 
-void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t size, int64_t step)
-{
-  int d;
-
-  if(!src)
-    src = self;
-
-  THArgCheck((dimension >= 0) && (dimension < THTensor_nDimensionLegacyNoScalars(src)), 2, "out of range");
-  THArgCheck(size <= THTensor_sizeLegacyNoScalars(src, dimension), 3, "out of range");
-  THArgCheck(step > 0, 4, "invalid step");
-
-  THTensor_(set)(self, src);
-
-  std::vector<int64_t> newSize(/* size */ self->dim()+1);
-  std::vector<int64_t> newStride(/* size */ self->dim()+1);
-
-  newSize[self->dim()] = size;
-  newStride[self->dim()] = THTensor_strideLegacyNoScalars(self, dimension);
-  for(d = 0; d < self->dim(); d++)
-  {
-    auto self_size = THTensor_sizeLegacyNoScalars(self, d);
-    auto self_stride = THTensor_strideLegacyNoScalars(self, d);
-    if(d == dimension)
-    {
-      newSize[d] = (self_size - size) / step + 1;
-      newStride[d] = step*self_stride;
-    }
-    else
-    {
-      newSize[d] = self_size;
-      newStride[d] = self_stride;
-    }
-  }
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
-/* we have to handle the case where the result is a number */
-void THTensor_(squeeze)(THTensor *self, THTensor *src)
-{
-  if(!src)
-    src = self;
-
-  THTensor_(set)(self, src);
-
-  std::vector<int64_t> newSize;
-  std::vector<int64_t> newStride;
-  for(int d = 0; d < src->dim(); ++d)
-  {
-    if(src->size(d) != 1)
-    {
-      newSize.push_back(src->size(d));
-      newStride.push_back(src->stride(d));
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 {
   int d;
@@ -523,25 +465,6 @@ int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
       return 0;
   }
   return 1;
-}
-
-int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
-{
-  if (!THTensor_getStoragePtr(self))
-    return 0;
-  if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
-      self->storage_offset() == src->storage_offset() &&
-      THTensor_nDimensionLegacyAll(self) == THTensor_nDimensionLegacyAll(src))
-  {
-    int d;
-    for (d = 0; d < THTensor_nDimensionLegacyAll(self); ++d)
-    {
-      if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
-        return 0;
-    }
-    return 1;
-  }
-  return 0;
 }
 
 ptrdiff_t THTensor_(nElement)(const THTensor *self)

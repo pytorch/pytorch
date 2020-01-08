@@ -67,7 +67,10 @@ void DistEngine::computeDependencies(
 
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
-      /* keep_graph */ false, /* create_graph */ false, /* depth */ 0);
+      /* keep_graph */ false,
+      /* create_graph */ false,
+      /* depth */ 0,
+      /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.
@@ -177,7 +180,7 @@ void DistEngine::runEngineAndAccumulateGradients(
   // TODO: make this non-blocking
   // (https://github.com/pytorch/pytorch/issues/26359)
   variable_list grads = engine_.execute_with_graph_task(
-      *autogradContext.retrieveGraphTask(), graphRoot);
+      autogradContext.retrieveGraphTask(), graphRoot);
 
   // Accumulate all the gradients in the context.
   TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
@@ -214,7 +217,7 @@ void DistEngine::executeSendFunction(
     // Enqueue the current send function.
     auto graphTask = autogradContext.retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask.get(), sendFunction, torch::autograd::InputBuffer(0)));
+        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
 
     // Run the autograd engine.
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
@@ -225,7 +228,7 @@ void DistEngine::executeSendFunction(
     lock.unlock();
     auto graphTask = autogradContext.retrieveGraphTask();
     engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask.get(), sendFunction, torch::autograd::InputBuffer(0)));
+        graphTask, sendFunction, torch::autograd::InputBuffer(0)));
   }
 }
 

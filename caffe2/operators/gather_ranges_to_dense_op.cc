@@ -68,6 +68,14 @@ are sorted by the corresponding KEY.
     .Input(2, "KEY", "Tensor of rank 1 and type int64.")
     .Output(0, "OUTPUT", "1-D tensor of size sum of range lengths")
     .Arg("lengths", "Expected lengths for ranges")
+    .Arg(
+        "min_observation",
+        "The number of observations needed before deciding that the ratio of "
+        "mismatched ranges is alarming, also determines whether an info "
+        "sumarizing the empty and mismatch ratio will be printed at the end.")
+    .Arg(
+        "max_mismatched_ratio",
+        "An error is raised when ratio of mismatched ranges exceeds this.")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

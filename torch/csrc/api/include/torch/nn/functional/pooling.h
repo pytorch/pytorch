@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
 
 namespace torch {
@@ -215,6 +216,24 @@ inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
 
   return torch::max_unpool3d(input, indices, output_size_,
                              options.stride(), options.padding());
+}
+
+inline Tensor lp_pool1d(const Tensor& input, const LPPool1dOptions& options) {
+  Tensor out = avg_pool1d(
+    input.pow(options.norm_type()),
+    AvgPool1dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
+
+  return (torch::sign(out) * relu(torch::abs(out))).mul((*options.kernel_size())[0]).pow(1. / options.norm_type());
+}
+
+inline Tensor lp_pool2d(const Tensor& input, const LPPool2dOptions& options) {
+  int kw = (*options.kernel_size())[0];
+  int kh = (*options.kernel_size())[1];
+  Tensor out = avg_pool2d(
+    input.pow(options.norm_type()),
+    AvgPool2dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
+
+  return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / options.norm_type());
 }
 
 } // namespace functional

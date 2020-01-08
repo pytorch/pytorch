@@ -11,7 +11,10 @@ namespace torch { namespace autograd { namespace python {
 
 struct PythonEngine : public Engine {
   void thread_init(int device) override;
-  void thread_on_exception(NodeTask& task, std::exception& e) override;
+  void thread_on_exception(
+      std::shared_ptr<GraphTask>& graph_task,
+      const std::shared_ptr<Node>& fn,
+      std::exception& e) override;
   variable_list execute(
       const edge_list& roots,
       const variable_list& inputs,

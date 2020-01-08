@@ -1093,10 +1093,14 @@ class HasElementsOp : public Operator<Context> {
   USE_SIMPLE_CTOR_DTOR(HasElementsOp);
 
   bool RunOnDevice() override {
-    auto& input = Input(0);
+    bool res = false;
+    for (auto i = 0; i < InputSize(); ++i) {
+      const auto& input = Input(i);
+      res = res || input.numel() > 0;
+    }
     auto* output = Output(0);
     output->Resize(std::vector<int64_t>{});
-    *output->template mutable_data<bool>() = input.numel() > 0;
+    *output->template mutable_data<bool>() = res;
     return true;
   }
 };

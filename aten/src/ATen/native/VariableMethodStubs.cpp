@@ -28,5 +28,9 @@ int64_t _version(const Tensor& self) {
   AT_ERROR("version is not implemented for Tensor");
 }
 
+Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
+  AT_ERROR("requires_grad_ is not implemented for Tensor");
+}
+
 } // namespace native
 } // namespace at

@@ -56,12 +56,6 @@
     output: reduction != at::Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction)
-  cname: SmoothL1Criterion
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   cname: SoftMarginCriterion
   scalar_check:

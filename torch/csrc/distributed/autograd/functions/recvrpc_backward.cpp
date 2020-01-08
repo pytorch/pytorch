@@ -34,8 +34,7 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
   // context.
   PropagateGradientsReq gradCall(autogradMetadata_, outputGrads);
 
-  // Send the gradients over to the appropriate node (we don't need the worker
-  // name only the id, so use a placeholder "foo").
+  // Send the gradients over to the appropriate node.
   auto rpcAgent = rpc::RpcAgent::getDefaultRpcAgent();
   auto futureMessage = rpcAgent->send(
       rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());

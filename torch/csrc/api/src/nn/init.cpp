@@ -280,6 +280,29 @@ Tensor zeros_(Tensor tensor) {
   return tensor.zero_();
 }
 
+std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor) {
+  const auto dimensions = tensor.dim();
+  TORCH_CHECK(dimensions >= 2,
+    "Fan in and fan out can not be computed "
+    "for tensor with fewer than 2 dimensions")
+
+  int64_t fan_in, fan_out;
+  if (dimensions == 2) { // Linear
+    fan_in = tensor.size(1);
+    fan_out = tensor.size(0);
+  } else {
+    const auto num_input_fmaps = tensor.size(1);
+    const auto num_output_fmaps = tensor.size(0);
+    auto receptive_field_size = 1;
+    if (tensor.dim() > 2) {
+      receptive_field_size = tensor[0][0].numel();
+    }
+    fan_in = num_input_fmaps * receptive_field_size;
+    fan_out = num_output_fmaps * receptive_field_size;
+  }
+  return std::tie(fan_in, fan_out);
+}
+
 } // namespace init
 } // namespace nn
 } // namespace torch

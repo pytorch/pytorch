@@ -531,6 +531,31 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(m, (torch.randn(5, 5),))
 
+    def test_function_attribute_in_submodule(self):
+        class N(nn.Module):
+            def __init__(self, norm):
+                super(N, self).__init__()
+                self.activation = torch.nn.functional.relu
+                self.norm = norm
+
+            def forward(self, src):
+                output = src
+                output = self.norm(output)
+                return output
+
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                encoder_norm = nn.ReLU()
+                self.encoder = N(encoder_norm)
+
+            def forward(self, x):
+                return self.encoder(x)
+
+        m = M()
+        self.checkModule(m, (torch.randn(5, 5), ))
+
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"

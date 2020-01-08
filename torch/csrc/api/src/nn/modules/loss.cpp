@@ -102,7 +102,7 @@ void MultiMarginLossImpl::reset() {
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiMarginLoss(p=" << options.p()
          << ", margin=" << options.margin() << ", weight=" << options.weight()
-         << ", reduction=" << options.reduction() << ")";
+         << ", reduction=" << enumtype::get_enum_name(options.reduction()) << ")";
 }
 
 Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -199,6 +199,21 @@ void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
 
 Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
   return F::soft_margin_loss(input, target, options);
+}
+
+// ============================================================================
+
+CTCLossImpl::CTCLossImpl(const CTCLossOptions& options_) : options(options_) {}
+
+void CTCLossImpl::reset() {}
+
+void CTCLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CTCLoss()";
+}
+
+Tensor CTCLossImpl::forward(const Tensor& log_probs, const Tensor& targets,
+                 const Tensor& input_lengths, const Tensor& target_lengths) {
+  return F::ctc_loss(log_probs, targets, input_lengths, target_lengths, options);
 }
 
 } // namespace nn

@@ -156,9 +156,9 @@ def _export_to_pretty_string(*args, **kwargs):
     return utils._export_to_pretty_string(*args, **kwargs)
 
 
-def _optimize_trace(trace, operator_export_type):
+def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
-    trace.set_graph(utils._optimize_graph(trace.graph(), operator_export_type))
+    return utils._optimize_graph(graph, operator_export_type)
 
 
 def set_training(model, mode):

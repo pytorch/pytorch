@@ -630,13 +630,12 @@ class ScriptModuleSerializer {
           src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
-      std::ostringstream debugFilename;
-      debugFilename << filename << ".debug_pkl";
+      std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      const auto& range_data =
+      auto range_data =
           source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
-          debugFilename.str(),
+          debugFilename,
           range_data.data(),
           range_data.size(),
           range_data.size() > kMinToCompress /*compress*/);

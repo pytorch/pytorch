@@ -81,8 +81,8 @@ public:
   // Also, technically according to the C++ standard, we don't have to define
   // a constexpr variable if we never odr-use it.  But it seems that some
   // versions GCC/Clang have buggy determinations on whether or not an
-  // identifier is odr-used or not, and in any case it's hard to tel if
-  // a variabe is odr-used or not.  So best to just cut the probem at the root.
+  // identifier is odr-used or not, and in any case it's hard to tell if
+  // a variable is odr-used or not.  So best to just cut the probem at the root.
   static constexpr int size() {
     return 32 / sizeof(T);
   }
@@ -256,8 +256,20 @@ public:
   Vec256<T> log1p() const {
     return map(std::log1p);
   }
+  template <typename other_t_log2 = T,
+            typename std::enable_if<!std::is_complex_t<other_t_log2>::value, int>::type = 0>
   Vec256<T> log2() const {
+    // other_t_log2 is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_log2, T>::value, "other_t_log2 must be T");
     return map(std::log2);
+  }
+  template <typename complex_t_log2 = T,
+            typename std::enable_if<std::is_complex_t<complex_t_log2>::value, int>::type = 0>
+  Vec256<T> log2() const {
+    // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
+    const T log_2 = T(std::log(2.0));
+    return Vec256(map(std::log))/Vec256(log_2);
   }
   Vec256<T> ceil() const {
     return map(at::native::ceil_impl);

@@ -735,7 +735,7 @@ class TestMSNPUTensor(common.TestCase):
 
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
-        with self.assertRaisesRegex(RuntimeError, "No function is registered"):
+        with self.assertRaisesRegex(RuntimeError, "Didn't find kernel to dispatch to for operator"):
             b = torch.arange(0, 10, device='msnpu')
 
     def test_zeros(self):

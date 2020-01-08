@@ -330,7 +330,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         preprocessed_op = preprocessed_op.unsqueeze(dim);
       }
     }
-    preprocessed_operands.push_back(preprocessed_op);
+
+    preprocessed_operands.push_back(std::move(preprocessed_op));
   }
 
   // now we reduce the indices from left to right
@@ -338,7 +339,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   // algorithms (see eigen_path in numpy docs)
   // we start with the leftmost operator and reduce indices that
   // appear only there
-  Tensor result = preprocessed_operands[0];
+  Tensor result = std::move(preprocessed_operands[0]);
   for (int64_t idx = 0; idx < num_total_idxes; idx++) {
     if ((last_idx_occurrence[idx] == 0)
         && (idxes_to_preprocessed_dims[idx]>=num_output_dims)) {
@@ -355,7 +356,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
         sum_dims.push_back(idxes_to_preprocessed_dims[idx]);
       }
     }
-    result = at::native::sumproduct_pair(result, preprocessed_operands[i], sum_dims, true);
+    result = at::native::sumproduct_pair(result, std::move(preprocessed_operands[i]), sum_dims, true);
   }
   // finally, we squeeze out all non-result dimensions
   auto sizes = result.sizes().vec();

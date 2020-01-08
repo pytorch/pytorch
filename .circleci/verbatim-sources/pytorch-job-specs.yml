@@ -65,6 +65,8 @@ jobs:
             output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
+            elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-libtorch
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -98,6 +100,8 @@ jobs:
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi

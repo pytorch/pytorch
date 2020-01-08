@@ -31,10 +31,10 @@ class ReLU(torch.nn.ReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.nn.quantized.functional.relu(input)
+        return torch.nn.quantized.functional.relu(input, inplace=self.inplace)
 
     def _get_name(self):
         return 'QuantizedReLU'

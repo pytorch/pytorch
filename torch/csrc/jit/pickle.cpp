@@ -74,7 +74,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   std::vector<at::TypePtr> types(writeable_tensors.size(), at::StringType::get());
 
   for (size_t i = 0; i < writeable_tensors.size(); i++) {
-    keys.emplace_back(std::to_string(i));
+    keys.emplace_back(c10::to_string(i));
   }
 
   auto keys_tuple = at::ivalue::Tuple::create(keys);

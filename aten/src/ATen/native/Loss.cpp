@@ -7,9 +7,14 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/native/BinaryOps.h>
+#include <ATen/native/PointwiseOps.h>
+#include <ATen/native/TensorIterator.h>
 
 #define EPSILON 1e-12
 #define _USE_MATH_DEFINES
+
+
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -23,6 +28,9 @@ namespace {
 }
 
 namespace at { namespace native {
+
+DEFINE_DISPATCH(smooth_l1_stub);
+DEFINE_DISPATCH(smooth_l1_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
@@ -148,4 +156,40 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
 
     return apply_loss_reduction(loss, reduction);
 }
+
+Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
+  Tensor loss;
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  smooth_l1_stub(iter.device_type(), iter);
+  return apply_loss_reduction(iter.output(), reduction);
+}
+
+Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    result = at::smooth_l1_loss(input, target, reduction);
+  } else {
+    auto iter = TensorIterator::binary_op(result, input, target);
+    smooth_l1_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(target);
+  iter.add_input(grad_output);
+  iter.build();
+  smooth_l1_backward_stub(iter.device_type(), iter, norm);
+  return grad_input;
+}
+
+Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto grad_input = at::zeros_like(input);
+  return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
 }}  // namespace at::native

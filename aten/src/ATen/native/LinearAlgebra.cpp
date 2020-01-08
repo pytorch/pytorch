@@ -39,7 +39,8 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
 
 Tensor det(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -51,7 +52,8 @@ Tensor det(const Tensor& self) {
 
 Tensor logdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -71,7 +73,8 @@ Tensor logdet(const Tensor& self) {
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Expected a floating point tensor as input");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point tensor as input");
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -84,9 +87,9 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() >= 2,
-           "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
+              "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
     auto self_sizes = self.sizes().vec();
@@ -114,18 +117,18 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
+              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
   return (S > tol).sum();
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
-           "of floating types");
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
+              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
   double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
@@ -476,9 +479,9 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
-  TORCH_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
-           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
-           "of floating types with dim at least 2");
+  TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
+              "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+              "of floating types with dim at least 2");
   if (n == 0) {
     return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
@@ -526,7 +529,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   if (dim.size() == 1) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt(at::sum(self * self, dim, keepdim));
+  return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
 }
 
 Tensor &frobenius_norm_out(
@@ -542,7 +545,7 @@ Tensor &frobenius_norm_out(
   if (dim.size() == 1) {
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
+  return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
 }
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {

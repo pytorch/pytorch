@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import argparse
 
-from caffe2.python import workspace
 import torch
 
 import benchmark_core
@@ -124,9 +123,6 @@ def main():
 
     args, _ = parser.parse_known_args()
 
-    if benchmark_utils.is_caffe2_enabled(args.framework):
-        workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-        workspace.ClearGlobalNetObserver()
     if args.omp_num_threads:
         # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS
         # which doesn't have any impact as C2 init logic has already been called

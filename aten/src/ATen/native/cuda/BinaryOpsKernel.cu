@@ -181,6 +181,15 @@ void ne_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void smooth_l1_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      auto z = fabs(a - b);
+      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+    });
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
@@ -193,5 +202,6 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
 REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
+REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 
 }} // namespace at::native

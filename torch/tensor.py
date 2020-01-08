@@ -10,6 +10,25 @@ import weakref
 from torch._six import imap
 from torch._C import _add_docstr
 from numbers import Number
+import functools
+
+
+def _wrap_type_error_to_not_implemented(f):
+    from torch import _six
+    import inspect
+
+    # functools.wraps doesn't work well with methods in python 2
+    method_assignments = ('__name__', '__doc__')
+    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
+                else functools.WRAPPER_ASSIGNMENTS)
+
+    @functools.wraps(f, assigned=assigned)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except TypeError:
+            return NotImplemented
+    return wrapped
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -372,17 +391,20 @@ class Tensor(torch._C._TensorBase):
         return object.__format__(self, format_spec)
 
     def __ipow__(self, other):
-        raise NotImplementedError("in-place pow not implemented")
+        return NotImplemented
 
+    @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
         return self.new_tensor(other) ** self
 
+    @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
         result = self / other
         if result.dtype.is_floating_point:
             result = result.trunc()
         return result
 
+    @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         result = other / self
         if result.dtype.is_floating_point:
@@ -391,12 +413,12 @@ class Tensor(torch._C._TensorBase):
 
     __neg__ = _C._TensorBase.neg
 
-    __eq__ = _C._TensorBase.eq
-    __ne__ = _C._TensorBase.ne
-    __lt__ = _C._TensorBase.lt
-    __le__ = _C._TensorBase.le
-    __gt__ = _C._TensorBase.gt
-    __ge__ = _C._TensorBase.ge
+    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
+    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
+    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
+    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
+    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
+    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):

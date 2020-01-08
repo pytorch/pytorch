@@ -176,8 +176,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
-Tensor empty_like(const Tensor& self) {
-  return native::empty_like(self, self.options());
+Tensor empty_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::empty_like(self, self.options(), optional_memory_format);
 }
 
 Tensor empty_like(
@@ -196,22 +198,19 @@ Tensor empty_like(
     return result;
   }
 
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
-  auto use_memory_format = memory_format;
-  if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
-      use_memory_format = MemoryFormat::ChannelsLast;
-    } else if (self.is_contiguous(MemoryFormat::Contiguous)) {
-      use_memory_format = MemoryFormat::Contiguous;
-    } else {
-      TORCH_CHECK(
-          false,
-          "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
-    }
-  }
-
   if (self.is_quantized()) {
+
+    auto memory_format =
+        optional_memory_format.value_or(MemoryFormat::Contiguous);
+
+    // TODO: To support all features of MemoryFormat::Preserve we need to add
+    // _empty_affine_quantized_strided function and use it similarly to
+    // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
+    // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
+    if (memory_format == MemoryFormat::Preserve) {
+      memory_format = self.suggest_memory_format();
+    }
+
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
     TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
@@ -223,7 +222,7 @@ Tensor empty_like(
       return at::_empty_affine_quantized(self.sizes(), options,
                                          self.q_scale(),
                                          self.q_zero_point(),
-                                         use_memory_format);
+                                         memory_format);
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
@@ -232,21 +231,33 @@ Tensor empty_like(
           self.q_per_channel_zero_points().clone(),
           self.q_per_channel_axis(),
           options,
-          use_memory_format);
+          memory_format);
     } else {
       TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
     }
   }
 
+  Tensor result;
+
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_non_overlapping_and_dense()) {
+      result = at::empty_strided(self.sizes(), self.strides(), options);
+    } else {
+      result = at::empty(self.sizes(), options, self.suggest_memory_format());
+    }
+  } else {
+    result = at::empty(self.sizes(), options, memory_format);
+  }
+
 #ifdef BUILD_NAMEDTENSOR
   if (self.opt_names()) {
-    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
-  } else {
-    return at::empty(self.sizes(), options, use_memory_format);
+    namedinference::propagate_names(result, self.opt_names());
   }
-#else
-  return at::empty(self.sizes(), options, use_memory_format);
 #endif
+
+  return result;
 }
 
 Tensor new_empty(
@@ -337,6 +348,7 @@ Tensor linspace(
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   Tensor result = at::empty({steps}, options);
   return at::linspace_out(result, start, end, steps);
 }
@@ -833,7 +845,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;

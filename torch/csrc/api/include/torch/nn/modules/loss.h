@@ -314,5 +314,35 @@ struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl>
 /// PyTorch's module storage semantics.
 TORCH_MODULE(TripletMarginLoss);
 
+// ============================================================================
+
+/// Calculates loss between a continuous (unsegmented) time series and a target
+/// sequence. CTCLoss sums over the probability of possible alignments of input
+/// to target, producing a loss value which is differentiable with respect
+/// to each input node. The alignment of input to target is assumed
+/// to be "many-to-one", which limits the length of the target sequence
+/// such that it must be less than or equal to the input length.
+struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
+
+  explicit CTCLossImpl(const CTCLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `CTCLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& log_probs, const Tensor& targets,
+                 const Tensor& input_lengths, const Tensor& target_lengths);
+
+  /// The options with which this `Module` was constructed.
+  CTCLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `CTCLossImpl`.
+/// See the documentation for `CTCLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(CTCLoss);
+
 } // namespace nn
 } // namespace torch

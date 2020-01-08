@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
 namespace torch {
 namespace distributed {
@@ -128,12 +129,42 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   return it->second;
 }
 
+void DistAutogradContainer::releaseContextIfPresent(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  // no-op if the context does not exist on this thread. This could happen if an
+  // in-flight RPC has already released the context on this thread.
+  if (autograd_context_.find(context_id) == autograd_context_.end()) {
+    return;
+  }
+  sendReleaseContextRpc(context_id);
+  eraseContextIdAndReset(context_id);
+}
+
 void DistAutogradContainer::releaseContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
+
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),
       "Could not find autograd context with id: ",
       context_id);
+
+  sendReleaseContextRpc(context_id);
+  eraseContextIdAndReset(context_id);
+}
+
+void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
+  // notify other workers to clean up their contexts.
+  auto workerIds =
+      autograd_context_.find(context_id)->second.getKnownWorkerIds();
+  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+  for (const auto& worker_id : workerIds) {
+    agent->send(
+        agent->getWorkerInfo(worker_id),
+        CleanupAutogradContextReq(context_id).toMessage());
+  }
+}
+
+void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   autograd_context_.erase(context_id);
 
   if (current_context_id_ == context_id) {
