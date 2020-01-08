@@ -1057,7 +1057,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1076,16 +1076,18 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-
-        rpc.shutdown()
+            rpc.shutdown(graceful=True)
+        else:
+            api._ignore_rref_leak = False
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
@@ -1299,21 +1301,20 @@ class RpcTest(RpcAgentTestFixture):
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
         dist.barrier()
 
         if self.rank == 0:
-            dst_rank = (self.rank + 1) % self.world_size
-            dst_worker = "worker{}".format(dst_rank)
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)
-            fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
                 else "(Request aborted during client shutdown)|"
                      "(worker.: Error in reponse from worker.: server shutting down)")
             with self.assertRaisesRegex(RuntimeError, error_str):
-                fut.wait()
+                rpc.rpc_sync(dst_worker, torch.add, args=(torch.ones(1), 3))
         else:
             pass  # exit all other nodes
 
