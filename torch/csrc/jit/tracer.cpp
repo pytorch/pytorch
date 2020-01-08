@@ -655,7 +655,7 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
 }
 
 void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
-  return addOutput(node, c10::impl::toVector(outputs));
+  return addOutput(node, outputs.vec());
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {
