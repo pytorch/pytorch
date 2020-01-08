@@ -85,7 +85,6 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 2) {
-    printf("specialized norm");
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
