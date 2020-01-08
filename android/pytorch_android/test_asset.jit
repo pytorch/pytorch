@@ -77,3 +77,9 @@ def str3Concat(self, input):
 
 def newEmptyShapeWithItem(self, input):
     return torch.tensor([int(input.item())])[0]
+
+def testAliasWithOffset(self):
+    # type: () -> List[Tensor]
+    x = torch.tensor([100, 200])
+    a = [x[0], x[1]]
+    return a
