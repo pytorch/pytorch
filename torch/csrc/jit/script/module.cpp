@@ -171,8 +171,17 @@ Module Module::clone_impl(
   // Create a new _ivalue in the same compilation unit.
   // The name is the same as for the original module, but it'll be mangled.
   // The class type is also created from scratch.
-  Module r(*type()->name(), _ivalue()->compilation_unit(), true);
-  type_remap[type()] = r.type();
+  bool type_already_cloned = type_remap.find(type()) != type_remap.end();
+  Module r;
+  if (type_already_cloned) {
+    // if we cloned the class type before, we'll reuse it
+    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    r = new_module;
+  } else {
+    Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
+    r = new_module;
+    type_remap[type()] = r.type();
+  }
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
@@ -192,9 +201,11 @@ Module Module::clone_impl(
     }
   }
 
-  // Clone methods remapping the types to the cloned ones.
-  for (auto& fn : type()->methods()) {
-    r.clone_method(*this, *fn, type_remap);
+  if (!type_already_cloned) {
+    // Clone methods remapping the types to the cloned ones.
+    for (auto& fn : type()->methods()) {
+      r.clone_method(*this, *fn, type_remap);
+    }
   }
   return r;
 }
