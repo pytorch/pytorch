@@ -14119,10 +14119,10 @@ class TestTorchDeviceType(TestCase):
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
-# Since linspace/logspace are deterministic, we can compute an expected 
+# Since linspace/logspace are deterministic, we can compute an expected
 # amount of error (by testing without a precision override), adding a tiny
 # amount (EPS) to that, and using that value as the override.
-EPS = 1e-5
+LINSPACE_LOGSPACE_EXTRA_EPS = 1e-5
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -14138,7 +14138,7 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(a, b)
 
     # See NOTE [Linspace+Logspace precision override]
-    @precisionOverride({torch.half: 0.0039 + EPS})
+    @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_linspace(self, device, dtype):
@@ -14161,14 +14161,14 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(a, b)
 
     # See NOTE [Linspace+Logspace precision override]
-    @precisionOverride({torch.half: 0.0157 + EPS})
+    @precisionOverride({torch.half: 0.0157 + LINSPACE_LOGSPACE_EXTRA_EPS})
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_logspace(self, device, dtype):
         self._test_logspace(device, dtype, steps=10)
 
     # See NOTE [Linspace+Logspace precision override]
-    @precisionOverride({torch.half: 0.00201 + EPS})
+    @precisionOverride({torch.half: 0.00201 + LINSPACE_LOGSPACE_EXTRA_EPS})
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_logspace_base2(self, device, dtype):
