@@ -11349,35 +11349,39 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(nz.requires_grad)
 
     def test_pdist_norm(self, device):
-        def test_pdist_single(shape, device, p, dtype, trans):
+        def test_pdist_single(shape, device, p, dtype, trans, grad_check=False):
             x = torch.randn(shape, dtype=dtype, device=device)
             if trans:
                 x.transpose_(-2, -1)
+            if grad_check:
+                x.requires_grad_()
+                y = x.detach().clone().requires_grad_()
+            else:
+                y = x
             actual = torch.pdist(x, p=p)
-            expected = brute_pdist(x, p=p)
+            expected = brute_pdist(y, p=p)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(torch.allclose(expected, actual))
+            if grad_check and expected.size() != torch.Size([0]):
+                g0 = torch.rand_like(actual)
+                actual.backward(g0)
+                expected.backward(g0)
+                self.assertTrue(torch.allclose(x.grad, y.grad))
 
-        for shape in [(4, 5), (3, 2), (2, 1)]:
+        for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        test_pdist_single(shape, device, p, dtype, trans)
+                        test_pdist_single(shape, device, p, dtype, trans, grad_check=dtype==torch.float64)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
         for dtype in [torch.float32, torch.float64]:
             test_pdist_single((1000, 2), device, 2, dtype, False)
 
-        # use dim0>=46342 for forward and dim0>=1449 for backward, see:
+        # use dim0>=46342 for forward, see:
         # https://github.com/pytorch/pytorch/issues/30583
-        # https://github.com/pytorch/pytorch/pull/31593
-        # Forward test
-        test_dist_single((50000, 1), device, 2, torch.float32, False)
-        # backward test
-        x = torch.randn(1500, 1, device=device, requires_grad=True)
-        torch.pdist(x).mean().backward()
-        self.assertIsNotNone(x.grad)
+        test_pdist_single((50000, 1), device, 2, torch.float32, False)
 
     def test_atan2(self, device):
         def _test_atan2_with_size(size, device):
