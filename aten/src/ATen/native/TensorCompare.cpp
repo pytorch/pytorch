@@ -96,6 +96,10 @@ Tensor isfinite(const Tensor& self) {
   });
 }
 
+Tensor isinf(const Tensor& self) {
+  return at::native::isfinite(self).logical_not();
+}
+
 bool is_nonzero(const Tensor& self) {
   auto n = self.numel();
   AT_ASSERT(n >= 0);

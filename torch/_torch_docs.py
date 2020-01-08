@@ -2473,6 +2473,22 @@ Returns a new tensor with boolean elements representing if each element is `Fini
         tensor([True,  False,  True,  False,  False])
 """)
 
+add_docstr(torch.isinf,
+    r"""
+Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([False,  True,  False,  True,  False])
+""")
+
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
@@ -4150,7 +4166,7 @@ Example::
     tensor([[9., 1., 3., 5.],
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
-            [2., 1., 4., 2.]])    
+            [2., 1., 4., 2.]])
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
