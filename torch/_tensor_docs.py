@@ -185,7 +185,7 @@ In-place version of :meth:`~Tensor.acos`
 add_docstr_all('add',
                r"""
 add(value) -> Tensor
-add(other, *, value=1) -> Tensor
+add(value=1, other) -> Tensor
 
 See :func:`torch.add`
 """)
@@ -193,91 +193,91 @@ See :func:`torch.add`
 add_docstr_all('add_',
                r"""
 add_(value) -> Tensor
-add_(other, *, value=1) -> Tensor
+add_(value=1, other) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
 
 add_docstr_all('addbmm',
                r"""
-addbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
+addbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.addbmm`
 """)
 
 add_docstr_all('addbmm_',
                r"""
-addbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
+addbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
 """)
 
 add_docstr_all('addcdiv',
                r"""
-addcdiv(tensor1, tensor2, *, value=1) -> Tensor
+addcdiv(value=1, tensor1, tensor2) -> Tensor
 
 See :func:`torch.addcdiv`
 """)
 
 add_docstr_all('addcdiv_',
                r"""
-addcdiv_(tensor1, tensor2, *, value=1) -> Tensor
+addcdiv_(value=1, tensor1, tensor2) -> Tensor
 
 In-place version of :meth:`~Tensor.addcdiv`
 """)
 
 add_docstr_all('addcmul',
                r"""
-addcmul(tensor1, tensor2, *, value=1) -> Tensor
+addcmul(value=1, tensor1, tensor2) -> Tensor
 
 See :func:`torch.addcmul`
 """)
 
 add_docstr_all('addcmul_',
                r"""
-addcmul_(tensor1, tensor2, *, value=1) -> Tensor
+addcmul_(value=1, tensor1, tensor2) -> Tensor
 
 In-place version of :meth:`~Tensor.addcmul`
 """)
 
 add_docstr_all('addmm',
                r"""
-addmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
+addmm(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 See :func:`torch.addmm`
 """)
 
 add_docstr_all('addmm_',
                r"""
-addmm_(mat1, mat2, *, beta=1, alpha=1) -> Tensor
+addmm_(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
 """)
 
 add_docstr_all('addmv',
                r"""
-addmv(mat, vec, *, beta=1, alpha=1) -> Tensor
+addmv(beta=1, alpha=1, mat, vec) -> Tensor
 
 See :func:`torch.addmv`
 """)
 
 add_docstr_all('addmv_',
                r"""
-addmv_(mat, vec, *, beta=1, alpha=1) -> Tensor
+addmv_(beta=1, alpha=1, mat, vec) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
 """)
 
 add_docstr_all('addr',
                r"""
-addr(vec1, vec2, *, beta=1, alpha=1) -> Tensor
+addr(beta=1, alpha=1, vec1, vec2) -> Tensor
 
 See :func:`torch.addr`
 """)
 
 add_docstr_all('addr_',
                r"""
-addr_(vec1, vec2, *, beta=1, alpha=1) -> Tensor
+addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
 
 In-place version of :meth:`~Tensor.addr`
 """)
@@ -491,14 +491,14 @@ In-place version of :meth:`~Tensor.atan`
 
 add_docstr_all('baddbmm',
                r"""
-baddbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
+baddbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.baddbmm`
 """)
 
 add_docstr_all('baddbmm_',
                r"""
-baddbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
+baddbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.baddbmm`
 """)
@@ -2685,11 +2685,11 @@ Example::
 
 add_docstr_all('sub',
                r"""
-sub(other, *, alpha=1) -> Tensor
+sub(value, other) -> Tensor
 
-Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`alpha`
-and :attr:`other` are specified, each element of :attr:`other` is scaled by
-:attr:`alpha` before being used.
+Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`value` and
+:attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`value` before being used.
 
 When :attr:`other` is a tensor, the shape of :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
@@ -2699,7 +2699,7 @@ tensor.
 
 add_docstr_all('sub_',
                r"""
-sub_(x, *, alpha=1) -> Tensor
+sub_(x) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)
