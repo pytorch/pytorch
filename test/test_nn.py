@@ -10433,35 +10433,34 @@ class TestNNDeviceType(NNTestCase):
 
     def test_nll_loss_empty_tensor(self, device):
 
-        def test_nll_loss(x, target):
-            for reduction in ['none', 'mean', 'sum']:
-                y = F.nll_loss(x, target, reduction=reduction)
-                if reduction == 'none':
-                    self.assertTrue(y.size() == target.size())
-                else:
-                    self.assertEqual(y.dim(), 0)
-                    if reduction == 'sum':
-                        self.assertEqual(y.item(), 0)
-                    else:  # reduction == 'mean':
-                        self.assertTrue(math.isnan(y.item()))
-                y.sum().backward()
-                self.assertEqual(x.grad.size(), x.size())
+        def helper(input_size, reduction, expected):
+            input = torch.rand(input_size, requires_grad=True, device=device)
+            num_channels = input_size[1]
+            target_size = (input_size[0], ) + tuple(input_size[2:])
+            target = torch.randint(num_channels, target_size, device=device)
 
-        C = 10
+            output = F.nll_loss(input, target, reduction=reduction)
+            self.assertEqual(output, expected)
 
-        N = 0
-        x = torch.rand(N, C, requires_grad=True, device=device)
-        target = torch.randint(C, (N,), device=device)
-        test_nll_loss(x, target)
+            output.sum().backward()
+            self.assertEqual(input.grad.size(), input.size())
 
-        # # 2-D scenarios
-        for N in [0, 10]:
-            for H in [0, 10]:
-                for W in [0, 10]:
-                    if (N * C * H * W == 0):  # If input is empty
-                        x = torch.rand(N, C, H, W, requires_grad=True, device=device)
-                        target = torch.randint(C, (N, H, W), device=device)
-                        test_nll_loss(x, target)
+        helper([0, 3], "none", torch.empty([0], device=device))
+        helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device))
+        helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
+        helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
+
+        nan = torch.tensor([float('nan')], device=device).resize_([])
+        helper([0, 3], "mean", nan)
+        helper([0, 3, 5, 7], "mean", nan)
+        helper([2, 3, 0, 7], "mean", nan)
+        helper([2, 3, 5, 0], "mean", nan)
+
+        zero = torch.tensor([0], device=device).resize_([])
+        helper([0, 3], "sum", zero)
+        helper([0, 3, 5, 7], "sum", zero)
+        helper([2, 3, 0, 7], "sum", zero)
+        helper([2, 3, 5, 0], "sum", zero)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
