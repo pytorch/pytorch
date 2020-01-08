@@ -13,7 +13,7 @@ default_set = set([
     # Selected oldest Python 2 version to ensure Python 2 coverage
     'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
-    'pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build',
+    'pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
