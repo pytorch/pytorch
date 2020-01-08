@@ -122,13 +122,13 @@ struct Class final {};
 #if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     string_view::npos !=
-        get_fully_qualified_type_name<Class<38474355855>>().find("38474355855"),
+        get_fully_qualified_type_name<Class<38474355>>().find("38474355"),
     "");
 #endif
 TEST(TypeIndex, NonTypeTemplateParameter) {
     EXPECT_NE(
         string_view::npos,
-        get_fully_qualified_type_name<Class<38474355855>>().find("38474355855")
+        get_fully_qualified_type_name<Class<38474355>>().find("38474355")
     );
 }
 } // namespace test_nontype_template_parameter
