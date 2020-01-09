@@ -16,7 +16,7 @@ TEST(TensorIndexingTest, Slice) {
   ASSERT_EQ(slice.stop(), 2);
   ASSERT_EQ(slice.step(), 3);
 
-  ASSERT_EQ(c10::str(slice), "{1, 2, 3}");
+  ASSERT_EQ(c10::str(slice), "1:2:3");
 }
 
 TEST(TensorIndexingTest, TensorIndex) {
@@ -58,31 +58,31 @@ TEST(TensorIndexingTest, TensorIndex) {
 
   {
     std::vector<TensorIndex> indices = {None, "...", Ellipsis, 0, true, {1, None, 2}};
-    ASSERT_EQ(c10::str(indices), c10::str("(None, ..., ..., 0, true, {1, ", INDEX_MAX, ", 2})"));
+    ASSERT_EQ(c10::str(indices), c10::str("(None, ..., ..., 0, true, 1:", INDEX_MAX, ":2)"));
     ASSERT_EQ(c10::str(indices[0]), "None");
     ASSERT_EQ(c10::str(indices[1]), "...");
     ASSERT_EQ(c10::str(indices[2]), "...");
     ASSERT_EQ(c10::str(indices[3]), "0");
     ASSERT_EQ(c10::str(indices[4]), "true");
-    ASSERT_EQ(c10::str(indices[5]), c10::str("{1, ", INDEX_MAX, ", 2}"));
+    ASSERT_EQ(c10::str(indices[5]), c10::str("1:", INDEX_MAX, ":2"));
   }
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{}})), c10::str("({0, ", INDEX_MAX, ", 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None}})), c10::str("({0, ", INDEX_MAX, ", 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, None}})), c10::str("({0, ", INDEX_MAX, ", 1})"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{}})), c10::str("(0:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None}})), c10::str("(0:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, None}})), c10::str("(0:", INDEX_MAX, ":1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None}})), c10::str("({1, ", INDEX_MAX, ", 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, None}})), c10::str("({1, ", INDEX_MAX, ", 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3}})), c10::str("({0, 3, 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, None}})), c10::str("({0, 3, 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, 2}})), c10::str("({0, ", INDEX_MAX, ", 2})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, -1}})), c10::str("({", INDEX_MAX, ", ", INDEX_MIN, ", -1})"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None}})), c10::str("(1:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, None}})), c10::str("(1:", INDEX_MAX, ":1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3}})), c10::str("(0:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, None}})), c10::str("(0:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, 2}})), c10::str("(0:", INDEX_MAX, ":2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, None, -1}})), c10::str("(", INDEX_MAX, ":", INDEX_MIN, ":-1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3}})), c10::str("({1, 3, 1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, 2}})), c10::str("({1, ", INDEX_MAX, ", 2})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, -1}})), c10::str("({1, ", INDEX_MIN, ", -1})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, 2}})), c10::str("({0, 3, 2})"));
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, -1}})), c10::str("({", INDEX_MAX, ", 3, -1})"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3}})), c10::str("(1:3:1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, 2}})), c10::str("(1:", INDEX_MAX, ":2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, None, -1}})), c10::str("(1:", INDEX_MIN, ":-1)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, 2}})), c10::str("(0:3:2)"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{None, 3, -1}})), c10::str("(", INDEX_MAX, ":3:-1)"));
 
-  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3, 2}})), c10::str("({1, 3, 2})"));
+  ASSERT_EQ(c10::str(std::vector<TensorIndex>({{1, 3, 2}})), c10::str("(1:3:2)"));
 }

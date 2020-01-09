@@ -21,9 +21,9 @@ struct CAFFE2_API Slice final {
   Slice();
   Slice(int64_t start, int64_t stop, int64_t step);
 
-  const int64_t& start() const;
-  const int64_t& stop() const;
-  const int64_t& step() const;
+  int64_t start() const;
+  int64_t stop() const;
+  int64_t step() const;
 
  private:
   int64_t start_;
