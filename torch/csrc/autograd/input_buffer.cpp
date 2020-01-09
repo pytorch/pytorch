@@ -77,6 +77,9 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
         opt_consumer_stream->wait(event);
+        // TODO:  I think we need
+        // c10::cuda::CUDACachingAllocator::recordStream(var.storage().data_ptr(), opt_consumer_stream);
+        // but I'm not sure if a call to c10::cuda::xyz here will allow a CPU-only build to compile.
       }
     } else {
       // (3) CUDA variable with multiple devices
@@ -112,6 +115,9 @@ namespace torch { namespace autograd {
       auto event = c10::Event{c10::DeviceType::CUDA};
       event.record(*opt_accumulate_stream);
       opt_consumer_stream->wait(event);
+      // TODO:  I think we need
+      // c10::cuda::CUDACachingAllocator::recordStream(var.storage().data_ptr(), opt_consumer_stream);
+      // but I'm not sure if a call to c10::cuda::xyz here will allow a CPU-only build to compile.
     }
   } else {
     if (opt_accumulate_stream) {
@@ -122,6 +128,9 @@ namespace torch { namespace autograd {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_accumulate_stream);
         opt_consumer_stream->wait(event);
+        // TODO:  I think we need
+        // c10::cuda::CUDACachingAllocator::recordStream(var.storage().data_ptr(), opt_consumer_stream);
+        // but I'm not sure if a call to c10::cuda::xyz here will allow a CPU-only build to compile.
       }
     } else {
       // (1) non-CUDA variable
