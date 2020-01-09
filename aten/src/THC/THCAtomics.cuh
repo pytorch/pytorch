@@ -178,4 +178,36 @@ static inline __device__ void gpuAtomicAdd(float *address, float val) {
   atomicAdd(address, val);
 }
 
+/* Note [gpuAtomicAdd vs atomicAdd]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * We are trying to standardize inside the PyTorch backend on using gpuAtomicAdd()
+ * without a return. These may either be resolved through library functions or
+ * implemented internally. Some extensions such as torchvision call atomicAdd()
+ * directly and require non-library provided data type support. Only for these, we
+ * continue to provide atomicAdd overloads. 
+ */
+static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline  __device__ void atomicAdd(int8_t *address, int8_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+  gpuAtomicAdd(address, val);
+}
+
+static inline __device__ void atomicAdd(bool *address, bool val) {
+  gpuAtomicAdd(address, val);
+}
+
 #endif // THC_ATOMICS_INC
