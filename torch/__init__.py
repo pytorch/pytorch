@@ -13,8 +13,10 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import ctypes
 from ._utils import _import_dotted_name
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
+    USE_RTLD_GLOBAL_WITH_LIBTORCH
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -33,38 +35,54 @@ __all__ = [
 # Load the extension module
 ################################################################################
 
-# Loading the extension with RTLD_GLOBAL option allows to not link extension
-# modules against the _C shared object. Their missing THP symbols will be
-# automatically filled by the dynamic loader.
-import os as _dl_flags
-
-# if we have numpy, it *must* be imported before the call to setdlopenflags()
-# or there is risk that later c modules will segfault when importing numpy
-try:
-    import numpy as _np
-except ImportError:
-    pass
-
 if platform.system() == 'Windows':
-    # first get nvToolsExt PATH
-    def get_nvToolsExt_path():
-        NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
+    NVTOOLSEXT_PATH = os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
-        if _dl_flags.path.exists(NVTOOLEXT_HOME):
-            return _dl_flags.path.join(NVTOOLEXT_HOME, 'bin', 'x64')
-        else:
-            return ''
+    if os.path.exists(NVTOOLSEXT_PATH):
+        nvtoolsext_lib_path = os.path.join(NVTOOLSEXT_PATH, 'bin', 'x64')
+    else:
+        nvtoolsext_lib_path = ''
 
-    py_dll_path = _dl_flags.path.join(sys.exec_prefix, 'Library', 'bin')
-    th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
+    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
+    th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
-    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
+    dll_paths = [th_dll_path, py_dll_path, nvtoolsext_lib_path, os.environ['PATH']]
 
     # then add the path to env
-    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
+    os.environ['PATH'] = ';'.join(dll_paths)
 
-else:
-    # first check if the os package has the required flags
+
+# See Note [Global dependencies]
+def _load_global_deps():
+    if platform.system() == 'Windows':
+        return
+
+    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    here = os.path.abspath(__file__)
+    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+
+    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+
+
+if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
+        platform.system() != 'Windows':
+    # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
+    # few circumstances:
+    #
+    #   1. You're in a build environment (e.g., fbcode) where
+    #      libtorch_global_deps is not available, but you still need
+    #      to get mkl to link in with RTLD_GLOBAL or it will just
+    #      not work.
+    #
+    #   2. You're trying to run PyTorch under UBSAN and you need
+    #      to ensure that only one copy of libtorch is loaded, so
+    #      vptr checks work properly
+    #
+    # If you're using this setting, you must verify that all the libraries
+    # you load consistently use the same libstdc++, or you may have
+    # mysterious segfaults.
+    #
+    import os as _dl_flags
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
@@ -72,21 +90,25 @@ else:
         except ImportError:
             # as a last attempt, use compile-time constants
             import torch._dl as _dl_flags
-
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    from torch._C import *
+    sys.setdlopenflags(old_flags)
+    del old_flags
+    del _dl_flags
 
-del _dl_flags
-
-from torch._C import *
+else:
+    # Easy way.  You want this most of the time, because it will prevent
+    # C++ symbols from libtorch clobbering C++ symbols from other
+    # libraries, leading to mysterious segfaults.
+    #
+    # See Note [Global dependencies]
+    _load_global_deps()
+    from torch._C import *
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
-
-if platform.system() != 'Windows':
-    sys.setdlopenflags(old_flags)
-    del old_flags
 
 ################################################################################
 # Define basic utilities
