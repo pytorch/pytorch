@@ -10751,7 +10751,7 @@ class TestTorchDeviceType(TestCase):
 
             self.assertWarnsRegex(
                 lambda: self.assertEqual(actual, torch.addcmul(a, alpha, b, c)),
-                "addcmul is deprecated")
+                "This overload of addcmul is deprecated")
 
     def test_empty_tensor_props(self, device):
         sizes = [(0,), (0, 3), (5, 0), (5, 0, 3, 0, 2), (0, 3, 0, 2), (0, 5, 0, 2, 0)]
@@ -11469,7 +11469,7 @@ class TestTorchDeviceType(TestCase):
 
             self.assertWarnsRegex(
                 lambda: self.assertEqual(actual, torch.addcdiv(a, alpha, b, c)),
-                "addcdiv is deprecated")
+                "This overload of addcdiv is deprecated")
 
         def non_zero_rand(size, dtype, device):
             if dtype.is_floating_point:
@@ -13779,17 +13779,17 @@ class TestTorchDeviceType(TestCase):
 
         self.assertWarnsRegex(
             lambda: res2.addbmm_(1, b1, b2),
-            "This signature for addbmm_ is deprecated")
+            "This overload of addbmm_ is deprecated")
         self.assertEqual(res2, res.sum(0, False) * 2),
 
         self.assertWarnsRegex(
             lambda: res2.addbmm_(1., .5, b1, b2),
-            "This signature for addbmm_ is deprecated")
+            "This overload of addbmm_ is deprecated")
         self.assertEqual(res2, res.sum(0, False) * 2.5)
 
         self.assertWarnsRegex(
             lambda: self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2)),
-            "This signature for addbmm is deprecated")
+            "This overload of addbmm is deprecated")
 
         res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
         self.assertEqual(res4, res.sum(0, False) * 3),
@@ -13815,17 +13815,17 @@ class TestTorchDeviceType(TestCase):
 
         self.assertWarnsRegex(
             lambda: res2.baddbmm_(1, b1, b2),
-            "This signature for baddbmm_ is deprecated")
+            "This overload of baddbmm_ is deprecated")
         self.assertEqual(res2, res * 2)
 
         self.assertWarnsRegex(
             lambda: res2.baddbmm_(1, .5, b1, b2),
-            "This signature for baddbmm_ is deprecated")
+            "This overload of baddbmm_ is deprecated")
         self.assertEqual(res2, res * 2.5)
 
         self.assertWarnsRegex(
             lambda: self.assertEqual(torch.baddbmm(1, res2, 0, b1, b2), res2),
-            "This signature for baddbmm is deprecated")
+            "This overload of baddbmm is deprecated")
 
         res4 = torch.baddbmm(res2, b1, b2, beta=1, alpha=.5)
         self.assertEqual(res4, res * 3)
@@ -14491,18 +14491,18 @@ tensor_op_tests = [
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("addbmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("addbmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("baddbmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("baddbmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, False),
     ('addcdiv', '', _small_2d,
@@ -14512,42 +14512,42 @@ tensor_op_tests = [
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
         _types, True,
-        [_wrap_assert_warns("This signature for addcdiv_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addcdiv_? is deprecated")]),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
         1e-5, 1e-5, _types, True,
-        [_wrap_assert_warns("This signature for addcmul_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addmm_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addmv_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addmv_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addr', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addr_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addr_? is deprecated")]),
     ('addr', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
-        [_wrap_assert_warns("This signature for addr_? is deprecated")]),
+        [_wrap_assert_warns("This overload of addr_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
