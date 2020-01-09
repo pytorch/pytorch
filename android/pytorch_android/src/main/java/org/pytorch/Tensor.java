@@ -34,7 +34,6 @@ public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
   private static final String ERROR_MSG_DATA_ARRAY_NOT_NULL = "Data array must be not null";
   private static final String ERROR_MSG_SHAPE_NOT_NULL = "Shape must be not null";
-  private static final String ERROR_MSG_SHAPE_NOT_EMPTY = "Shape must be not empty";
   private static final String ERROR_MSG_SHAPE_NON_NEGATIVE = "Shape elements must be non negative";
   private static final String ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER =
       "Data buffer must have native byte order (java.nio.ByteOrder#nativeOrder)";
@@ -626,7 +625,6 @@ public abstract class Tensor {
 
   private static void checkShape(long[] shape) {
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
-    checkArgument(shape.length > 0, ERROR_MSG_SHAPE_NOT_EMPTY);
     for (int i = 0; i < shape.length; i++) {
       checkArgument(shape[i] >= 0, ERROR_MSG_SHAPE_NON_NEGATIVE);
     }

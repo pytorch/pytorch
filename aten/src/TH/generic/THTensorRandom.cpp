@@ -142,16 +142,6 @@ void THTensor_(exponential)(THTensor *self, double lambda, at::Generator *_gener
 
 #undef TH_REAL_MIN
 
-void THTensor_(cauchy)(THTensor *self, double median, double sigma, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::cauchy_distribution<double> cauchy(median, sigma);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
-}
-
 void THTensor_(logNormal)(THTensor *self, double mean, double stdv, at::Generator *_generator)
 {
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
