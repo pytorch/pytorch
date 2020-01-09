@@ -3,8 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import sys
-import os
 import unittest
 import onnxruntime  # noqa
 import torch
@@ -23,15 +21,6 @@ from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_S
 import model_defs.word_language_model as word_language_model
 import torchvision
 
-from PIL import Image
-from torch._utils_internal import get_writable_path
-if sys.version_info < (3,):
-    from urlparse import urlsplit
-    import urllib2
-    request = urllib2
-else:
-    from urllib.parse import urlsplit
-    from urllib import request
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
     input, _ = torch.jit._flatten(input)
@@ -233,42 +222,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = torchvision.models.video.r2plus1d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def get_image_from_url(self, url):
-        filename = os.path.basename(urlsplit(url)[2])
-        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
-        path = os.path.join(data_dir, filename)
-        data = request.urlopen(url, timeout=15).read()
-        with open(path, 'wb') as f:
-            f.write(data)
-        image = Image.open(path).convert("RGB")
-        image = image.resize((300, 200), Image.BILINEAR)
-        to_tensor = torchvision.transforms.ToTensor()
-        return to_tensor(image)
-
-    def get_test_images(self):
-        image_url = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
-        image = self.get_image_from_url(url=image_url)
-        images = [image]
-        return images
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    def test_keypoint_rcnn(self):
-        class KeyPointRCNN(torch.nn.Module):
-            def __init__(self):
-                super(KeyPointRCNN, self).__init__()
-                self.model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True,
-                                                                                                  min_size=200,
-                                                                                                  max_size=300)
-
-            def forward(self, images):
-                output = self.model(images)
-                # TODO: The keypoints_scores require the use of Argmax that is updated in ONNX.
-                #       For now we are testing all the output of KeypointRCNN except keypoints_scores.
-                #       Enable When Argmax is updated in ONNX Runtime.
-                return output[0]['boxes'], output[0]['labels'], output[0]['scores'], output[0]['keypoints']
-        images = self.get_test_images()
-        self.run_test(KeyPointRCNN(), (images,), rtol=1e-3, atol=1e-5)
 
     def run_word_language_model(self, model_name):
         ntokens = 50
