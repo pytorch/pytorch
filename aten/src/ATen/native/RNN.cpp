@@ -242,7 +242,7 @@ struct QuantizedCellParamsStatic {
     const Tensor output_hh = output_hh_list[0].toTensor();
     return output_hh;
   }
-}
+};
 
 
 struct QuantizedCellParamsFP16 {
@@ -354,11 +354,11 @@ static std::vector<QuantizedCellParamsStatic> gather_quantized_params_static(
   static at::Tensor undefined;
   std::vector<QuantizedCellParamsStatic> result;
   TORCH_CHECK(params.size() % 6 == 0,
-              "Got an incorrect number of quantized RNN parameters. "
-              "Expecting 6 (w, out_scale, out_zp)*2, but got "
+              "Got an incorrect number of quantized RNN parameters. ",
+              "Expecting 6 (w, out_scale, out_zp)*2, but got ",
               params.size());
-  for (size_t i = 0; i < params.size()) {
-    results.emplace_back(params[i],       // packed weight + bias ih
+  for (size_t i = 0; i < params.size(), ++i) {
+    result.emplace_back(params[i],       // packed weight + bias ih
                          params[i + 1],   // packed weight + bias hh
                          params[i + 2],   // output scale ih
                          params[i + 3],   // output scale hh
