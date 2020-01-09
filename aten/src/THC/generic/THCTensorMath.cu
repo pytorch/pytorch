@@ -3,6 +3,7 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#include <ATen/MemoryOverlap.h>
 
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
@@ -86,6 +87,15 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THCTensor *notSkippedTensor = NULL;  // non-owning reference
   auto should_skip = [](THCTensor *t) { return t->is_empty() && t->dim() == 1; };
   int nDims = 0;
+
+  // Inputs cannot alias the output tensor
+  for (int i = 0; i < numInputs; i++) {
+    auto lap = at::get_overlap_status(result, inputs[i]);
+    THArgCheck(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor %d.", i);
+  }
 
   for (i = 0; i < numInputs; i++)
   {

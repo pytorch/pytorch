@@ -261,9 +261,10 @@ static inline Tensor _run_cufft(
   return output;
 }
 
-// The cuFFT plan cache, defined in CuFFTUtils.h
-std::vector<optional<CuFFTParamsLRUCache>> plan_caches;
-std::mutex plan_caches_mutex;
+// The cuFFT plan cache
+// unique_ptr for nullability and to avoid reference invalidation on vector resize
+static std::vector<std::unique_ptr<CuFFTParamsLRUCache>> plan_caches;
+static std::mutex plan_caches_mutex;
 
 static inline
 CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
@@ -276,7 +277,7 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
   }
 
   if (!plan_caches[device_index]) {
-    plan_caches[device_index].emplace();
+    plan_caches[device_index] = std::make_unique<CuFFTParamsLRUCache>();
   }
 
   return *plan_caches[device_index];
