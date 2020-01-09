@@ -236,7 +236,7 @@ Stmt ScheduleNode::LowerNoSibling(TensorExprNode* node) {
     return Stmt();
   }
   if (node->is_empty_value()) {
-    return Stmt();
+    return Lower(node->first_child());
   }
   if (node->is_tensor_expr_op()) {
     CHECK(node->first_child() == nullptr);

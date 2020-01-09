@@ -14,6 +14,8 @@ void IRPrinter::print(Stmt stmt) {
   stmt.accept(this);
 }
 
+// TODO: change whether to include the parenthesis to the parent expression,
+// we need to look at the operator precedence to make the output simpler.
 #define BINARY_ACCEPT(os, v, op_str) \
   os << "(";                         \
   v->lhs().accept(this);             \
@@ -67,27 +69,37 @@ void IRPrinter::visit(const Let* v) {
 }
 
 void IRPrinter::visit(const Ramp* v) {
-  throw std::runtime_error("NYI");
+  os << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes() << ")";
 }
 
 void IRPrinter::visit(const Load* v) {
-  throw std::runtime_error("NYI");
+  // TODO: support the mask case
+  os << v->base_handle() << "[" << v->index() << "]";
 }
 
 void IRPrinter::visit(const For* v) {
-  throw std::runtime_error("NYI");
+  std::string var_name = v->var().name_hint();
+  os << "for (" << var_name << " = " << v->start() << "; "
+     << var_name << "< " << v->stop() << "; "
+     << var_name << "++) {" << std::endl;
+  os << v->body() << std::endl;
+  os << "}";
 }
 
 void IRPrinter::visit(const Block* v) {
-  throw std::runtime_error("NYI");
+  for (int i = 0; i < v->nstmts(); ++i) {
+    os << v->stmt(i) << std::endl;
+  }
 }
 
 void IRPrinter::visit(const Store* v) {
-  throw std::runtime_error("NYI");
+  // TODO: handle the mask
+  os << v->base_handle() << "[" << v->index() << "] = "
+     << v->value();
 }
 
 void IRPrinter::visit(const Broadcast* v) {
-  throw std::runtime_error("NYI");
+  os << "Broadcast(" << v->value() << ", " << v->lanes() << ")";
 }
 
 std::ostream& operator<<(std::ostream& stream, const Expr& expr) {
