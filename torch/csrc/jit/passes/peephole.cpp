@@ -206,7 +206,8 @@ struct PeepholeOptimizeImpl {
         changed_ = false;
       }
 
-      if(!aliasDb_->safeToChangeAliasingRelationship(node->inputs(), node->outputs())) {
+      if (!aliasDb_->safeToChangeAliasingRelationship(
+              node->inputs(), node->outputs())) {
         continue;
       }
 
