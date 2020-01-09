@@ -22,6 +22,7 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerState state = ProfilerState::Disabled;
 uint16_t next_thread_id = 0;
+// Protects access to next_thread_id and all_event_lists_map.
 std::mutex all_event_lists_map_mutex;
 std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
     all_event_lists_map;
