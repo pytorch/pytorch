@@ -193,11 +193,8 @@ __device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
 
 }  // namespace detail
 
-static constexpr int launch_size = 128;
-static constexpr int launch_bound2 = 4;
-
 template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
-C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // all arguments have the same type, which could be different from the return type
@@ -251,7 +248,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
-C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
+C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // all arguments have the same type, which could be different from the return type
@@ -335,7 +332,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else if (iter.has_contiguous_first_dim()) {
-      modern::launch_kernel<modern::launch_size, modern::launch_bound2>(numel, f, data);
+      modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
