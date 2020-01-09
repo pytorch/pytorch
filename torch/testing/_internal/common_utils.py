@@ -143,9 +143,6 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
 
 # Used to run the same test with different tensor types
 def repeat_test_for_types(dtypes):
@@ -291,6 +288,20 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# bfloat16 bringup is currently only available on ROCm
+# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
+# when bfloat16 bringup is complete on all platforms
+if TEST_WITH_ROCM:
+    ALL_TENSORTYPES2 = [torch.float,
+                        torch.double,
+                        torch.half,
+                        torch.bfloat16]
+else:
+    ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -1031,10 +1042,14 @@ class TestCase(expecttest.TestCase):
             if text.startswith(prefix):
                 return text[len(prefix):]
             return text
-        # Always look for 'expect' in the same directory as 'common_utils.py'.
+        # NB: we take __file__ from the module that defined the test
+        # class, so we place the expect directory where the test script
+        # lives, NOT where test/common_utils.py lives.  This doesn't matter in
+        # PyTorch where all test scripts are in the same directory as
+        # test/common_utils.py, but it matters in onnx-pytorch
         module_id = self.__class__.__module__
         munged_id = remove_prefix(self.id(), module_id + ".")
-        test_file = os.path.realpath(__file__)
+        test_file = os.path.realpath(sys.modules[module_id].__file__)
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
@@ -1417,4 +1432,5 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
 
 dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
-              torch.half: 1e-2}
+              torch.half: 1e-2,
+              torch.bfloat16: 1e-1}
