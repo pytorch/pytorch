@@ -18,6 +18,7 @@ DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_or_stub);
 DEFINE_DISPATCH(bitwise_xor_stub);
+DEFINE_DISPATCH(lshift_stub);
 DEFINE_DISPATCH(logical_and_stub);
 DEFINE_DISPATCH(logical_or_stub);
 DEFINE_DISPATCH(logical_xor_stub);
@@ -375,6 +376,34 @@ Tensor& __ixor__(Tensor& self, const Tensor& other) {
 
 Tensor& __ixor__(Tensor& self, Scalar other) {
   return self.bitwise_xor_(other);
+}
+
+Tensor __lshift__(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor __lshift__(const Tensor& self, Scalar other) { 
+  Tensor result;
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& __ilshift__(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor& __ilshift__(Tensor& self, Scalar other) {
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(self, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return self;
 }
 
 template <typename Stub>

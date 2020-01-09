@@ -758,13 +758,6 @@ Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   return self;
 }
 
-Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
-  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
-  auto iter = TensorIterator::nullary_op(self);
-  geometric_kernel_cuda(iter, p, gen);
-  return self;
-}
-
 Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
@@ -780,5 +773,6 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
 }
 
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel_cuda);
 
 }} // namespace at::native
