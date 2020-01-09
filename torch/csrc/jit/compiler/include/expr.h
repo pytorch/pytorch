@@ -73,10 +73,16 @@ class Expr : public RefHandle<BaseExprNode> {
     // TODO: Consider implement this without using recursion. Otherwise,
     // if the expression tree is degenerate and too long, it could cause a
     // stack overflow.
+    if (node() == nullptr) {
+      return;
+    }
     node()->accept(visitor);
   }
 
   Expr accept_mutator(IRMutator* mutator) {
+    if (node() == nullptr) {
+      return Expr();
+    }
     return node()->accept_mutator(mutator);
   }
 
@@ -111,10 +117,16 @@ class Stmt : public RefHandle<BaseStmtNode> {
   explicit Stmt(const BaseStmtNode* node) : BaseHandle(node) {}
 
   void accept(IRVisitor* visitor) const {
+    if (node() == nullptr) {
+      return;
+    }
     node()->accept(visitor);
   }
 
   Stmt accept_mutator(IRMutator* mutator) {
+    if (node() == nullptr) {
+      return Stmt();
+    }
     node()->accept_mutator(mutator);
   }
 

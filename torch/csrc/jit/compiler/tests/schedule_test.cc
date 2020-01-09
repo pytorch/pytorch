@@ -1,6 +1,6 @@
-#include <stdexcept>
-
 #include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
@@ -43,6 +43,10 @@ TEST(TensorExpr, Lower01) {
   Var y = tensor.function().arg(1);
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
+  std::ostringstream oss;
+  oss << stmt;
+  ASSERT_GT(oss.str().size(), 20);
+  ASSERT_LT(oss.str().size(), 200);
 }
 
 TEST(TensorExpr, Simple02) {

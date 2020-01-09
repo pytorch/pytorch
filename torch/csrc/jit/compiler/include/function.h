@@ -35,7 +35,7 @@ class FunctionNode : public RefCounted {
       const std::vector<Expr>& dims,
       const std::vector<Var>& args,
       const Expr& body)
-      : func_var_(func_name, body.dtype().scalar_type()),
+      : func_var_(func_name, kHandle),
         dims_(dims),
         args_(args),
         body_(body) {}
