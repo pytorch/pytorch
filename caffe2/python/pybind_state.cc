@@ -1716,6 +1716,7 @@ void addGlobalMethods(py::module& m) {
          int max_seq_size,
          bool adjust_batch,
          bool debug_builder,
+         bool merge_fp32_inputs_into_fp16,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
@@ -1734,6 +1735,7 @@ void addGlobalMethods(py::module& m) {
         opts.bound_shape_spec.max_seq_size = max_seq_size;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
+        opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
         Workspace* curr_ws = GetCurrentWorkspace();
