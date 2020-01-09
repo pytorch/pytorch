@@ -465,9 +465,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
                && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
-	         || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
-	         || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
-		 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
+                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
+                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
+                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
                && detail::getCUDAHooks().compiledWithCuDNN()
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
