@@ -3355,7 +3355,7 @@ Example::
     >>> torch.median(a)
     tensor(0.2202)
 
-.. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+.. function:: median(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the median
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3372,8 +3372,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
 
@@ -3610,7 +3609,7 @@ Example::
 
 add_docstr(torch.mode,
            r"""
-mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3630,8 +3629,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
 
