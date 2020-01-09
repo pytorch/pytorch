@@ -562,6 +562,7 @@ void Engine::evaluate_function(
     // Records leaf stream (if applicable)
     // See note "Streaming backwards"
     if (opt_parent_stream) {
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
     }
     return;

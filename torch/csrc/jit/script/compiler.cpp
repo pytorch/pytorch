@@ -3329,6 +3329,7 @@ c10::QualifiedName CompilationUnit::mangle(
       auto num = atom.substr(pos + manglePrefix.size());
       // current mangle index in the name
       size_t num_i = std::stoi(num);
+      // bump the mangleIndex_ to num_i + 1
       mangleIndex_ = std::max(mangleIndex_, num_i + 1);
       std::string newAtomPrefix;
       newAtomPrefix.reserve(atom.size());
@@ -3337,7 +3338,7 @@ c10::QualifiedName CompilationUnit::mangle(
       newAtomPrefix.append(manglePrefix);
       atom = newAtomPrefix + c10::to_string(mangleIndex_++);
       // increment mangleIndex_ until the type is not defined
-      while (get_type(c10::QualifiedName(atoms))) {
+      while (get_type(QualifiedName(atoms))) {
         atom = newAtomPrefix + c10::to_string(mangleIndex_++);
       }
       return QualifiedName(atoms);
