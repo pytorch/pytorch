@@ -3326,13 +3326,20 @@ c10::QualifiedName CompilationUnit::mangle(
   for (auto& atom : atoms) {
     auto pos = atom.find(manglePrefix);
     if (pos != std::string::npos) {
-      std::string newAtom;
-      newAtom.reserve(atom.size());
+      auto num = atom.substr(pos + manglePrefix.size());
+      // current mangle index in the name
+      size_t num_i = std::stoi(num);
+      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
+      std::string newAtomPrefix;
+      newAtomPrefix.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
-      newAtom.append(atom, 0, pos);
-      newAtom.append(manglePrefix);
-      newAtom.append(c10::to_string(mangleIndex_++));
-      atom = newAtom;
+      newAtomPrefix.append(atom, 0, pos);
+      newAtomPrefix.append(manglePrefix);
+      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      // increment mangleIndex_ until the type is not defined
+      while (get_type(c10::QualifiedName(atoms))) {
+        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      }
       return QualifiedName(atoms);
     }
   }
