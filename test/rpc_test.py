@@ -1298,7 +1298,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     def test_sender_exceptions(self):
-        print("FOOOOOOOO")
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
