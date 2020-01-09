@@ -10,15 +10,15 @@ const EllipsisIndexType Ellipsis = EllipsisIndexType();
 Slice::Slice() {}
 Slice::Slice(int64_t start, int64_t stop, int64_t step) : start_(start), stop_(stop), step_(step) {}
 
-const int64_t& Slice::start() const {
+int64_t Slice::start() const {
   return start_;
 }
 
-const int64_t& Slice::stop() const {
+int64_t Slice::stop() const {
   return stop_;
 }
 
-const int64_t& Slice::step() const {
+int64_t Slice::step() const {
   return step_;
 }
 
