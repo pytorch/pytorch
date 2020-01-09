@@ -218,7 +218,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   // fetch data
   return_t results[vt];
-  at::detail::Array<arg_t, arity> args[vt];
+  arg_t args[vt][arity];
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
