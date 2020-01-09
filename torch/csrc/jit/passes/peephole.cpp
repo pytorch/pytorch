@@ -210,22 +210,6 @@ struct PeepholeOptimizeImpl {
         continue;
       }
 
-      // if (aliasDb_->mayContainAlias(
-      //         node->outputs(), node->owningGraph()->outputs()) &&
-      //     (aliasDb_->mayContainAlias(
-      //          node->inputs(), node->owningGraph()->inputs()) ||
-      //      aliasDb_->mayContainAlias(
-      //          node->inputs(), node->owningGraph()->outputs()))) {
-      //   continue;
-      // }
-
-      // also, if there are writes to either inputs or outputs
-      // the peephole transformations are invalid
-
-      if (aliasDb_->hasWriters(node)) {
-        continue;
-      }
-
       // XXX: remember that if you want to simplify an expression by combining
       // multiple nodes into a different one, then you need to check that they
       // all belong to the given block
