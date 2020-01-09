@@ -144,14 +144,7 @@ def _cpu_deserialize(obj, location):
 
 
 def validate_cuda_device(location):
-    if isinstance(location, torch.device):
-        location = str(location)
-    if not isinstance(location, _string_classes):
-        raise ValueError("location should be a string or torch.device")
-    if location[5:] == '':
-        device = 0
-    else:
-        device = max(int(location[5:]), 0)
+    device = torch.cuda._utils._get_device_index(location, True)
 
     if not torch.cuda.is_available():
         raise RuntimeError('Attempting to deserialize object on a CUDA '

@@ -23,5 +23,6 @@
             name: ecr_gc_job_for_tensorcomp
             project: tensorcomp
             tags_to_keep: "34"
+      - docker_hub_index_job
 
 
