@@ -402,60 +402,6 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
   }
 }
 
-void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_HALF)
-  return THError("clshift is not supported for torch.HalfTensor");
-#endif
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD,
-          [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_FLOAT)
-          rp[i] = tp[i] * powf(2, sp[i]);
-#elif defined(TH_REAL_IS_DOUBLE)
-          rp[i] = tp[i] * pow(2, sp[i]);
-#elif defined(TH_REAL_IS_BYTE)
-          rp[i] = ((scalar_t) tp[i]) << sp[i];
-#else
-          rp[i] = ((ureal) tp[i]) << sp[i];
-#endif
-        }
-      });
-    } else {
-#if defined(TH_REAL_IS_FLOAT)
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#elif defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#elif defined(TH_REAL_IS_BYTE)
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-    }
-  } else {
-#if defined(TH_REAL_IS_FLOAT)
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * powf(2, *src_data););
-#elif defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * pow(2, *src_data););
-#elif defined(TH_REAL_IS_BYTE)
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) << *src_data;);
-#else
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) << *src_data;);
-#endif
-  }
-}
-
 void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_HALF)

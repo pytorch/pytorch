@@ -115,6 +115,7 @@ namespace native {
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(geometric_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -183,9 +184,17 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+
 Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& geometric_(Tensor& self, double p, Generator* gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_stub(iter.device_type(), iter, p, gen);
   return self;
 }
 
