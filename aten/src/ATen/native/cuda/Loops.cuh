@@ -218,7 +218,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   // fetch data
   return_t results[vt];
-  at::detail::Array<arg_t, arity> args[vt];
+  at::detail::Array<arg_t, arity> args[vt] = {{ arg_t(0) }};
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
@@ -262,7 +262,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  return_t results[vt];
+  return_t results[vt] = { return_t(0) };
 
   // compute
   #pragma unroll
