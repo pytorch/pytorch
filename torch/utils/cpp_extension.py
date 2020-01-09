@@ -50,6 +50,28 @@ def _find_cuda_home():
         print("No CUDA runtime is found, using CUDA_HOME='{}'".format(cuda_home))
     return cuda_home
 
+def _find_rocm_home():
+    '''Finds the ROCm install path.'''
+    # Guess #1
+    rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
+    if rocm_home is None:
+        # Guess #2
+        try:
+            hipcc = subprocess.check_output(
+                ['which', 'hipcc']).decode().rstrip('\r\n')
+            # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
+            rocm_home = os.path.dirname(os.path.dirname(hipcc))
+            if os.path.basename(rocm_home) == 'hip':
+                rocm_home = os.path.dirname(hipcc)
+        except Exception:
+            # Guess #3
+            rocm_home = '/opt/rocm'
+            if not os.path.exists(rocm_home):
+                rocm_home = None
+    if rocm_home and not torch.cuda.is_available():
+        print("No ROCm runtime is found, using ROCM_HOME='{}'".format(rocm_home))
+    return rocm_home
+
 
 MINIMUM_GCC_VERSION = (4, 9, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
@@ -85,9 +107,10 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
-HIP_COMP = os.path.exists('/opt/rocm')
-CUDA_HOME = ('/opt/rocm' if HIP_COMP else _find_cuda_home())
-CUDNN_HOME = ('/opt/rocm/miopen' if HIP_COMP else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
+ROCM_HOME = _find_rocm_home()
+HIP_COMP = os.path.exists(ROCM_HOME) # redundant with ROCM_HOME, but for backwards compatibilty
+CUDA_HOME = (ROCM_HOME if ROCM_HOME else _find_cuda_home())
+CUDNN_HOME = (_join_rocm_home('miopen') if ROCM_HOME else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
@@ -284,13 +307,13 @@ class BuildExtension(build_ext, object):
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
-                    nvcc = (_join_cuda_home('bin', 'hipcc') if HIP_COMP else _join_cuda_home('bin', 'nvcc'))
+                    nvcc = (_join_rocm_home('bin', 'hipcc') if ROCM_HOME else _join_cuda_home('bin', 'nvcc'))
                     if not isinstance(nvcc, list):
                         nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    if HIP_COMP:
+                    if ROCM_HOME:
                         cflags = COMMON_HIPCC_FLAGS + cflags
                     else:
                         cflags = COMMON_NVCC_FLAGS + ['--compiler-options',
@@ -300,7 +323,8 @@ class BuildExtension(build_ext, object):
                 # NVCC does not allow multiple -std to be passed, so we avoid
                 # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
-                    cflags.append('-std=c++14')
+                    if ROCM_HOME or not _is_cuda_file(src):
+                        cflags.append('-std=c++14')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -507,7 +531,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
-    if not HIP_COMP:
+    if not ROCM_HOME:
         libraries.append('cudart')
     libraries.append('c10')
     libraries.append('c10_cuda')
@@ -548,7 +572,12 @@ def include_paths(cuda=False):
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
-    if cuda:
+    if cuda and ROCM_HOME:
+        paths.append(os.path.join(lib_include, 'THH'))
+        paths.append(_join_rocm_home('include'))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, 'include'))
+    elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
         # but gcc doesn't like having /usr/include passed explicitly
@@ -577,7 +606,10 @@ def library_paths(cuda=False):
     lib_path = os.path.join(torch_path, 'lib')
     paths.append(lib_path)
 
-    if cuda:
+    if cuda and ROCM_HOME:
+        lib_dir = 'lib'
+        paths.append(_join_rocm_home(lib_dir))
+    elif cuda:
         if IS_WINDOWS:
             lib_dir = 'lib/x64'
         else:
@@ -1272,6 +1304,22 @@ def _join_cuda_home(*paths):
         raise EnvironmentError('CUDA_HOME environment variable is not set. '
                                'Please set it to your CUDA install root.')
     return os.path.join(CUDA_HOME, *paths)
+
+
+def _join_rocm_home(*paths):
+    '''
+    Joins paths with ROCM_HOME, or raises an error if it ROCM_HOME is not set.
+
+    This is basically a lazy way of raising an error for missing $ROCM_HOME
+    only once we need to get any ROCm-specific path.
+    '''
+    if ROCM_HOME is None:
+        raise EnvironmentError('ROCM_HOME environment variable is not set. '
+                               'Please set it to your ROCm install root.')
+    elif IS_WINDOWS:
+        raise EnvironmentError('Building PyTorch extensions using '
+                               'ROCm and Windows is not supported.')
+    return os.path.join(ROCM_HOME, *paths)
 
 
 def _is_cuda_file(path):
