@@ -3482,6 +3482,23 @@ class TestNN(NNTestCase):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
 
+    def test_multihead_attn_3d_attn_mask(self):
+        embed_dim = 8
+        num_heads = 4
+        batch_size = 2
+        src_len = 3
+        tgt_len = 2
+
+        query = torch.rand(src_len, batch_size, embed_dim)
+        key = torch.rand(tgt_len, batch_size, embed_dim)
+        value = key
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)
+        attn_mask_2d = torch.randint(0, 1, (tgt_len, src_len)).float()
+        attn_mask_2d = attn_mask_2d.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)) 
+        attn_mask_3d = torch.stack([attn_mask_2d] * (embed_dim * num_heads), dim=0)
+        self.assertEqual(mta_model(query, key, value, attn_mask=attn_mask_2d)[0],
+                         mta_model(query, key, value, attn_mask=attn_mask_3d)[0])
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
