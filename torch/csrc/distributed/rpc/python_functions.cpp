@@ -97,7 +97,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
       dst,
       std::move(*pythonRemoteCall).toMessage(),
       true /*forceGradRecording*/,
-      std::move(rf));
+      rf);
 }
 
 } // namespace
@@ -158,7 +158,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   return sendMessageWithAutograd(
-      agent, dst, std::move(*scriptCall).toMessage(), false, std::move(rf));
+      agent, dst, std::move(*scriptCall).toMessage(), false, rf);
 }
 
 PyRRef pyRemoteBuiltin(
@@ -182,11 +182,7 @@ PyRRef pyRemoteBuiltin(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
   auto fm = sendMessageWithAutograd(
-      agent,
-      dst,
-      std::move(*scriptRemoteCall).toMessage(),
-      false,
-      std::move(rf));
+      agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
@@ -207,7 +203,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       dst,
       std::move(*pythonCall).toMessage(),
       true /*forceGradRecording*/,
-      std::move(rf));
+      rf);
 }
 
 PyRRef pyRemotePythonUdf(
@@ -228,7 +224,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         userRRef->rrefId().toIValue(),
         userRRef->forkId().toIValue(),
-        std::move(rf));
+        rf);
 
     fm->addCallback(finishAcceptUserRRef);
     return PyRRef(userRRef);
@@ -242,7 +238,7 @@ PyRRef pyRemotePythonUdf(
         std::move(serializedPyObj),
         ownerRRef->rrefId().toIValue(),
         ownerRRef->rrefId().toIValue(),
-        std::move(rf));
+        rf);
 
     fm->addCallback(finishCreatingOwnerRRef);
     return PyRRef(ownerRRef);
