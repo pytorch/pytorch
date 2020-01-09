@@ -1,5 +1,5 @@
 from __future__ import division
-from future.builtins import round
+from builtins import round
 
 import numpy as np
 import unittest
