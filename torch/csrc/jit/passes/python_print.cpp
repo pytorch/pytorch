@@ -838,18 +838,16 @@ struct PythonPrintImpl {
     } else if (v.isTuple()) {
       const auto& elems = v.toTuple()->elements();
       ss << "(";
-      if (elems.size() == 1) {
-        printConstant(ss, elems[0]);
-        ss << ",)";
-      } else {
-        const char* delim = "";
-        for (const auto& ivalue : elems) {
-          ss << delim;
-          printConstant(ss, ivalue);
-          delim = ", ";
-        }
-        ss << ")";
+      const char* delim = "";
+      for (const auto& ivalue : elems) {
+        ss << delim;
+        printConstant(ss, ivalue);
+        delim = ", ";
       }
+      if (elems.size() == 1) {
+        ss << ",";
+      }
+      ss << ")";
     } else {
       ss << v;
     }
