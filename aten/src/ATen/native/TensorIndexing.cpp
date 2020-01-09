@@ -23,7 +23,7 @@ const int64_t& Slice::step() const {
 }
 
 std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
-  stream << "{" << slice.start() << ", " << slice.stop() << ", " << slice.step() << "}";
+  stream << slice.start() << ":" << slice.stop() << ":" << slice.step();
   return stream;
 }
 
@@ -40,7 +40,7 @@ Slice unpackSlice(
     if (step == 0) {
       TORCH_CHECK(false, "slice step cannot be zero");
     }
-    // Here *step might be -INDEX_MAX-1; in this case we replace it
+    // Here step might be -INDEX_MAX-1; in this case we replace it
     // with -INDEX_MAX.  This doesn't affect the semantics, and it
     // guards against later undefined behaviour resulting from code that
     // does "step = -step" as part of a slice reversal.
