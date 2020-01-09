@@ -158,6 +158,50 @@ void bitwise_xor_kernel(TensorIterator& iter) {
   }
 }
 
+template<typename scalar_t>
+static inline scalar_t lshift_wrapper(scalar_t a, scalar_t b) {
+  return a << b;
+}
+
+static inline int8_t lshift_wrapper(int8_t a, int8_t b) {
+  return ((uint8_t)a) << b;
+}
+
+static inline int16_t lshift_wrapper(int16_t a, int16_t b) {
+  return ((uint16_t)a) << b;
+}
+
+static inline int32_t lshift_wrapper(int32_t a, int32_t b) {
+  return ((uint32_t)a) << b;
+}
+
+static inline int64_t lshift_wrapper(int64_t a, int64_t b) {
+  return ((uint64_t)a) << b;
+}
+
+void lshift_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "lshift_cpu", [&]() {
+      auto base_vec = Vec256<scalar_t>((scalar_t)(2));
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return a * std::pow((scalar_t)(2), b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          return a * base_vec.pow(b);
+      });
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return lshift_wrapper(a, b);
+      });
+    });
+  }
+}
+
 void logical_and_kernel(TensorIterator& iter) {
   // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
   // common_dtype() is unavailable for bfloat16.
@@ -386,6 +430,7 @@ REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
+REGISTER_DISPATCH(lshift_stub, &lshift_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
