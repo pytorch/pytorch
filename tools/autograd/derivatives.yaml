@@ -93,6 +93,10 @@
 #
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
+
+# test on ghstack
+#
+
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
