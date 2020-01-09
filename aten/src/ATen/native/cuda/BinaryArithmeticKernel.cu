@@ -1,9 +1,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/zmath.cuh>
-#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
