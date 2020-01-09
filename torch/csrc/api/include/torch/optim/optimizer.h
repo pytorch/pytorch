@@ -67,7 +67,7 @@ class TORCH_API OptimizerParamGroup {
   // NOTE: In order to store `OptimizerParamGroup` in a `std::vector`, it has to be copy-constructible.
   OptimizerParamGroup(const OptimizerParamGroup& param_group) : params_(param_group.params()), options_(param_group.has_options() ? param_group.options().clone() : nullptr) {}
   OptimizerParamGroup(std::vector<Tensor> params) : params_(std::move(params)) {}
-  OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptions> options) : params_(params), options_(std::move(options)) {}
+  OptimizerParamGroup(std::vector<Tensor> params, std::unique_ptr<OptimizerOptions> options) : params_(std::move(params)), options_(std::move(options)) {}
 
   bool has_options() const;
   OptimizerOptions& options();

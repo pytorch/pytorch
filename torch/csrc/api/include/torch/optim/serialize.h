@@ -41,13 +41,13 @@ namespace detail {
     }
   }
 
-  // Utility function to save param_sgroups
+  // Utility function to save param_groups
   template <typename DerivedOptimizerParamOptions>
   void serialize(
       serialize::OutputArchive& archive,
       const std::vector<OptimizerParamGroup>& param_groups) {
     for (size_t i = 0; i < param_groups.size(); i++) {
-      serialize::OutputArchive param_group_archive(archive.compilation_unit()); // For each OptimizerParamState
+      serialize::OutputArchive param_group_archive(archive.compilation_unit()); // For each OptimizerParamGroup
       std::vector<Tensor> params = param_groups[i].params();
       param_group_archive.write(
           "params/size", torch::tensor(static_cast<int64_t>(params.size())));

@@ -12,11 +12,11 @@
 namespace torch {
 namespace optim {
 
-AdagradOptions::AdagradOptions(double learning_rate)
-    : learning_rate_(learning_rate) {}
+AdagradOptions::AdagradOptions(double lr)
+    : lr_(lr) {}
 
 bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
-  return (lhs.learning_rate() == rhs.learning_rate()) &&
+  return (lhs.lr() == rhs.lr()) &&
           (lhs.lr_decay() == rhs.lr_decay()) &&
           (lhs.weight_decay() == rhs.weight_decay()) &&
           (lhs.initial_accumulator_value() == rhs.initial_accumulator_value()) &&
@@ -24,7 +24,7 @@ bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
 }
 
 void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(learning_rate);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(initial_accumulator_value);
@@ -32,7 +32,7 @@ void AdagradOptions::serialize(torch::serialize::OutputArchive& archive) const {
 }
 
 void AdagradOptions::serialize(torch::serialize::InputArchive& archive) {
-  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, learning_rate);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, initial_accumulator_value);
@@ -73,7 +73,7 @@ void Adagrad::step() {
         TORCH_CHECK(!p.grad().data().is_sparse(), "weight_decay option is not compatible with sparse gradients");
         grad = grad.add(p.data(), options.weight_decay());
       }
-      const auto clr = options.learning_rate() /
+      const auto clr = options.lr() /
           (1 + (state.step() - 1) * options.lr_decay());
 
       if (grad.is_sparse()) {
