@@ -45,12 +45,14 @@ namespace torch { namespace autograd {
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) If var is not a CUDA variable, accumulation happens on var's device.
-  //  (2) If var is a CUDA variable, and the producer and consumer share its device, then:
+  //  (1) If the variable is not a CUDA variable, accumulation happens on the
+  //      device of the variable.
+  //  (2) If the variable is a CUDA variable, and the producer and consumer
+  //      share its device, then:
   //        (2a) if the producer and consumer do not share a stream,
   //             the consumer is synced with the producer.
   //        (2b) accumulation happens on the consumer's stream
-  //  (3) If var is a CUDA variable but it, the producer, and the
+  //  (3) If the variable is a CUDA variable but it, the producer, and the
   //      consumer are on multiple devices, then:
   //        (3a) We assume var was created on its device's current stream.
   //             We further assume (and assert) that var's device's current stream
