@@ -73,7 +73,6 @@ TensorIndex::TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) 
 }
 TensorIndex::TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
 TensorIndex::TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
-TensorIndex::TensorIndex(bool boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 TensorIndex::TensorIndex(std::initializer_list<c10::optional<int64_t>> init_list)
     : type_(TensorIndexType::Slice) {
   if (init_list.size() == 0) {
