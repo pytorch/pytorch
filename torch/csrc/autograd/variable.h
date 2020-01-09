@@ -145,6 +145,10 @@ namespace impl {
   /// Variable.
   TORCH_API void rebase_history(const Variable&, Edge gradient_edge);
 
+  /// Mark a view such that its history cannot be rebased.
+  /// This is only valid to call on views.
+  TORCH_API void disable_rebase_history(Variable&);
+
   /// Gets the raw gradient function pointer, whatever it currently is.
   TORCH_API Node* grad_fn_unsafe(const Variable&);
 
@@ -323,6 +327,10 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// grad_fn field is stale if attr_version !=
   /// version_counter.current_version().
   uint32_t attr_version;
+
+  /// Boolean flag that signifies if the history of this Tensor can be rebased
+  /// or if it is forbidden.
+  bool allow_rebase_history;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
