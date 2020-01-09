@@ -206,14 +206,18 @@ struct PeepholeOptimizeImpl {
         changed_ = false;
       }
 
-      if (aliasDb_->mayContainAlias(
-              node->outputs(), node->owningGraph()->outputs()) &&
-          (aliasDb_->mayContainAlias(
-               node->inputs(), node->owningGraph()->inputs()) ||
-           aliasDb_->mayContainAlias(
-               node->inputs(), node->owningGraph()->outputs()))) {
+      if(!aliasDb_->safeToChangeAliasingRelationship(node->inputs(), node->outputs())) {
         continue;
       }
+
+      // if (aliasDb_->mayContainAlias(
+      //         node->outputs(), node->owningGraph()->outputs()) &&
+      //     (aliasDb_->mayContainAlias(
+      //          node->inputs(), node->owningGraph()->inputs()) ||
+      //      aliasDb_->mayContainAlias(
+      //          node->inputs(), node->owningGraph()->outputs()))) {
+      //   continue;
+      // }
 
       // also, if there are writes to either inputs or outputs
       // the peephole transformations are invalid
