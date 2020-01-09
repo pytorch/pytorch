@@ -7,7 +7,7 @@ set -ex
 
 if [[ "$CLANG_VERSION" == "6.0" || "$CLANG_VERSION" == "7" || "$CLANG_VERSION" == "8" ]]; then
   apt-get update
-  apt-get install -y --no-install-recommends software-properties-common wget
+  apt-get install -y --no-install-recommends software-properties-common wget gpg-agent
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
   if [[ "$UBUNTU_VERSION" == 16.04 ]]; then
       apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-${CLANG_VERSION} main"
