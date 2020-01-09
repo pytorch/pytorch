@@ -2002,7 +2002,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 out = []
                 for i in range(-2, 2):
-                    out.append(torch.sort(x, dim=i,descending=True))
+                    out.append(torch.sort(x, dim=i, descending=True))
                 return out
 
         x = torch.randn(3, 4)
