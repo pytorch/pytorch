@@ -16,9 +16,10 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
+
+namespace {
 
 /* Computes the spatial 2D max pooling with dilation.
 

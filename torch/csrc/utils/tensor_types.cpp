@@ -28,13 +28,19 @@ static const char* backend_to_string(const at::Backend& backend) {
   }
 }
 
+std::string options_to_string(const at::TensorOptions options) {
+  std::ostringstream ss;
+  ss << backend_to_string(options.backend()) << "." << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
+  return ss.str();
+}
+
 std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   std::ostringstream ss;
   ss << backend_to_string(type.backend()) << "." << toString(type.scalarType()) << "Tensor";
   return ss.str();
 }
 
-at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
+at::TensorOptions options_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
   static std::once_flag cpu_once;
   static std::once_flag cuda_once;
@@ -46,7 +52,7 @@ at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
   if (str == "torch.Tensor") {
     auto backend = tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id());
     auto scalar_type = torch::tensors::get_default_scalar_type();
-    return &getDeprecatedTypeProperties(backend, scalar_type);
+    return getDeprecatedTypeProperties(backend, scalar_type).options();
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {
@@ -70,7 +76,7 @@ at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
   if (it == map->end()) {
     throw ValueError("invalid type: '%s'", str.c_str());
   }
-  return it->second;
+  return it->second->options();
 }
 
 std::vector<std::pair<Backend, ScalarType>> all_declared_types() {

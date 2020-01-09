@@ -57,7 +57,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   } else if (ivalue.isTensor()) {
     return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
   } else {
-    throw std::runtime_error("Can't hash IValues with this tag");
+    throw std::runtime_error(
+        "Can't hash IValues with tag '" + ivalue.tagKind() + "'");
   }
 }
 

@@ -110,7 +110,7 @@ namespace {
 
   TEST(BFloat16Math, Substraction) {
     // This test verifies that if only first 7 bits of float's mantisa are
-    // changed after substraction, we should have no loss in precision.
+    // changed after subtraction, we should have no loss in precision.
 
     // input bits
     // S | Exponent | Mantissa

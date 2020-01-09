@@ -140,7 +140,7 @@ void storeLastDimension<bool>(
   }
 }
 
-// refernce python implementation recursive_store in tensor_new.cpp
+// reference python implementation recursive_store in tensor_new.cpp
 
 void recursiveStore(
     char* data,

@@ -88,7 +88,7 @@ void OutputMinMaxObserver::Stop() {
       continue;
     }
     Tensor* tensor = subject_->template Output<Tensor>(i, CPU);
-    if (tensor->numel() == 0 || tensor->numel() == -1)
+    if (!tensor || tensor->numel() == 0 || tensor->numel() == -1)
       continue;
     string out_name(subject_->debug_def().output(i));
 
@@ -266,7 +266,7 @@ void HistogramObserver::Stop() {
       continue;
     }
     Tensor* tensor = subject_->template Output<Tensor>(i, CPU);
-    if (tensor->numel() == 0 || tensor->numel() == -1) {
+    if (!tensor || tensor->numel() == 0 || tensor->numel() == -1) {
       continue;
     }
 
@@ -337,7 +337,7 @@ void OutputColumnMaxHistogramObserver::Stop() {
     return;
   }
   Tensor* tensor = subject_->template Output<Tensor>(col_max_blob_idx_, CPU);
-  if (tensor->numel() == 0 || tensor->numel() == -1) {
+  if (!tensor || tensor->numel() == 0 || tensor->numel() == -1) {
     return;
   }
 
