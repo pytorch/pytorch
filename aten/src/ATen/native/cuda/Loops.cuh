@@ -36,7 +36,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
-#include <c10/util/C++17.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
