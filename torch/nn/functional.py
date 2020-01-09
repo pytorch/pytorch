@@ -3408,7 +3408,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         assert attn_mask.dim() == 2 or attn_mask.dim() == 3, "The dim of attn_mask is not supported."
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
-        if attn_mask.dim() == 3:
+        elif attn_mask.dim() == 3:
             assert list(attn_mask.size()) == [bsz * num_heads, tgt_len, src_len], "The size of the 3D attn_mask is not correct."
 
         attn_output_weights += attn_mask
