@@ -89,6 +89,10 @@ bool attributesEqual(
 
 bool ivaluesEqual(const IValue& a1, const IValue& a2);
 
+bool attributesEqual(const IValue& a1, const IValue& a2) {
+  return ivaluesEqual(a1, a2);
+}
+
 std::vector<std::string> toStringList(const IValue& val) {
   std::vector<std::string> ss;
   auto generic_list = val.toGenericListRef();
@@ -99,8 +103,8 @@ std::vector<std::string> toStringList(const IValue& val) {
 }
 
 bool attributesEqual(
-    const c10::intrusive_ptr<at::ivalue::Tuple> a1,
-    const c10::intrusive_ptr<at::ivalue::Tuple> a2) {
+    const c10::intrusive_ptr<at::ivalue::Tuple>& a1,
+    const c10::intrusive_ptr<at::ivalue::Tuple>& a2) {
   if (a1->elements().size() != a2->elements().size()) {
     return false;
   }
@@ -190,7 +194,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(ss)
       COMPARE_ATTRIBUTEVALUE(t)
       COMPARE_ATTRIBUTEVALUE(ts)
-      COMPARE_ATTRIBUTEVALUE(tup)
+      COMPARE_ATTRIBUTEVALUE(ival)
       case AttributeKind::ty:
         if (*lhs->ty(name) != *rhs->ty(name)) {
           return false;

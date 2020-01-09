@@ -123,12 +123,12 @@ PRINT_LIST(c10::List, int64_t, item)
 
 /* use ivalue printing to corretly format floats with no decimal */
 PRINT_LIST(std::vector, double, IValue(item))
-PRINT_LIST(c10::List, double, IValue(item))
+    PRINT_LIST(c10::List, double, IValue(item))
 
-// bool[] attributes stored as int64_t[], no need for std::vector overload
-PRINT_LIST(c10::List, bool, item)
+    // bool[] attributes stored as int64_t[], no need for std::vector overload
+    PRINT_LIST(c10::List, bool, item)
 
-static void printAttribute(std::ostream& out, const std::string& attr) {
+        static void printAttribute(std::ostream& out, const std::string& attr) {
   c10::printQuotedString(out, attr);
 }
 
@@ -183,42 +183,50 @@ static void printAttribute(
 
 static void printAttribute(
     std::ostream& out,
-    const c10::intrusive_ptr<at::ivalue::Tuple> attr) {
+    const c10::intrusive_ptr<at::ivalue::Tuple>& attr);
+
+static void printAttribute(std::ostream& out, const IValue& ival) {
 #define PRINT_IVALUE(type)                \
-  if (elem.is##type()) {                  \
-    printAttribute(out, elem.to##type()); \
-    continue;                             \
+  if (ival.is##type()) {                  \
+    printAttribute(out, ival.to##type()); \
+    return;                               \
   };
+  PRINT_IVALUE(Int)
+  PRINT_IVALUE(IntList)
+  PRINT_IVALUE(Bool)
+  PRINT_IVALUE(BoolList)
+  PRINT_IVALUE(Double)
+  PRINT_IVALUE(DoubleList)
+  PRINT_IVALUE(Tensor)
+  PRINT_IVALUE(TensorList)
+  PRINT_IVALUE(Tuple)
+  if (ival.isString()) {
+    printAttribute(out, ival.toStringRef());
+    return;
+  }
+  if (ival.type()->isSubtypeOf(ListType::ofStrings())) {
+    auto str_list = ival.toGenericListRef();
+    printAttribute(out, fmap(str_list, [](const IValue& ival) {
+                     return ival.toStringRef();
+                   }));
+    return;
+  }
+  if (ival.isNone()) {
+    out << "None";
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+static void printAttribute(
+    std::ostream& out,
+    const c10::intrusive_ptr<at::ivalue::Tuple>& attr) {
   out << "(";
   const char* delim = "";
   for (const auto& elem : attr->elements()) {
     out << delim;
+    printAttribute(out, elem);
     delim = ", ";
-    PRINT_IVALUE(Int)
-    PRINT_IVALUE(IntList)
-    PRINT_IVALUE(Bool)
-    PRINT_IVALUE(BoolList)
-    PRINT_IVALUE(Double)
-    PRINT_IVALUE(DoubleList)
-    PRINT_IVALUE(Tensor)
-    PRINT_IVALUE(TensorList)
-    PRINT_IVALUE(Tuple)
-    if (elem.isString()) {
-      printAttribute(out, elem.toStringRef());
-      continue;
-    }
-    if (elem.type()->isSubtypeOf(ListType::ofStrings())) {
-      auto str_list = elem.toGenericListRef();
-      printAttribute(out, fmap(str_list, [](const IValue& ival) {
-                       return ival.toStringRef();
-                     }));
-      continue;
-    }
-    if (elem.isNone()) {
-      out << "None";
-      continue;
-    }
-    TORCH_INTERNAL_ASSERT(false);
   }
   if (attr->elements().size() == 1) {
     out << ",";
@@ -254,7 +262,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
     PRINT_ATTRIBUTE(ss)
     PRINT_ATTRIBUTE(t)
     PRINT_ATTRIBUTE(ts)
-    PRINT_ATTRIBUTE(tup)
+    PRINT_ATTRIBUTE(ival)
     case AttributeKind::g:
       out << "<Graph>";
       break;

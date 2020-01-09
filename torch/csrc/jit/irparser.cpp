@@ -264,7 +264,10 @@ void IRParser::parseAttr(Node* n) {
   };
   SET_SCALARATTR(Int, i_);
   SET_SCALARATTR(Double, f_);
-  SET_SCALARATTR(Tuple, tup_);
+  if (attr.isTuple()) {
+    n->ival_(Symbol::attr(attrname), attr);
+    return;
+  }
   if (attr.isString()) {
     n->s_(Symbol::attr(attrname), attr.toStringRef());
     return;
