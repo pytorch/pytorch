@@ -536,8 +536,8 @@ class RpcTest(RpcAgentTestFixture):
 
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
         dst = (self.rank + 1) % self.world_size
-        # only run profiler on rank 0.
-        if self.rank in {0}:
+        # only run profiler on rank 1.
+        if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
                 if rpc_exec_mode == RPCExecMode.SYNC:
                     rpc.rpc_sync("worker{}".format(dst), func, args=args)
@@ -1120,7 +1120,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1148,16 +1148,18 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-
-        rpc.shutdown()
+            rpc.shutdown(graceful=True)
+        else:
+            api._ignore_rref_leak = False
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):

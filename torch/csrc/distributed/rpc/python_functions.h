@@ -15,7 +15,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs);
 
@@ -24,13 +24,13 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf);
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs);
 
@@ -39,7 +39,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf);
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 } // namespace rpc
 } // namespace distributed

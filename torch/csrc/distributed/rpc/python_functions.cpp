@@ -86,7 +86,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -151,7 +151,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -165,7 +165,7 @@ PyRRef pyRemoteBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -198,7 +198,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto pythonCall = std::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
@@ -215,7 +215,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));

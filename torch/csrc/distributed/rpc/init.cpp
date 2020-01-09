@@ -269,7 +269,7 @@ If the future completes with an error, an exception is thrown.
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
-         std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         return pyRpcBuiltin(agent, dst, opName, std::move(rf), args, kwargs);
@@ -281,7 +281,7 @@ If the future completes with an error, an exception is thrown.
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
         return pyRpcPythonUdf(
             agent, dst, pickledPythonUDF, tensors, std::move(rf));
       },
@@ -296,7 +296,7 @@ If the future completes with an error, an exception is thrown.
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
-         std::shared_ptr<torch::autograd::profiler::RecordFunction> rf,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         return pyRemoteBuiltin(agent, dst, opName, std::move(rf), args, kwargs);
@@ -308,7 +308,7 @@ If the future completes with an error, an exception is thrown.
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         std::shared_ptr<torch::autograd::profiler::RecordFunction> rf) {
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
         return pyRemotePythonUdf(
             agent, dst, pickledPythonUDF, tensors, std::move(rf));
       },
