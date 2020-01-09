@@ -87,6 +87,7 @@ WINDOWS_BLACKLIST = [
     'rpc_spawn',
     'dist_autograd_fork',
     'dist_autograd_spawn',
+    'dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
