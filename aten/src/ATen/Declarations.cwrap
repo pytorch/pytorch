@@ -1368,18 +1368,6 @@
     - double lambd
     - THGenerator* generator
 ]]
-[[
-  name: _th_geometric_
-  backends:
-    - CPU
-  cname: geometric
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double p
-    - THGenerator* generator
-]]
 
 [[
   name: _th_copy_ignoring_overlaps_

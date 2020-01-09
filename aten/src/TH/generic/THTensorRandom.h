@@ -8,7 +8,6 @@
 TH_API void THTensor_(random)(THTensor *self, at::Generator *_generator);
 TH_API void THTensor_(clampedRandom)(THTensor *self, int64_t min, int64_t max, at::Generator *_generator);
 TH_API void THTensor_(cappedRandom)(THTensor *self, int64_t max, at::Generator *_generator);
-TH_API void THTensor_(geometric)(THTensor *self, double p, at::Generator *_generator);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, at::Generator *_generator, THTensor *p);
