@@ -136,7 +136,7 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     fut->addCallback(
         [rf](
             const Message& /* unused */,
-            const c10::optional<utils::FutureError>& /* unused */) mutable {
+            const c10::optional<utils::FutureError>& /* unused */) {
           rf->end();
         });
   }

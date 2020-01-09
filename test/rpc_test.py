@@ -573,18 +573,27 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(rpc_event.count, 1)
 
     @dist_init
-    def test_profiler_with_sync_rpc(self):
+    def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
-    def test_profiler_with_async_rpc(self):
+    def test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
-    def test_profiler_with_remote(self):
+    def test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
