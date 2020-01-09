@@ -30,9 +30,7 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
-# A map: function name => two options:
-#      1. name of the argument that all outputs are view of
-#      2. map: output idx => name of the argument that this result is view of
+# A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',

@@ -769,47 +769,26 @@ def emit_body(declaration):
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
             tensor_output_vars = {r['name'] for r in returns if 'Tensor' in r['type']}
-            if not isinstance(view_info, dict):
-                if len(differentiable_output_vars) == len(tensor_output_vars):
-                    # all outputs are differentiable
-                    return 'as_view({}, {}, true)'.format(view_info, call), []
-                elif len(differentiable_output_vars) == 0:
-                    # no output is differentiable
-                    return 'as_view({}, {}, false)'.format(view_info, call), []
-                else:
-                    # some of the outputs are differentiable
-                    # need to expand to dict mode, i.e., one entry per output
-                    base_name = view_info
-                    view_info_dict = {}
-                    for i, return_info in enumerate(returns):
-                        if 'Tensor' in return_info['type']:
-                            view_info_dict[i] = base_name
+
+            if not isinstance(view_info, str):
+                raise TypeError("The view info should be a string for {}".format(base_name))
+
+            if len(differentiable_output_vars) == 0:
+                # no output is differentiable
+                return 'as_view({}, {}, false)'.format(view_info, call), []
+            elif len(differentiable_output_vars) == 1:
+                # Single differentiable output
+                extra = []
+                is_differentiable_view = 'true'
+                wrapped_call = 'as_view({}, {}, {})'.format(view_info, call, is_differentiable_view)
+                return_info = returns[0]
+                if return_info['type'] != 'Tensor':
+                    # We return a collection of Tensors so we disallow rebase history
+                    extra.append('disable_rebase_history({});'.format(return_info['name']))
+                return wrapped_call, extra
             else:
-                view_info_dict = view_info
-
-            def wrap_view_single(output_var, base_var):
-                fmt = '{output_var} = as_view({base_var}, {output_var}, {is_differentiable});'
-                if output_var in differentiable_output_vars:
-                    # If `GradMode::is_enabled()` is False, this is a
-                    # non-differentiable view. Gradients should not flow through.
-                    is_differentiable = 'true'
-                else:
-                    # This output is non-differentiable, so it is a
-                    # non-differentiable view. Gradients should not flow through.
-                    is_differentiable = 'false'
-                return fmt.format(output_var=output_var, base_var=base_var,
-                                  is_differentiable=is_differentiable)
-
-            extra_wrapping_stmts = []
-            for output_idx, return_info in enumerate(returns):
-                if 'Tensor' not in return_info['type']:
-                    assert output_idx not in view_info_dict, 'Can not wrap non-Tensor output as a view'
-                    continue
-                output_var = return_info['name']
-                if output_idx in view_info_dict:
-                    stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                extra_wrapping_stmts.append(stmt)
-            return call, extra_wrapping_stmts
+                raise RuntimeError("Function that return multiple differentiable output "
+                                   "when at least one of them is view is not supported.")
         else:
             return 'std::move({})'.format(call), []
 
@@ -867,6 +846,7 @@ def emit_body(declaration):
             call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
+        call += '\n'
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
