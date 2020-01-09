@@ -180,12 +180,29 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   return *optimized_plan_;
 }
 
-std::shared_ptr<Graph> ProfilingGraphExecutorImpl::_getProfiledGraph() const {
-  if (!pr_ || !optimized_plan_) {
-    return {nullptr};
+static void removeProfileNodes(Block* b) {
+
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+      if (it->outputs().size() == 1) {
+      it->input(0)->setType(it->output()->type());
+      it->output()->replaceAllUsesWith(it->input(0));
+      }
+      it.destroyCurrent();
+    } else {
+      for (auto ib : it->blocks()) {
+        removeProfileNodes(ib);
+      }
+    }
   }
 
-  return optimized_plan_->graph->copy();
+}
+
+std::shared_ptr<Graph> ProfilingGraphExecutorImpl::_getProfiledGraph() const {
+  TORCH_INTERNAL_ASSERT(pr_, "the graph is supposed to be already profiled")
+  auto copy = pr_->profiled_graph_->copy();
+  //removeProfileNodes(copy->block());
+  return copy;
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {

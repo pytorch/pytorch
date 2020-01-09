@@ -990,6 +990,9 @@ void initJitScriptBindings(PyObject* module) {
             return g;
           })
       .def_property_readonly(
+          "_profiled_graph",
+          [](const StrongFunctionPtr& self) { return self.function_->get_executor().getProfiledGraph(); })
+      .def_property_readonly(
           "schema",
           [](const StrongFunctionPtr& self) {
             return self.function_->getSchema();
@@ -1054,6 +1057,11 @@ void initJitScriptBindings(PyObject* module) {
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         return script_compile_function(name, def, defaults, std::move(rcb));
       });
+  m.def(
+    "_profiled_graph",
+    [](Method& self) {
+      return self.get_executor().getProfiledGraph();
+    });
   m.def(
       "_jit_script_compile_overload",
       [](const std::string& qualname,
