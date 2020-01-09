@@ -98,6 +98,9 @@ struct PythonArgParser {
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
+  // Formatted strings of non-hidden signatures
+  std::vector<std::string> get_signatures() const;
+
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
