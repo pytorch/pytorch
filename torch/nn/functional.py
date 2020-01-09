@@ -3344,15 +3344,23 @@ def multi_head_attention_forward(query,                           # type: Tensor
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
     q = q * scaling
 
+    if attn_mask is not None:
+        assert attn_mask.dim() == 2 or attn_mask.dim() == 3, "The dim of attn_mask is not supported."
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0)
+        elif attn_mask.dim() == 3:
+            assert list(attn_mask.size()) == [bsz * num_heads, tgt_len, src_len], "The size of the 3D attn_mask is not correct."
+        # attn_mask's dim is 3 now.
+
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
                 attn_mask = torch.cat([attn_mask,
-                                      torch.zeros((attn_mask.size(0), 1),
+                                      torch.zeros((attn_mask.size(0), attn_mask.size(1), 1),
                                                   dtype=attn_mask.dtype,
-                                                  device=attn_mask.device)], dim=1)
+                                                  device=attn_mask.device)], dim=2)
             if key_padding_mask is not None:
                 key_padding_mask = torch.cat(
                     [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
@@ -3392,9 +3400,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
         v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
+            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), attn_mask.size(1), 1),
                                                           dtype=attn_mask.dtype,
-                                                          device=attn_mask.device)], dim=1)
+                                                          device=attn_mask.device)], dim=2)
         if key_padding_mask is not None:
             key_padding_mask = torch.cat(
                 [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
@@ -3405,12 +3413,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        assert attn_mask.dim() == 2 or attn_mask.dim() == 3, "The dim of attn_mask is not supported."
-        if attn_mask.dim() == 2:
-            attn_mask = attn_mask.unsqueeze(0)
-        elif attn_mask.dim() == 3:
-            assert list(attn_mask.size()) == [bsz * num_heads, tgt_len, src_len], "The size of the 3D attn_mask is not correct."
-
         attn_output_weights += attn_mask
 
     if key_padding_mask is not None:
