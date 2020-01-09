@@ -6194,8 +6194,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
     def test_batchnorm_large_batch(self, dtype=torch.float):
-        bn = nn.BatchNorm1d(1).to('cuda', dtype)
-        data = torch.rand(131072, 1, device="cuda", dtype=dtype)
+        bn = nn.BatchNorm2d(1).to('cuda', dtype)
+        data = torch.rand(880801, 1, 1, 1, device="cuda", dtype=dtype)
         out = bn(data).sum().backward()
 
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
