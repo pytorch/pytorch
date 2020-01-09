@@ -166,7 +166,7 @@ class TransformerEncoder(Module):
         r"""Pass the input through the encoder layers in turn.
 
         Args:
-            src: the sequnce to the encoder (required).
+            src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
@@ -215,7 +215,7 @@ class TransformerDecoder(Module):
 
         Args:
             tgt: the sequence to the decoder (required).
-            memory: the sequnce from the last layer of the encoder (required).
+            memory: the sequence from the last layer of the encoder (required).
             tgt_mask: the mask for the tgt sequence (optional).
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
@@ -283,7 +283,7 @@ class TransformerEncoderLayer(Module):
         r"""Pass the input through the encoder layer.
 
         Args:
-            src: the sequnce to the encoder layer (required).
+            src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
@@ -352,7 +352,7 @@ class TransformerDecoderLayer(Module):
 
         Args:
             tgt: the sequence to the decoder layer (required).
-            memory: the sequnce from the last layer of the encoder (required).
+            memory: the sequence from the last layer of the encoder (required).
             tgt_mask: the mask for the tgt sequence (optional).
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
