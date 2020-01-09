@@ -323,8 +323,7 @@ class BuildExtension(build_ext, object):
                 # NVCC does not allow multiple -std to be passed, so we avoid
                 # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
-                    if ROCM_HOME or not _is_cuda_file(src):
-                        cflags.append('-std=c++14')
+                    cflags.append('-std=c++14')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
