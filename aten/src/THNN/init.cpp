@@ -66,18 +66,3 @@
 
 #include <THNN/generic/GatedLinearUnit.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/LeakyReLU.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/LogSigmoid.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftMarginCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/RReLU.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftPlus.c>
-#include <TH/THGenerateFloatTypes.h>
