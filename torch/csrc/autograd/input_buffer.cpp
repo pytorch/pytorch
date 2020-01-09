@@ -92,16 +92,19 @@ namespace torch { namespace autograd {
       // Engine::evaluate_function).  For cross-device backward ops in particular, however, that stream guard
       // only sets the stream on the producer device (opt_producer_stream).  If the gradient (var) that the op
       // created is on a different device, that device wasn't affected by the stream guard.
-      // Therefore, var's device's current stream should be the ambient current stream that the backward
-      // thread holds for var's device, which should be that device's default stream.
+      // Therefore, if var is not on the producer device, var's device's current stream should be the
+      // ambient current stream that the backward thread holds for var's device, which should be that
+      // device's default stream.
       //
       // tldr: for case (3) we assume var was populated on its device's default stream.
 
       //  guard is a hack to access streams that will compile even if the build is CPU-only.
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
       const auto default_stream = guard.getDefaultStream(*device_of(var));
-      // double check our belief that the current stream on var's device is the default stream
-      TORCH_INTERNAL_ASSERT(guard.getStream(*device_of(var)) == default_stream);
+      if (!on_producer) {
+        // double check our belief that the current stream on var's device is the default stream
+        TORCH_INTERNAL_ASSERT(guard.getStream(*device_of(var)) == default_stream);
+      }
       opt_accumulate_stream = default_stream;
     }
   }
