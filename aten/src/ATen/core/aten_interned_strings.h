@@ -504,6 +504,7 @@ _(aten, ne) \
 _(aten, neg) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
+_(aten, bitwise_or) \
 _(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \

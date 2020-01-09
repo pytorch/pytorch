@@ -109,27 +109,9 @@ private:
   bool traceable;
 };
 
-struct PYBIND11_EXPORT FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt, int index);
-
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
-
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  std::vector<py::handle> overloaded_args;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
-  int index;
-  bool hidden;
-  bool deprecated;
-};
-
 struct PythonArgs {
-  PythonArgs(bool traceable, const FunctionSignature& signature, PyObject** args)
-    : idx(signature.index)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
+    : idx(idx)
     , traceable(traceable)
     , signature(signature)
     , args(args) {}
@@ -184,6 +166,23 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
+};
+
+struct PYBIND11_EXPORT FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt);
+
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  std::vector<py::handle> overloaded_args;
+  ssize_t min_args;
+  ssize_t max_args;
+  ssize_t max_pos_args;
+  bool hidden;
+  bool deprecated;
 };
 
 struct FunctionParameter {

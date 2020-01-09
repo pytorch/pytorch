@@ -7,7 +7,7 @@
 // has necessary diagnostic guards.
 #include <caffe2/core/common_gpu.h>
 #endif
-#if __HIP_DEVICE_COMPILE__
+#ifdef __HIP_DEVICE_COMPILE__
 #include <caffe2/core/hip/common_gpu.h>
 #endif
 
