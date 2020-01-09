@@ -3221,8 +3221,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer).
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer). A 2D mask will be unsqueezed
+            and applied for all the batches. A 3D mask allows different mask for each batch.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -3239,7 +3240,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          S is the source sequence length.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3402,7 +3405,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        attn_mask = attn_mask.unsqueeze(0)
+        assert attn_mask.dim() == 2 or attn_mask.dim() == 3, "The dim of attn_mask is not supported."
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0)
         attn_output_weights += attn_mask
 
     if key_padding_mask is not None:
