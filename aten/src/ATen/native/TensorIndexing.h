@@ -44,7 +44,7 @@ CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `None`                  | `at::indexing::None`
 // `Ellipsis`              | `at::indexing::Ellipsis`
 // `...`                   | `"..."`
-// `123`                   | `123`  
+// `123`                   | `123`
 // `True` / `False`        | `true` / `false`
 // `:`                     | `{}` / `{None, None}`
 // `::`                    | `{}` / `{None, None, None}`
@@ -71,7 +71,9 @@ struct CAFFE2_API TensorIndex final {
   TensorIndex(int integer);
 
   // Case 4: Boolean value
-  TensorIndex(bool boolean);
+  template <class T,
+            class = typename std::enable_if<std::is_same<bool, T>::value>::type >
+  TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `{start, stop, step}` form,
   // where `start` / `stop` / `step` can be integer or `at::indexing::None`
