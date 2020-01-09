@@ -76,7 +76,7 @@ inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
-  return toIntrusivePtr<ivalue::Object>();
+  return moveToIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
@@ -399,7 +399,7 @@ namespace detail {
 struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t){};
 };
-using _guarded_unsigned_long = c10::guts::conditional_t<
+using _guarded_unsigned_long = std::conditional_t<
     std::is_same<unsigned long, uint32_t>::value ||
         std::is_same<unsigned long, uint64_t>::value,
     _guarded_unsigned_long_unique_dummy,
@@ -470,7 +470,8 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
+// TODO this is deprecated but we don't throw a warning because a lot of ops in native_functions.yaml still return std::vector.
+//C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -545,7 +546,7 @@ namespace detail {
 template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
     const std::vector<IValue>& t,
-    c10::guts::index_sequence<INDEX...>) {
+    std::index_sequence<INDEX...>) {
   return std::make_tuple(
       t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
 }
@@ -553,11 +554,11 @@ Tuple generic_to_tuple_impl(
 
 template <
     typename... Args,
-    typename Indices = c10::guts::make_index_sequence<sizeof...(Args)>,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    typename Indices = std::make_index_sequence<sizeof...(Args)>,
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
   auto vals = ivalue.toTuple()->elements();
@@ -654,10 +655,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 }
 template <
     typename... Args,
-    c10::guts::enable_if_t<
-        !c10::guts::disjunction<
+    std::enable_if_t<
+        !guts::disjunction<
             std::is_lvalue_reference<Args>...,
-            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
@@ -773,7 +774,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:
-  // 1. None is None, False is False, and True is True are all true
+  // 1. Immutable primitive values of the same type (Int, Double, None, Bool, Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
   // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
@@ -792,6 +793,12 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   } else if (this->isNone() && rhs.isTensor()) {
     // special case: undefined tensor and None are the same identity
     return !rhs.is_intrusive_ptr;
+  } else if (this->isInt() && rhs.isInt()) {
+    return this->toInt() == rhs.toInt();
+  } else if (this->isDouble() && rhs.isDouble()) {
+    return this->toDouble() == rhs.toDouble();
+  } else if (this->isString() && rhs.isString()) {
+    return this->toStringRef() == rhs.toStringRef();
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr

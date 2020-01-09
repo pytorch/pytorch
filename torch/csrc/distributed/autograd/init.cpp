@@ -1,5 +1,5 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -46,9 +46,9 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
               })
           .def(
               "_send_functions",
-              [](const DistAutogradContext& ctx) {
+              [](const ContextPtr& ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx.sendFunctions()) {
+                for (const auto& map_entry : ctx->sendFunctions()) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -57,17 +57,11 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                 }
                 return funcs;
               })
-          .def("_known_worker_ids", [](const DistAutogradContext& ctx) {
-            std::vector<rpc::worker_id_t> worker_ids;
-            for (const auto worker_id : ctx.getKnownWorkerIds()) {
-              worker_ids.push_back(worker_id);
-            }
-            return worker_ids;
-          });
+          .def("_known_worker_ids", &DistAutogradContext::getKnownWorkerIds);
 
   module.def(
       "_new_context",
-      []() -> const DistAutogradContext& {
+      []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().newContext();
       },
       py::return_value_policy::reference);
@@ -85,14 +79,14 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "_retrieve_context",
-      [](int64_t context_id) -> const DistAutogradContext& {
+      [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
       },
       py::return_value_policy::reference);
 
   module.def(
       "_current_context",
-      []() -> const DistAutogradContext& {
+      []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().currentContext();
       },
       py::return_value_policy::reference);
@@ -101,6 +95,14 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       "_init",
       [](int64_t worker_id) { DistAutogradContainer::init(worker_id); },
       py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_get_debug_info",
+      []() { return DistEngine::getInstance().getDebugInfo(); },
+      py::call_guard<py::gil_scoped_release>());
+
+  py::options options;
+  options.disable_function_signatures();
 
   module.def(
       "backward",
@@ -112,9 +114,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
         DistEngine::getInstance().execute(variables);
       },
       R"(
+backward(roots: List[Tensor]) -> None
+
 Kicks off the distributed backward pass using the provided roots. This
-currently implements the "FAST" mode
-(see https://github.com/pytorch/pytorch/issues/23110) algorithm which
+currently implements the :ref:`fast-mode-algorithm` which
 assumes all RPC messages sent in the same distributed autograd context
 across workers would be part of the autograd graph during the backward pass.
 
@@ -122,42 +125,51 @@ We use the provided roots to discover the autograd graph and compute
 appropriate dependencies. This method blocks until the entire
 autograd computation is done.
 
-We accumulate the gradients in the appropriate "autograd context id" on each
-of the nodes. The autograd context id used is the current autograd context
-id of this node when backward() is called. If there is no valid autograd
-context id, we throw an error. You can retrieve the accumulated gradients
-using the ``get_gradients`` API.
+We accumulate the gradients in the appropriate
+:class:`torch.distributed.autograd.context` on each of the nodes. The autograd
+context used is the current autograd context of this node when
+:meth:`torch.distributed.autograd.backward` is called. If there is no valid
+autograd context, we throw an error. You can retrieve the accumulated
+gradients using the :meth:`~torch.distributed.autograd.get_gradients` API.
 
 Arguments:
-    roots: List of tensors which represent the roots of the autograd
-        computation. All the tensors should be scalars.
+    roots (list): Tensors which represent the roots of the autograd
+                  computation. All the tensors should be scalars.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      pred = model.forward()
     >>      loss = loss_func(pred, loss)
     >>      dist_autograd.backward(loss)
 )",
+      py::arg("roots"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "get_gradients",
-      [](int64_t contextId) {
+      [](int64_t contextId) -> py::dict {
         const auto& autogradContext =
             DistAutogradContainer::getInstance().retrieveContext(contextId);
-        return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
+        return torch::jit::toPyObject(IValue(autogradContext->getGradients()));
       },
       R"(
+get_gradients(context_id: int) -> Dict[Tensor, Tensor]
+
 Retrieves a map from Tensor to the appropriate gradient for that Tensor
-accumulated in the provided context_id as part of the distributed autograd
+accumulated in the provided ``context_id`` as part of the distributed autograd
 backward pass.
 
 Arguments:
-    context_id: The autograd context id for which we should retrieve the
-                gradients.
+    context_id(int): The autograd context id for which we should retrieve the
+                     gradients.
+
+Returns:
+    A map where the key is the Tensor and the value is the associated gradient for that Tensor.
 
 Example::
+
     >> import torch.distributed.autograd as dist_autograd
     >> with dist_autograd.context() as context_id:
     >>      t1 = torch.rand((3, 3), requires_grad=True)
@@ -167,7 +179,8 @@ Example::
     >>      grads = dist_autograd.get_gradients(context_id)
     >>      print (grads[t1])
     >>      print (grads[t2])
-)");
+)",
+      py::arg("context_id"));
 
   Py_RETURN_TRUE;
 }

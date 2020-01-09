@@ -280,5 +280,81 @@ Tensor MarginRankingLossImpl::forward(const Tensor& input1,
   return F::detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
+// ============================================================================
+
+NLLLossImpl::NLLLossImpl(
+    const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+  reset();
+}
+
+void NLLLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+void NLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::NLLLoss()";
+}
+
+Tensor NLLLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::nll_loss(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
+}
+
+// ============================================================================
+
+CrossEntropyLossImpl::CrossEntropyLossImpl(
+    const CrossEntropyLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+  reset();
+}
+
+void CrossEntropyLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+}
+
+void CrossEntropyLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CrossEntropyLoss()";
+}
+
+Tensor CrossEntropyLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::detail::cross_entropy(
+    input,
+    target,
+    weight,
+    options.ignore_index(),
+    options.reduction());
+}
+
+// ============================================================================
+
+BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
+  const BCEWithLogitsLossOptions& options_) : options(options_) {
+  reset();
+}
+
+void BCEWithLogitsLossImpl::reset() {
+  weight = register_buffer("weight", options.weight());
+  pos_weight = register_buffer("pos_weight", options.pos_weight());
+}
+
+void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::BCEWithLogitsLoss()";
+}
+
+Tensor BCEWithLogitsLossImpl::forward(
+  const Tensor& input, const Tensor& target) {
+  return F::detail::binary_cross_entropy_with_logits(input, target,
+    options.weight(), options.reduction(), options.pos_weight());
+}
+
 } // namespace nn
 } // namespace torch

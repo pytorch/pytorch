@@ -477,25 +477,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * If `condition_when_zero_dim` is true, and the tensor is a 1-dim, 1-size
-   * tensor, reshape the tensor into a 0-dim tensor (scalar).
-   *
-   * This helper function is called from generated wrapper code, to help
-   * "fix up" tensors that legacy code didn't generate in the correct shape.
-   * For example, suppose that we have a legacy function 'add' which produces
-   * a tensor which is the same shape as its inputs; however, if the inputs
-   * were zero-dimensional, it produced a 1-dim 1-size tensor (don't ask).
-   * result->maybe_zero_dim(lhs->dim() == 0 && rhs->dim() == 0) will be called,
-   * correctly resetting the dimension to 0 when when the inputs had 0-dim.
-   *
-   * As we teach more and more of TH to handle 0-dim correctly, this function
-   * will become less necessary.  At the moment, it is often called from functions
-   * that correctly handle the 0-dim case, and is just dead code in this case.
-   * In the glorious future, this function will be eliminated entirely.
-   */
-  virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
-
-  /**
    * True if a tensor was auto-wrapped from a C++ or Python number.
    * For example, when you write 't + 2', 2 is auto-wrapped into a Tensor
    * with `is_wrapped_number_` set to true.
@@ -747,8 +728,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
@@ -809,19 +790,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t stride(int64_t d) const;
 
   /**
-   * True if we will dispatch to the Variable handler for this tensor.  This has
-   * nothing to do with the variable-ness of a tensor (as every tensor is a
-   * variable; see also the invariant on type_set_), it just consults thread
-   * local state.
-   *
-   * TODO: Remove this in favor of a more direct test that doesn't mention
-   * Tensor at all.
-   */
-  bool is_variable() const {
-    return !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
-  }
-
-  /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
@@ -873,6 +841,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::NamedTensorMetaInterface* named_tensor_meta() {
     return named_tensor_meta_.get();
+  }
+
+  bool has_named_tensor_meta() {
+    return named_tensor_meta_ != nullptr;
   }
 
 
@@ -1385,9 +1357,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     #endif
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
-        strides_.resize(sizes_.size(), 0);
-        if (dim() > 0) {
-          int last_idx = dim() - 1;
+        // dim_ is a virtual call, don't repeat it
+        auto dim_ = dim();
+        strides_.resize(dim_);
+        if (dim_ > 0) {
+          int last_idx = dim_ - 1;
           strides_[last_idx] = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
@@ -1747,5 +1721,4 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
-
 } // namespace c10

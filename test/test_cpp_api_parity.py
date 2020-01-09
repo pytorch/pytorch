@@ -273,7 +273,7 @@ class TestCppApiParity(common.TestCase):
         example_inputs = self._prepare_tensors_for_module_input_or_target(test_params, example_inputs)
 
         # We set all inputs to torch.nn module to requires grad, so that the backward test can always be run.
-        # However, we skip embedding layers for now, becuase they only accept LongTensor as inputs,
+        # However, we skip embedding layers for now, because they only accept LongTensor as inputs,
         # And LongTensor cannot require grad.
         if test_params.module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
             example_inputs = [x.requires_grad_() for x in example_inputs]

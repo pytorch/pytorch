@@ -128,8 +128,24 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
       push<PickleOpCode>(PickleOpCode::SETITEMS);
     }
     push<PickleOpCode>(PickleOpCode::BUILD);
+  } else if (ivalue.isDevice()) {
+    pushDevice(ivalue);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
+  }
+}
+
+void Pickler::pushDevice(const IValue& ivalue) {
+  auto device = ivalue.toDevice();
+  auto it = memoized_devices_map_.find(device.str());
+  if (it == memoized_devices_map_.end()) {
+    pushGlobal("torch", "device");
+    pushString(ivalue.toDevice().str());
+    push<PickleOpCode>(PickleOpCode::TUPLE1);
+    push<PickleOpCode>(PickleOpCode::REDUCE);
+    memoized_devices_map_[device.str()] = pushNextBinPut();
+  } else {
+    pushBinGet(it->second);
   }
 }
 
@@ -242,8 +258,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   pushString(tensor.device().str());
   // size
   pushInt(tensor.storage().size());
-  // view_metadata
-  push<PickleOpCode>(PickleOpCode::NONE);
+
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::BINPERSID);
 

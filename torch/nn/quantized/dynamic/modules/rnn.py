@@ -108,12 +108,10 @@ class RNNBase(torch.nn.Module):
                         [gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
                     w_hh = torch._empty_affine_quantized(
                         [gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    b_ih = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_ih = torch.empty([gate_size], dtype=torch.float)
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
-                    b_hh = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_hh = torch.empty([gate_size], dtype=torch.float)
 
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
@@ -306,15 +304,19 @@ class LSTM(RNNBase):
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
-        assert batch_sizes is None
 
         weight_values = []
         for mod in self._all_weight_values:
             weight_values.append(mod.param)
 
-        result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
-                                    float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first, dtype=self.dtype, use_dynamic=True)
+        if batch_sizes is None:
+            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
+                                        float(self.dropout), self.training, self.bidirectional,
+                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
+        else:
+            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
+                                        self.num_layers, float(self.dropout), self.training,
+                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 

@@ -10,20 +10,6 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCReduce.cuh>
 
-
-template <typename T>
-struct TensorSigmoidOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) const {
-    T one = (T) 1.0;
-    *out = one / (one + THCNumerics<T>::exp(- *in));
-  }
-
-  __device__ __forceinline__ void operator()(T* v) const {
-    T one = (T) 1.0;
-    *v = one / (one + THCNumerics<T>::exp(- *v));
-  }
-};
-
 template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}
@@ -332,45 +318,6 @@ struct TensorRShiftOp<double> {
   __device__ __forceinline__ void
   operator()(double* out, double* in1, double* in2) {
     *out = *in1 / pow(2.0, *in2);
-  }
-};
-
-template <typename T>
-struct TensorBitAndOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out &= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 & *in2;
-  }
-};
-
-template <typename T>
-struct TensorBitOrOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out |= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 | *in2;
-  }
-};
-
-template <typename T>
-struct TensorBitXorOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out ^= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 ^ *in2;
   }
 };
 

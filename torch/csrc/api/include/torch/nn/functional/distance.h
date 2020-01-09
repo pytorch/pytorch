@@ -23,7 +23,7 @@ inline Tensor cosine_similarity(
 inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
-    CosineSimilarityFuncOptions options = {}) {
+    const CosineSimilarityFuncOptions& options = {}) {
   return detail::cosine_similarity(x1, x2, options.dim(), options.eps());
 }
 
@@ -48,7 +48,7 @@ inline Tensor pairwise_distance(
 inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
-    PairwiseDistanceFuncOptions options = {}) {
+    const PairwiseDistanceFuncOptions& options = {}) {
   return detail::pairwise_distance(x1, x2, options.p(), options.eps(), options.keepdim());
 }
 

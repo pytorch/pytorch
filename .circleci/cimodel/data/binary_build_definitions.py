@@ -24,7 +24,7 @@ class Conf(object):
 
     def gen_docker_image(self):
         if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
-            return miniutils.quote("soumith/conda-cuda-cxx11-ubuntu1604:latest")
+            return miniutils.quote("pytorch/pytorch-binary-docker-image-ubuntu16.04:latest")
 
         docker_word_substitution = {
             "manywheel": "manylinux",
@@ -33,10 +33,10 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
-        # The cpu nightlies are built on the soumith/manylinux-cuda100 docker image
+        # The cpu nightlies are built on the pytorch/manylinux-cuda100 docker image
         alt_docker_suffix = self.cuda_version or "100"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
-        return miniutils.quote("soumith/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
+        return miniutils.quote("pytorch/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
 
     def get_name_prefix(self):
         return "smoke" if self.smoke else "binary"

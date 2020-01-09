@@ -142,16 +142,6 @@ void THTensor_(exponential)(THTensor *self, double lambda, at::Generator *_gener
 
 #undef TH_REAL_MIN
 
-void THTensor_(cauchy)(THTensor *self, double median, double sigma, at::Generator *_generator)
-{
-  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  at::cauchy_distribution<double> cauchy(median, sigma);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(gen););
-}
-
 void THTensor_(logNormal)(THTensor *self, double mean, double stdv, at::Generator *_generator)
 {
   auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
@@ -303,7 +293,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
   THGeneratorStateNew* rng_state = (THGeneratorStateNew*)self->data<scalar_t>();
 
   // accumulate generator data to be copied into byte tensor
-  auto accum_state = c10::guts::make_unique<THGeneratorStateNew>();
+  auto accum_state = std::make_unique<THGeneratorStateNew>();
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
   auto rng_data = cast_generator->engine().data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;

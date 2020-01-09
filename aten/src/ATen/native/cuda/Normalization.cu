@@ -31,6 +31,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Ten
   auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
   int64_t n_input = self.size(1);
   auto input_options = self.options();
+  // Accumulate in higher precision if input is half
+  if (self.scalar_type() == at::ScalarType::Half) {
+    input_options = input_options.dtype(ScalarType::Float);
+  }
   Tensor save_mean, save_invstd;
   if (train) {
     save_mean = at::empty({n_input}, input_options);
@@ -79,7 +83,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsi
 
 Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
   return output;
 }

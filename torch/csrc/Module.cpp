@@ -46,7 +46,6 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
@@ -388,7 +387,7 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // atensor steals the ownership of the underlying storage. It also passes a
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
-  auto atensor = make_variable(at::fromDLPack(dlMTensor), false);
+  auto atensor = at::fromDLPack(dlMTensor);
 
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
@@ -764,12 +763,6 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
-
-#ifdef BUILD_NAMEDTENSOR
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
-#else
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
 #endif
 
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();

@@ -1,4 +1,5 @@
 #include <ATen/AccumulateType.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -518,6 +519,8 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
   IntArrayRef dilation,
   bool ceil_mode)
 {
+  NoNamesGuard guard;
+
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   max_pool3d_with_indices_out_cuda_template(
@@ -529,6 +532,11 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
+
+  guard.reset();
+  namedinference::propagate_names(output, input);
+  namedinference::propagate_names(indices, input);
+
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
@@ -566,7 +574,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool3d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput,

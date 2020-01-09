@@ -657,6 +657,19 @@ def smoothl1loss_no_reduce_scalar_test():
         pickle=False)
 
 
+def multilabelmarginloss_0d_no_reduce_test():
+    t = torch.zeros(()).long()
+    return dict(
+        fullname='MultiLabelMarginLoss_0d_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduction='none')),
+        input_fn=lambda: torch.randn(()),
+        reference_fn=lambda i, *_:
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        pickle=False)
+
 def multilabelmarginloss_1d_no_reduce_test():
     t = Variable(torch.rand(10).mul(10).floor().long())
     return dict(
@@ -794,6 +807,20 @@ def multimarginloss_1d_no_reduce_test():
         pickle=False)
 
 
+def multimarginloss_1d_input_0d_target_no_reduce_test():
+    t = torch.rand(()).mul(8).floor().long()
+    return dict(
+        fullname='multimarginloss_1d_input_0d_target_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduction='none')),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, *_:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
 def multimarginloss_p_no_reduce_test():
     t = torch.rand(5).mul(8).floor().long()
     return dict(
@@ -907,6 +934,7 @@ new_module_tests = [
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
     smoothl1loss_no_reduce_scalar_test(),
+    multilabelmarginloss_0d_no_reduce_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
     multilabelmarginloss_no_reduce_test(),
@@ -917,6 +945,7 @@ new_module_tests = [
     multilabelsoftmarginloss_weights_no_reduce_test(),
     multimarginloss_no_reduce_test(),
     multimarginloss_1d_no_reduce_test(),
+    multimarginloss_1d_input_0d_target_no_reduce_test(),
     multimarginloss_p_no_reduce_test(),
     multimarginloss_margin_no_reduce_test(),
     multimarginloss_weights_no_reduce_test(),
@@ -2608,23 +2637,29 @@ def _multilabelmarginloss_reference(input, target):
 
 
 def multilabelmarginloss_reference(input, target, reduction='mean'):
-    if input.dim() == 1:
-        n = 1
-        dim = input.size(0)
-        output = input.new(n).zero_()
-        output[0] = _multilabelmarginloss_reference(input, target)
-    else:
-        n = input.size(0)
-        dim = input.size(1)
-        output = input.new(n).zero_()
-        for i in range(0, n):
-            output[i] = _multilabelmarginloss_reference(input[i], target[i])
+    # make everything 2-dimensional
+    input_dim = input.dim()
+    if input.dim() < 2:
+        assert target.dim() < 2
+        input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
+        target = target.unsqueeze(0) if target.dim() == 1 else target.unsqueeze(0).unsqueeze(0)
+
+    n = input.size(0)
+    dim = input.size(1)
+    output = input.new(n).zero_()
+    for i in range(0, n):
+        output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
     if reduction == 'mean':
         return output.mean() / dim
     elif reduction == 'sum':
         return output.sum() / dim
-    return output / dim
+    elif input_dim < 2:
+        # we know we have (1, C) X (1, C) -> (1,), so squeeze will get us
+        # back to correct dimensionality
+        return output.squeeze() / dim
+    else:
+        return output / dim
 
 
 def hingeembeddingloss_reference(input, target, margin=1.0, reduction='mean'):
@@ -2660,22 +2695,26 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
 
 
 def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reduction='mean'):
-    if input.dim() == 1:
-        n = 1
-        dim = input.size(0)
-        return _multimarginloss_reference(input, target[0], p, margin, weight) / dim
-    else:
-        n = input.size(0)
-        dim = input.size(1)
-        output = input.new(n)
-        for x in range(0, n):
-            output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+    if input.dim() < 2:
+        input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
 
-        if reduction == 'mean':
-            return output.mean() / dim
-        elif reduction == 'sum':
-            return output.sum() / dim
-        return output / dim
+    target_dim = target.dim()
+    if target.dim() == 0:
+        target = target.unsqueeze(0)
+
+    n = input.size(0)
+    dim = input.size(1)
+    output = input.new(n)
+    for x in range(0, n):
+        output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+
+    if reduction == 'mean':
+        return output.mean() / dim
+    elif reduction == 'sum':
+        return output.sum() / dim
+    elif target_dim == 0:
+        return output.squeeze(0) / dim
+    return output / dim
 
 
 def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
@@ -3277,19 +3316,21 @@ new_criterion_tests = [
         check_gradgrad=False,
         check_half=False,
     ),
-    dict(
-        module_name='CTCLoss',
-        desc='1d_target',
-        constructor_args=(14,),  # blank=14
-        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
-        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
-        reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        check_gradgrad=False,
-        check_half=False,
-    ),
+    # Test is flaky
+    # See https://github.com/pytorch/pytorch/issues/29380.
+    # dict(
+    #     module_name='CTCLoss',
+    #     desc='1d_target',
+    #     constructor_args=(14,),  # blank=14
+    #     extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+    #     input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+    #     target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
+    #     reference_fn=lambda i, t, il, tl, m:
+    #         ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
+    #     check_sum_reduction=True,
+    #     check_gradgrad=False,
+    #     check_half=False,
+    # ),
     dict(
         module_name='CTCLoss',
         desc='2d_int_target',

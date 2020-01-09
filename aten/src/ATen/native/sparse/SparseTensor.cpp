@@ -71,7 +71,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
@@ -354,7 +354,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {

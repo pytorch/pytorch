@@ -22,6 +22,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/sequential.cpp
   ${TORCH_API_TEST_DIR}/serialize.cpp
   ${TORCH_API_TEST_DIR}/static.cpp
+  ${TORCH_API_TEST_DIR}/support.cpp
   ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
   ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
   ${TORCH_API_TEST_DIR}/tensor_options.cpp

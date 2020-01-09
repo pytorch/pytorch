@@ -4,6 +4,8 @@ set -eux -o pipefail
 export ANDROID_NDK_HOME=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
+# Must be in sync with GRADLE_VERSION in docker image for android
+# https://github.com/pietern/pytorch-dockerfiles/blob/master/build.sh#L155
 export GRADLE_VERSION=4.10.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
@@ -45,17 +47,30 @@ fi
 env
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
 
+GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
+if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
+    GRADLE_PARAMS+=" -PABI_FILTERS=x86"
+fi
+
+if [ -n "{GRADLE_OFFLINE:-}" ]; then
+    GRADLE_PARAMS+=" --offline"
+fi
+
+# touch gradle cache files to prevent expiration
+while IFS= read -r -d '' file
+do
+  touch "$file" || true
+done < <(find /var/lib/jenkins/.gradle -type f -print0)
+
+env
+
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
-if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
-    $GRADLE_PATH -PABI_FILTERS=x86 -p ~/workspace/android/ assembleRelease
-else
-    $GRADLE_PATH -p ~/workspace/android/ assembleRelease
-fi
-
+$GRADLE_PATH $GRADLE_PARAMS
 
 find . -type f -name "*.a" -exec ls -lh {} \;
 
@@ -68,4 +83,3 @@ do
 done < <(find . -type f -name '*.aar' -print0)
 
 find . -type f -name *aar -print | xargs tar cfvz ~/workspace/android/artifacts.tgz
-

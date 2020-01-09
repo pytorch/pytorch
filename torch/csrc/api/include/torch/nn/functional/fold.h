@@ -30,7 +30,7 @@ inline Tensor fold(const Tensor& input,
 }
 } // namespace detail
 
-inline Tensor fold(const Tensor& input, FoldFuncOptions options) {
+inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
   return detail::fold(
     input,
     options.output_size(),
@@ -64,7 +64,7 @@ inline Tensor unfold(const Tensor& input,
 }
 } // namespace detail
 
-inline Tensor unfold(const Tensor& input, UnfoldFuncOptions options) {
+inline Tensor unfold(const Tensor& input, const UnfoldFuncOptions& options) {
   return detail::unfold(input, options.kernel_size(), options.dilation(), options.padding(), options.stride());
 }
 

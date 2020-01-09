@@ -508,7 +508,7 @@ Tensor adaptive_max_pool3d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool3d_backward_out_cuda_template(
     gradInput,
     gradOutput_,

@@ -21,6 +21,8 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 
   void reset() override;
 
+  void reset_parameters();
+
   /// Pretty prints the `LayerNorm` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -46,11 +48,13 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   Tensor bias;
 };
 
-/// A `ModuleHolder` subclass for `LayerNorm`.
-/// See the documentation for `LayerNorm` class to learn what methods it
+/// A `ModuleHolder` subclass for `LayerNormImpl`.
+/// See the documentation for `LayerNormImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LayerNorm);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LocalResponseNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies local response normalization over an input signal composed
 /// of several input planes, where channels occupy the second dimension.
@@ -96,6 +100,39 @@ class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImp
 };
 
 TORCH_MODULE(CrossMapLRN2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GroupNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
+ public:
+  GroupNormImpl(int64_t num_groups, int64_t num_channels)
+      : GroupNormImpl(GroupNormOptions(num_groups, num_channels)) {}
+  explicit GroupNormImpl(const GroupNormOptions& options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  /// Pretty prints the `GroupNorm` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  /// The options with which this module was constructed.
+  GroupNormOptions options;
+
+  /// The learned weight.
+  Tensor weight;
+
+  /// The learned bias.
+  Tensor bias;
+};
+
+/// A `ModuleHolder` subclass for `GroupNormImpl`.
+/// See the documentation for `GroupNormImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(GroupNorm);
 
 } // namespace nn
 } // namespace torch

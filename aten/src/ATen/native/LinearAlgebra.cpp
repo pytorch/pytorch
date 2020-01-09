@@ -12,7 +12,6 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -88,7 +87,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
 Tensor pinverse(const Tensor& self, double rcond) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
-              "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
@@ -118,7 +117,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -127,7 +126,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -302,17 +301,13 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-#ifdef BUILD_NAMEDTENSOR
   {
   NoNamesGuard guard;
-#endif
   bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-#ifdef BUILD_NAMEDTENSOR
   }
   namedinference::propagate_names_if_nonempty(
       result,
       namedinference::compute_bmm_outnames(result, batch1, batch2));
-#endif
   return result;
 }
 
@@ -346,9 +341,7 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   NoNamesGuard guard;
-#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -456,30 +449,22 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
   auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
-#ifdef BUILD_NAMEDTENSOR
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-#endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
   return result;
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
   TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
-              "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+              "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of floating types with dim at least 2");
   if (n == 0) {
     return a.clone(at::MemoryFormat::Contiguous).copy_(at::eye(a.size(-2), a.options()).expand_as(a));
@@ -556,7 +541,7 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(self, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), 0, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -576,7 +561,7 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // would end up throwing an error as a result if U and V aren't computed.
   // Due to this, we have to compute U and V conditionally.
   return at::sum(std::get<1>(at::svd(p, /*some=*/true,
-                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), -1, keepdim);
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.requires_grad())), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {

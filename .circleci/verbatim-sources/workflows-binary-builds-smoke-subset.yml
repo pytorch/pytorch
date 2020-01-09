@@ -10,19 +10,19 @@
           build_environment: "manywheel 2.7mu cpu devtoolset7"
           requires:
             - setup
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_cu100_devtoolset7_build
           build_environment: "manywheel 3.7m cu100 devtoolset7"
           requires:
             - setup
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_conda_2_7_cpu_devtoolset7_build
           build_environment: "conda 2.7 cpu devtoolset7"
           requires:
             - setup
-          docker_image: "soumith/conda-cuda"
+          docker_image: "pytorch/conda-cuda"
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_build
       - binary_linux_build:
@@ -31,14 +31,14 @@
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2_7m_cu90_devtoolset7_static-without-deps_build
       - binary_mac_build:
@@ -63,14 +63,14 @@
           requires:
             - setup
             - binary_linux_manywheel_2_7mu_cpu_devtoolset7_build
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu100_devtoolset7_test
           build_environment: "manywheel 3.7m cu100 devtoolset7"
           requires:
             - setup
             - binary_linux_manywheel_3_7m_cu100_devtoolset7_build
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -79,7 +79,7 @@
           requires:
             - setup
             - binary_linux_conda_2_7_cpu_devtoolset7_build
-          docker_image: "soumith/conda-cuda"
+          docker_image: "pytorch/conda-cuda"
       # This binary build is currently broken, see https://github_com/pytorch/pytorch/issues/16710
       # - binary_linux_conda_3_6_cu90_devtoolset7_test:
       - binary_linux_test:
@@ -89,7 +89,7 @@
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "soumith/manylinux-cuda100"
+          docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
           name: binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
@@ -97,5 +97,5 @@
             - setup
             - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
           libtorch_variant: "shared-with-deps"
-          docker_image: "yf225/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
 

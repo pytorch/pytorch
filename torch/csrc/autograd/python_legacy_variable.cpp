@@ -74,7 +74,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   var.set_requires_grad(requires_grad);
 
   if (name) {
-    var.set_name(name);
+    impl::set_name(var, name);
   }
 
   if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {

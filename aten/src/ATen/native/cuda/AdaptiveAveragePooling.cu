@@ -241,6 +241,7 @@ namespace {
     // each CTA handles a portion of a single slice on batch dimension;
     int batch_id = blockIdx.x % sizeB;
     int channel_id = blockIdx.x / sizeB;
+    int channel_offset = threadIdx.x + channel_id * blockDim.x;
 
     // each CTA handles a single slice on batch dimension;
     // We use gridDim.x to handle striding on C as well.
@@ -276,7 +277,7 @@ namespace {
           for (index_t iw = istartW; iw < iendW; iw++) {
             int cached_index = threadIdx.x;
             const scalar_t *ptr_input = input + ih*istrideH + iw*istrideW;
-            for (index_t c = threadIdx.x + channel_id*blockDim.x;
+            for (index_t c = channel_offset;
                  c < sizeC;
                  c += blockDim.x*kernel_stride_C) {
               out_cached[cached_index] += ptr_input[c*istrideC];
@@ -288,7 +289,7 @@ namespace {
 
         int cached_index = threadIdx.x;
         // write accumulated output to global memory;
-        for (index_t c = threadIdx.x + channel_id*blockDim.x;
+        for (index_t c = channel_offset;
              c < sizeC;
              c += blockDim.x*kernel_stride_C) {
           // This causes numerical issueptr when unit test with NCHW kernel;
@@ -357,6 +358,7 @@ namespace {
     // each CTA handles a portion of a single slice on batch dimension;
     int batch_id = blockIdx.x % sizeB;
     int channel_id = blockIdx.x / sizeB;
+    int channel_offset = threadIdx.x + channel_id * blockDim.x;
 
     // use shared memory to store temporary output value. This is simply to
     // reduce register usage.
@@ -397,7 +399,7 @@ namespace {
             scalar_t f = r_kW_cached[ow] * r_kH_cached[oh];
             const scalar_t* ptr_gradOutput = gradOutput + oh*ostrideH + ow*ostrideW;
             int cached_index = threadIdx.x;
-            for (index_t c = threadIdx.x + channel_id*blockDim.x;
+            for (index_t c = channel_offset;
                  c < sizeC;
                  c += blockDim.x*kernel_stride_C) {
               out_cached[cached_index] += ptr_gradOutput[c*ostrideC] * f;
@@ -408,7 +410,7 @@ namespace {
         scalar_t *ptr_gradInput = gradInput + (ih * isizeW + iw) * sizeC;
         int cached_index = threadIdx.x;
         // write accumulated gradIput to global memory;
-        for (index_t c = threadIdx.x + channel_id*blockDim.x;
+        for (index_t c = channel_offset;
              c < sizeC;
              c += blockDim.x*kernel_stride_C) {
           ptr_gradInput[c] = out_cached[cached_index];
@@ -467,6 +469,8 @@ namespace {
         const int max_threads = std::min<int>(
             at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+        int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+        size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
 
         // Launch kernel on output tensor elements. Logic behind launch config:
         // output tensor size NCHW, strides NHWC;
@@ -488,10 +492,17 @@ namespace {
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
         int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+
+        // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
+        // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
-        int grid_y = cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE);
-        int grid_z = cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE);
+        // it's OK to clip grid_y & grid_z, as we block the two dimensions in the kernel;
+        int grid_y = std::min<int>(
+            maxGridSize[1], cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE));
+        int grid_z = std::min<int>(
+            maxGridSize[2], cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE));
         const dim3 grid(grid_x, grid_y, grid_z);
+
 
         // we are dealing with packed tensor here. max index is the same as numel.
         // TODO: to really support input tensor large enought to go beyond int32,
@@ -500,7 +511,9 @@ namespace {
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-              adaptive_average_pool_nhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
+              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
+              AT_ASSERT(shmem_size <= sharedMemPerBlock);
+              adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
                 input_.data_ptr<scalar_t>(),
                 output.data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
@@ -602,6 +615,8 @@ namespace {
         const int max_threads = std::min<int>(
             at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
         int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+        int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+        size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
 
         // Launch kernel on input tensor elements. Logic behind launch config:
         // input tensor size NCHW, strides NHWC;
@@ -623,9 +638,15 @@ namespace {
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
         int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+        
+        // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
+        // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
-        int grid_y = cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE);
-        int grid_z = cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE);
+        // it's OK to clip grid_y & grid_z, as we block the two dimensions in the kernel;
+        int grid_y = std::min<int>(
+            maxGridSize[1], cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE));
+        int grid_z = std::min<int>(
+            maxGridSize[2], cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE));
         const dim3 grid(grid_x, grid_y, grid_z);
 
         // we are dealing with packed tensor here. max index is the same as numel.
@@ -635,7 +656,9 @@ namespace {
         AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
             input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
-              adaptive_average_gradinput_nhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
+              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);
+              AT_ASSERT(shmem_size <= sharedMemPerBlock);
+              adaptive_average_gradinput_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
                 gradInput.data_ptr<scalar_t>(),
                 gradOutput.data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
@@ -735,7 +758,7 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
-    auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
+    auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
     return gradInput;

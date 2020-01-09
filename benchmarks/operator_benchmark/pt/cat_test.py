@@ -14,6 +14,7 @@ import torch
 cat_configs_short = op_bench.config_list(
     attr_names=['M', 'N', 'K', 'dim'],
     attrs=[
+        [1, 1, 1, 0],
         [256, 512, 1, 0],
         [512, 512, 2, 1],
     ],
@@ -24,7 +25,7 @@ cat_configs_short = op_bench.config_list(
 )
 
 cat_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
+    M=[128],
     N=[128, 1024],
     K=[1, 2],
     dim=[0, 1, 2],
