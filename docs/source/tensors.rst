@@ -195,6 +195,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bitwise_not_
    .. automethod:: bitwise_and
    .. automethod:: bitwise_and_ 
+   .. automethod:: bitwise_or
+   .. automethod:: bitwise_or_
    .. automethod:: bitwise_xor
    .. automethod:: bitwise_xor_
    .. automethod:: bmm
