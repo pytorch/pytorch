@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/CUDAGenerator.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -508,7 +509,7 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
    });
 }
 
-void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
+void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "cauchy_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -751,12 +752,6 @@ Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
   return ret;
 }
 
-Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  cauchy_kernel_cuda(iter, median, sigma, gen);
-  return self;
-}
-
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   exponential_kernel_cuda(iter, lambda, gen);
@@ -783,5 +778,7 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   bernoulli_scalar_cuda_kernel(iter, p, gen);
   return self;
 }
+
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 
 }} // namespace at::native

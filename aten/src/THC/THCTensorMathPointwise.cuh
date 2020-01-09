@@ -321,17 +321,4 @@ struct TensorRShiftOp<double> {
   }
 };
 
-template <typename T>
-struct TensorBitOrOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out |= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 | *in2;
-  }
-};
-
 #endif // THC_TENSORMATH_POINTWISE_CUH
