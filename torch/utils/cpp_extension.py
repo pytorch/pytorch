@@ -62,7 +62,7 @@ def _find_rocm_home():
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
             rocm_home = os.path.dirname(os.path.dirname(hipcc))
             if os.path.basename(rocm_home) == 'hip':
-                rocm_home = os.path.dirname(hipcc)
+                rocm_home = os.path.dirname(rocm_home)
         except Exception:
             # Guess #3
             rocm_home = '/opt/rocm'
