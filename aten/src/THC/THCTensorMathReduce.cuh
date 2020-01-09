@@ -267,21 +267,6 @@ struct TensorNonZeroOp {
   }
 };
 
-template <typename T, int StaticExp>
-struct TensorNormOp {
-  TensorNormOp(T _exponent) : exponent{_exponent} {}
-
-  __host__ __device__ T operator()(const T x) const {
-    switch (StaticExp) {
-      case 1: return static_cast<T>(std::abs(x));
-      case 2: return THCNumerics<T>::mul(x, x);
-      default: return THCNumerics<T>::pow(static_cast<T>(std::abs(x)), exponent);
-    }
-  }
-
-  const T exponent;
-};
-
 /*
   Fuses conversions and a TensorDistOp. Needed for Thrust.
 */

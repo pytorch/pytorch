@@ -255,6 +255,27 @@ struct NormOneOps {
 #endif
 };
 
+template <typename acc_t>
+struct NormTwoOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
+    return acc + data * data;
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a + b;
+  }
+
+  inline C10_DEVICE acc_t project(acc_t a) const {
+    return device_sqrt(a);
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
 namespace detail {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
