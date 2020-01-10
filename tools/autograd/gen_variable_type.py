@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -562,6 +562,8 @@ def emit_body(declaration):
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
+    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
+      view_info = "self"
 
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
@@ -784,7 +786,7 @@ def emit_body(declaration):
                 return_info = returns[0]
                 if return_info['type'] != 'Tensor':
                     # We return a collection of Tensors so we disallow rebase history
-                    extra.append('disable_rebase_history({});'.format(return_info['name']))
+                    extra.append('disable_rebase_history({});\n'.format(return_info['name']))
                 return wrapped_call, extra
             else:
                 raise RuntimeError("Function that return multiple differentiable output "
@@ -846,7 +848,6 @@ def emit_body(declaration):
             call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
-        call += '\n'
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 

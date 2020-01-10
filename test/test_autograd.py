@@ -3459,7 +3459,7 @@ for shape in [(1,), ()]:
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, out_modif_err.format(0), out_modif_err.format(1)))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,

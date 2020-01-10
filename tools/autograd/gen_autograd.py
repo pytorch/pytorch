@@ -37,7 +37,8 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'narrow': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
@@ -63,7 +64,7 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
 
 
 def format_return_type(returns):

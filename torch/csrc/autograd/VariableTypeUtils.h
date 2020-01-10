@@ -42,16 +42,16 @@ namespace torch { namespace autograd {
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && GradMode::is_enabled()) {
-    if (var.is_view()) {
+    if (var.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
+    } else if (var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
       auto grad_fn = impl::grad_fn_unsafe(var);
       TORCH_CHECK(diff_view_meta->allow_rebase_history,
           "The ", diff_view_meta->output_nr_, "th output of ", grad_fn ? grad_fn->name() : "UnknownFunction",
           " is being modified inplace but this is not allowed as it would prevent correct gradient computation.");
-    } else if (var.is_leaf()) {
-    AT_ERROR(
-      "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }
 }
