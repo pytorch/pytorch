@@ -1238,7 +1238,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
 return_type name( \
     const Tensor& input, \
-    hx_type &hx, \
+    hx_type hx, \
     const Tensor& w_ih, \
     const Tensor& w_hh, \
     const Tensor& b_ih, \
