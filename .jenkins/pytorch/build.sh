@@ -220,6 +220,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 else
   # Test standalone c10 build
   if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    /usr/local/cuda/bin/nvcc --version
     mkdir -p c10/build
     pushd c10/build
     cmake ..
@@ -277,7 +278,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     exit 1
   fi
 
-  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
+  bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytCUDAes=0
   pushd xla
   export CC=clang-7 CXX=clang++-7
   # Use cloud cache to build when available.
