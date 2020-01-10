@@ -11,10 +11,10 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from common_utils import load_tests, IS_MACOS
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from common_utils import load_tests
 import dist_utils
-from dist_utils import dist_init
+from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
@@ -373,16 +373,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # This is for the below `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -1138,16 +1129,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # This is for the below `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -1197,13 +1179,7 @@ class RpcTest(RpcAgentTestFixture):
         # The barrier before the check makes sure that all previous states are
         # cleared globally, the barrier after ensures that no following states
         # change gets into the current check.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
@@ -1275,14 +1251,7 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
-
+        initialize_pg(self.init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
         info = _agent.get_debug_info()
@@ -1386,6 +1355,42 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(IS_MACOS,
+                     "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019")
+    def test_handle_send_exceptions(self):
+        # test that if a callee node has gone down, we raise an appropriate
+        # exception instead of just crashing.
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[
+                dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        # This barrier is needed to ensure that some workers do not exit before
+        # others have been brought up, for non ProcessGroupAgent backends.
+        initialize_pg(self.init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        if self.rank == 1:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker = "worker{}".format(dst_rank)
+            # allow destination worker to exit without joining
+            wait_until_node_failure(dst_rank)
+            fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
+            error_str = (
+                "Encountered exception in ProcessGroupAgent::enqueueSend"
+                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                else "(Request aborted during client shutdown)|"
+                     "(worker.: Error in reponse from worker.: server shutting down)")
+            with self.assertRaisesRegex(RuntimeError, error_str):
+                fut.wait()
+        # exit all workers non-gracefully.
+        rpc.shutdown(graceful=False)
+
+    @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_local_shutdown_with_rpc(self):
         # test that we can start RPC, send RPCs, and then run local shutdown.
@@ -1408,13 +1413,7 @@ class RpcTest(RpcAgentTestFixture):
         # A barrier is needed to ensure that all RPCs are processed.
         # Otherwise, some RPCs can timeout since the receiving end
         # has terminated.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
