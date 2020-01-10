@@ -768,28 +768,6 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
   return grad_L;
 }
 
-Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
-                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-
-  // it's possible some of the grads are not defined (represents tensors of all 0s).
-  // Since at::cat can't handle those, let's define them
-  std::vector<Tensor> grads_all_defined(grads.size());
-  for (size_t j = 0; j < grads.size(); ++j) {
-    if (grads[j].defined()) {
-      grads_all_defined[j] = grads[j];
-    } else {
-      auto length = split_sizes[j];
-      auto grad_size = sizes.vec();
-      grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, options);
-    }
-  }
-
-  auto ret =  at::cat(grads_all_defined, dim);
-  return ret;
-}
-
 Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
                       int64_t split_size, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
