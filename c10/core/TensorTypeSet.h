@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/Exception.h>
 #include <ostream>

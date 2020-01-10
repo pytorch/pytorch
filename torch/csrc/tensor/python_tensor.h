@@ -2,7 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 
 namespace c10 {
 struct Device;

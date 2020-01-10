@@ -4,7 +4,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
