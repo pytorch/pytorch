@@ -3347,12 +3347,13 @@ def multi_head_attention_forward(query,                           # type: Tensor
     q = q * scaling
 
     if attn_mask is not None:
-        assert attn_mask.dim() == 2 or attn_mask.dim() == 3, "The dim of attn_mask is not supported."
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
         elif attn_mask.dim() == 3:
-            assert list(attn_mask.size()) == [bsz * num_heads, query.size(0), key.size(0)], \
-                "The size of the 3D attn_mask is not correct."
+            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+                raise ValueError('The size of the 3D attn_mask is not correct.')
+        else:
+            raise ValueError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
         # attn_mask's dim is 3 now.
 
     if bias_k is not None and bias_v is not None:
@@ -3360,15 +3361,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask,
-                                      torch.zeros((attn_mask.size(0), attn_mask.size(1), 1),
-                                                  dtype=attn_mask.dtype,
-                                                  device=attn_mask.device)], dim=2)
+                attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                                   dtype=key_padding_mask.dtype,
-                                                   device=key_padding_mask.device)], dim=1)
+                key_padding_mask = pad(key_padding_mask, (0, 1))
         else:
             assert static_k is None, "bias cannot be added to static key."
             assert static_v is None, "bias cannot be added to static value."
@@ -3403,14 +3398,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
         v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), attn_mask.size(1), 1),
-                                                          dtype=attn_mask.dtype,
-                                                          device=attn_mask.device)], dim=2)
+            attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+            key_padding_mask = pad(key_padding_mask, (0, 1))
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
