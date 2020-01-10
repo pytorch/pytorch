@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 
 #include <math.h>
 
@@ -215,7 +216,7 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
   /* TODO: result here is trucated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
-  atomicAdd(
+  gpuAtomicAdd(
       &data[batch][channel][access_y][access_x], static_cast<scalar_t>(value));
 }
 
