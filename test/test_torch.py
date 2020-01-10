@@ -10476,7 +10476,7 @@ class TestTorchDeviceType(TestCase):
                 integrated.sum().backward()
                 # Check that output maintained correct shape
                 self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
- 
+
         # Check a scalar example
         raw_tensor = torch.tensor(3., requires_grad=True)
         integrated = raw_tensor.cumprod(dim=-1)
