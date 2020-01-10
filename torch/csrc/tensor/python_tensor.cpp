@@ -42,7 +42,7 @@ struct PyTensorType {
     return static_cast<Backend>(backend);
   }
 
-  TensorTypeId get_type_id() const {
+  DispatchKey get_type_id() const {
     return backendToTensorTypeId(static_cast<Backend>(backend));
   }
 
@@ -380,7 +380,7 @@ void py_set_default_dtype(PyObject* obj) {
   }
 }
 
-c10::TensorTypeId get_default_tensor_type_id() {
+c10::DispatchKey get_default_tensor_type_id() {
   AT_ASSERT(default_tensor_type);
   return default_tensor_type->get_type_id();
 }

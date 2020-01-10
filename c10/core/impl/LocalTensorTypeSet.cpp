@@ -29,28 +29,28 @@ LocalTensorTypeSet tls_local_tensor_type_set() {
   if (FLAGS_disable_variable_dispatch) {
     raw_local_tensor_type_set.set_excluded(
       raw_local_tensor_type_set.excluded().add(
-        TensorTypeId::VariableTensorId));
+        DispatchKey::VariableTensorId));
   }
   return raw_local_tensor_type_set;
 }
 
 // An RAII guard could snapshot and restore the entire state (entire TensorTypeSet) as
-// opposed to only snapshotting and restoring the state of its assigned TensorTypeId.
+// opposed to only snapshotting and restoring the state of its assigned DispatchKey.
 // I'm not sure which is better.  If only the RAII API is used, the two choices are
 // not distinguishable.
 //
 // However, if the guard chooses to snapshot and restore the entire TensorTypeSet,
 // the interaction with the non-RAII API changes.  Consider this sequence of events:
-// - An RAII guard is declared for a particular TensorTypeId, but snapshots the entire
+// - An RAII guard is declared for a particular DispatchKey, but snapshots the entire
 //   current TensorTypeSet.
-// - A call to the non-RAII API changes the state for a different TensorTypeId.
+// - A call to the non-RAII API changes the state for a different DispatchKey.
 // - The RAII guard goes out of scope, restoring the entire TensorTypeSet it snapshotted
-//   (which restores the state for its own assigned TensorTypeId and wipes out the state
-//   for the other TensorTypeId set by the non-RAII API).
+//   (which restores the state for its own assigned DispatchKey and wipes out the state
+//   for the other DispatchKey set by the non-RAII API).
 
 // RAII API
 
-IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(TensorTypeId x)
+IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(DispatchKey x)
   : tls_(&raw_local_tensor_type_set)
   , id_(x)
   , prev_state_(tls_->included().has(x)) {
@@ -65,7 +65,7 @@ IncludeTensorTypeIdGuard::~IncludeTensorTypeIdGuard() {
   }
 }
 
-ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(TensorTypeId x)
+ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(DispatchKey x)
   : tls_(&raw_local_tensor_type_set)
   , id_(x)
   , prev_state_(tls_->excluded().has(x)) {
@@ -83,11 +83,11 @@ ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
 // Non-RAII API
 // Please prefer using the RAII API. See declarations in LocalTensorTypeSet.h for details.
 
-bool tls_is_tensor_type_id_excluded(TensorTypeId x) {
+bool tls_is_tensor_type_id_excluded(DispatchKey x) {
   return raw_local_tensor_type_set.excluded().has(x);
 }
 
-void tls_set_tensor_type_id_excluded(TensorTypeId x, bool desired_state) {
+void tls_set_tensor_type_id_excluded(DispatchKey x, bool desired_state) {
   auto* tls = &raw_local_tensor_type_set;
   bool current_state = tls->excluded().has(x);
   if (desired_state != current_state) {
@@ -99,12 +99,12 @@ void tls_set_tensor_type_id_excluded(TensorTypeId x, bool desired_state) {
   }
 }
 
-bool tls_is_tensor_type_id_included(TensorTypeId x) {
+bool tls_is_tensor_type_id_included(DispatchKey x) {
   return raw_local_tensor_type_set.included().has(x);
 
 }
 
-void tls_set_tensor_type_id_included(TensorTypeId x, bool desired_state) {
+void tls_set_tensor_type_id_included(DispatchKey x, bool desired_state) {
   auto* tls = &raw_local_tensor_type_set;
   bool current_state = tls->included().has(x);
   if (desired_state != current_state) {

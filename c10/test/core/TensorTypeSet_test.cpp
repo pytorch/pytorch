@@ -6,19 +6,19 @@ using namespace c10;
 
 TEST(TensorTypeSet, Empty) {
   TensorTypeSet empty_set;
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
-    auto tid = static_cast<TensorTypeId>(i);
+  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto tid = static_cast<DispatchKey>(i);
     ASSERT_FALSE(empty_set.has(tid));
   }
   ASSERT_TRUE(empty_set.empty());
   TensorTypeSet empty_set2;
   ASSERT_TRUE(empty_set == empty_set2);
-  ASSERT_EQ(empty_set.highestPriorityTypeId(), TensorTypeId::UndefinedTensorId);
+  ASSERT_EQ(empty_set.highestPriorityTypeId(), DispatchKey::UndefinedTensorId);
 }
 
 TEST(TensorTypeSet, Singleton) {
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
-    auto tid = static_cast<TensorTypeId>(i);
+  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto tid = static_cast<DispatchKey>(i);
     TensorTypeSet sing(tid);
     ASSERT_EQ(sing, sing);
     ASSERT_EQ(sing, TensorTypeSet().add(tid));
@@ -32,11 +32,11 @@ TEST(TensorTypeSet, Singleton) {
 }
 
 TEST(TensorTypeSet, Doubleton) {
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
-    for (uint8_t j = i + 1; j < static_cast<uint8_t>(TensorTypeId::NumTensorIds); j++) {
+  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    for (uint8_t j = i + 1; j < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); j++) {
       ASSERT_LT(i, j);
-      auto tid1 = static_cast<TensorTypeId>(i);
-      auto tid2 = static_cast<TensorTypeId>(j);
+      auto tid1 = static_cast<DispatchKey>(i);
+      auto tid2 = static_cast<DispatchKey>(j);
       auto doub = TensorTypeSet(tid1).add(tid2);
       ASSERT_EQ(doub, TensorTypeSet(tid1) | TensorTypeSet(tid2));
       ASSERT_TRUE(doub.has(tid1));
@@ -48,8 +48,8 @@ TEST(TensorTypeSet, Doubleton) {
 
 TEST(TensorTypeSet, Full) {
   TensorTypeSet full(TensorTypeSet::FULL);
-  for (uint8_t i = 1; i < static_cast<uint8_t>(TensorTypeId::NumTensorIds); i++) {
-    auto tid = static_cast<TensorTypeId>(i);
+  for (uint8_t i = 1; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto tid = static_cast<DispatchKey>(i);
     ASSERT_TRUE(full.has(tid));
   }
 }

@@ -2,54 +2,54 @@
 
 namespace c10 {
 
-const char* toString(TensorTypeId t) {
+const char* toString(DispatchKey t) {
   switch (t) {
-    case TensorTypeId::UndefinedTensorId:
+    case DispatchKey::UndefinedTensorId:
       return "UndefinedTensorId";
-    case TensorTypeId::CPUTensorId:
+    case DispatchKey::CPUTensorId:
       return "CPUTensorId";
-    case TensorTypeId::CUDATensorId:
+    case DispatchKey::CUDATensorId:
       return "CUDATensorId";
-    case TensorTypeId::SparseCPUTensorId:
+    case DispatchKey::SparseCPUTensorId:
       return "SparseCPUTensorId";
-    case TensorTypeId::SparseCUDATensorId:
+    case DispatchKey::SparseCUDATensorId:
       return "SparseCUDATensorId";
-    case TensorTypeId::MKLDNNTensorId:
+    case DispatchKey::MKLDNNTensorId:
       return "MKLDNNTensorId";
-    case TensorTypeId::OpenGLTensorId:
+    case DispatchKey::OpenGLTensorId:
       return "OpenGLTensorId";
-    case TensorTypeId::OpenCLTensorId:
+    case DispatchKey::OpenCLTensorId:
       return "OpenCLTensorId";
-    case TensorTypeId::IDEEPTensorId:
+    case DispatchKey::IDEEPTensorId:
       return "IDEEPTensorId";
-    case TensorTypeId::HIPTensorId:
+    case DispatchKey::HIPTensorId:
       return "HIPTensorId";
-    case TensorTypeId::SparseHIPTensorId:
+    case DispatchKey::SparseHIPTensorId:
       return "SparseHIPTensorId";
-    case TensorTypeId::MSNPUTensorId:
+    case DispatchKey::MSNPUTensorId:
       return "MSNPUTensorId";
-    case TensorTypeId::XLATensorId:
+    case DispatchKey::XLATensorId:
       return "XLATensorId";
-    case TensorTypeId::MkldnnCPUTensorId:
+    case DispatchKey::MkldnnCPUTensorId:
       return "MkldnnCPUTensorId";
-    case TensorTypeId::QuantizedCPUTensorId:
+    case DispatchKey::QuantizedCPUTensorId:
       return "QuantizedCPUTensorId";
-    case TensorTypeId::ComplexCPUTensorId:
+    case DispatchKey::ComplexCPUTensorId:
       return "ComplexCPUTensorId";
-    case TensorTypeId::ComplexCUDATensorId:
+    case DispatchKey::ComplexCUDATensorId:
       return "ComplexCUDATensorId";
-    case TensorTypeId::VariableTensorId:
+    case DispatchKey::VariableTensorId:
       return "VariableTensorId";
-    case TensorTypeId::TESTING_ONLY_GenericModeTensorId:
+    case DispatchKey::TESTING_ONLY_GenericModeTensorId:
       return "TESTING_ONLY_GenericModeTensorId";
-    case TensorTypeId::TESTING_ONLY_GenericWrapperTensorId:
+    case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
       return "TESTING_ONLY_GenericWrapperTensorId";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
 }
 
-std::ostream& operator<<(std::ostream& str, TensorTypeId rhs) {
+std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
 

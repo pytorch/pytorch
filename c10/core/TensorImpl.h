@@ -328,9 +328,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
-  TensorImpl(Storage&& storage, TensorTypeId type_id)
+  TensorImpl(Storage&& storage, DispatchKey type_id)
     : TensorImpl(std::move(storage), TensorTypeSet(type_id)) {}
-  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+  TensorImpl(DispatchKey type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl(TensorTypeSet(type_id), data_type, device_opt) {}
 
  private:
@@ -423,30 +423,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(TensorTypeId::SparseCPUTensorId) ||
-           type_set_.has(TensorTypeId::SparseCUDATensorId) ||
-           type_set_.has(TensorTypeId::SparseHIPTensorId);
+    return type_set_.has(DispatchKey::SparseCPUTensorId) ||
+           type_set_.has(DispatchKey::SparseCUDATensorId) ||
+           type_set_.has(DispatchKey::SparseHIPTensorId);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(TensorTypeId::QuantizedCPUTensorId);
+    return type_set_.has(DispatchKey::QuantizedCPUTensorId);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(TensorTypeId::CUDATensorId) ||
-           type_set_.has(TensorTypeId::SparseCUDATensorId);
+    return type_set_.has(DispatchKey::CUDATensorId) ||
+           type_set_.has(DispatchKey::SparseCUDATensorId);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(TensorTypeId::HIPTensorId) ||
-           type_set_.has(TensorTypeId::SparseHIPTensorId);
+    return type_set_.has(DispatchKey::HIPTensorId) ||
+           type_set_.has(DispatchKey::SparseHIPTensorId);
   }
 
   bool is_mkldnn() const {
-    return type_set_.has(TensorTypeId::MkldnnCPUTensorId);
+    return type_set_.has(DispatchKey::MkldnnCPUTensorId);
   }
 
   int64_t get_device() const {
@@ -884,14 +884,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(TensorTypeSet from) {
     auto is_dense = [](TensorTypeSet ts) {
-      return ts.has(TensorTypeId::CPUTensorId) ||
-             ts.has(TensorTypeId::CUDATensorId) ||
-             ts.has(TensorTypeId::HIPTensorId);
+      return ts.has(DispatchKey::CPUTensorId) ||
+             ts.has(DispatchKey::CUDATensorId) ||
+             ts.has(DispatchKey::HIPTensorId);
     };
     auto is_sparse = [](TensorTypeSet ts) {
-      return ts.has(TensorTypeId::SparseCPUTensorId) ||
-             ts.has(TensorTypeId::SparseCUDATensorId) ||
-             ts.has(TensorTypeId::SparseHIPTensorId);
+      return ts.has(DispatchKey::SparseCPUTensorId) ||
+             ts.has(DispatchKey::SparseCUDATensorId) ||
+             ts.has(DispatchKey::SparseHIPTensorId);
     };
     return (type_set_ == from) || (is_dense(type_set_) && is_dense(from)) || (is_sparse(type_set_) && is_sparse(from));
   }
@@ -1597,9 +1597,9 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of TensorTypeIds which describe this tensor
+  // The set of DispatchKeys which describe this tensor
   //
-  // INVARIANT: type_set_.has(TensorTypeId::VariableTensorId) (every tensor
+  // INVARIANT: type_set_.has(DispatchKey::VariableTensorId) (every tensor
   // is a variable).  Historically this was not the case (there was a
   // distinction between plain tensors and variables), but because
   // we merged Variable and Tensor, this invariant now always holds.
@@ -1610,7 +1610,7 @@ protected:
   // to dispatch differently from variables, and then mask out the variable
   // id once we are done handling autograd.  If the boolean here was
   // inverted, we wouldn't be able to get autograd codepath (since there's
-  // be no TensorTypeId to dispatch to!)  We cannot set VariableTensorId
+  // be no DispatchKey to dispatch to!)  We cannot set VariableTensorId
   // as the default value contained in the *included* tensor type id set
   // as TLS requires our state to be zero-initialized (i.e., it is not
   // included).

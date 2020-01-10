@@ -82,7 +82,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    guard_(TensorTypeId::VariableTensorId) {
+    guard_(DispatchKey::VariableTensorId) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }

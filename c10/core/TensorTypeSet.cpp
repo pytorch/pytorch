@@ -14,9 +14,9 @@ std::ostream& operator<<(std::ostream& os, TensorTypeSet ts) {
     return os;
   }
   os << "TensorTypeSet(";
-  TensorTypeId tid;
+  DispatchKey tid;
   bool first = true;
-  while ((tid = ts.highestPriorityTypeId()) != TensorTypeId::UndefinedTensorId) {
+  while ((tid = ts.highestPriorityTypeId()) != DispatchKey::UndefinedTensorId) {
     if (!first) {
       os << ", ";
     }

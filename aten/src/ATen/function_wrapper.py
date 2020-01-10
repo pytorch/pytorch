@@ -111,7 +111,7 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(DispatchKey::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -128,7 +128,7 @@ DEFAULT_SCHEMA_REGISTRATION = CodeTemplate("""\
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, &${Type}::${api_name})
+  .kernel<${return_type} (${formals_types})>(DispatchKey::${Backend}TensorId, &${Type}::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -369,19 +369,19 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
-                 'TensorTypeId::${Backend}TensorId).release()',
+                 'DispatchKey::${Backend}TensorId).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     'TensorTypeId::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}TensorId).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Bool), 0, allocator(), true),'
-                     'TensorTypeId::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}TensorId).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     'TensorTypeId::${Backend}TensorId).release()',
+                     'DispatchKey::${Backend}TensorId).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                         '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
-                        'TensorTypeId::${Backend}TensorId).release()',
+                        'DispatchKey::${Backend}TensorId).release()',
 }
 
 ALLOC_WRAP = {

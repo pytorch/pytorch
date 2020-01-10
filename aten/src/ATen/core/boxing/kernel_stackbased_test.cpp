@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/script/function_schema_parser.h>
 
 using c10::RegisterOperators;
-using c10::TensorTypeId;
+using c10::DispatchKey;
 using c10::Stack;
 using std::make_unique;
 using c10::OperatorHandle;
@@ -31,7 +31,7 @@ void decrementKernel(const OperatorHandle&, Stack* stack) {
   torch::jit::push(*stack, input - 1);
 }
 
-void expectCallsIncrement(TensorTypeId type_id) {
+void expectCallsIncrement(DispatchKey type_id) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
@@ -42,7 +42,7 @@ void expectCallsIncrement(TensorTypeId type_id) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
-void expectCallsIncrementUnboxed(TensorTypeId type_id) {
+void expectCallsIncrementUnboxed(DispatchKey type_id) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
@@ -52,7 +52,7 @@ void expectCallsIncrementUnboxed(TensorTypeId type_id) {
   EXPECT_EQ(6, result);
 }
 
-void expectCallsDecrement(TensorTypeId type_id) {
+void expectCallsDecrement(DispatchKey type_id) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
@@ -64,41 +64,41 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(TensorTypeId::CPUTensorId));
-  expectCallsIncrement(TensorTypeId::CPUTensorId);
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPUTensorId));
+  expectCallsIncrement(DispatchKey::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(TensorTypeId::CPUTensorId))
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CUDATensorId))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CPUTensorId))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CUDATensorId));
-  expectCallsIncrement(TensorTypeId::CPUTensorId);
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPUTensorId))
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDATensorId))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPUTensorId))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDATensorId));
+  expectCallsIncrement(DispatchKey::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(TensorTypeId::CPUTensorId));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CUDATensorId));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CPUTensorId));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(TensorTypeId::CUDATensorId));
-  expectCallsIncrement(TensorTypeId::CPUTensorId);
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPUTensorId));
+  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDATensorId));
+  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CPUTensorId));
+  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&errorKernel>(DispatchKey::CUDATensorId));
+  expectCallsIncrement(DispatchKey::CPUTensorId);
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(TensorTypeId::CPUTensorId));
+    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPUTensorId));
     {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&decrementKernel>(TensorTypeId::CUDATensorId));
+      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&decrementKernel>(DispatchKey::CUDATensorId));
 
       // assert that schema and cpu kernel are present
-      expectCallsIncrement(TensorTypeId::CPUTensorId);
-      expectCallsDecrement(TensorTypeId::CUDATensorId);
+      expectCallsIncrement(DispatchKey::CPUTensorId);
+      expectCallsDecrement(DispatchKey::CUDATensorId);
     }
 
     // now registrar2 is destructed. Assert that schema is still present but cpu kernel is not
-    expectCallsIncrement(TensorTypeId::CPUTensorId);
-    expectDoesntFindKernel("_test::my_op", TensorTypeId::CUDATensorId);
+    expectCallsIncrement(DispatchKey::CPUTensorId);
+    expectDoesntFindKernel("_test::my_op", DispatchKey::CUDATensorId);
   }
 
   // now both registrars are destructed. Assert that the whole schema is gone
@@ -155,8 +155,8 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithou
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(TensorTypeId::CPUTensorId));
-  expectCallsIncrementUnboxed(TensorTypeId::CPUTensorId);
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPUTensorId));
+  expectCallsIncrementUnboxed(DispatchKey::CPUTensorId);
 }
 
 }

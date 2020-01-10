@@ -51,7 +51,7 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+  return c10::impl::tls_local_tensor_type_set().excluded_.has(DispatchKey::VariableTensorId);
 }
 }
 
@@ -523,7 +523,7 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace detail
 
-static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
+static inline DispatchKey legacyExtractTypeId(const Tensor& t) {
   return legacyExtractTypeId(t.type_set());
 }
 

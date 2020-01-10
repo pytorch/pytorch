@@ -7,9 +7,9 @@ namespace at {
 
 namespace {
   DeviceType sparseTensorSetToDeviceType(TensorTypeSet type_set) {
-    if (type_set.has(TensorTypeId::SparseCPUTensorId)) {
+    if (type_set.has(DispatchKey::SparseCPUTensorId)) {
       return kCPU;
-    } else if (type_set.has(TensorTypeId::SparseCUDATensorId)) {
+    } else if (type_set.has(DispatchKey::SparseCUDATensorId)) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_set);

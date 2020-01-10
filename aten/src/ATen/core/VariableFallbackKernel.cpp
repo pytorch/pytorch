@@ -20,7 +20,7 @@
 
 using c10::OperatorHandle;
 using c10::Stack;
-using c10::TensorTypeId;
+using c10::DispatchKey;
 using c10::TensorTypeSet;
 using c10::Dispatcher;
 using c10::KernelFunction;
@@ -33,7 +33,7 @@ void variable_fallback_kernel(const OperatorHandle& op, Stack* stack) {
 }
 
 static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
-    TensorTypeId::VariableTensorId,
+    DispatchKey::VariableTensorId,
     KernelFunction::makeFromBoxedFunction<&variable_fallback_kernel>()
 );
 

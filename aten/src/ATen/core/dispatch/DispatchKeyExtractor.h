@@ -12,7 +12,7 @@ namespace impl {
 
 // Take a TensorTypeSet for a Tensor, and combine it with the current thread
 // local valid (implemented) and enabled (not implemented) TensorTypeSets
-// to determine what the actual dispatch TensorTypeId should be.  Unlike
+// to determine what the actual dispatch DispatchKey should be.  Unlike
 // Tensor::type_set(), the value of this on a tensor can change depending
 // on TLS.
 //
@@ -21,7 +21,7 @@ namespace impl {
 // TODO: I'm not sure if this should live in this header or not; the operant
 // question is whether or not we have access to all the relevant TLS at this
 // point.
-static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
+static inline DispatchKey dispatchTypeId(TensorTypeSet ts) {
   c10::impl::LocalTensorTypeSet local = c10::impl::tls_local_tensor_type_set();
   return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
 }
@@ -68,7 +68,7 @@ public:
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
-  c10::optional<TensorTypeId> getDispatchKeyBoxed(const Stack* stack) const {
+  c10::optional<DispatchKey> getDispatchKeyBoxed(const Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. These should be aligned and do the same thing.
 
@@ -88,13 +88,13 @@ public:
   }
 
   template<class... Args>
-  c10::optional<TensorTypeId> getDispatchKeyUnboxed(const Args&... args) const {
+  c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
     auto type_set = detail::multi_dispatch_tensor_type_set(args...);
     return typeSetToDispatchKey_(type_set);
   }
 
 private:
-  static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
+  static c10::optional<DispatchKey> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
     if (C10_UNLIKELY(typeSet.empty())) {
       return c10::nullopt;
     }

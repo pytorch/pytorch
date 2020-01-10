@@ -73,11 +73,11 @@ Tensor values_sparse(const Tensor& self) {
 SparseTensor new_sparse(const TensorOptions& options) {
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparse);
-  TensorTypeId type_id;
+  DispatchKey type_id;
   if (options.device().is_cuda()) {
-    type_id = TensorTypeId::SparseCUDATensorId;
+    type_id = DispatchKey::SparseCUDATensorId;
   } else {
-    type_id = TensorTypeId::SparseCPUTensorId;
+    type_id = DispatchKey::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
       TensorTypeSet(type_id), options.dtype());

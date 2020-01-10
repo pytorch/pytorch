@@ -60,44 +60,44 @@ C10_API LocalTensorTypeSet tls_local_tensor_type_set();
 
 class C10_API IncludeTensorTypeIdGuard {
 public:
-  IncludeTensorTypeIdGuard(TensorTypeId);
+  IncludeTensorTypeIdGuard(DispatchKey);
   ~IncludeTensorTypeIdGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalTensorTypeSet* tls_;
-  TensorTypeId id_;
+  DispatchKey id_;
   bool prev_state_;
 };
 
 class C10_API ExcludeTensorTypeIdGuard {
 public:
-  ExcludeTensorTypeIdGuard(TensorTypeId);
+  ExcludeTensorTypeIdGuard(DispatchKey);
   ~ExcludeTensorTypeIdGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalTensorTypeSet* tls_;
-  TensorTypeId id_;
+  DispatchKey id_;
   bool prev_state_;
 };
 
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
-// the included/excluded state of a given TensorTypeId must span
+// the included/excluded state of a given DispatchKey must span
 // many calls from the Python to the C++, so you cannot conveniently
 // use an RAII guard.
 //
 // Example use case:  a Python context manager that includes a certain
-// TensorTypeId, to ensure ops running under the context manager dispatch
-// through that TensorTypeId's registered overrides.
+// DispatchKey, to ensure ops running under the context manager dispatch
+// through that DispatchKey's registered overrides.
 //
 // The non-RAII API is less efficient than the RAII guards because both the
 // getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
 
-bool tls_is_tensor_type_id_excluded(TensorTypeId x);
-void tls_set_tensor_type_id_excluded(TensorTypeId x, bool desired_state);
-bool tls_is_tensor_type_id_included(TensorTypeId x);
-void tls_set_tensor_type_id_included(TensorTypeId x, bool desired_state);
+bool tls_is_tensor_type_id_excluded(DispatchKey x);
+void tls_set_tensor_type_id_excluded(DispatchKey x, bool desired_state);
+bool tls_is_tensor_type_id_included(DispatchKey x);
+void tls_set_tensor_type_id_included(DispatchKey x, bool desired_state);
 
 }} // namespace c10::impl
