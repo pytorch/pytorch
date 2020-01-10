@@ -12,7 +12,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
-from common_utils import load_tests
+from common_utils import load_tests, IS_MACOS
 import dist_utils
 from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
@@ -1297,7 +1297,12 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
-    def test_sender_exceptions(self):
+    @unittest.skipIf(IS_MACOS,
+        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019"
+    )
+    def test_handle_send_exceptions(self):
+        # test that if a callee node has gone down, we raise an appropriate
+        # exception instead of just crashing.
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[

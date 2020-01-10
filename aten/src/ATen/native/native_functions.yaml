@@ -2651,6 +2651,10 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
+  dispatch:
+    CPU: tanh
+    CUDA: tanh
+    QuantizedCPU: quantized_tanh
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
@@ -4266,9 +4270,6 @@
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_geometric_
-    CUDA: geometric_cuda_
   supports_named_tensor: True
 
 # wrappers for TH functions
@@ -6498,6 +6499,12 @@
     CUDA: im2col_backward_cuda
 
 - func: isfinite(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+  supports_named_tensor: True
+
+- func: isinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function
   device_guard: False
