@@ -127,7 +127,7 @@ class Stmt : public RefHandle<BaseStmtNode> {
     if (node() == nullptr) {
       return Stmt();
     }
-    node()->accept_mutator(mutator);
+    return node()->accept_mutator(mutator);
   }
 
   template <class Op>

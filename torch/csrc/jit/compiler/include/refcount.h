@@ -112,11 +112,13 @@ class RefHandle {
     if (node_ != nullptr) {
       node_->Ref();
     }
+    return *this;
   }
 
   RefHandle& operator=(RefHandle&& other) {
     node_ = other.node_;
     other.node_ = nullptr;
+    return *this;
   }
 
   void reset() {
