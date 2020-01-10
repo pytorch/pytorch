@@ -8,7 +8,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
-#include <c10/core/TensorTypeSet.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/CopyBytes.h>
 

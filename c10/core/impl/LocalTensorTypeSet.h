@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/TensorTypeSet.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Flags.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))

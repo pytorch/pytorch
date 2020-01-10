@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
-#include <c10/core/TensorTypeSet.h>
+#include <c10/core/DispatchKeySet.h>
 #include <ATen/core/Variadic.h>
 
 namespace c10 {

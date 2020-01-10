@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/TensorTypeSet.h>
+#include <c10/core/DispatchKeySet.h>
 
 using namespace c10;
 
