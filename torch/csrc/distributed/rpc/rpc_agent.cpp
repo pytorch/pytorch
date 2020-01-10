@@ -12,7 +12,8 @@ RpcAgent::RpcAgent(
     std::chrono::milliseconds rpcTimeout)
     : workerInfo_(std::move(workerId)),
       cb_(std::move(cb)),
-      rpcTimeout_(rpcTimeout) {}
+      rpcTimeout_(rpcTimeout),
+      profilingEnabled_(true) {}
 
 RpcAgent::~RpcAgent() = default;
 

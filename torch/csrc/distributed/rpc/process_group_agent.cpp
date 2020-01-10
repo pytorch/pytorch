@@ -50,10 +50,10 @@ double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
 const ProcessGroupAgent::steady_clock_time_point
     ProcessGroupAgent::kInfiniteTimeoutTimePoint =
         std::chrono::time_point<std::chrono::steady_clock>::max();
-const std::string kNumPendingRequests = "num_pending_requests";
-const std::string kThreadPoolSize = "thread_pool_size";
-const std::string kNumIdleThreads = "num_idle_threads";
-const std::string kGilAverageWaitTime = "gil_average_wait_time_us";
+const std::string kNumPendingRequests = "agent.num_pending_requests";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;

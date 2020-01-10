@@ -146,18 +146,18 @@ class TORCH_API RpcAgent {
 
   // Flag to control whether more expensive metrics (such as GIL wait times)
   // should be profiled or not.
-  virtual void setMetricsProfiling(bool flag);
+  void setMetricsProfiling(bool flag);
 
   // Retrieve wheher we should profile certain expensive metrics (such as GIL
   // wait time) or not.
-  virtual bool getMetricsProfiling();
+  bool getMetricsProfiling();
 
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
-  std::atomic<bool> profilingEnabled_{true};
+  std::atomic<bool> profilingEnabled_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
