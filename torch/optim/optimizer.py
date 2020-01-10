@@ -170,6 +170,10 @@ class Optimizer(object):
         Arguments:
             closure (callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
+
+        .. note::
+            Unless otherwise specified, this function should not modify the
+            ``.grad`` field of the parameters.
         """
         raise NotImplementedError
 

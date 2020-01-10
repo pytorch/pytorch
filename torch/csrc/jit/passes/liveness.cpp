@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
@@ -85,7 +86,18 @@ struct LivenessAnalyzer {
         // loop's outputs aren't live inside the loop
         // loop's block outputs, OTOH, will be considered
         // as uses
+
+        LoopView lv(it);
+        WithInsertPoint guard(*lv.bodyBlock()->nodes().end());
+        // temporary make loop counts live for the duration of the loop
+        // as they are needed by BailOuts in the loop
+        auto ctc = graph_->create(prim::Store, {lv.currentTripCount()}, 0);
+        graph_->insertNode(ctc);
+        auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
+        graph_->insertNode(mtc);
         loop_block = processBlock(it->blocks()[0], loop_block);
+        ctc->destroy();
+        mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
         liveness |= loop_block;

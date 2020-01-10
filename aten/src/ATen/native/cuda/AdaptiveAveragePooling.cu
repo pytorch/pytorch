@@ -5,6 +5,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/Utils.h"
 #include "c10/util/Exception.h"
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include "THC/THCNumerics.cuh"
 #include <ATen/native/cuda/LaunchUtils.h>
@@ -199,7 +200,7 @@ namespace {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             // atomic add since different threads could update same variable
-            atomicAdd(&(ptr_gradInput[iw]), grad_delta);
+            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
           }
           ptr_gradInput += isizeW; // next input line
         }

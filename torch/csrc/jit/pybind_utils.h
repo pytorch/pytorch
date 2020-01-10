@@ -3,22 +3,23 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -329,11 +330,9 @@ inline IValue createGenericDict(
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-#ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
-#endif
 }
 
 inline IValue toIValue(
@@ -344,7 +343,7 @@ inline IValue toIValue(
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_WARN(
+        TORCH_WARN_ONCE(
             "Using sparse tensors in TorchScript is experimental. Many optimization "
             "pathways have not been thoroughly tested with sparse tensors. Please "
             "include the fact that the network is running sparse tensors in any bug "
@@ -356,6 +355,9 @@ inline IValue toIValue(
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+    // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
+    case TypeKind::LayoutType:
+    case TypeKind::ScalarTypeType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -540,6 +542,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
@@ -614,24 +617,13 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline c10::optional<py::object> tryToConvertToCustomClass(
-    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
-  if (obj->name().find("__torch__.torch.classes") == 0) {
-    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
-    auto classConverter = c10::getClassConverter()[obj->name()];
-    py::handle rawPyObj = classConverter(objPtr);
-    auto o = py::reinterpret_steal<py::object>(rawPyObj);
-    return o;
-  }
-  return c10::nullopt;
-}
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_WARN(
+      TORCH_WARN_ONCE(
           "Using sparse tensors in TorchScript is experimental. Many optimization "
           "pathways have not been thoroughly tested with sparse tensors. Please "
           "include the fact that the network is running sparse tensors in any bug "
@@ -697,9 +689,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    auto res = tryToConvertToCustomClass(obj);
-    if (res.has_value()) {
-      return res.value();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
@@ -862,7 +853,7 @@ inline py::object runAndInsertCall(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   auto tracing_state = tracer::getTracingState();
   if (!tracing_state) {
-    AutoNoGIL no_gil_guard;
+    pybind11::gil_scoped_release no_gil_guard;
     // If we're not tracing, just run the callee as normal.
     callee.run(stack);
   } else {
@@ -893,7 +884,7 @@ inline py::object runAndInsertCall(
     // Actually run the callee. Pause the tracer so that we don't double-add the
     // callee nodes.
     {
-      AutoNoGIL no_gil_guard;
+      pybind11::gil_scoped_release no_gil_guard;
       ResourceGuard guard(tracer::pauseTracing());
       callee.run(stack);
     }

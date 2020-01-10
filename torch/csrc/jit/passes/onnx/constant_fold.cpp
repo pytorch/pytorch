@@ -231,6 +231,28 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       return c10::optional<at::Tensor>(updated_val);
     }
     return c10::nullopt;
+  } else if (node->kind() == onnx::Reshape) {
+    assert(inputTensorValues.size() == 2);
+    updated_val = inputTensorValues[0];
+    std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
+    auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
+    for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+      // All shape dim values should be >= -1
+      // onnx::Reshape supports a shape dim value to be zero, in
+      // which case the actual dim value remains unchanged. However,
+      // at::reshape does not support shape dim value to be zero
+      assert(shape_a[i] >= -1);
+      if (shape_a[i] == 0){
+        if (i >= inputTensorValues[0].sizes().size()){
+          throw std::runtime_error("Dimension with value 0 exceeds the input size dimensions.");
+        }
+        shape[i] = inputTensorValues[0].sizes()[i];
+      }
+      else {
+        shape[i] = shape_a[i];
+      }
+    }
+    return c10::optional<at::Tensor>(at::reshape(updated_val, shape));
   } else {
     return c10::nullopt;
   }
@@ -302,7 +324,7 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 //
 // NB: This is not constant folding in the traditional sense, as we
 // don't try particularly hard to evaluate operations on constant nodes.
-// This is more of a partial evaluation  analysis, where operations on constant
+// This is more of a partial evaluation analysis, where operations on constant
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {

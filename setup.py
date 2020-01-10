@@ -245,7 +245,7 @@ if IS_WINDOWS:
     cmake_python_library = "{}/libs/python{}.lib".format(
         distutils.sysconfig.get_config_var("prefix"),
         distutils.sysconfig.get_config_var("VERSION"))
-    # Fix virtualenv builds 
+    # Fix virtualenv builds
     # TODO: Fix for python < 3.3
     if not os.path.exists(cmake_python_library):
         cmake_python_library = "{}/libs/python{}.lib".format(
@@ -586,7 +586,7 @@ def configure_extension_build():
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++11',
+            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -610,28 +610,10 @@ def configure_extension_build():
 
     library_dirs.append(lib_path)
 
-    # we specify exact lib names to avoid conflict with lua-torch installs
-    CAFFE2_LIBS = []
-
     main_compile_args = []
     main_libraries = ['shm', 'torch_python']
     main_link_args = []
     main_sources = ["torch/csrc/stub.cpp"]
-
-    # Before the introduction of stub.cpp, _C.so and libcaffe2.so defined
-    # some of the same symbols, and it was important for _C.so to be
-    # loaded before libcaffe2.so so that the versions in _C.so got
-    # used. This happened automatically because we loaded _C.so directly,
-    # and libcaffe2.so was brought in as a dependency (though I suspect it
-    # may have been possible to break by importing caffe2 first in the
-    # same process).
-    #
-    # Now, libtorch_python.so and libcaffe2.so define some of the same
-    # symbols. We directly load the _C.so stub, which brings both of these
-    # in as dependencies. We have to make sure that symbols continue to be
-    # looked up in libtorch_python.so first, by making sure it comes
-    # before libcaffe2.so in the linker command.
-    main_link_args.extend(CAFFE2_LIBS)
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -796,6 +778,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
+                'include/ATen/native/*.h',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/caffe2/utils/*.h',

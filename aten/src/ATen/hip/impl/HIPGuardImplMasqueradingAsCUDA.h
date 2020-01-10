@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/hip/HIPConfig.h>
+#include <aten/src/ATen/hip/HIPConfig.h>
 
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>

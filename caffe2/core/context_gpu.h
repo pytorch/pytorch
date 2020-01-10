@@ -105,7 +105,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   cublasHandle_t GetHandle(c10::cuda::CUDAStream cuda_stream) {
     CUDAGuard guard(cuda_stream.device_index());
     // Default construct in the map if it doesn't exist, and return a mutable
-    // refernce to it.
+    // reference to it.
     auto& r = cublas_handles_[cuda_stream];
     if (r == nullptr) {
       CUBLAS_ENFORCE(cublasCreate(&r));

@@ -82,7 +82,7 @@ class TestNumbaIntegration(common.TestCase):
                     AttributeError, lambda: sparse_cuda_t.__cuda_array_interface__
                 )
 
-            # CUDA tensors have the attribute and v0 interface
+            # CUDA tensors have the attribute and v2 interface
             cudat = tp(10).cuda()
 
             self.assertTrue(hasattr(cudat, "__cuda_array_interface__"))
@@ -94,11 +94,11 @@ class TestNumbaIntegration(common.TestCase):
             )
 
             self.assertEqual(ar_dict["shape"], (10,))
-            self.assertEqual(ar_dict["strides"], (cudat.storage().element_size(),))
+            self.assertIs(ar_dict["strides"], None)
             # typestr from numpy, cuda-native little-endian
             self.assertEqual(ar_dict["typestr"], numpy.dtype(npt).newbyteorder("<").str)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
-            self.assertEqual(ar_dict["version"], 1)
+            self.assertEqual(ar_dict["version"], 2)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
@@ -308,6 +308,30 @@ class TestNumbaIntegration(common.TestCase):
                 # Check that `torch_ary` and `numba_ary` points to different memory
                 torch_ary += 42
                 self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary) + 42)
+
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_from_cuda_array_interface_inferred_strides(self):
+        """torch.as_tensor(numba_ary) should have correct inferred (contiguous) strides"""
+        # This could, in theory, be combined with test_from_cuda_array_interface but that test
+        # is overly strict: it checks that the exported protocols are exactly the same, which
+        # cannot handle differing exported protocol versions.
+        dtypes = [
+            numpy.float64,
+            numpy.float32,
+            numpy.int64,
+            numpy.int32,
+            numpy.int16,
+            numpy.int8,
+            numpy.uint8,
+        ]
+        for dtype in dtypes:
+            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype),
+            numba_ary = numba.cuda.to_device(numpy_ary)
+            self.assertTrue(numba_ary.is_c_contiguous())
+            torch_ary = torch.as_tensor(numba_ary, device="cuda")
+            self.assertTrue(torch_ary.is_contiguous())
 
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
