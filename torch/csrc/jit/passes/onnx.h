@@ -15,6 +15,7 @@ TORCH_API void BlockToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     std::unordered_map<Value*, Value*> env);
 TORCH_API void RemovePrintOps(std::shared_ptr<Graph>& graph);
+TORCH_API void RemoveTupleConstants(std::shared_ptr<Graph>& graph);
 TORCH_API void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph);
 
 } // namespace jit

@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
@@ -37,6 +38,40 @@ void removePrintOps(Block* block) {
 
 void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
+}
+
+Value* insertIValueWithoutTupleConstants(Graph* graph, const IValue& ival) {
+  if (ival.isTuple()) {
+    std::vector<Value*> values;
+    for (const auto& elem : ival.toTuple()->elements()) {
+      values.push_back(insertIValueWithoutTupleConstants(graph, elem));
+    }
+    return graph->insertNode(graph->createTuple(values))->output();
+  }
+  return graph->insertConstant(ival);
+}
+
+void removeTupleConstants(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
+       ++it) {
+    for (auto b : it->blocks()) {
+      removeTupleConstants(b);
+    }
+    if (it->kind() == prim::Constant &&
+        it->output()->type()->cast<TupleType>()) {
+      auto tuple = toIValue(it->output());
+      std::vector<Value*> tuple_elems;
+      WithInsertPoint guard(*it);
+      auto new_val =
+          insertIValueWithoutTupleConstants(block->owningGraph(), tuple);
+      it->output()->replaceAllUsesWith(new_val);
+      it.destroyCurrent();
+    }
+  }
+}
+
+void RemoveTupleConstants(std::shared_ptr<Graph>& graph) {
+  removeTupleConstants(graph->block());
 }
 
 void checkONNXCompatibility(const c10::FunctionSchema& schema) {
