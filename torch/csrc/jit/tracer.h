@@ -316,6 +316,7 @@ template <
     typename T,
     typename = torch::enable_if_t<
         (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+         !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
          !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
@@ -326,6 +327,7 @@ void addOutput(Node* node, T&&) {
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
+TORCH_API void addOutput(Node* node, const c10::List<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,

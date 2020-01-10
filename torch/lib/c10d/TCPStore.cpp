@@ -274,7 +274,7 @@ TCPStore::TCPStore(
     int numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
-    bool wait)
+    bool waitWorkers)
     : Store(timeout),
       isServer_(isServer),
       tcpStoreAddr_(masterAddr),
@@ -293,7 +293,7 @@ TCPStore::TCPStore(
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
 
-  if (wait) {
+  if (waitWorkers) {
     waitForWorkers();
   }
 }

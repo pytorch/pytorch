@@ -51,7 +51,7 @@ class TCPStore : public Store {
       int numWorkers,
       bool isServer = false,
       const std::chrono::milliseconds& timeout = kDefaultTimeout,
-      bool wait = true);
+      bool waitWorkers = true);
 
   virtual ~TCPStore();
 
