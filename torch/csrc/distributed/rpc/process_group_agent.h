@@ -65,6 +65,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void shutdown() override;
 
+  ~ProcessGroupAgent() override;
+
   std::unordered_map<std::string, std::string> getMetrics() override;
   std::unordered_map<std::string, std::string> getDebugInfo() override;
 
@@ -115,6 +117,10 @@ class ProcessGroupAgent : public RpcAgent {
   void collectNames();
   // put SendWork into a queue and notify the worker thread
   void enqueueSend(SendWork work);
+  // handle a SendWork request. This serializes the payload inside the work
+  // object, and sends the message to the receiver using the underlying
+  // ProcessGroup.
+  void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
   // receiving messages
@@ -126,6 +132,12 @@ class ProcessGroupAgent : public RpcAgent {
   // compute the remaining time for an RPC, given its end time.
   const std::chrono::milliseconds getRPCRemainingTime(
       const std::chrono::milliseconds& rpcEndTime) const;
+
+  // a helper function to mark a future in the futures_ map with a message. The
+  // future is marked with the passed in message, and then removed from the
+  // futures_ map. It is also removed from the futureTimeouts_ map since these
+  // maps are kept in sync.
+  void markFutureWithError(Message& message);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -198,10 +210,11 @@ class ProcessGroupAgent : public RpcAgent {
   // A map to keep track of when futures time out. The map is keyed by the time
   // (millisecond level precision) the future will expire. This is so that timed
   // out futures can be efficiently cleaned up, and we can quickly exit if we
-  // find a future that has not timed out. The values correspond to a vector of
-  // future ids that started at that time. This map must be kept in sync with
-  // the above futures_ map.
-  std::map<steady_clock_time_point, std::vector<int64_t>> futureTimeouts_;
+  // find a future that has not timed out. The values correspond to an
+  // unordered_set of future ids that started at that time. This map must be
+  // kept in sync with the above futures_ map.
+  std::map<steady_clock_time_point, std::unordered_set<int64_t>>
+      futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
   // CV to wake up watchdog thread that watches for timed out futures.

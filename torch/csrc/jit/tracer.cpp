@@ -200,6 +200,14 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
        throw std::runtime_error(os.str());
      }
      return it->second;
+  } else if (iv.isTensorList()) {
+    return graph
+        ->insertNode(graph->createList(
+            TensorType::get(),
+            fmap(
+                iv.toTensorListRef(),
+                [&](const IValue& ival) { return getOutput(ival, i); })))
+        ->output();
   } else if (iv.isTuple()) {
     auto tuple = iv.toTuple()->elements();
     auto tuple_node = graph->createTuple(
@@ -208,7 +216,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     return tuple_node->output();
   } else {
     AT_ERROR(
-        "Only tensors or tuples of tensors can be output from traced functions");
+        "Only tensors, lists and tuples of tensors can be output from traced functions");
   }
 }
 
@@ -648,6 +656,10 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
     output_val->inferTypeFrom(outputs[i]);
     setValueTrace(outputs[i], output_val);
   }
+}
+
+void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
+  return addOutput(node, c10::impl::toVector(outputs));
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {
