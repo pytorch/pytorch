@@ -356,6 +356,7 @@ struct CodeImpl {
   size_t n_outputs;
   size_t n_inputs;
   TypePtr return_type_;
+  size_t num_bailouts_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -383,7 +384,9 @@ struct CodeImpl {
   std::vector<std::unique_ptr<Function>> bailout_functions_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
-      : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        num_bailouts_(0) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -399,6 +402,10 @@ struct CodeImpl {
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+  }
+
+  void setNumBailOuts(size_t num) {
+    num_bailouts_ = num;
   }
 
   const std::vector<c10::IValue>& constant_table() const {
@@ -1028,8 +1035,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            auto num_bailouts = frames.back().function->num_bailouts_ > 0
+                ? frames.back().function->num_bailouts_ - 1
+                : 0;
+            auto& executor = af.functions[inst.X]->get_executor();
+            executor.setNumBailOuts(num_bailouts);
+            const Code& code = executor.getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
@@ -1139,6 +1150,10 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+void Code::setNumBailOuts(size_t num) {
+  pImpl->setNumBailOuts(num);
 }
 
 size_t Code::num_inputs() const {

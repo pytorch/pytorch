@@ -57,13 +57,17 @@ struct GraphExecutorImplBase {
   GraphExecutorImplBase(const std::shared_ptr<Graph>& graph)
       : graph(prepareGraph(graph)),
         num_inputs(this->graph->inputs().size()),
-        num_outputs(this->graph->outputs().size()) {}
+        num_outputs(this->graph->outputs().size()),
+        num_bailouts_(0) {}
 
   // entry point where execution begins
   void run(Stack& stack);
 
   virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
   virtual GraphExecutorState getDebugState() = 0;
+  void setNumBailOuts(size_t num) {
+    num_bailouts_ = num;
+  }
   virtual ~GraphExecutorImplBase() = default;
 
  protected:
@@ -78,6 +82,7 @@ struct GraphExecutorImplBase {
   // Useful for debugging.
   const size_t num_inputs;
   const size_t num_outputs;
+  size_t num_bailouts_;
 
   // GraphExecutors can be accessed from multiple threads, so this thread needs
   // to be held every time we access the fallback or plan_cache.

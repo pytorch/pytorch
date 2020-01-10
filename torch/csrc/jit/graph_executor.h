@@ -49,6 +49,8 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 
+  void setNumBailOuts(size_t num);
+
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };

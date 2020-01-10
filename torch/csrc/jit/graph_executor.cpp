@@ -621,6 +621,10 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
+void GraphExecutor::setNumBailOuts(size_t num) {
+  pImpl->setNumBailOuts(num);
+}
+
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
     : pImpl(
           getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(

@@ -38,6 +38,8 @@ struct TORCH_API Code {
 
   const std::vector<GraphExecutor*>& grad_executors();
 
+  void setNumBailOuts(size_t num);
+
   explicit operator bool() const {
     return pImpl != nullptr;
   }
