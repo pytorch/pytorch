@@ -185,7 +185,7 @@ def _to_worker_info(name_or_info):
     elif isinstance(name_or_info, str):
         return get_worker_info(name_or_info)
     else:
-        raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
