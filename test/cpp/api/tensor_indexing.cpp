@@ -42,8 +42,29 @@ TEST(TensorIndexingTest, TensorIndex) {
     "Expected \"...\" to represent an ellipsis index, but got \"..\"");
 
   // NOTE: Some compilers such as Clang 5 and MSVC always treat `TensorIndex({1})` the same as
-  // `TensorIndex(1)`. Therefore, we should only run this test on compilers that treat
-  // `TensorIndex({1})` as `TensorIndex(std::initializer_list<c10::optional<int64_t>>({1}))`.
+  // `TensorIndex(1)`. This is in violation of the C++ standard
+  // (`https://en.cppreference.com/w/cpp/language/list_initialization`), which says:
+  // ```
+  // copy-list-initialization:
+  //
+  // U( { arg1, arg2, ... } )
+  //
+  // functional cast expression or other constructor invocations, where braced-init-list is used
+  // in place of a constructor argument. Copy-list-initialization initializes the constructor's parameter
+  // (note; the type U in this example is not the type that's being list-initialized; U's constructor's parameter is)
+  // ```
+  // When we call `TensorIndex({1})`, `TensorIndex`'s constructor's parameter is being list-initialized with {1}.
+  // And since we have the `TensorIndex(std::initializer_list<c10::optional<int64_t>>)` constructor, the following
+  // rule in the standard applies:
+  // ```
+  // The effects of list initialization of an object of type T are:
+  //
+  // if T is a specialization of std::initializer_list, the T object is direct-initialized or copy-initialized,
+  // depending on context, from a prvalue of the same type initialized from the braced-init-list.
+  // ```
+  // Therefore, if the compiler strictly follows the standard, it should treat `TensorIndex({1})` as
+  // `TensorIndex(std::initializer_list<c10::optional<int64_t>>({1}))`. However, this is not the case for
+  // compilers such as Clang 5 and MSVC, and hence we skip this test for those compilers.
 #if (!defined(__clang__) || (defined(__clang__) && __clang_major__ != 5)) && !defined(_MSC_VER)
   ASSERT_THROWS_WITH(
     TensorIndex({1}),
