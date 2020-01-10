@@ -556,6 +556,27 @@ class _TestTorchMixin(object):
     def test_round(self):
         self._test_math(torch.round, round)
 
+    def test_clamp_bfloat16(self):
+        a = torch.randn(4, 4, dtype=torch.float, device='cpu', requires_grad=True)
+        a_bf16= a.bfloat16()
+        out = torch.clamp(a, min=0, max=2)
+        out_bf16= torch.clamp(a_bf16, min=0, max=2)
+        self.assertEqual(out, out_bf16, prec=0.01)
+    
+    def test_clamp_min_bfloat16(self):
+        a = torch.randn(4, 4, dtype=torch.float, device='cpu', requires_grad=True)
+        a_bf16= a.bfloat16()
+        out = torch.clamp_min(a, min=0)
+        out_bf16= torch.clamp_min(a_bf16, min=0)
+        self.assertEqual(out, out_bf16, prec=0.01)
+
+    def test_clamp_max_bfloat16(self):
+        a = torch.randn(4, 4, dtype=torch.float, device='cpu', requires_grad=True)
+        a_bf16= a.bfloat16()
+        out = torch.clamp_max(a, max=2)
+        out_bf16= torch.clamp_max(a_bf16, max=2)
+        self.assertEqual(out, out_bf16, prec=0.01)
+
     def test_has_storage(self):
         self.assertIsNotNone(torch.Tensor().storage())
         self.assertIsNotNone(torch.Tensor(0).storage())
@@ -6348,18 +6369,12 @@ class TestTorchDeviceType(TestCase):
     def test_logical_not(self, device):
         for dtype in torch.testing.get_all_dtypes():
             a = torch.tensor([10, 1, 0], dtype=dtype, device=device)
-            if dtype == torch.bfloat16:
-                self.assertRaises(RuntimeError, lambda: a.logical_not())
-                continue
             expected_res = torch.tensor([0, 0, 1], dtype=dtype, device=device)
             # new tensor
             self.assertEqual(expected_res.bool(), a.logical_not())
             # out
             for out_dtype in torch.testing.get_all_dtypes():
                 b = torch.empty(0, dtype=out_dtype, device=device)
-                if out_dtype == torch.bfloat16:
-                    self.assertRaises(RuntimeError, lambda: torch.logical_not(a, out=b))
-                    continue
                 torch.logical_not(a, out=b)
                 self.assertEqual(expected_res.bool(), b.bool())
             # in-place
@@ -9661,6 +9676,17 @@ class TestTorchDeviceType(TestCase):
         a_bool.sign_()
         self.assertEqual(a_bool, a_bool_target, 'sign_ device={} dtype=bool'.format(device))
 
+        #bfloat16
+        if device == 'cpu':
+            dt_info = torch.finfo(torch.float)
+            a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=torch.float)
+            a_bf16= a.bfloat16()
+            out = torch.empty_like(a)
+            torch.sign(a, out=out)
+            out_bf16= torch.empty_like(a_bf16)
+            torch.sign(a_bf16, out=out_bf16)
+            self.assertEqual(out, out_bf16)
+
     def test_logical_any(self, device):
         x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
 
@@ -11309,6 +11335,13 @@ class TestTorchDeviceType(TestCase):
             expected = torch.tensor([math.atan2(x[i].item(), y[i].item()) for i in range(x.numel())],
                                     device=device, dtype=torch.double)
             self.assertTrue(torch.allclose(expected, actual.view(-1), rtol=0, atol=0.02))
+
+            #bfloat16
+            if device == 'cpu':
+                a_bf16 = a.bfloat16()
+                b_bf16 = b.bfloat16()
+                actual_bf16 = a_bf16.atan2(b_bf16)
+                self.assertEqual(actual_bf16, actual, prec=0.01)
 
         _test_atan2_with_size((2, 2), device)
         _test_atan2_with_size((3, 3), device)
@@ -13669,13 +13702,20 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(y.le(0).any())
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_reciprocal(self, device, dtype):
-        a = torch.randn(100, 89, device=device, dtype=dtype)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
+        if dtype is torch.bfloat16:
+            a = torch.randn(10, 5, device=device, dtype=torch.float)
+            a_bf16= a.bfloat16()
+            res_div = 1 / a
+            res_div_bf16= 1 / a_bf16
+            self.assertEqual(res_div_bf16, res_div, prec=0.1)
+        else:
+            a = torch.randn(100, 89, device=device, dtype=dtype)
+            res_div = 1 / a
+            res_reciprocal = a.clone()
+            res_reciprocal.reciprocal_()
+            self.assertEqual(res_reciprocal, res_div)
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float)

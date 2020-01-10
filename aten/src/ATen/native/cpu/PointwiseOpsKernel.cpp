@@ -48,7 +48,7 @@ static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
 
 static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
     auto norm_val_vec = Vec256<scalar_t>(norm_val);
     const auto neg_1_vec = Vec256<scalar_t>(-1);
