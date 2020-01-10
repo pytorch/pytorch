@@ -113,8 +113,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
-    atomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
-    atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
+    gpuAtomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
+    gpuAtomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
   }
 }
 

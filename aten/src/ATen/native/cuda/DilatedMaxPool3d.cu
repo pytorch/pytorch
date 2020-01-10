@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
@@ -227,7 +228,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   {
     int maxIndex = indices[slice][oFrame][oRow][oColumn];
     if (maxIndex != -1) {
-      atomicAdd(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
+      gpuAtomicAdd(&gradInputData[slice * itime * iheight * iwidth + maxIndex],
                 gradOutput[slice][oFrame][oRow][oColumn]);
     }
   }

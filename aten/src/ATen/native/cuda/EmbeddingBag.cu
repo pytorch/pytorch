@@ -208,7 +208,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       int64_t word_idx = max_indices[bag * stride + featureDim];
       if (word_idx >= 0) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
-        atomicAdd(&(gradWeight[word_idx * stride + featureDim]),
+        gpuAtomicAdd(&(gradWeight[word_idx * stride + featureDim]),
                 gradOutput[bag * stride + featureDim]);
       }
     }
