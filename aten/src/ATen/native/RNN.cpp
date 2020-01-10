@@ -278,12 +278,12 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
 static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
     TensorList params) {
   static at::Tensor undefined;
-  std::vector<QuantizedCellParamsDynamic> result;
   TORCH_CHECK(
       params.size() % 2 == 0,
       "got an incorrect number of quantized RNN parameters");
   // PackedLinearWeight is only defined when USE_FBGEMM is defined
 #ifdef USE_FBGEMM
+  std::vector<QuantizedCellParamsDynamic> result;
   for (size_t i = 0; i < params.size(); i += 2) {
     auto& packed_struct_ih =
         cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
@@ -1238,7 +1238,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
 return_type name( \
     const Tensor& input, \
-    hx_type hx, \
+    hx_type &hx, \
     const Tensor& w_ih, \
     const Tensor& w_hh, \
     const Tensor& b_ih, \

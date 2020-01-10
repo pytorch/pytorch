@@ -1683,6 +1683,7 @@ void test_THDoubleVector_cadd_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THFloatVector_cadd_VSX()
@@ -1754,6 +1755,7 @@ void test_THFloatVector_cadd_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THDoubleVector_adds_VSX()
@@ -1959,6 +1961,7 @@ void test_THDoubleVector_cmul_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THFloatVector_cmul_VSX()
@@ -2029,6 +2032,7 @@ void test_THFloatVector_cmul_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THDoubleVector_muls_VSX()
@@ -2240,6 +2244,7 @@ void test_THDoubleVector_cdiv_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THFloatVector_cdiv_VSX()
@@ -2310,6 +2315,7 @@ void test_THFloatVector_cdiv_VSX()
     free(z_standard);
     free(z_optimized);
     free(x);
+    free(y);
 }
 
 void test_THDoubleVector_divs_VSX()

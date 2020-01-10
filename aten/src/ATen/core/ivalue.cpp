@@ -74,7 +74,7 @@ namespace {
 
 template<class T>
 std::ostream& printList(std::ostream & out, const c10::List<T> &v,
-  const std::string start, const std::string finish) {
+  const std::string &start, const std::string &finish) {
   out << start;
   for(size_t i = 0; i < v.size(); ++i) {
     if(i > 0)
@@ -88,7 +88,7 @@ std::ostream& printList(std::ostream & out, const c10::List<T> &v,
 
 template<class T>
 std::ostream& printList(std::ostream & out, const std::vector<T> &v,
-  const std::string start, const std::string finish) {
+  const std::string &start, const std::string &finish) {
   out << start;
   for(size_t i = 0; i < v.size(); ++i) {
     if(i > 0)
