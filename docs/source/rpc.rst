@@ -86,8 +86,13 @@ for communication.
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
 
-The following APIs provide primitives allowing users to remotely execute
-functions as well as create (RRefs) to remote data objects.
+The following APIs allow users to remotely execute functions as well as create
+references (RRefs) to remote data objects. In these APIs, when passing a
+`Tensor` as an argument or a return value, the destination worker will try to
+create a `Tensor` with the same meta (i.e., device, stride, etc.), which might
+crash if the device lists on source and destination workers are different. In
+such cases, applications can always feed in CPU tensors and manually move it
+to appropriate devices if necessary.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
