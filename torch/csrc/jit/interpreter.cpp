@@ -943,9 +943,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             const Code& code =
+                // consider passing `frames.back().function->num_bailouts_`
+                // into `get_executor().getPlanFor()`
+                // to propagate caller's depth restrictions onto children
+                // while this strategy has a potential to reduce the number
+                // of compilations for too dynamic callers
+                // we might miss opportunities where a caller is dynamic
+                // but a callee gets stable arguments
                 af.functions[inst.X]
                     ->get_executor()
-                    .getPlanFor(stack, frames.back().function->num_bailouts_)
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
@@ -956,13 +963,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // this can be more optimized if necessary, caching parts
             // of the hashing computation or storing the offset when
             // the object is turned into an interface
+
+            // consider passing `frames.back().function->num_bailouts_`
+            // into `get_executor().getPlanFor()`
+            // to propagate caller's depth restrictions onto children
+            // while this strategy has a potential to reduce the number
+            // of compilations for too dynamic callers
+            // we might miss opportunities where a caller is dynamic
+            // but a callee gets stable arguments
             auto function = peek(stack, 0, inst.N)
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
             const Code& code =
                 function->get_executor()
-                    .getPlanFor(stack, frames.back().function->num_bailouts_)
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - inst.N);
