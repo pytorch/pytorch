@@ -22,7 +22,7 @@ namespace impl {
 // question is whether or not we have access to all the relevant TLS at this
 // point.
 static inline DispatchKey dispatchTypeId(DispatchKeySet ts) {
-  c10::impl::LocalTensorTypeSet local = c10::impl::tls_local_tensor_type_set();
+  c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_tensor_type_set();
   return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
 }
 
