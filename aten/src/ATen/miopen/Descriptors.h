@@ -13,6 +13,7 @@ inline int dataSize(miopenDataType_t dataType)
   switch (dataType) {
     case miopenHalf: return 2;
     case miopenFloat: return 4;
+    case miopenBFloat16: return 2;
     default: return 8;
   }
 }
@@ -145,7 +146,7 @@ union Constant
   float f;
   double d;
   Constant(miopenDataType_t dataType, double value) {
-    if (dataType == miopenHalf || dataType == miopenFloat) {
+    if (dataType == miopenHalf || dataType == miopenFloat || dataType == miopenBFloat16) {
       f = static_cast<float>(value);
     } else {
       d = value;
