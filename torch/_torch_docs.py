@@ -845,6 +845,26 @@ Example:
     tensor([ False, True, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_or,
+           r"""
+bitwise_or(input, other, out=None) -> Tensor
+
+Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical OR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -2,  3], dtype=torch.int8)
+    >>> torch.bitwise_or(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, True, False])
+""".format(**common_args))
+
 add_docstr(torch.bitwise_xor,
            r"""
 bitwise_xor(input, other, out=None) -> Tensor
@@ -2456,6 +2476,22 @@ Example::
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
 """.format(**common_args))
+
+add_docstr(torch.isinf,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([False,  True,  False,  True,  False])
+""")
 
 add_docstr(torch.isfinite,
            r"""
@@ -4150,7 +4186,7 @@ Example::
     tensor([[9., 1., 3., 5.],
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
-            [2., 1., 4., 2.]])    
+            [2., 1., 4., 2.]])
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
