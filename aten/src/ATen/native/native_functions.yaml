@@ -4084,27 +4084,27 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_rshift
-    CUDA: legacy::cuda::_th_rshift
+    CPU: __rshift__
+    CUDA: __rshift__
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_rshift
-    CUDA: legacy::cuda::_th_rshift
+    CPU: __rshift__
+    CUDA: __rshift__
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_irshift_
-    CUDA: legacy::cuda::_th_irshift_
+    CPU: __irshift__
+    CUDA: __irshift__
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_irshift_
-    CUDA: legacy::cuda::_th_irshift_
+    CPU: __irshift__
+    CUDA: __irshift__
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True

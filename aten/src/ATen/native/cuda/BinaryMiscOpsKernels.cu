@@ -93,6 +93,25 @@ void lshift_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void rshift_kernel_cuda(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Float || iter.dtype() == ScalarType::Double) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rshift_cuda", [&]() {
+      gpu_kernel_with_scalars(
+        iter,
+        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a / std::pow((scalar_t)(2), b);
+      });
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cuda", [&]() {
+      gpu_kernel_with_scalars(iter,
+        []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+          return a >> b;
+      });
+    });
+  }
+}
+
 void logical_and_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.common_dtype(), "logical_and_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
@@ -156,6 +175,7 @@ REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel_cuda);
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel_cuda);
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda);
+REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel_cuda);
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
