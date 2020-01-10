@@ -4058,27 +4058,27 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lshift
-    CUDA: legacy::cuda::_th_lshift
+    CPU: __lshift__
+    CUDA: __lshift__
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_lshift
-    CUDA: legacy::cuda::_th_lshift
+    CPU: __lshift__
+    CUDA: __lshift__
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_ilshift_
-    CUDA: legacy::cuda::_th_ilshift_
+    CPU: __ilshift__
+    CUDA: __ilshift__
 
 - func: __ilshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_ilshift_
-    CUDA: legacy::cuda::_th_ilshift_
+    CPU: __ilshift__
+    CUDA: __ilshift__
 
 - func: __rshift__.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -4270,9 +4270,6 @@
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_geometric_
-    CUDA: geometric_cuda_
   supports_named_tensor: True
 
 # wrappers for TH functions
@@ -5575,26 +5572,26 @@
 - func: log_sigmoid_forward.output(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_log_sigmoid_forward_out
+    CPU: log_sigmoid_forward_out_cpu
     CUDA: legacy::cuda::_thnn_log_sigmoid_forward_out
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_log_sigmoid_forward
+    CPU: log_sigmoid_forward_cpu
     CUDA: legacy::cuda::_thnn_log_sigmoid_forward
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_log_sigmoid_backward_out
+    CPU: log_sigmoid_backward_out_cpu
     CUDA: legacy::cuda::_thnn_log_sigmoid_backward_out
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_log_sigmoid_backward
+    CPU: log_sigmoid_backward_cpu
     CUDA: legacy::cuda::_thnn_log_sigmoid_backward
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -6502,6 +6499,12 @@
     CUDA: im2col_backward_cuda
 
 - func: isfinite(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+  supports_named_tensor: True
+
+- func: isinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function
   device_guard: False
