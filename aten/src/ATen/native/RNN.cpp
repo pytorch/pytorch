@@ -358,7 +358,7 @@ static std::vector<QuantizedCellParamsStatic> gather_quantized_params_static(
               "Expecting 6 (w, out_scale, out_zp)*2, but got ",
               params.size());
   for (size_t i = 0; i < params.size(); ++i) {
-    result.emplace_back(params[i],       // packed weight + bias ih
+    result.emplace_back(params[i],      // packed weight + bias ih
                         params[i + 1],  // packed weight + bias hh
                         params[i + 2].item(),   // output scale ih
                         params[i + 3].item(),   // output scale hh
