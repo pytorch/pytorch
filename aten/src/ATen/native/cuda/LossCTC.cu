@@ -5,7 +5,7 @@
 // 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
-// A few optimizations (simmilar to those here, but also some I didn't take) are described in
+// A few optimizations (similar to those here, but also some I didn't take) are described in
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
 
 #include <ATen/TensorUtils.h>
@@ -15,6 +15,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+
+#include <THC/THCAtomics.cuh>
 
 #include <type_traits>
 #include <numeric>
@@ -453,7 +455,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 
   for (int64_t t = 0; t < input_length; t++) {
     scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * target];
-    atomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
+    gpuAtomicAdd(&gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * target],
               -std::exp(log_alpha_data[la_batch_offset + la_input_stride * t + la_target_stride * (s*2+1)]
                         + log_beta_data[lb_batch_offset + lb_input_stride * t + lb_target_stride * (s*2+1)]
                         + nll - lp) * gr);

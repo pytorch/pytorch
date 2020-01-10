@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 template <typename T>
 static std::ostream& printValueRefs(
     std::ostream& out,
-    const at::ArrayRef<T>& nodes) {
+    const at::ArrayRef<T> nodes) {
   size_t i = 0;
   for (auto n : nodes) {
     if (i++ > 0) {
@@ -64,11 +64,11 @@ static std::ostream& printValueRefs(
 
 std::ostream& operator<<(
     std::ostream& out,
-    const at::ArrayRef<const Value*>& nodes) {
+    const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
+std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -818,6 +818,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
   while (!uses().empty()) {
     replaceFirstUseWith(newValue);
   }
+}
+
+void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+    if (u.user->isAfter(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
+    return u.user->isAfter(node);
+  }), uses_.end());
 }
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {

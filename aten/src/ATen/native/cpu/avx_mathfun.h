@@ -260,7 +260,7 @@ inline v8sf exp256_ps(v8sf x) {
 
   tmp = _mm256_floor_ps(fx);
 
-  /* if greater, substract 1 */
+  /* if greater, subtract 1 */
   //v8sf mask = _mm256_cmpgt_ps(tmp, fx);
   v8sf mask = _mm256_cmp_ps(tmp, fx, _CMP_GT_OS);
   mask = _mm256_and_ps(mask, one);

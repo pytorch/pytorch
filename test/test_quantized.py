@@ -1,3 +1,6 @@
+from __future__ import division
+from builtins import round
+
 import numpy as np
 import unittest
 
@@ -10,7 +13,7 @@ from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
-from hypothesis_utils import no_deadline
+hu.assert_deadline_disabled()
 
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
@@ -114,6 +117,34 @@ class TestQuantizedOps(TestCase):
             op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qtanh(self, X):
+        # Note: QNNPACK is tested separately in TestQNNPackOps
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        Y = torch.tanh(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 2.0/2^BITS
+        # in the implementations.
+        f_min, f_max = -1.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = int(round((q_max + q_min) / 2.0))
+        qY = torch.quantize_per_tensor(Y, scale=output_scale,
+                                       zero_point=output_zero_point,
+                                       dtype=torch_type)
+        qY_hat = torch.tanh(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="TanH failed: {} vs. {}".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -144,12 +175,38 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
-    """Tests the correctness of the scalar addition."""
-    @no_deadline
-    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
-                       elements=st.floats(-1e6, 1e6, allow_nan=False),
+    """Tests the correctness of the quantized::clamp op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
-           b=st.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False))
+    def test_qclamp(self, X, min_val, max_val):
+        X, (scale, zero_point, torch_type) = X
+
+        assume(min_val <= max_val)
+        Y = X.copy()
+        Y[Y < min_val] = min_val
+        Y[Y > max_val] = max_val
+        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        ops_under_test = {
+            'ops.quantized': torch.ops.quantized.clamp,
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX, min_val, max_val)
+            self.assertEqual(qY, qY_hat, message="{} qclamp failed".format(name))
+
+    """Tests the correctness of the scalar addition."""
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
         import copy
         add_scalar = torch.ops.quantized.add_scalar
@@ -506,7 +563,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
@@ -556,7 +612,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           qX_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -619,7 +674,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                              X_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
@@ -662,7 +716,6 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
@@ -708,7 +761,6 @@ class TestQuantizedOps(TestCase):
                              message=error_message.format(name + '.zero_point', scale,
                                                           X_hat.q_zero_point()))
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -733,7 +785,6 @@ class TestQuantizedOps(TestCase):
         torch.testing.assert_allclose(quantized_out[0].dequantize(), unquantized_out[0])
         torch.testing.assert_allclose(quantized_out[1], unquantized_out[1])
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -818,7 +869,6 @@ class TestQuantizedOps(TestCase):
             cat_q = q_cat_op(tensors_q, dim=ch_axis, scale=scale,
                              zero_point=zero_point)
 
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams()),
@@ -874,7 +924,6 @@ class TestQuantizedOps(TestCase):
                                                           qX_hat.q_zero_point()))
 
     """Tests quantize concatenation (both fused and not)."""
-    @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
                        qparams=hu.qparams()),
@@ -999,7 +1048,6 @@ class TestQuantizedOps(TestCase):
                      " with instruction set support avx2 or newer.")
 class TestDynamicQuantizedLinear(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
-    @no_deadline
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -1112,7 +1160,6 @@ class TestDynamicQuantizedLinear(TestCase):
                          message="torch.ops.quantized.linear_dynamic (fbgemm) results are off")
 
     """Tests the correctness of the legacy dynamic quantized linear op."""
-    @no_deadline
     @given(
         batch_size=st.integers(1, 4),
         input_channels=st.integers(16, 32),
@@ -1189,7 +1236,6 @@ class TestDynamicQuantizedLinear(TestCase):
 
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
-    @no_deadline
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),
            output_channels=st.integers(4, 8),
@@ -1475,7 +1521,7 @@ class TestQuantizedConv(unittest.TestCase):
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
 
-        # Quantize reference results for comparision
+        # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
             result_ref, scale=Y_scale, zero_point=Y_zero_point,
             dtype=torch.quint8)
@@ -1794,6 +1840,32 @@ class TestQNNPackOps(TestCase):
             qY = torch.quantize_per_tensor(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
             self.assertEqual(qY, qY_hat)
 
+    """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_tanh(self, X):
+        # Note: In QNNPACK the output scale and zero_point can only be
+        #       2.0/256, 128 respectively, as it uses a LUT with 256 bins.
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Floating point reference
+        Y = torch.tanh(X)
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 128, zero_point=128,
+                                       dtype=torch.quint8)
+        with override_quantized_engine('fbgemm'):
+            qYserver = torch.tanh(qX)
+        with override_quantized_engine('qnnpack'):
+            qY_hat = torch.tanh(qX)
+            self.assertEqual(qY, qY_hat,
+                             message="QNNPACK TanH failed (FP ref)!")
+            self.assertEqual(qYserver, qY_hat,
+                             message="QNNPACK TanH failed (FBGEMM ref)!")
+
+
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @settings(suppress_health_check=(HealthCheck.filter_too_much,))
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -2016,7 +2088,7 @@ class TestComparatorOps(TestCase):
     @unittest.skip("FIXME: Failing due to overflow error without width option")
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
-           b=st.floats(allow_infinity=False, allow_nan=False))
+           b=hu.floats(allow_infinity=False, allow_nan=False))
     def test_compare_tensor_scalar(self, A, b):
         A, (scale_a, zero_point_a, dtype_a) = A
         tA = torch.from_numpy(A)

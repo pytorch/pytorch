@@ -66,6 +66,14 @@ class ObserverBase(ABC, nn.Module):
     def calculate_qparams(self, **kwargs):
         pass
 
+    # Returns all quantization parameters that's needed
+    # for a quantize function call
+    # For instance, per channel obsserver will return
+    # scales, zero_points and axis
+    @abstractmethod
+    def get_qparams(self, **kwargs):
+        pass
+
     with_args = classmethod(_with_args)
 
 
@@ -117,7 +125,7 @@ class _ObserverBase(ObserverBase):
         ), "Default Observer only works for qint8 and quint8 data type"
 
     def _calculate_per_channel_qparams(self, min_vals, max_vals):
-        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, int]
+        # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
         r"""Calculates the per channel quantization parameters, given min and max
         value tensors.
 
@@ -134,7 +142,7 @@ class _ObserverBase(ObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0]), self.ch_axis
+            return torch.tensor([1.0]), torch.tensor([0])
 
         for i in range(len(min_vals)):
             assert (
@@ -151,7 +159,7 @@ class _ObserverBase(ObserverBase):
             scales[i] = float(qparam[0])
             zero_points[i] = int(qparam[1])
 
-        return scales, zero_points, self.ch_axis
+        return scales, zero_points
 
     @torch.jit.export
     def _calculate_qparams(self, min_val, max_val):
@@ -209,6 +217,10 @@ class _ObserverBase(ObserverBase):
 
         return torch.tensor([scale]), torch.tensor([zero_point])
 
+    @torch.jit.export
+    def get_qparams(self):
+        r"""Get all quantization parameters needed for quantize call"""
+        return self.calculate_qparams()
 
 class MinMaxObserver(_ObserverBase):
     r"""Observer module for computing the quantization parameters based on the
@@ -329,9 +341,14 @@ class MinMaxObserver(_ObserverBase):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        self.min_val = state_dict.pop(prefix + 'min_val')
-        self.max_val = state_dict.pop(prefix + 'max_val')
-        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        local_state = ['min_val', 'max_val']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                           missing_keys, unexpected_keys, error_msgs)
 
 
@@ -473,6 +490,11 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
 
+    @torch.jit.export
+    def get_qparams(self):
+        scales, zero_points = self.calculate_qparams()
+        return scales, zero_points, self.ch_axis
+
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
@@ -483,9 +505,14 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.min_vals = state_dict.pop(prefix + 'min_vals')
-        self.max_vals = state_dict.pop(prefix + 'max_vals')
-        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        local_state = ['min_vals', 'max_vals']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                                     missing_keys, unexpected_keys, error_msgs)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -819,9 +846,15 @@ class HistogramObserver(_ObserverBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.min_val = state_dict.pop(prefix + 'min_val')
-        self.max_val = state_dict.pop(prefix + 'max_val')
-        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+
+        local_state = ['min_val', 'max_val']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                              missing_keys, unexpected_keys, error_msgs)
 
 class RecordingObserver(_ObserverBase):
@@ -873,6 +906,9 @@ class NoopObserver(ObserverBase):
 
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
+
+    def get_qparams(self):
+        return self.calculate_qparams()
 
 
 # Restrict activations to be in the range (0,127)

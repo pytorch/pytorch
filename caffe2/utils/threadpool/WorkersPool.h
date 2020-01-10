@@ -231,7 +231,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       : task_(nullptr),
         state_(State::ThreadStartup),
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
-    thread_ = caffe2::make_unique<std::thread>([this]() { this->ThreadFunc(); });
+    thread_ = std::make_unique<std::thread>([this]() { this->ThreadFunc(); });
   }
 
   ~Worker() {

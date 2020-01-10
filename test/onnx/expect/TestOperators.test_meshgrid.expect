@@ -1,9 +1,10 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     output: "3"
+    name: "Constant_0"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -16,13 +17,15 @@ graph {
     }
   }
   node {
-    input: "x"
+    input: "0"
     input: "3"
     output: "4"
+    name: "Reshape_1"
     op_type: "Reshape"
   }
   node {
     output: "5"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -35,13 +38,15 @@ graph {
     }
   }
   node {
-    input: "y"
+    input: "1"
     input: "5"
     output: "6"
+    name: "Reshape_3"
     op_type: "Reshape"
   }
   node {
     output: "7"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -54,24 +59,28 @@ graph {
     }
   }
   node {
-    input: "z"
+    input: "2"
     input: "7"
     output: "8"
+    name: "Reshape_5"
     op_type: "Reshape"
   }
   node {
     input: "4"
     output: "9"
+    name: "Shape_6"
     op_type: "Shape"
   }
   node {
     input: "6"
     output: "10"
+    name: "Shape_7"
     op_type: "Shape"
   }
   node {
     input: "8"
     output: "11"
+    name: "Shape_8"
     op_type: "Shape"
   }
   node {
@@ -79,6 +88,7 @@ graph {
     input: "10"
     input: "11"
     output: "12"
+    name: "Concat_9"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -88,6 +98,7 @@ graph {
   }
   node {
     output: "13"
+    name: "Constant_10"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -104,6 +115,7 @@ graph {
     input: "13"
     input: "13"
     output: "14"
+    name: "Concat_11"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -115,16 +127,19 @@ graph {
     input: "4"
     input: "14"
     output: "15"
+    name: "Reshape_12"
     op_type: "Reshape"
   }
   node {
     input: "15"
     input: "12"
     output: "16"
+    name: "Expand_13"
     op_type: "Expand"
   }
   node {
     output: "17"
+    name: "Constant_14"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -141,6 +156,7 @@ graph {
     input: "10"
     input: "17"
     output: "18"
+    name: "Concat_15"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -152,16 +168,19 @@ graph {
     input: "6"
     input: "18"
     output: "19"
+    name: "Reshape_16"
     op_type: "Reshape"
   }
   node {
     input: "19"
     input: "12"
     output: "20"
+    name: "Expand_17"
     op_type: "Expand"
   }
   node {
     output: "21"
+    name: "Constant_18"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -178,6 +197,7 @@ graph {
     input: "21"
     input: "11"
     output: "22"
+    name: "Concat_19"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -189,17 +209,19 @@ graph {
     input: "8"
     input: "22"
     output: "23"
+    name: "Reshape_20"
     op_type: "Reshape"
   }
   node {
     input: "23"
     input: "12"
     output: "24"
+    name: "Expand_21"
     op_type: "Expand"
   }
   name: "torch-jit-export"
   input {
-    name: "x"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1
@@ -212,7 +234,7 @@ graph {
     }
   }
   input {
-    name: "y"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
@@ -225,7 +247,7 @@ graph {
     }
   }
   input {
-    name: "z"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
