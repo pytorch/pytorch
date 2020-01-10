@@ -436,33 +436,33 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
 
 } // namespace indexing
 
-Tensor Tensor::idx(ArrayRef<TensorIndex> indices) const {
+Tensor Tensor::index(ArrayRef<TensorIndex> indices) const {
   return at::indexing::get_item(*this, indices);
 }
-Tensor Tensor::idx(std::initializer_list<TensorIndex> indices) const {
-  return idx(ArrayRef<TensorIndex>(indices));
+Tensor Tensor::index(std::initializer_list<TensorIndex> indices) const {
+  return index(ArrayRef<TensorIndex>(indices));
 }
 
-Tensor & Tensor::idx_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs) {
+Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs) {
   at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
-Tensor & Tensor::idx_put_(ArrayRef<TensorIndex> indices, Tensor && rhs) {
+Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor && rhs) {
   at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
-Tensor & Tensor::idx_put_(ArrayRef<TensorIndex> indices, Scalar v) {
+Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Scalar v) {
   at::indexing::set_item(*this, indices, v);
   return *this;
 }
-Tensor & Tensor::idx_put_(std::initializer_list<TensorIndex> indices, Tensor const & rhs) {
-  return idx_put_(ArrayRef<TensorIndex>(indices), rhs);
+Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Tensor const & rhs) {
+  return index_put_(ArrayRef<TensorIndex>(indices), rhs);
 }
-Tensor & Tensor::idx_put_(std::initializer_list<TensorIndex> indices, Tensor && rhs) {
-  return idx_put_(ArrayRef<TensorIndex>(indices), rhs);
+Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Tensor && rhs) {
+  return index_put_(ArrayRef<TensorIndex>(indices), rhs);
 }
-Tensor & Tensor::idx_put_(std::initializer_list<TensorIndex> indices, Scalar v) {
-  return idx_put_(ArrayRef<TensorIndex>(indices), v);
+Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v) {
+  return index_put_(ArrayRef<TensorIndex>(indices), v);
 }
 
 } // namespace at
