@@ -52,7 +52,7 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeTensorTypeIdGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
   callBoxedWorkaround(op, stack);
 }
 
@@ -122,7 +122,7 @@ struct Environment {
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   Environment e;
-  c10::impl::IncludeTensorTypeIdGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
