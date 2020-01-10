@@ -3328,7 +3328,7 @@ c10::QualifiedName CompilationUnit::mangle(
     if (pos != std::string::npos) {
       auto num = atom.substr(pos + manglePrefix.size());
       // current mangle index in the name
-      size_t num_i = std::stoi(num);
+      size_t num_i = c10::stoi(num);
       // bump the mangleIndex_ to num_i + 1
       mangleIndex_ = std::max(mangleIndex_, num_i + 1);
       std::string newAtomPrefix;
