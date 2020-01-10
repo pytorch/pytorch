@@ -83,7 +83,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     // TODO: Handle tensor list
     if (args[i].isTensor()) {
       auto* impl = args[i].unsafeToTensorImpl();
-      if (impl->type_set().has(DispatchKey::TESTING_ONLY_GenericWrapperTensorId)) {
+      if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapperTensorId)) {
         auto* wrapper = static_cast<GenericWrapperTensorImpl*>(impl);
         torch::jit::push(*stack, wrapper->rep_);  // no move!
       } else {

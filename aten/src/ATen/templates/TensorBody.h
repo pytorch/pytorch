@@ -51,7 +51,7 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(DispatchKey::VariableTensorId);
+  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::VariableTensorId);
 }
 }
 
@@ -238,11 +238,11 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        dispatchKeyToBackend(legacyExtractTypeId(type_set())),
+        dispatchKeyToBackend(legacyExtractTypeId(key_set())),
         scalar_type());
   }
-  DispatchKeySet type_set() const {
-    return impl_->type_set();
+  DispatchKeySet key_set() const {
+    return impl_->key_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -524,7 +524,7 @@ Tensor make_tensor(Args&&... args) {
 } // namespace detail
 
 static inline DispatchKey legacyExtractTypeId(const Tensor& t) {
-  return legacyExtractTypeId(t.type_set());
+  return legacyExtractTypeId(t.key_set());
 }
 
 } // namespace at

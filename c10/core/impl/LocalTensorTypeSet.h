@@ -54,7 +54,7 @@ struct C10_API LocalDispatchKeySet {
   DispatchKeySet excluded_;
 };
 
-C10_API LocalDispatchKeySet tls_local_tensor_type_set();
+C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 
 // RAII API for manipulating the thread-local dispatch state.
 
