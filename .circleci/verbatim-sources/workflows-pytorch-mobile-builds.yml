@@ -4,4 +4,4 @@
           requires:
             - setup
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:405"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:a8006f9a-272d-4478-b137-d121c6f05c83"
