@@ -198,21 +198,21 @@ struct QuantizedCellParamsDynamic {
 struct QuantizedCellParamsStatic {
   QuantizedCellParamsStatic(const Tensor& _packed_w_ih,
                             const Tensor& _packed_w_hh,
-                            const Scalar& _output_scale_ih,
-                            const Scalar& _output_scale_hh,
-                            const Scalar& _output_zp_ih,
-                            const Scalar& _output_zp_hh)
+                            const Scalar& _linear_scale_ih,
+                            const Scalar& _linear_scale_hh,
+                            const Scalar& _linear_zp_ih,
+                            const Scalar& _linear_zp_hh)
     : packed_w_ih(_packed_w_ih), packed_w_hh(_packed_w_hh),
-      output_scale_ih(_output_scale_ih), output_scale_hh(_output_scale_hh),
-      output_zp_ih(_output_zp_ih), output_zp_hh(_output_zp_hh) {};
+      linear_scale_ih(_linear_scale_ih), linear_scale_hh(_linear_scale_hh),
+      linear_zp_ih(_linear_zp_ih), linear_zp_hh(_linear_zp_hh) {};
 
   // use linear_prepack to get the packed weights.
   const Tensor& packed_w_ih;
   const Tensor& packed_w_hh;
-  const Scalar& output_scale_ih;
-  const Scalar& output_scale_hh;
-  const Scalar& output_zp_ih;
-  const Scalar& output_zp_hh;
+  const Scalar& linear_scale_ih;
+  const Scalar& linear_scale_hh;
+  const Scalar& linear_zp_ih;
+  const Scalar& linear_zp_hh;
 
   Tensor matmul_ih(Tensor input) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
@@ -224,7 +224,7 @@ struct QuantizedCellParamsStatic {
     const auto kFuncName = "quantized::linear";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input, packed_w_ih, output_scale_ih, output_zp_ih);
+        callOp(kFuncName, kOvrldName, input, packed_w_ih, linear_scale_ih, linear_zp_ih);
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exactly one element");
@@ -235,7 +235,7 @@ struct QuantizedCellParamsStatic {
     const auto kFuncName = "quantized::linear";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, h, packed_w_hh, output_scale_hh, output_zp_hh);
+        callOp(kFuncName, kOvrldName, h, packed_w_hh, linear_scale_hh, linear_zp_hh);
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exactly one element");
