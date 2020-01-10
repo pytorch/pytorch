@@ -154,7 +154,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
   if(warning_buffer_.size() > 0) {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
 
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);

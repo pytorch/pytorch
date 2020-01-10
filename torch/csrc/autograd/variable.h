@@ -364,7 +364,7 @@ inline Variable make_variable_view(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<DifferentiableViewMeta>(
+      data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
         data_impl_copy.get(), std::move(base)));
       return Variable(data_impl_copy);
     } else {
@@ -397,7 +397,7 @@ inline Variable make_variable(
       auto data_impl = data.getIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       if (requires_grad) {
-        data_impl->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
+        data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       } else {
         data_impl->set_autograd_meta(nullptr);
       }
@@ -407,7 +407,7 @@ inline Variable make_variable(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       if (requires_grad) {
-        data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
+        data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
           data_impl_copy.get(), requires_grad));
       } else {
         data_impl_copy->set_autograd_meta(nullptr);
@@ -430,7 +430,7 @@ inline Variable make_variable(
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
+    data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
       data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }

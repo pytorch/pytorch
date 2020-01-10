@@ -34,14 +34,14 @@ def _python_version_check():
     if not _supports_context:
         raise RuntimeError("Requires python 3.4 or higher to use "
                            "torch.multiprocessing.spawn and "
-                           "torch.multiprocessing.SpawnContext helper "
+                           "torch.multiprocessing.ProcessContext helper "
                            "to launch multiple processes. If you are using "
                            "this for distributed training and have a lower "
                            "version of python, please use "
                            "torch.distributed.launch instead.")
 
 
-class SpawnContext:
+class ProcessContext:
     def __init__(self, processes, error_queues):
         _python_version_check()
         self.error_queues = error_queues
@@ -118,7 +118,47 @@ class SpawnContext:
         raise Exception(msg)
 
 
-def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
+class SpawnContext(ProcessContext):
+    def __init__(self, processes, error_queues):
+        warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
+        super(SpawnContext, self).__init__(self, processes, error_queues)
+    pass
+
+
+# Note: [start_processes]
+# mp.start_processes handles both start_method='spawn' and 'fork'. It's supposed to be a
+# more generalized API than mp.spawn. Currently we only document mp.spawn as it's the
+# CUDA compatible start_method. However, in environments like Ipython notebooks, 'fork'
+# works better than 'spawn'. Every helper function we created for mp.spawn is indeed
+# general enough, and backends like XLA can reuse them in Colab notebooks as well.
+# Currently we only add this API first, we can consider adding it to documentation as
+# needed in the future.
+def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+    _python_version_check()
+    mp = multiprocessing.get_context(start_method)
+    error_queues = []
+    processes = []
+    for i in range(nprocs):
+        error_queue = mp.SimpleQueue()
+        process = mp.Process(
+            target=_wrap,
+            args=(fn, i, args, error_queue),
+            daemon=daemon,
+        )
+        process.start()
+        error_queues.append(error_queue)
+        processes.append(process)
+
+    context = ProcessContext(processes, error_queues)
+    if not join:
+        return context
+
+    # Loop on join until it returns True or raises an exception.
+    while not context.join():
+        pass
+
+
+def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -142,31 +182,13 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
         join (bool): Perform a blocking join on all processes.
         daemon (bool): The spawned processes' daemon flag. If set to True,
                        daemonic processes will be created.
+        start_method (string): The multiprocessing start method to be used
+            to create new processes. It CUDA is available and used, it must
+            be set to ``spawn``.
 
     Returns:
         None if ``join`` is ``True``,
-        :class:`~SpawnContext` if ``join`` is ``False``
+        :class:`~ProcessContext` if ``join`` is ``False``
 
     """
-    _python_version_check()
-    mp = multiprocessing.get_context('spawn')
-    error_queues = []
-    processes = []
-    for i in range(nprocs):
-        error_queue = mp.SimpleQueue()
-        process = mp.Process(
-            target=_wrap,
-            args=(fn, i, args, error_queue),
-            daemon=daemon,
-        )
-        process.start()
-        error_queues.append(error_queue)
-        processes.append(process)
-
-    spawn_context = SpawnContext(processes, error_queues)
-    if not join:
-        return spawn_context
-
-    # Loop on join until it returns True or raises an exception.
-    while not spawn_context.join():
-        pass
+    return start_processes(fn, args, nprocs, join, daemon, start_method='spawn')

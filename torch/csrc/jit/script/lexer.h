@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/strtod.h>
+#include <torch/csrc/jit/script/parser_constants.h>
 #include <torch/csrc/jit/source_range.h>
 #include <algorithm>
 #include <clocale>
@@ -101,11 +102,10 @@ namespace script {
   _(TK_LIST_COMP, "list comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
+  _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
   _(TK_IMPORT, "import", "import")
-
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|~";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -140,7 +140,7 @@ struct TokenTrie {
     }
 
     child_chars.emplace_back(*str);
-    child_tries.emplace_back(c10::guts::make_unique<TokenTrie>());
+    child_tries.emplace_back(std::make_unique<TokenTrie>());
     child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
