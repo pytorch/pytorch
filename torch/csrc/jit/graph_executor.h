@@ -42,12 +42,14 @@ struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph);
   void run(Stack& inputs);
-  ExecutionPlan getPlanFor(Stack& inputs);
+  ExecutionPlan getPlanFor(Stack& inputs, size_t num_bailouts);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
+
+  static size_t getDefaultNumBailOuts();
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;

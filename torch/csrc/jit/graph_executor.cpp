@@ -477,7 +477,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan = getPlanFor(stack);
+  ExecutionPlan plan =
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -494,8 +495,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  ExecutionPlan getPlanFor(Stack& stack) override {
-   return getGraphExecutorOptimize() ? getOrCompile(stack)
+  ExecutionPlan getPlanFor(Stack& stack, size_t num_bailouts) override {
+    return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
 
@@ -632,8 +633,12 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
-  return pImpl->getPlanFor(inputs);
+size_t GraphExecutor::getDefaultNumBailOuts() {
+  return getProfilingMode() ? 1 : 0;
+}
+
+ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs, size_t num_bailouts) {
+  return pImpl->getPlanFor(inputs, num_bailouts);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {

@@ -381,9 +381,12 @@ struct CodeImpl {
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
   std::vector<std::unique_ptr<Function>> bailout_functions_;
+  size_t num_bailouts_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
-      : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        num_bailouts_(0) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -429,6 +432,10 @@ struct CodeImpl {
       }
       last_inserted_op_ = current_node_;
     }
+  }
+
+  void setNumBailOuts(size_t num_bailouts) {
+    num_bailouts_ = num_bailouts;
   }
 
   void truncateInstructions(size_t size) {
@@ -936,7 +943,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+                af.functions[inst.X]
+                    ->get_executor()
+                    .getPlanFor(stack, frames.back().function->num_bailouts_)
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
@@ -950,7 +960,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code = function->get_executor().getPlanFor(stack).code;
+            const Code& code =
+                function->get_executor()
+                    .getPlanFor(stack, frames.back().function->num_bailouts_)
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - inst.N);
             af = ActiveFrame(frames.back());
@@ -1028,8 +1041,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            size_t num_bailouts = frames.back().function->num_bailouts_ > 0
+                ? frames.back().function->num_bailouts_ - 1
+                : 0;
+            const Code& code = af.functions[inst.X]
+                                   ->get_executor()
+                                   .getPlanFor(stack, num_bailouts)
+                                   .code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
@@ -1147,6 +1165,10 @@ size_t Code::num_inputs() const {
 
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
+}
+
+void Code::setNumBailOuts(size_t num_bailouts) {
+  return pImpl->setNumBailOuts(num_bailouts);
 }
 
 const std::vector<c10::IValue>& Code::constant_table() const {

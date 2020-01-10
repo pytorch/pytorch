@@ -62,7 +62,7 @@ struct GraphExecutorImplBase {
   // entry point where execution begins
   void run(Stack& stack);
 
-  virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
+  virtual ExecutionPlan getPlanFor(Stack& stack, size_t num_bailouts) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

@@ -47,6 +47,7 @@ struct TORCH_API Code {
   const std::vector<Instruction>& instructions() const;
   const std::vector<Node*>& instructions_source() const;
   size_t register_size() const;
+  void setNumBailOuts(size_t num_bailouts);
 
  private:
   std::shared_ptr<CodeImpl> pImpl;
