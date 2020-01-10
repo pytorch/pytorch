@@ -17,13 +17,13 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    notes/*
    PyTorch on XLA Devices <http://pytorch.org/xla/>
-
+   
 .. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
    C++ API <https://pytorch.org/cppdocs/>
-   Javadoc <https://pytorch.org/javadoc/>
+   packages
 
 .. toctree::
    :maxdepth: 1
