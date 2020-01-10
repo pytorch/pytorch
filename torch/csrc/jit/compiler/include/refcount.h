@@ -107,6 +107,9 @@ class RefHandle {
   }
 
   RefHandle& operator=(const RefHandle& other) {
+    if (this == &other) {
+      return *this;
+    }
     this->reset();
     node_ = other.node_;
     if (node_ != nullptr) {
@@ -116,6 +119,9 @@ class RefHandle {
   }
 
   RefHandle& operator=(RefHandle&& other) {
+    if (this == &other) {
+      return *this;
+    }
     node_ = other.node_;
     other.node_ = nullptr;
     return *this;
