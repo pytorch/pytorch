@@ -5,7 +5,7 @@
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
 //
-// This manages two thread-local TensorTypeSets:
+// This manages two thread-local DispatchKeySets:
 //
 //  - The included type set, which adds a tensor type for consideration
 //    in dispatch.  (For example, you might add ProfilingTensorId to
@@ -25,9 +25,9 @@ namespace impl {
 
 C10_DECLARE_bool(disable_variable_dispatch);
 
-// POD version of LocalTensorTypeSet.  Declared here just so that
+// POD version of LocalDispatchKeySet.  Declared here just so that
 // we can put it in the guards.
-struct C10_API PODLocalTensorTypeSet {
+struct C10_API PODLocalDispatchKeySet {
   uint64_t included_;
   uint64_t excluded_;
 
@@ -45,16 +45,16 @@ struct C10_API PODLocalTensorTypeSet {
     excluded_ = x.raw_repr();
   }
 };
-static_assert(std::is_pod<PODLocalTensorTypeSet>::value, "PODLocalTensorTypeSet must be a POD type.");
+static_assert(std::is_pod<PODLocalDispatchKeySet>::value, "PODLocalDispatchKeySet must be a POD type.");
 
-struct C10_API LocalTensorTypeSet {
-  /* implicit */ LocalTensorTypeSet(PODLocalTensorTypeSet x)
+struct C10_API LocalDispatchKeySet {
+  /* implicit */ LocalDispatchKeySet(PODLocalDispatchKeySet x)
     : included_(x.included()), excluded_(x.excluded()) {}
   DispatchKeySet included_;
   DispatchKeySet excluded_;
 };
 
-C10_API LocalTensorTypeSet tls_local_tensor_type_set();
+C10_API LocalDispatchKeySet tls_local_tensor_type_set();
 
 // RAII API for manipulating the thread-local dispatch state.
 
@@ -65,7 +65,7 @@ public:
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
-  PODLocalTensorTypeSet* tls_;
+  PODLocalDispatchKeySet* tls_;
   DispatchKey id_;
   bool prev_state_;
 };
@@ -77,7 +77,7 @@ public:
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
-  PODLocalTensorTypeSet* tls_;
+  PODLocalDispatchKeySet* tls_;
   DispatchKey id_;
   bool prev_state_;
 };

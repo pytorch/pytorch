@@ -14,17 +14,17 @@ namespace {
 #ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
 // NB: POD, zero initialized!
-thread_local PODLocalTensorTypeSet raw_local_tensor_type_set;
+thread_local PODLocalDispatchKeySet raw_local_tensor_type_set;
 
 #else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-static PODLocalTensorTypeSet raw_local_tensor_type_set;
+static PODLocalDispatchKeySet raw_local_tensor_type_set;
 
 #endif
 
 } // anonymous namespace
 
-LocalTensorTypeSet tls_local_tensor_type_set() {
+LocalDispatchKeySet tls_local_tensor_type_set() {
   // Hack until variable performance is fixed
   if (FLAGS_disable_variable_dispatch) {
     raw_local_tensor_type_set.set_excluded(
@@ -81,7 +81,7 @@ ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
 }
 
 // Non-RAII API
-// Please prefer using the RAII API. See declarations in LocalTensorTypeSet.h for details.
+// Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h for details.
 
 bool tls_is_tensor_type_id_excluded(DispatchKey x) {
   return raw_local_tensor_type_set.excluded().has(x);
