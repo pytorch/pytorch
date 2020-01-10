@@ -126,6 +126,7 @@ _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
 _(aten, _sparse_sum) \
 _(aten, _sqrt) \
+_(aten, _square) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
@@ -501,7 +502,9 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_and) \
 _(aten, bitwise_not) \
+_(aten, bitwise_or) \
 _(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
@@ -619,6 +622,7 @@ _(aten, sparse_resize_and_clear) \
 _(aten, split) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
+_(aten, square) \
 _(aten, squeeze) \
 _(aten, sspaddmm) \
 _(aten, stack) \

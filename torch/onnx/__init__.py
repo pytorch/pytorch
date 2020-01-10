@@ -9,9 +9,9 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
-ir_version = 4
+ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
-producer_version = "1.3"
+producer_version = _C._onnx.PRODUCER_VERSION
 
 
 class ExportTypes:
@@ -30,8 +30,8 @@ def _export(*args, **kwargs):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None):
+           do_constant_folding=True, example_outputs=None, strip_doc_string=True,
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -96,7 +96,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             - VALUE: index of dynamic axes for given key and potentially the name to be used for
             exported dynamic axes. In general the value is defined according to one of the following
             ways or a combination of both:
-            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
+            (1). A list of integers specifying the dynamic axes of provided input. In this scenario
             automated names will be generated and applied to dynamic axes of provided input/output
             during export.
             OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
@@ -138,6 +138,13 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             equivalent to setting this argument to True. Note that for ONNX opset version < 9,
             initializers MUST be part of graph inputs. Therefore, if opset_version argument is
             set to a 8 or lower, this argument will be ignored.
+        custom_opsets (dict<string, int>, default empty dict): A dictionary to indicate
+            custom opset domain and version at export. If model contains a custom opset,
+            it is optional to specify the domain and opset version in the dictionary:
+            - KEY: opset domain name
+            - VALUE: opset version
+            If the custom opset is not provided in this dictionary, opset version is set
+            to 1 by default.
     """
 
     from torch.onnx import utils
@@ -145,7 +152,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         input_names, output_names, aten, export_raw_ir,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
-                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs)
+                        strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
+                        custom_opsets)
 
 
 def export_to_pretty_string(*args, **kwargs):

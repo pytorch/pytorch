@@ -5,6 +5,8 @@
 namespace c10 {
 namespace impl {
 
+C10_DEFINE_bool(disable_variable_dispatch, false, "This flag forcibly disables the Variable code paths from executing, which currently breaks profiling in the process.");
+
 namespace {
 
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
@@ -23,6 +25,12 @@ static PODLocalTensorTypeSet raw_local_tensor_type_set;
 } // anonymous namespace
 
 LocalTensorTypeSet tls_local_tensor_type_set() {
+  // Hack until variable performance is fixed
+  if (FLAGS_disable_variable_dispatch) {
+    raw_local_tensor_type_set.set_excluded(
+      raw_local_tensor_type_set.excluded().add(
+        TensorTypeId::VariableTensorId));
+  }
   return raw_local_tensor_type_set;
 }
 

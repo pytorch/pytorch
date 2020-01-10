@@ -45,8 +45,8 @@ class Linear(nnq.Linear):
         return 'DynamicQuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}'.format(
-            self.in_features, self.out_features
+        return 'in_features={}, out_features={}, qscheme={}'.format(
+            self.in_features, self.out_features, self.weight().qscheme()
         )
 
     @classmethod

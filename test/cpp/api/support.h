@@ -47,7 +47,7 @@ private:
 };
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data_ptr<float>() == second.data_ptr<float>();
+  return first.data_ptr() == second.data_ptr();
 }
 
 // This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, Number)` branch
