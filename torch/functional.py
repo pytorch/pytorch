@@ -572,9 +572,9 @@ def tensordot(a, b, dims=2):
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
-    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
-    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
-    it computes
+    When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
+    the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
+    respectively, :func:`~torch.tensordot` computes
 
     .. math::
         r_{i_0,...,i_{m-d}, i_d,...,i_n}
@@ -582,7 +582,7 @@ def tensordot(a, b, dims=2):
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
-    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
+    in these dimensions must match, but :func:`~torch.tensordot` will deal with broadcasted
     dimensions.
 
     Examples::
@@ -610,6 +610,8 @@ def tensordot(a, b, dims=2):
     else:
         if isinstance(dims, torch.Tensor):
             dims = dims.item()
+        if dims < 0:
+            raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
     return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
