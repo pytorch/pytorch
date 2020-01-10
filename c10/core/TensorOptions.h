@@ -311,7 +311,7 @@ struct C10_API TensorOptions {
   // Resolves the ATen backend specified by the current construction axes.
   // TODO: Deprecate this
   Backend backend() const noexcept {
-    return at::tensorTypeIdToBackend(computeTensorTypeId());
+    return at::dispatchKeyToBackend(computeDispatchKey());
   }
 
   /// Return the right-biased merge of two TensorOptions.  This has the
@@ -337,10 +337,10 @@ struct C10_API TensorOptions {
 
   // Resolves the tensor type set specified by the current construction axes.
   DispatchKeySet type_set() const noexcept {
-    return DispatchKeySet(computeTensorTypeId()).add(DispatchKey::VariableTensorId);
+    return DispatchKeySet(computeDispatchKey()).add(DispatchKey::VariableTensorId);
   }
 
-  inline DispatchKey computeTensorTypeId() const {
+  inline DispatchKey computeDispatchKey() const {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
@@ -559,9 +559,9 @@ inline std::string toString(const TensorOptions options) {
 // This takes a TensorOptions, rather than just a DeviceType and Layout, because
 // we reserve the right to change dispatch based on *any* aspect of
 // TensorOptions.  WARNING: If you do this, you need to fix the calls
-// to computeTensorTypeId in caffe2/tensor.h
-inline DispatchKey computeTensorTypeId(TensorOptions options) {
-  return options.computeTensorTypeId();
+// to computeDispatchKey in caffe2/tensor.h
+inline DispatchKey computeDispatchKey(TensorOptions options) {
+  return options.computeDispatchKey();
 }
 
 inline DeviceType computeDeviceType(DispatchKey tid) {

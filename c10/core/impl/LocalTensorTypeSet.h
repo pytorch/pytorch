@@ -58,10 +58,10 @@ C10_API LocalDispatchKeySet tls_local_tensor_type_set();
 
 // RAII API for manipulating the thread-local dispatch state.
 
-class C10_API IncludeTensorTypeIdGuard {
+class C10_API IncludeDispatchKeyGuard {
 public:
-  IncludeTensorTypeIdGuard(DispatchKey);
-  ~IncludeTensorTypeIdGuard();
+  IncludeDispatchKeyGuard(DispatchKey);
+  ~IncludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
@@ -70,10 +70,10 @@ private:
   bool prev_state_;
 };
 
-class C10_API ExcludeTensorTypeIdGuard {
+class C10_API ExcludeDispatchKeyGuard {
 public:
-  ExcludeTensorTypeIdGuard(DispatchKey);
-  ~ExcludeTensorTypeIdGuard();
+  ExcludeDispatchKeyGuard(DispatchKey);
+  ~ExcludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
@@ -95,9 +95,9 @@ private:
 // The non-RAII API is less efficient than the RAII guards because both the
 // getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
 
-bool tls_is_tensor_type_id_excluded(DispatchKey x);
-void tls_set_tensor_type_id_excluded(DispatchKey x, bool desired_state);
-bool tls_is_tensor_type_id_included(DispatchKey x);
-void tls_set_tensor_type_id_included(DispatchKey x, bool desired_state);
+bool tls_is_dispatch_key_excluded(DispatchKey x);
+void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
+bool tls_is_dispatch_key_included(DispatchKey x);
+void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
 
 }} // namespace c10::impl

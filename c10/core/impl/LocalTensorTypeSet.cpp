@@ -50,7 +50,7 @@ LocalDispatchKeySet tls_local_tensor_type_set() {
 
 // RAII API
 
-IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(DispatchKey x)
+IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKey x)
   : tls_(&raw_local_tensor_type_set)
   , id_(x)
   , prev_state_(tls_->included().has(x)) {
@@ -59,13 +59,13 @@ IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(DispatchKey x)
   }
 }
 
-IncludeTensorTypeIdGuard::~IncludeTensorTypeIdGuard() {
+IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
   if (!prev_state_) {
     tls_->set_included(tls_->included().remove(id_));
   }
 }
 
-ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(DispatchKey x)
+ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKey x)
   : tls_(&raw_local_tensor_type_set)
   , id_(x)
   , prev_state_(tls_->excluded().has(x)) {
@@ -74,7 +74,7 @@ ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(DispatchKey x)
   }
 }
 
-ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
+ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
   if (!prev_state_) {
     tls_->set_excluded(tls_->excluded().remove(id_));
   }
@@ -83,11 +83,11 @@ ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
 // Non-RAII API
 // Please prefer using the RAII API. See declarations in LocalDispatchKeySet.h for details.
 
-bool tls_is_tensor_type_id_excluded(DispatchKey x) {
+bool tls_is_dispatch_key_excluded(DispatchKey x) {
   return raw_local_tensor_type_set.excluded().has(x);
 }
 
-void tls_set_tensor_type_id_excluded(DispatchKey x, bool desired_state) {
+void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state) {
   auto* tls = &raw_local_tensor_type_set;
   bool current_state = tls->excluded().has(x);
   if (desired_state != current_state) {
@@ -99,12 +99,12 @@ void tls_set_tensor_type_id_excluded(DispatchKey x, bool desired_state) {
   }
 }
 
-bool tls_is_tensor_type_id_included(DispatchKey x) {
+bool tls_is_dispatch_key_included(DispatchKey x) {
   return raw_local_tensor_type_set.included().has(x);
 
 }
 
-void tls_set_tensor_type_id_included(DispatchKey x, bool desired_state) {
+void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
   auto* tls = &raw_local_tensor_type_set;
   bool current_state = tls->included().has(x);
   if (desired_state != current_state) {

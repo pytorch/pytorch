@@ -181,7 +181,7 @@ ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(${type_set}))) {
+switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
