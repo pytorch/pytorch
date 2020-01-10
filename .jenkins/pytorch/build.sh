@@ -51,7 +51,7 @@ cmake --version
 
 export PATH="/opt/python/bin:/opt/conda/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 unset CUDA_NVCC_EXECUTABLE
-rm -rf /opt/cache/lib
+sudo rm -rf /opt/cache/lib
 
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
