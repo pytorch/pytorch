@@ -606,12 +606,14 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   }
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
-  // Add time-series based metrics
-  {
-    std::unique_lock<std::mutex> lock(metricsMutex_);
-    auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();
-    lock.unlock();
-    metrics[kGilAverageWaitTime] = c10::to_string(avgGilWaitTime);
+  if (getMetricsProfiling()) {
+    // Add time-series based metrics
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(avgGilWaitTime);
+    }
   }
   return metrics;
 }

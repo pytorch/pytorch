@@ -71,11 +71,16 @@ class PYBIND11_EXPORT PythonRpcHandler {
   };
 
 // A macro that grabs the GIL, profiling the acquisition time. The average GIL
-// acquisition time will be recorded in RpcAgent's getMetrics().
-#define PROFILE_GIL_SCOPED_ACQUIRE \
-  GilWaitTimeGuard g;              \
-  pybind11::gil_scoped_acquire ag; \
-  g.markAcquired();
+// acquisition time will be recorded in RpcAgent's getMetrics() if this
+// profiling is enabled.
+#define PROFILE_GIL_SCOPED_ACQUIRE                             \
+  if (RpcAgent::getDefaultRpcAgent()->getMetricsProfiling()) { \
+    GilWaitTimeGuard g;                                        \
+    pybind11::gil_scoped_acquire ag;                           \
+    g.markAcquired();                                          \
+  } else {                                                     \
+    pybind11::gil_scoped_acquire ag;                           \
+  }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;

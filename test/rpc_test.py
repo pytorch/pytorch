@@ -1210,6 +1210,21 @@ class RpcTest(RpcAgentTestFixture):
         dist.barrier()
 
     @dist_init
+    def test_disable_metrics_profiling(self):
+        # test that _agent._set_metrics_profiling(false) will result in more
+        # expensive metrics such as GIL wait time not being recorded.
+        from torch.distributed.rpc.api import _agent
+        rpc._set_metrics_profiling(False)
+        dst_rank = (self.rank + 1) % self.world_size
+        rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
+        info = _agent.get_debug_info()
+        self.assertRaises(KeyError, lambda: info["gil_average_wait_time"])
+        rpc._set_metrics_profiling(True)
+        rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
+        info = _agent.get_debug_info()
+        self.assertIn("gil_average_wait_time", info)
+
+    @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent

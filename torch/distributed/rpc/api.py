@@ -178,6 +178,18 @@ def get_worker_info(worker_name=None):
     else:
         return _agent.get_worker_info()
 
+@_require_initialized
+def _set_metrics_profiling(flag):
+    r"""
+    Set whether certain metrics (such as GIL wait times) should be profiled or
+    not. This incurs a slight computational cost, so it should be disabled for
+    production runs. Default is enabled.
+
+    Arguments:
+        flag (bool): True to set metrics profiling, False to disable.
+    """
+    _agent.set_metrics_profiling(flag)
+
 
 def _to_worker_info(name_or_info):
     if isinstance(name_or_info, WorkerInfo):

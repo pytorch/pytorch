@@ -144,11 +144,20 @@ class TORCH_API RpcAgent {
   // Retrive debug info in addition to metrics as KV map
   virtual std::unordered_map<std::string, std::string> getDebugInfo();
 
+  // Flag to control whether more expensive metrics (such as GIL wait times)
+  // should be profiled or not.
+  virtual void setMetricsProfiling(bool flag);
+
+  // Retrieve wheher we should profile certain expensive metrics (such as GIL
+  // wait time) or not.
+  virtual bool getMetricsProfiling();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  std::atomic<bool> profilingEnabled_{true};
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;

@@ -34,6 +34,14 @@ void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
   defaultRpcAgent_ = std::move(defaultRpcAgent);
 }
 
+void RpcAgent::setMetricsProfiling(bool flag) {
+  profilingEnabled_ = flag;
+}
+
+bool RpcAgent::getMetricsProfiling() {
+  return profilingEnabled_.load();
+}
+
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
   /* This would later include more info other than metrics for eg: may include
      stack traces for the threads owned by the agent */
