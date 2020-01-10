@@ -49,6 +49,8 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+export CCACHE_DISABLE=1
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
