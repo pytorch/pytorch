@@ -32,25 +32,25 @@ DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
 
+#define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
+{ \
+  TORCH_CHECK(\
+    out.option() == self.option(),\
+    "expected ", #option, " ",\
+    self.option(),\
+    " but found ", out.option())\
+}
+
+static inline void check_scalar_type_device_layout_equal(const Tensor& out, const Tensor& self) {
+  OPTION_TYPE_EQUALITY_CHECK(scalar_type, out, self);
+  OPTION_TYPE_EQUALITY_CHECK(device, out.options(), self.options());
+  OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
+}
+
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
-}
-
-static inline void check_dtype_device_layout_equal(const TensorOptions& out, const TensorOptions& self, std::string out_name, std::string self_name) {
-  TORCH_CHECK(
-    out.dtype() == self.dtype(),
-    out_name + " tensor should have the same dtype as the " + self_name + " tensor. Got ",
-    out.dtype(), " and ", self.dtype(), ".");
-  TORCH_CHECK(
-    out.device() == self.device(),
-    out_name + " tensor should have the same device type as the " + self_name + " tensor. Got ",
-    out.device(), " and ", self.device(), ".");
-  TORCH_CHECK(
-    out.layout() == self.layout(),
-    out_name + " tensor should have the same layout type as the " + self_name + " tensor. Got ",
-    out.layout(), " and ", self.layout(), ".");
 }
 
 using DimMask = TensorIterator::DimMask;
@@ -233,8 +233,8 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 }
 
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
-  check_dtype_device_layout_equal(values.options(), self.options(), "values", "input");
-  check_dtype_device_layout_equal(indices.options(), self.options().dtype(at::kLong), "indices", "input");
+  check_scalar_type_device_layout_equal(values, self);
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
     values.resize_(self.sizes());
