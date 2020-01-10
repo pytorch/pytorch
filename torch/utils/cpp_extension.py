@@ -124,7 +124,6 @@ with compiling PyTorch from source.
                               !! WARNING !!
 '''
 ROCM_HOME = _find_rocm_home()
-HIP_COMP = os.path.exists(ROCM_HOME) # redundant with ROCM_HOME, but for backwards compatibilty
 CUDA_HOME = (ROCM_HOME if ROCM_HOME else _find_cuda_home())
 CUDNN_HOME = (_join_rocm_home('miopen') if ROCM_HOME else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
 # PyTorch releases have the version pattern major.minor.patch, whereas when
