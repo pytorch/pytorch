@@ -39,28 +39,11 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-inline void check_inplace(const Tensor& tensor, std::string fn_name) {
+inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && GradMode::is_enabled()) {
-    if (var.is_leaf()) {
-      AT_ERROR(
-<<<<<<< HEAD
-        "a leaf Variable that requires grad is being used in an in-place operation by ", fn_name, ".");
-=======
-        "a leaf Variable that requires grad is being used in an in-place operation.");
->>>>>>> 6f61a62cfd... Add allow_rebase_history flag and fix codegen functions for multiple views
-    } else if (var.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      auto grad_fn = impl::grad_fn_unsafe(var);
-      TORCH_CHECK(diff_view_meta->allow_rebase_history,
-          "The ", diff_view_meta->output_nr_, "th output of ", grad_fn ? grad_fn->name() : "UnknownFunction",
-<<<<<<< HEAD
-          " is being modified inplace by ", fn_name, " but this is not allowed as it would prevent correct gradient computation.");
-=======
-          " is being modified inplace but this is not allowed as it would prevent correct gradient computation.");
->>>>>>> 6f61a62cfd... Add allow_rebase_history flag and fix codegen functions for multiple views
-    }
+  if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
+    AT_ERROR(
+      "a leaf Variable that requires grad has been used in an in-place operation.");
   }
 }
 
@@ -133,16 +116,6 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
     tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
   }
   return tensors;
-}
-
-inline void disable_rebase_history(Tensor& tensor) {
-  impl::disable_rebase_history(tensor);
-}
-
-inline void disable_rebase_history(std::vector<Tensor> tensors) {
-  for(Tensor &tensor : tensors) {
-    impl::disable_rebase_history(tensor);
-  }
 }
 
 inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
