@@ -22,9 +22,9 @@ struct PeepholeOptimizeImpl {
   PeepholeOptimizeImpl(
       const std::shared_ptr<Graph>& graph,
       bool addmm_fusion_enabled)
-      : aliasDb_(torch::make_unique<torch::jit::AliasDb>(graph)),
+      : aliasDb_(nullptr),
         graph_(graph),
-        changed_(false),
+        changed_(true),
         addmm_fusion_enabled_(addmm_fusion_enabled) {
     run(graph->block());
   }
@@ -51,49 +51,10 @@ struct PeepholeOptimizeImpl {
       for (Block* sub_block : node->blocks()) {
         run(sub_block);
       }
-      // if either the inputs or outputs of an op alias graph's inputs or
-      // outputs, the transformations below are invalid
-      // An example:
-      //
-      // def test_write(x):
-      //     s = 0
-      //     s += x
-      //     s += x
-      //     return s
-      //
-      // any transformations that are still valid despite
-      // should be pulled above this statement
 
-
-      // _grad_sum_to_size peephole foldings are exempted from aliasing restrictions below
-      if (
-          node->matches(
-              "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
-        if (node->input(1)->mustBeNone()) {
-          GRAPH_UPDATE(
-              *node,
-              " (x._grad_sum_to_size(x, None) == x) is replaced with ",
-              node->input(0)->debugName());
-          node->output()->replaceAllUsesWith(node->input(0));
-          changed_ = true;
-        } else {
-          auto uses = node->output()->uses();
-          for (Use u : uses) {
-            if (u.user->matches(
-                    "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
-                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
-              GRAPH_UPDATE(
-                  *node,
-                  " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
-                  node->inputs().at(0)->debugName());
-              u.user->replaceInput(0, node->inputs().at(0));
-              changed_ = true;
-            }
-          }
-        }
-      }
-
-      // addmm is exempted from aliasing restrictions below
+      // XXX: remember that if you want to simplify an expression by combining
+      // multiple nodes into a different one, then you need to check that they
+      // all belong to the given block
       if (node->matches(
               "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
               /*const_inputs=*/attr::alpha)) {
@@ -199,22 +160,33 @@ struct PeepholeOptimizeImpl {
         }
         // TODO: this doesn't work with Scalar-Tensor ops! We should
         // canonicalize those
-      }
-
-      if (changed_) {
-        aliasDb_ = torch::make_unique<AliasDb>(graph_);
-        changed_ = false;
-      }
-
-      if (!aliasDb_->safeToChangeAliasingRelationship(
-              node->inputs(), node->outputs())) {
-        continue;
-      }
-
-      // XXX: remember that if you want to simplify an expression by combining
-      // multiple nodes into a different one, then you need to check that they
-      // all belong to the given block
-      if (node->matches(
+      } else if (
+          node->matches(
+              "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+        if (node->input(1)->mustBeNone()) {
+          GRAPH_UPDATE(
+              *node,
+              " (x._grad_sum_to_size(x, None) == x) is replaced with ",
+              node->input(0)->debugName());
+          node->output()->replaceAllUsesWith(node->input(0));
+          changed_ = true;
+        } else {
+          auto uses = node->output()->uses();
+          for (Use u : uses) {
+            if (u.user->matches(
+                    "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
+                u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+              GRAPH_UPDATE(
+                  *node,
+                  " (x._grad_sum_to_size(y)._grad_sum_to_size(z) == x._grad_sum_to_size(z)) is replaced with ",
+                  node->inputs().at(0)->debugName());
+              u.user->replaceInput(0, node->inputs().at(0));
+              changed_ = true;
+            }
+          }
+        }
+      } else if (
+          node->matches(
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
               /*const_inputs=*/attr::size)) {
         // x.expand(x.size()) == x
@@ -253,39 +225,6 @@ struct PeepholeOptimizeImpl {
           GRAPH_UPDATE(
               *node,
               " (x.type_as(y) == x) is replaced with ",
-              node->input(0)->debugName());
-          node->output()->replaceAllUsesWith(node->input(0));
-          changed_ = true;
-        }
-      } else if (
-          node->matches(
-              "aten::mul(Tensor self, Scalar other) -> Tensor",
-              /*const_inputs=*/attr::other) ||
-          node->matches(
-              "aten::div(Tensor self, Scalar other) -> Tensor",
-              /*const_inputs=*/attr::other)) {
-        // x * 1 == x / 1 == x
-        if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
-          GRAPH_UPDATE(
-              *node,
-              " (x * 1 == x / 1 == x) is replaced with ",
-              node->input(0)->debugName());
-          node->output()->replaceAllUsesWith(node->input(0));
-          changed_ = true;
-        }
-      } else if (
-          node->matches(
-              "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-              /*const_inputs=*/{attr::alpha, attr::other}) ||
-          node->matches(
-              "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-              /*const_inputs=*/{attr::alpha, attr::other})) {
-        // x + 0 == x - 0 == x
-        if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
-            node->get<at::Scalar>(attr::other)->toDouble() == 0) {
-          GRAPH_UPDATE(
-              *node,
-              " (x + 0 == x - 0 == x) is replaced with ",
               node->input(0)->debugName());
           node->output()->replaceAllUsesWith(node->input(0));
           changed_ = true;
@@ -436,6 +375,66 @@ struct PeepholeOptimizeImpl {
           node->output()->replaceAllUsesWith(output);
           changed_ = true;
         }
+      }
+
+      // these transformations rely on AA for correctness
+      // see `runAliasingSensitivePeepholeTransformations` for more details
+      runAliasingSensitivePeepholeTransformations(node);
+    }
+  }
+
+  // if either the inputs or outputs of an op alias graph's inputs or
+  // outputs, the transformations below are invalid
+  // An example:
+  //
+  // def test_write(x):
+  //     s = 0
+  //     s += x
+  //     s += x
+  //     return s
+  //
+  void runAliasingSensitivePeepholeTransformations(Node* node) {
+    if (changed_) {
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      changed_ = false;
+    }
+
+    if (!aliasDb_->safeToChangeAliasingRelationship(
+            node->inputs(), node->outputs())) {
+      return;
+    }
+
+    if (node->matches(
+            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+            /*const_inputs=*/{attr::alpha, attr::other}) ||
+        node->matches(
+            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+            /*const_inputs=*/{attr::alpha, attr::other})) {
+      // x + 0 == x - 0 == x
+      if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
+          node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+        GRAPH_UPDATE(
+            *node,
+            " (x + 0 == x - 0 == x) is replaced with ",
+            node->input(0)->debugName());
+        node->output()->replaceAllUsesWith(node->input(0));
+        changed_ = true;
+      }
+    } else if (
+        node->matches(
+            "aten::mul(Tensor self, Scalar other) -> Tensor",
+            /*const_inputs=*/attr::other) ||
+        node->matches(
+            "aten::div(Tensor self, Scalar other) -> Tensor",
+            /*const_inputs=*/attr::other)) {
+      // x * 1 == x / 1 == x
+      if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+        GRAPH_UPDATE(
+            *node,
+            " (x * 1 == x / 1 == x) is replaced with ",
+            node->input(0)->debugName());
+        node->output()->replaceAllUsesWith(node->input(0));
+        changed_ = true;
       }
     }
   }

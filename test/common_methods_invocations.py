@@ -217,7 +217,7 @@ def method_tests():
         ('expand', (S, 1), (S, S, S), 'new_dim', (True,)),
         ('expand', (1,), (S, S, S), '1_element', (True,)),
         ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1', (True,)),
-        ('expand', (), (dont_convert(()),), 'scalar_to_scalar', (True,)),
+        ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (True,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (True,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
