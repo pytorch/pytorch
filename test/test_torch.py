@@ -10462,8 +10462,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(aRes, torch.tensor([[1, 0, 0],
                                              [0, 0, 0],
                                              [1, 1, 1]]))
-        
-        
+
         # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
         # dimensiuon also works
