@@ -1298,8 +1298,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     @unittest.skipIf(IS_MACOS,
-        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019"
-    )
+                     "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019")
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
