@@ -30,24 +30,24 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
   return input - 1;
 }
 
-void expectCallsIncrement(DispatchKey type_id) {
+void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(type_id), 5);
+  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
 }
 
-void expectCallsDecrement(DispatchKey type_id) {
+void expectCallsDecrement(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(type_id), 5);
+  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
 }
@@ -631,24 +631,24 @@ std::string concatKernel(const Tensor& tensor1, std::string a, const std::string
   return a + b + c10::guts::to_string(c);
 }
 
-void expectCallsConcatUnboxed(DispatchKey type_id) {
+void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(type_id), "1", "2", 3);
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(dispatch_key), "1", "2", 3);
   EXPECT_EQ("123", result);
 }
 
-void expectCannotCallConcatBoxed(DispatchKey type_id) {
+void expectCannotCallConcatBoxed(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>(
-    [&] {callOp(*op, dummyTensor(type_id), "1", "2", 3);},
+    [&] {callOp(*op, dummyTensor(dispatch_key), "1", "2", 3);},
     "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed()."
   );
 }

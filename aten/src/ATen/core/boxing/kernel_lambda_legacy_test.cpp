@@ -28,13 +28,13 @@ using std::unique_ptr;
 
 namespace {
 
-void expectCallsIncrement(DispatchKey type_id) {
+void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(type_id), 5);
+  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
 }
@@ -836,13 +836,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_TRUE(outputs[2].isNone());
 }
 
-void expectCallsConcatUnboxed(DispatchKey type_id) {
+void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(type_id), "1", "2", 3);
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(dispatch_key), "1", "2", 3);
   EXPECT_EQ("prefix123", result);
 }
 
