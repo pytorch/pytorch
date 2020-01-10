@@ -14,13 +14,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # (2) build with NCCL and MPI
 # (3) build with only MPI
 # (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda10.1 libnccl2=2.2.13-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
