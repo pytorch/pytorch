@@ -10,7 +10,7 @@ namespace c10 {
 
 namespace impl {
 
-// Take a TensorTypeSet for a Tensor, and combine it with the current thread
+// Take a DispatchKeySet for a Tensor, and combine it with the current thread
 // local valid (implemented) and enabled (not implemented) TensorTypeSets
 // to determine what the actual dispatch DispatchKey should be.  Unlike
 // Tensor::type_set(), the value of this on a tensor can change depending
@@ -21,7 +21,7 @@ namespace impl {
 // TODO: I'm not sure if this should live in this header or not; the operant
 // question is whether or not we have access to all the relevant TLS at this
 // point.
-static inline DispatchKey dispatchTypeId(TensorTypeSet ts) {
+static inline DispatchKey dispatchTypeId(DispatchKeySet ts) {
   c10::impl::LocalTensorTypeSet local = c10::impl::tls_local_tensor_type_set();
   return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
 }
@@ -30,7 +30,7 @@ static inline DispatchKey dispatchTypeId(TensorTypeSet ts) {
 
 namespace detail {
   struct MultiDispatchTensorTypeSet : at::IterArgs<MultiDispatchTensorTypeSet> {
-    TensorTypeSet ts;
+    DispatchKeySet ts;
     void operator()(const at::Tensor& x) {
       ts = ts | x.type_set();
     }
@@ -51,7 +51,7 @@ namespace detail {
   // NB: take by const reference (Don't do universal forwarding here! You
   // don't want to move into this function!)
   template <typename... Args>
-  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
+  DispatchKeySet multi_dispatch_tensor_type_set(const Args&... args) {
     return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
@@ -72,7 +72,7 @@ public:
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. These should be aligned and do the same thing.
 
-    TensorTypeSet ts;
+    DispatchKeySet ts;
     for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
@@ -94,7 +94,7 @@ public:
   }
 
 private:
-  static c10::optional<DispatchKey> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
+  static c10::optional<DispatchKey> typeSetToDispatchKey_(const DispatchKeySet& typeSet) {
     if (C10_UNLIKELY(typeSet.empty())) {
       return c10::nullopt;
     }

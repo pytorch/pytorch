@@ -241,7 +241,7 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
         scalar_type());
   }
-  TensorTypeSet type_set() const {
+  DispatchKeySet type_set() const {
     return impl_->type_set();
   }
   ScalarType scalar_type() const {

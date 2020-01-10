@@ -6,7 +6,7 @@
 namespace at {
 
 namespace {
-  DeviceType sparseTensorSetToDeviceType(TensorTypeSet type_set) {
+  DeviceType sparseTensorSetToDeviceType(DispatchKeySet type_set) {
     if (type_set.has(DispatchKey::SparseCPUTensorId)) {
       return kCPU;
     } else if (type_set.has(DispatchKey::SparseCUDATensorId)) {
@@ -30,12 +30,12 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type)
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet type_set, const caffe2::TypeMeta& data_type)
   :   SparseTensorImpl(type_set, data_type
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
     : TensorImpl(type_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)

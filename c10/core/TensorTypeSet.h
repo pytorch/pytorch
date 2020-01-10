@@ -9,7 +9,7 @@ namespace c10 {
 
 // A representation of a set of DispatchKeys.  A tensor may have multiple
 // tensor type ids, e.g., a Variable tensor can also be a CPU tensor; the
-// TensorTypeSet specifies what type ids apply.  The internal representation is
+// DispatchKeySet specifies what type ids apply.  The internal representation is
 // as a 64-bit bit set (this means only 64 tensor type ids are supported).
 //
 // Note that DispatchKeys are ordered; thus, we can ask questions like "what is
@@ -31,56 +31,56 @@ namespace c10 {
 // handling code if one of the inputs requires grad.)
 //
 // An undefined tensor is one with an empty tensor type set.
-class TensorTypeSet final {
+class DispatchKeySet final {
 public:
   enum Full { FULL };
   enum Raw { RAW };
 
   // NB: default constructor representation as zero is MANDATORY as
-  // use of TensorTypeSet in TLS requires this.
-  TensorTypeSet()
+  // use of DispatchKeySet in TLS requires this.
+  DispatchKeySet()
     : repr_(0) {}
-  TensorTypeSet(Full)
+  DispatchKeySet(Full)
     : repr_(std::numeric_limits<decltype(repr_)>::max()) {}
-  // Public version of TensorTypeSet(uint64_t) API; external users
+  // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
-  TensorTypeSet(Raw, uint64_t x)
+  DispatchKeySet(Raw, uint64_t x)
     : repr_(x) {}
-  explicit TensorTypeSet(DispatchKey t)
+  explicit DispatchKeySet(DispatchKey t)
     : repr_(t == DispatchKey::UndefinedTensorId
               ? 0
               : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
   // Test if a DispatchKey is in the set
   bool has(DispatchKey t) const {
     TORCH_INTERNAL_ASSERT(t != DispatchKey::UndefinedTensorId);
-    return static_cast<bool>(repr_ & TensorTypeSet(t).repr_);
+    return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Perform set union
-  TensorTypeSet operator|(TensorTypeSet other) const {
-    return TensorTypeSet(repr_ | other.repr_);
+  DispatchKeySet operator|(DispatchKeySet other) const {
+    return DispatchKeySet(repr_ | other.repr_);
   }
   // Perform set intersection
-  TensorTypeSet operator&(TensorTypeSet other) const {
-    return TensorTypeSet(repr_ & other.repr_);
+  DispatchKeySet operator&(DispatchKeySet other) const {
+    return DispatchKeySet(repr_ & other.repr_);
   }
   // Compute the set difference self - other
-  TensorTypeSet operator-(TensorTypeSet other) const {
-    return TensorTypeSet(repr_ & ~other.repr_);
+  DispatchKeySet operator-(DispatchKeySet other) const {
+    return DispatchKeySet(repr_ & ~other.repr_);
   }
   // Perform set equality
-  bool operator==(TensorTypeSet other) const {
+  bool operator==(DispatchKeySet other) const {
     return repr_ == other.repr_;
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
-  // returns the extended TensorTypeSet!
-  C10_NODISCARD TensorTypeSet add(DispatchKey t) const {
-    return *this | TensorTypeSet(t);
+  // returns the extended DispatchKeySet!
+  C10_NODISCARD DispatchKeySet add(DispatchKey t) const {
+    return *this | DispatchKeySet(t);
   }
   // Remove a DispatchKey from the DispatchKey set.  This is
   // generally not an operation you should be doing (it's
   // used to implement operator<<)
-  C10_NODISCARD TensorTypeSet remove(DispatchKey t) const {
-    return TensorTypeSet(repr_ & ~TensorTypeSet(t).repr_);
+  C10_NODISCARD DispatchKeySet remove(DispatchKey t) const {
+    return DispatchKeySet(repr_ & ~DispatchKeySet(t).repr_);
   }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
@@ -99,12 +99,12 @@ public:
     return static_cast<DispatchKey>(64 - llvm::countLeadingZeros(repr_));
   }
 private:
-  TensorTypeSet(uint64_t repr) : repr_(repr) {}
+  DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
 };
 
-C10_API std::string toString(TensorTypeSet);
-C10_API std::ostream& operator<<(std::ostream&, TensorTypeSet);
+C10_API std::string toString(DispatchKeySet);
+C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
 // Historically, every tensor only had a single DispatchKey, and it was
 // always something like CPUTensorId and not something weird like VariableId.
@@ -121,7 +121,7 @@ C10_API std::ostream& operator<<(std::ostream&, TensorTypeSet);
 //
 // NB: If you add other non-VariableTensorId other keys to this set, you'll
 // have to adjust this some more (sorry.)
-static inline DispatchKey legacyExtractTypeId(TensorTypeSet s) {
+static inline DispatchKey legacyExtractTypeId(DispatchKeySet s) {
   return s.remove(DispatchKey::VariableTensorId).highestPriorityTypeId();
 }
 

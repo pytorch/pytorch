@@ -3,7 +3,7 @@
 #include <c10/core/TensorTypeSet.h>
 #include <c10/util/Flags.h>
 
-// TLS management for TensorTypeSet (the "local" TensorTypeSet(s))
+// TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
 //
 // This manages two thread-local TensorTypeSets:
 //
@@ -31,17 +31,17 @@ struct C10_API PODLocalTensorTypeSet {
   uint64_t included_;
   uint64_t excluded_;
 
-  TensorTypeSet included() const {
-    return TensorTypeSet(TensorTypeSet::RAW, included_);
+  DispatchKeySet included() const {
+    return DispatchKeySet(DispatchKeySet::RAW, included_);
   }
-  TensorTypeSet excluded() const {
-    return TensorTypeSet(TensorTypeSet::RAW, excluded_);
+  DispatchKeySet excluded() const {
+    return DispatchKeySet(DispatchKeySet::RAW, excluded_);
   }
 
-  void set_included(TensorTypeSet x) {
+  void set_included(DispatchKeySet x) {
     included_ = x.raw_repr();
   }
-  void set_excluded(TensorTypeSet x) {
+  void set_excluded(DispatchKeySet x) {
     excluded_ = x.raw_repr();
   }
 };
@@ -50,8 +50,8 @@ static_assert(std::is_pod<PODLocalTensorTypeSet>::value, "PODLocalTensorTypeSet 
 struct C10_API LocalTensorTypeSet {
   /* implicit */ LocalTensorTypeSet(PODLocalTensorTypeSet x)
     : included_(x.included()), excluded_(x.excluded()) {}
-  TensorTypeSet included_;
-  TensorTypeSet excluded_;
+  DispatchKeySet included_;
+  DispatchKeySet excluded_;
 };
 
 C10_API LocalTensorTypeSet tls_local_tensor_type_set();

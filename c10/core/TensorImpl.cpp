@@ -44,13 +44,13 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet type_set)
     : TensorImpl(std::move(storage), type_set, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+TensorImpl::TensorImpl(DispatchKeySet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, type_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::TypeMeta& data_type,
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet type_set, const caffe2::TypeMeta& data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},

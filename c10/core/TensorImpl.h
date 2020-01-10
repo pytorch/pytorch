@@ -319,26 +319,26 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
    */
-  TensorImpl(Storage&& storage, TensorTypeSet);
+  TensorImpl(Storage&& storage, DispatchKeySet);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
-  TensorImpl(TensorTypeSet, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt);
+  TensorImpl(DispatchKeySet, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt);
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
   TensorImpl(Storage&& storage, DispatchKey type_id)
-    : TensorImpl(std::move(storage), TensorTypeSet(type_id)) {}
+    : TensorImpl(std::move(storage), DispatchKeySet(type_id)) {}
   TensorImpl(DispatchKey type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl(TensorTypeSet(type_id), data_type, device_opt) {}
+    : TensorImpl(DispatchKeySet(type_id), data_type, device_opt) {}
 
  private:
   // This constructor is private, because the data_type is redundant with
   // storage.  Still, we pass it in separately because it's easier to write
   // the initializer list if we're not worried about storage being moved out
   // from under us.
-  TensorImpl(Storage&& storage, TensorTypeSet, const caffe2::TypeMeta& data_type, c10::optional<c10::Device>);
+  TensorImpl(Storage&& storage, DispatchKeySet, const caffe2::TypeMeta& data_type, c10::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -354,11 +354,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void release_resources() override;
 
   /**
-   * Return the TensorTypeSet corresponding to this Tensor, specifying
+   * Return the DispatchKeySet corresponding to this Tensor, specifying
    * all of the TensorTypeIds that this Tensor identifies as.  This is the
    * information used to dispatch operations on this tensor.
    */
-  TensorTypeSet type_set() const { return type_set_; }
+  DispatchKeySet type_set() const { return type_set_; }
 
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
@@ -878,17 +878,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * One TensorImpl can be copied to another TensorImpl if they have the same
-   * TensorTypeSet. The only two special cases (for legacy reason) are:
+   * DispatchKeySet. The only two special cases (for legacy reason) are:
    * CPUTensorId is compatible with CUDATensorId and SparseCPUTensorId is
    * compatible with SparseCUDATensorId.
    */
-  inline bool has_compatible_shallow_copy_type(TensorTypeSet from) {
-    auto is_dense = [](TensorTypeSet ts) {
+  inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
+    auto is_dense = [](DispatchKeySet ts) {
       return ts.has(DispatchKey::CPUTensorId) ||
              ts.has(DispatchKey::CUDATensorId) ||
              ts.has(DispatchKey::HIPTensorId);
     };
-    auto is_sparse = [](TensorTypeSet ts) {
+    auto is_sparse = [](DispatchKeySet ts) {
       return ts.has(DispatchKey::SparseCPUTensorId) ||
              ts.has(DispatchKey::SparseCUDATensorId) ||
              ts.has(DispatchKey::SparseHIPTensorId);
@@ -1614,7 +1614,7 @@ protected:
   // as the default value contained in the *included* tensor type id set
   // as TLS requires our state to be zero-initialized (i.e., it is not
   // included).
-  TensorTypeSet type_set_;
+  DispatchKeySet type_set_;
 
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.

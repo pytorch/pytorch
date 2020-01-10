@@ -2,18 +2,18 @@
 
 namespace c10 {
 
-std::string toString(TensorTypeSet ts) {
+std::string toString(DispatchKeySet ts) {
   std::stringstream ss;
   ss << ts;
   return ss.str();
 }
 
-std::ostream& operator<<(std::ostream& os, TensorTypeSet ts) {
+std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
   if (ts.empty()) {
-    os << "TensorTypeSet()";
+    os << "DispatchKeySet()";
     return os;
   }
-  os << "TensorTypeSet(";
+  os << "DispatchKeySet(";
   DispatchKey tid;
   bool first = true;
   while ((tid = ts.highestPriorityTypeId()) != DispatchKey::UndefinedTensorId) {

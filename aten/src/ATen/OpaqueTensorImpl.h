@@ -19,7 +19,7 @@ namespace at {
 template <typename OpaqueHandle>
 struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
-  OpaqueTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::Device device,
+  OpaqueTensorImpl(at::DispatchKeySet type_set, const caffe2::TypeMeta& data_type, c10::Device device,
                    OpaqueHandle opaque_handle, c10::IntArrayRef sizes)
   :   TensorImpl(type_set, data_type, device),
       opaque_handle_(std::move(opaque_handle))

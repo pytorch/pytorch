@@ -61,7 +61,7 @@ void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* sta
 struct GenericWrapperTensorImpl : public c10::TensorImpl {
   explicit GenericWrapperTensorImpl(at::Tensor rep)
     : TensorImpl(
-        c10::TensorTypeSet(c10::DispatchKey::TESTING_ONLY_GenericWrapperTensorId),
+        c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapperTensorId),
         rep.dtype(),
         rep.device()
         // TODO: propagate size!

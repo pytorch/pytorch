@@ -20,9 +20,9 @@ namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initForTensorTypeSet(TensorTypeSet ts) {
+  void initForTensorTypeSet(DispatchKeySet ts) {
     // TODO: Avoid use of legacyExtractTypeId here.  The key
-    // problem is that you may get a TensorTypeSet with
+    // problem is that you may get a DispatchKeySet with
     // VariableTensorId set; should you initialize the "underlying"
     // type in that case?  Hard to say.
     auto b = tensorTypeIdToBackend(legacyExtractTypeId(ts));

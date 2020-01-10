@@ -21,7 +21,7 @@
 using c10::OperatorHandle;
 using c10::Stack;
 using c10::DispatchKey;
-using c10::TensorTypeSet;
+using c10::DispatchKeySet;
 using c10::Dispatcher;
 using c10::KernelFunction;
 

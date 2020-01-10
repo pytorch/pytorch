@@ -6,12 +6,12 @@
 
 namespace c10 {
 
-// A "bit" in a TensorTypeSet, which may have a unique dispatch handler
+// A "bit" in a DispatchKeySet, which may have a unique dispatch handler
 // for it.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros")
 enum class DispatchKey : uint8_t {
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
-  // element we can return for cases when a TensorTypeSet contains no elements.
+  // element we can return for cases when a DispatchKeySet contains no elements.
   // You can think a more semantically accurate definition of DispatchKey is:
   //
   //    using DispatchKey = optional<RealDispatchKey>
@@ -45,7 +45,7 @@ enum class DispatchKey : uint8_t {
   // WARNING! If you add more "wrapper" style tensor ids (tensor
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust
-  // legacyExtractTypeId in c10/core/TensorTypeSet.h to mask them out.
+  // legacyExtractTypeId in c10/core/DispatchKeySet.h to mask them out.
 
   VariableTensorId,
 

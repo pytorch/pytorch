@@ -336,8 +336,8 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the tensor type set specified by the current construction axes.
-  TensorTypeSet type_set() const noexcept {
-    return TensorTypeSet(computeTensorTypeId()).add(DispatchKey::VariableTensorId);
+  DispatchKeySet type_set() const noexcept {
+    return DispatchKeySet(computeTensorTypeId()).add(DispatchKey::VariableTensorId);
   }
 
   inline DispatchKey computeTensorTypeId() const {
