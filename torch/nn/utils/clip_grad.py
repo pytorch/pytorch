@@ -25,13 +25,13 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == inf:
-        total_norm = max(p.grad.data.abs().max() for p in parameters)
+        total_norm = max(p.grad.detach().abs().max() for p in parameters)
     else:
-        total_norm = torch.norm(torch.stack([torch.norm(p.grad.data, norm_type) for p in parameters]), norm_type)
+        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]), norm_type)
     clip_coef = max_norm / (total_norm + 1e-6)
     if clip_coef < 1:
         for p in parameters:
-            p.grad.data.mul_(clip_coef)
+            p.grad.detach().mul_(clip_coef)
     return total_norm
 
 
