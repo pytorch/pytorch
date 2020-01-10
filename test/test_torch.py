@@ -10570,7 +10570,7 @@ class TestTorchDeviceType(TestCase):
         indices = torch.LongTensor()
         with self.assertRaisesRegex(
                 RuntimeError,
-                'values tensor should have the same dtype as the input tensor. Got short int and float.'):
+                'expected scalar_type Float but found Short'):
             torch.cummax(t, 0, out=(values, indices))
 
         # Check that cummulative max over a zero length dimension doesn't crash on backprop.
