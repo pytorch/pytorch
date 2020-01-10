@@ -267,7 +267,7 @@ void TestIndexingByZerodimTensor() {
 void TestIndexingMixedDevice(DeprecatedTypeProperties& type) {
   Tensor tensor = randn({20, 20}, type);
   Tensor index = arange(10, kLong).cpu();
-  Tensor result = tensor.index({index});
+  Tensor result = tensor.index(ArrayRef<Tensor>({index}));
   ASSERT_TRUE(result[0].equal(tensor[0]));
 }
 void TestDispatch() {

@@ -223,7 +223,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
     tensor.index_put_(
-        {zero_indices, torch::tensor(column, tensor.options().dtype(kLong))},
+        torch::ArrayRef<Tensor>({zero_indices, torch::tensor(column, tensor.options().dtype(kLong))}),
         torch::zeros(num_zeros, tensor.options()));
   }
 
