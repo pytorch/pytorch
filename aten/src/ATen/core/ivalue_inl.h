@@ -577,7 +577,7 @@ inline T IValue::to() const& {
 }
 
 template<typename T>
-static std::vector<T> createList(const c10::detail::ListImpl* impl) {
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
   std::vector<T> result;
   result.reserve(impl->list.size());
   for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
@@ -596,7 +596,7 @@ inline c10::List<int64_t> IValue::toIntList() const & {
 }
 inline std::vector<int64_t> IValue::toIntListRef() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
-  return createList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+  return createVectorFromList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
@@ -608,7 +608,7 @@ inline c10::List<double> IValue::toDoubleList() const & {
 }
 inline std::vector<double> IValue::toDoubleListRef() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
-  return createList<double>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+  return createVectorFromList<double>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {
   AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
@@ -628,7 +628,7 @@ inline c10::List<at::Tensor> IValue::toTensorList() const & {
 }
 inline std::vector<at::Tensor> IValue::toTensorListRef() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
-  return createList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+  return createVectorFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toGenericList() && {
   AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
@@ -695,7 +695,7 @@ template<class T> inline IValue::IValue(at::ArrayRef<T> v)
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
-    list.push_back(std::move(e));
+    list.push_back(e);
   }
 }
 template<class T> inline IValue::IValue(const std::vector<T>& v)
@@ -703,7 +703,7 @@ template<class T> inline IValue::IValue(const std::vector<T>& v)
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
   for (const auto& e : v) {
-    list.push_back(std::move(e));
+    list.push_back(e);
   }
 }
 
@@ -761,7 +761,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:
-  // 1. None is None, False is False, and True is True are all true
+  // 1. Immutable primitive values of the same type (Int, Double, None, Bool, Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
   // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
@@ -780,6 +780,12 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   } else if (this->isNone() && rhs.isTensor()) {
     // special case: undefined tensor and None are the same identity
     return !rhs.is_intrusive_ptr;
+  } else if (this->isInt() && rhs.isInt()) {
+    return this->toInt() == rhs.toInt();
+  } else if (this->isDouble() && rhs.isDouble()) {
+    return this->toDouble() == rhs.toDouble();
+  } else if (this->isString() && rhs.isString()) {
+    return this->toStringRef() == rhs.toStringRef();
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr

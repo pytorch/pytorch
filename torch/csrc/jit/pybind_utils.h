@@ -639,6 +639,14 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
+  } else if (ivalue.isIntList()) {
+    return py::cast(std::move(ivalue).toIntList().vec());
+  } else if (ivalue.isDoubleList()) {
+    return py::cast(std::move(ivalue).toDoubleList().vec());
+  } else if (ivalue.isBoolList()) {
+    return py::cast(std::move(ivalue).toBoolList().vec());
+  } else if (ivalue.isTensorList()) {
+    return py::cast(std::move(ivalue).toTensorList().vec());
   } else if (ivalue.isGenericList()) {
     auto list = std::move(ivalue).toGenericList();
     py::list t{list.size()};

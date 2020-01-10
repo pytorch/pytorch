@@ -311,7 +311,7 @@ auto Engine::thread_main(
     }
 
     if (task.fn_ && !local_graph_task->has_error_.load()) {
-      GradMode::set_enabled(local_graph_task->grad_mode_);
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
       try {
         evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
@@ -562,6 +562,7 @@ void Engine::evaluate_function(
     // Records leaf stream (if applicable)
     // See note "Streaming backwards"
     if (opt_parent_stream) {
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
     }
     return;

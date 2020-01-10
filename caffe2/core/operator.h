@@ -126,8 +126,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   template <typename T>
   inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
-    auto list = value.template to<List<T>>();
-    return std::vector<T>(list.begin(), list.end());
+    return value.template to<List<T>>().vec();
   }
 #endif
 

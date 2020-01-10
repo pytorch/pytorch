@@ -1815,6 +1815,7 @@ ScalarTypeType() : EnumerationType() {}
 };
 
 inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
 }
 
