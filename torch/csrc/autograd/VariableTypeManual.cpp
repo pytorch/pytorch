@@ -178,7 +178,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // it automatically
   auto& self_ = unpack(self, "self", 0);
   auto& src_ = unpack(src, "src", 1);
-  check_inplace(self);
+  check_inplace(self, "copy_");
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
   // currently, isFloatingType will return false for (floating) complex types,

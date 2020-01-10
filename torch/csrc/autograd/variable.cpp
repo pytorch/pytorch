@@ -26,13 +26,14 @@ namespace autograd {
 
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base)
-    : AutogradMeta(self_impl, false) {
+    : AutogradMeta(self_impl) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
     base_ = base_.base();
   }
   is_view_ = true;
+  allow_rebase_history = true;
   self_impl->set_version_counter(impl::version_counter(base_));
   attr_version = self_impl->version_counter().current_version();
 }
@@ -76,6 +77,7 @@ namespace impl {
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
+      AT_ASSERT(diff_view_meta->allow_rebase_history);
       AT_ASSERT(gradient_edge.input_nr == 0);
       AT_ASSERT(gradient_edge.function);
       TORCH_CHECK(
@@ -89,6 +91,13 @@ namespace impl {
     } else {
       set_gradient_edge(self, std::move(gradient_edge));
     }
+  }
+
+  void disable_rebase_history(Variable& self) {
+    TORCH_CHECK(self.is_view(), "disable_rebase_history can only be called on views.");
+    // NB: is_view() ==> get_autograd_meta()
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
+    diff_view_meta->allow_rebase_history = false;
   }
 
   void create_cpp_hook(const Variable& self) {

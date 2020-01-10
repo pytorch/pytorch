@@ -30,17 +30,13 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
-# A map: function name => two options:
-#      1. name of the argument that all outputs are view of
-#      2. map: output idx => name of the argument that this result is view of
+# A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
@@ -66,7 +62,7 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow', 'split', 'split_with_sizes'})
 
 
 def format_return_type(returns):
