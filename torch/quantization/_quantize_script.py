@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 from .qconfig import QConfig
-from torch.jit._recursive import wrap_cpp_module
 
 class ConvPackedParams(torch.nn.Module):
     def __init__(self):
@@ -70,11 +69,11 @@ def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
-    model._c = torch._C._jit_pass_insert_observers(model._c,
-                                                   'forward',
-                                                   qconfig_dict,
-                                                   False)
-    return wrap_cpp_module(model._c)
+    torch._C._jit_pass_insert_observers(model._c,
+                                        'forward',
+                                        qconfig_dict,
+                                        True)
+    return model
 
 def convert_script(model, inplace=False):
     _check_is_script_module(model)
@@ -104,7 +103,7 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     # revisit after constants is properly handled in
     # JIT
     # torch._C._jit_pass_fold_convbn(model._c)
-    model = prepare_script(model, scripted_qconfig_dict)
+    prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
     # When we mutating graph we didn't create a new ClassType
     # and the graph executor will run an out dated version
