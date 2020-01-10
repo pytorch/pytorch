@@ -358,7 +358,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * all of the DispatchKeys that this Tensor identifies as.  This is the
    * information used to dispatch operations on this tensor.
    */
-  DispatchKeySet type_set() const { return type_set_; }
+  DispatchKeySet key_set() const { return key_set_; }
 
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
@@ -423,30 +423,30 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::SparseCPUTensorId) ||
-           type_set_.has(DispatchKey::SparseCUDATensorId) ||
-           type_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::SparseCPUTensorId) ||
+           key_set_.has(DispatchKey::SparseCUDATensorId) ||
+           key_set_.has(DispatchKey::SparseHIPTensorId);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::QuantizedCPUTensorId);
+    return key_set_.has(DispatchKey::QuantizedCPUTensorId);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::CUDATensorId) ||
-           type_set_.has(DispatchKey::SparseCUDATensorId);
+    return key_set_.has(DispatchKey::CUDATensorId) ||
+           key_set_.has(DispatchKey::SparseCUDATensorId);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    return type_set_.has(DispatchKey::HIPTensorId) ||
-           type_set_.has(DispatchKey::SparseHIPTensorId);
+    return key_set_.has(DispatchKey::HIPTensorId) ||
+           key_set_.has(DispatchKey::SparseHIPTensorId);
   }
 
   bool is_mkldnn() const {
-    return type_set_.has(DispatchKey::MkldnnCPUTensorId);
+    return key_set_.has(DispatchKey::MkldnnCPUTensorId);
   }
 
   int64_t get_device() const {
@@ -893,7 +893,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
              ts.has(DispatchKey::SparseCUDATensorId) ||
              ts.has(DispatchKey::SparseHIPTensorId);
     };
-    return (type_set_ == from) || (is_dense(type_set_) && is_dense(from)) || (is_sparse(type_set_) && is_sparse(from));
+    return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) || (is_sparse(key_set_) && is_sparse(from));
   }
 
   /**
@@ -905,7 +905,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_set_);
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), key_set_);
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -1526,7 +1526,7 @@ private:
   // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
   // equivalent to having an autograd_meta_ pointing to a default constructed
   // AutogradMeta; intuitively, tensors which don't require grad will have this
-  // field set to null.  If !type_set_.has(VariableTensorId), then
+  // field set to null.  If !key_set_.has(VariableTensorId), then
   // autograd_meta == nullptr (but not vice versa, due to the nullptr
   // optimization)
   //
@@ -1599,7 +1599,7 @@ protected:
 
   // The set of DispatchKeys which describe this tensor
   //
-  // INVARIANT: type_set_.has(DispatchKey::VariableTensorId) (every tensor
+  // INVARIANT: key_set_.has(DispatchKey::VariableTensorId) (every tensor
   // is a variable).  Historically this was not the case (there was a
   // distinction between plain tensors and variables), but because
   // we merged Variable and Tensor, this invariant now always holds.
@@ -1614,7 +1614,7 @@ protected:
   // as the default value contained in the *included* tensor type id set
   // as TLS requires our state to be zero-initialized (i.e., it is not
   // included).
-  DispatchKeySet type_set_;
+  DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.

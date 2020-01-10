@@ -13,7 +13,7 @@ namespace impl {
 // Take a DispatchKeySet for a Tensor, and combine it with the current thread
 // local valid (implemented) and enabled (not implemented) TensorTypeSets
 // to determine what the actual dispatch DispatchKey should be.  Unlike
-// Tensor::type_set(), the value of this on a tensor can change depending
+// Tensor::key_set(), the value of this on a tensor can change depending
 // on TLS.
 //
 // NB: I didn't make this take a Tensor to avoid header include shenanigans.
@@ -22,24 +22,24 @@ namespace impl {
 // question is whether or not we have access to all the relevant TLS at this
 // point.
 static inline DispatchKey dispatchTypeId(DispatchKeySet ts) {
-  c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_tensor_type_set();
+  c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
   return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
 }
 
 }
 
 namespace detail {
-  struct MultiDispatchTensorTypeSet : at::IterArgs<MultiDispatchTensorTypeSet> {
+  struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
     DispatchKeySet ts;
     void operator()(const at::Tensor& x) {
-      ts = ts | x.type_set();
+      ts = ts | x.key_set();
     }
     void operator()(const TensorOptions& x) {
-      ts = ts | x.type_set();
+      ts = ts | x.key_set();
     }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
-        ts = ts | x.type_set();
+        ts = ts | x.key_set();
       }
     }
     template <typename T>
@@ -51,8 +51,8 @@ namespace detail {
   // NB: take by const reference (Don't do universal forwarding here! You
   // don't want to move into this function!)
   template <typename... Args>
-  DispatchKeySet multi_dispatch_tensor_type_set(const Args&... args) {
-    return MultiDispatchTensorTypeSet().apply(args...).ts;
+  DispatchKeySet multi_dispatch_key_set(const Args&... args) {
+    return MultiDispatchKeySet().apply(args...).ts;
   }
 }
 
@@ -77,10 +77,10 @@ public:
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
         // no safe toTensorRef method, alas)
-        ts = ts | ivalue.unsafeToTensorImpl()->type_set();
+        ts = ts | ivalue.unsafeToTensorImpl()->key_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
         for (const auto& tensor : ivalue.toTensorListRef()) {
-          ts = ts | tensor.type_set();
+          ts = ts | tensor.key_set();
         }
       }
     }
@@ -89,8 +89,8 @@ public:
 
   template<class... Args>
   c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
-    auto type_set = detail::multi_dispatch_tensor_type_set(args...);
-    return typeSetToDispatchKey_(type_set);
+    auto key_set = detail::multi_dispatch_key_set(args...);
+    return typeSetToDispatchKey_(key_set);
   }
 
 private:

@@ -89,7 +89,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     //
     // TODO: Stop using legacyExtractTypeId here (probably need to build
     // in instanceof checking to Tensor class itself)
-    if (legacyExtractTypeId(var.type_set()) == self->get_type_id() &&
+    if (legacyExtractTypeId(var.key_set()) == self->get_type_id() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
