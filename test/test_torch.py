@@ -10917,6 +10917,10 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensordot(a, b, dims=2).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=2))
+
+        with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
+            torch.tensordot(a, b, dims=-1)
+
         self.assertEqual(c, cn)
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
