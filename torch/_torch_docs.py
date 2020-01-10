@@ -845,6 +845,26 @@ Example:
     tensor([ False, True, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_or,
+           r"""
+bitwise_or(input, other, out=None) -> Tensor
+
+Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical OR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -2,  3], dtype=torch.int8)
+    >>> torch.bitwise_or(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, True, False])
+""".format(**common_args))
+
 add_docstr(torch.bitwise_xor,
            r"""
 bitwise_xor(input, other, out=None) -> Tensor
@@ -4150,7 +4170,7 @@ Example::
     tensor([[9., 1., 3., 5.],
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
-            [2., 1., 4., 2.]])    
+            [2., 1., 4., 2.]])
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
