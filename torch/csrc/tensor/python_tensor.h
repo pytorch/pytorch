@@ -29,7 +29,7 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // TODO: This is nuts!  There is no reason to let the default tensor type id
 // change.  Probably only store ScalarType, as that's the only flex point
 // we support.
-c10::DispatchKey get_default_tensor_type_id();
+c10::DispatchKey get_default_dispatch_key();
 
 // Gets the ScalarType for the default tensor type.
 at::ScalarType get_default_scalar_type();

@@ -31,34 +31,34 @@ void decrementKernel(const OperatorHandle&, Stack* stack) {
   torch::jit::push(*stack, input - 1);
 }
 
-void expectCallsIncrement(DispatchKey type_id) {
+void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(type_id), 5);
+  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(6, result[0].toInt());
 }
 
-void expectCallsIncrementUnboxed(DispatchKey type_id) {
+void expectCallsIncrementUnboxed(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, dummyTensor(type_id), 5);
+  int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(6, result);
 }
 
-void expectCallsDecrement(DispatchKey type_id) {
+void expectCallsDecrement(DispatchKey dispatch_key) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  auto result = callOp(*op, dummyTensor(type_id), 5);
+  auto result = callOp(*op, dummyTensor(dispatch_key), 5);
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(4, result[0].toInt());
 }

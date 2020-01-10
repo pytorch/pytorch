@@ -328,10 +328,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Legacy constructors so I don't have to go update call sites.
   // TODO: When Variable is added, delete these constructors
-  TensorImpl(Storage&& storage, DispatchKey type_id)
-    : TensorImpl(std::move(storage), TensorTypeSet(type_id)) {}
-  TensorImpl(DispatchKey type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl(TensorTypeSet(type_id), data_type, device_opt) {}
+  TensorImpl(Storage&& storage, DispatchKey dispatch_key)
+    : TensorImpl(std::move(storage), TensorTypeSet(dispatch_key)) {}
+  TensorImpl(DispatchKey dispatch_key, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl(TensorTypeSet(dispatch_key), data_type, device_opt) {}
 
  private:
   // This constructor is private, because the data_type is redundant with
@@ -355,7 +355,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Return the TensorTypeSet corresponding to this Tensor, specifying
-   * all of the TensorTypeIds that this Tensor identifies as.  This is the
+   * all of the DispatchKeys that this Tensor identifies as.  This is the
    * information used to dispatch operations on this tensor.
    */
   TensorTypeSet type_set() const { return type_set_; }

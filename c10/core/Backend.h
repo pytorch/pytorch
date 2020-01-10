@@ -75,7 +75,7 @@ static inline Backend toDense(Backend b) {
   }
 }
 
-static inline Backend tensorTypeIdToBackend(DispatchKey t) {
+static inline Backend dispatchKeyToBackend(DispatchKey t) {
   if (t == DispatchKey::CPUTensorId) {
     return Backend::CPU;
   } else if (t == DispatchKey::CUDATensorId) {
@@ -107,7 +107,7 @@ static inline Backend tensorTypeIdToBackend(DispatchKey t) {
   }
 }
 
-static inline DispatchKey backendToTensorTypeId(Backend b) {
+static inline DispatchKey backendToDispatchKey(Backend b) {
   switch (b) {
     case Backend::CPU:
       return DispatchKey::CPUTensorId;
