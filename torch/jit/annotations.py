@@ -105,7 +105,7 @@ def is_vararg(the_callable):
         return False
 
 
-def get_param_names(fn, n_args):
+def get_param_names(fn):
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
@@ -117,9 +117,7 @@ def get_param_names(fn, n_args):
         else:
             return inspect.getfullargspec(fn).args
     else:
-        # The `fn` was not a method or function (maybe a class with a __call__
-        # method, so use a default param name list)
-        return [str(i) for i in range(n_args)]
+        raise RuntimeError("Could not get callable from {}".format(fn))
 
 
 def check_fn(fn, loc):

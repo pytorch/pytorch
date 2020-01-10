@@ -42,7 +42,7 @@ FunctionSchema PythonValue::getSchema(
       callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
   std::vector<Argument> args, rets;
 
-  auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
+  auto py_param_names = annotations.attr("get_param_names")(callable);
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
