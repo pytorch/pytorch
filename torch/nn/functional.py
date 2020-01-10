@@ -3351,7 +3351,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
         elif attn_mask.dim() == 3:
-            assert list(attn_mask.size()) == [bsz * num_heads, query.size(0), key.size(0)], "The size of the 3D attn_mask is not correct."
+            assert list(attn_mask.size()) == [bsz * num_heads, query.size(0), key.size(0)], \
+                "The size of the 3D attn_mask is not correct."
         # attn_mask's dim is 3 now.
 
     if bias_k is not None and bias_v is not None:
