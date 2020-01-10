@@ -310,7 +310,7 @@ void TensorExprNode::CloneFrom(const TensorExprNode* other) {
 
 void TensorExprNode::NodeValue::CloneFrom(
     const TensorExprNode::NodeValue* other) {
-  this->node_type = this->node_type;
+  this->node_type = other->node_type;
   if (this->node_type == NodeType::kOperation) {
     this->tensor_expr_op = CloneObject(other->tensor_expr_op);
   } else if (node_type == NodeType::kAxis) {
@@ -416,6 +416,7 @@ LoopAxis* LoopAxisTransform::NewAxis(
   ScheduleNode* schedule = this->schedule();
   LoopAxis* axis = schedule->NewAxis(loop_var, loop_range);
   axis->set_loop_axis_transform(this);
+  return axis;
 }
 
 } // namespace schedule
