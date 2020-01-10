@@ -3224,8 +3224,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer). A 2D mask will be unsqueezed
-            and applied for all the batches. A 3D mask allows different mask for each batch.
+            (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
+            the batches while a 3D mask allows different mask on each batch.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
