@@ -119,7 +119,8 @@ def preprocess(
         all_files,
         show_detailed=False,
         show_progress=True,
-        hip_clang_launch=False):
+        hip_clang_launch=False,
+        is_pytorch_extension=False):
     """
     Call preprocessor on selected files.
 
@@ -131,7 +132,7 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        result = preprocessor(output_directory, filepath, stats, hip_clang_launch)
+        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension)
         # Show what happened
         if show_progress:
             print(
@@ -605,7 +606,7 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats, hip_clang_launch):
+def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
@@ -616,14 +617,18 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch):
         os.makedirs(os.path.dirname(fout_path))
 
     # unsupported_calls statistics reporting is broken atm
-    if is_pytorch_file(filepath):
-        def pt_repl(m):
+    def pt_repl(m):
             return PYTORCH_MAP[m.group(0)]
+
+    if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
     else:
-        def c2_repl(m):
-            return CAFFE2_MAP[m.group(0)]
-        output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
+        if is_pytorch_file(filepath):
+            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
+        else:
+            def c2_repl(m):
+                return CAFFE2_MAP[m.group(0)]
+            output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
 
     # Header rewrites
     def mk_repl(templ):
@@ -775,6 +780,7 @@ def hipify(
     ignores=(),
     show_progress=True,
     hip_clang_launch=False,
+    is_pytorch_extension=False,
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -803,4 +809,5 @@ def hipify(
         all_files,
         show_detailed=show_detailed,
         show_progress=show_progress,
-        hip_clang_launch=hip_clang_launch)
+        hip_clang_launch=hip_clang_launch,
+        is_pytorch_extension=is_pytorch_extension)
