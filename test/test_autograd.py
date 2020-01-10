@@ -3773,9 +3773,15 @@ for shape in [(1,), ()]:
         MyFunction.apply(inp).sum().backward(create_graph=True)
 
     def test_power_function(self):
-        a = torch.tensor([0., 0., 0.])
-        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        a = torch.tensor([0., 0., 0., 1.0])
+        b = torch.tensor([-1., 0., 1., 1.0], requires_grad=True)
         c = torch.sum(a**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0., 0.0]), allow_inf=True)
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.0], requires_grad=True)
+        c = torch.sum(s**b)
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
