@@ -630,7 +630,9 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
           getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
                                   new ProfilingGraphExecutorImpl(graph))
                             : dynamic_cast<GraphExecutorImplBase*>(
-                                  new GraphExecutorImpl(graph))) {}
+                                  new GraphExecutorImpl(graph))) {
+  pImpl->num_bailouts_ = getProfilingMode() ? 1 : 0;
+}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
