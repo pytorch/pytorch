@@ -240,7 +240,7 @@ def export_opnames(m):
     r"""
         Returns a list of operator names of a script module and its submodules
     """
-    return torch._C.export_opnames(m._c)
+    return torch._C._export_opnames(m._c)
 
 def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
@@ -1990,7 +1990,7 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
 
 def _compile_function_with_overload(overload_fn, qual_name, impl_fn):
     overload_decl = torch.jit.get_jit_def(overload_fn).decl()
-    overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None)
+    overload_signature = torch.jit.annotations.get_signature(overload_fn, None, None, inspect.ismethod(overload_fn))
     impl_ast = torch.jit.get_jit_def(impl_fn)
     overload_defaults = get_default_args(overload_fn)
     implementation_defaults = get_default_args(impl_fn)
