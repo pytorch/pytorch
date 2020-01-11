@@ -286,7 +286,7 @@ static bool CompareKeys(const std::pair<IValue, IValue>& aWrap,
   AT_ERROR("Illegal dict key");
 }
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
+std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>&dict) {
   std::vector<std::pair<IValue, IValue>> ordered;
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
