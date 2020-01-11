@@ -21,10 +21,11 @@ inline void assert_unreachable(const char *msg) {
   std::abort();
 }
 
+template <int severity>
 class MessageLogger {
  public:
-  static std::string SeverityToString(int severity) {
-    switch (severity) {
+  static std::string SeverityToString(int sev) {
+    switch (sev) {
       case FATAL:
         return "FATAL";
       case ERROR:
@@ -37,17 +38,13 @@ class MessageLogger {
     assert_unreachable("No such severity level");
   }
 
-  MessageLogger(const char* file, int line, int severity)
+  MessageLogger(const char* file, int line)
       : severity_(severity) {
     stream_ << SeverityToString(severity) << ":" << file << ":" << line << ": ";
   }
 
-  ~MessageLogger() {
-    std::cerr << stream_.str() << std::flush;
-    if (severity_ == FATAL) {
-      DealWithFatal();
-    }
-  }
+  ~MessageLogger();
+
   // Return the stream associated with the logger object.
   std::stringstream& stream() {
     return stream_;
@@ -55,6 +52,7 @@ class MessageLogger {
 
  private:
   // When there is a fatal log, we simply abort.
+__attribute__((noreturn))
   void DealWithFatal() {
     abort();
   }
@@ -72,10 +70,22 @@ class LoggerVoidify {
   void operator&(const std::ostream& s) {}
 };
 
+template <int severity>
+MessageLogger<severity>::~MessageLogger() {
+  std::cerr << stream_.str() << std::flush;
+}
+
+template <>
+__attribute__((noreturn))
+inline MessageLogger<FATAL>::~MessageLogger() {
+  std::cerr << stream_.str() << std::flush;
+  DealWithFatal();
+}
+ 
 // Log a message and terminate.
 template <class T>
 void LogMessageFatal(const char* file, int line, const T& message) {
-  MessageLogger(file, line, FATAL).stream() << message;
+  MessageLogger<FATAL>(file, line).stream() << message;
 }
 
 // Helpers for CHECK_NOTNULL(). Two are necessary to support both raw pointers
@@ -98,12 +108,12 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
   return CheckNotNullCommon(file, line, names, t);
 }
 
-#define LOG(n) MessageLogger((char*)__FILE__, __LINE__, n).stream()
+#define LOG(n) MessageLogger<n>((char*)__FILE__, __LINE__).stream()
 
 #define FATAL_IF(condition)     \
   condition ? (void)0           \
             : LoggerVoidify() & \
-          MessageLogger((char*)__FILE__, __LINE__, FATAL).stream()
+          MessageLogger<FATAL>((char*)__FILE__, __LINE__).stream()
 
 #define CHECK(condition) \
   FATAL_IF(condition) << "Check failed: (" #condition ") "
