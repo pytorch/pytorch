@@ -49,7 +49,6 @@ public:
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;

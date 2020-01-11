@@ -25,3 +25,4 @@
 /torch/csrc/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/rpc @mrshenli @pritamdamania87 @zhaojuanmao
 /torch/distributed/autograd @mrshenli @pritamdamania87 @zhaojuanmao
+/torch/distributed/optim @mrshenli @pritamdamania87 @zhaojuanmao @aazzolini

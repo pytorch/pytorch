@@ -31,9 +31,9 @@ fi
 
 conda_sh="$workdir/install_miniconda.sh"
 if [[ "$(uname)" == Darwin ]]; then
-  retry curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+  curl --retry 3 -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
 else
-  retry curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+  curl --retry 3 -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
 fi
 chmod +x "$conda_sh"
 "$conda_sh" -b -p "$MINICONDA_ROOT"

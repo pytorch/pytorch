@@ -37,7 +37,7 @@ std::unique_ptr<MetaNetDef> extractMetaNetDef(
     Blob blob;
     DeserializeBlob(proto, &blob);
     CAFFE_ENFORCE(blob.template IsType<string>());
-    auto def = caffe2::make_unique<MetaNetDef>();
+    auto def = std::make_unique<MetaNetDef>();
     CAFFE_ENFORCE(def->ParseFromString(blob.template Get<string>()));
     return def;
   }

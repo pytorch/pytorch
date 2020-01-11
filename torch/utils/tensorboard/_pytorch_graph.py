@@ -239,17 +239,17 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
         node_py.inputs = [node.debugName()]
         nodes_py.append(node_py)
 
-    def parse_traced_name(module_name):
-        prefix = 'TracedModule['
-        suffix = ']'
-        if module_name.startswith(prefix) and module_name.endswith(suffix):
-            module_name = module_name[len(prefix):-len(suffix)]
+    def parse_traced_name(module):
+        if isinstance(module, torch.jit.TracedModule):
+            module_name = module._name
+        else:
+            module_name = getattr(module, 'original_name', "Module")
         return module_name
 
     alias_to_name = dict()
-    base_name = parse_traced_name(trace._name)
+    base_name = parse_traced_name(trace)
     for name, module in trace.named_modules(prefix='__module'):
-        mod_name = parse_traced_name(module._name)
+        mod_name = parse_traced_name(module)
         attr_name = name.split('.')[-1]
         alias_to_name[name] = '{}[{}]'.format(mod_name, attr_name)
 

@@ -3,7 +3,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 #include <ATen/Config.h>
 namespace at {
@@ -25,7 +25,6 @@ int64_t stride(const Tensor& self, int64_t dim) {
   return self.strides()[dim];
 }
 
-#ifdef BUILD_NAMEDTENSOR
 int64_t size(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.sizes()[pos_dim];
@@ -35,7 +34,6 @@ int64_t stride(const Tensor& self, Dimname dim) {
   size_t pos_dim = dimname_to_position(self, dim);
   return self.strides()[pos_dim];
 }
-#endif
 
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;
@@ -57,7 +55,7 @@ bool cudnn_is_acceptable(const Tensor& self) {
 Tensor detach(const Tensor& self) {
 #ifndef USE_STATIC_DISPATCH
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  AT_ERROR("detach is not implemented for Tensor");
+  //AT_ERROR("detach is not implemented for Tensor");
 #endif
   // this is no-op for USE_STATIC_DISPATCH mode
   return self;
@@ -66,11 +64,22 @@ Tensor detach(const Tensor& self) {
 Tensor & detach_(Tensor & self) {
 #ifndef USE_STATIC_DISPATCH
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  AT_ERROR("detach_ is not implemented for Tensor");
+  //AT_ERROR("detach_ is not implemented for Tensor");
 #endif
   // this is no-op for USE_STATIC_DISPATCH mode
   return self;
 }
+
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach(Tensor self) -> Tensor")
+    .catchAllKernel<decltype(detach), &detach>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyCatchAllKernel<decltype(detach_), &detach_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
 
 Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);

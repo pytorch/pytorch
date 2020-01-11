@@ -131,6 +131,69 @@ std::pair<int, PortType> listen(PortType port) {
   return {socket, getSocketPort(socket)};
 }
 
+void handleConnectException(
+    struct ::addrinfo** nextAddr,
+    int error_code,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  // ECONNREFUSED happens if the server is not yet listening.
+  if (error_code == ECONNREFUSED) {
+    *anyRefused = true;
+  }
+  // ECONNRESET happens if the server's listen backlog is exhausted.
+  if (error_code == ECONNRESET) {
+    *anyReset = true;
+  }
+
+  // We need to move to the next address because this was not available
+  // to connect or to create a socket.
+  *nextAddr = (*nextAddr)->ai_next;
+
+  // We have tried all addresses but could not connect to any of them.
+  if (!*nextAddr) {
+    if (!wait || (!anyRefused && !anyReset)) {
+      throw;
+    }
+
+    // if a timeout is specified, check time elapsed to see if we need to
+    // timeout. A timeout is specified if timeout != kNoTimeout.
+    if (timeout != kNoTimeout) {
+      const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+      if (elapsed > timeout) {
+        throw std::runtime_error(kConnectTimeoutMsg);
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    *anyRefused = false;
+    *anyReset = false;
+    *nextAddr = addresses.get();
+  }
+}
+
+void handleConnectSystemError(
+    struct ::addrinfo** nextAddr,
+    std::system_error& e,
+    bool* anyRefused,
+    bool* anyReset,
+    bool wait,
+    std::chrono::time_point<std::chrono::high_resolution_clock> start,
+    std::shared_ptr<struct ::addrinfo> addresses,
+    std::chrono::milliseconds timeout) {
+  handleConnectException(
+      nextAddr,
+      e.code().value(),
+      anyRefused,
+      anyReset,
+      wait,
+      start,
+      addresses,
+      timeout);
+}
+
 int connect(
     const std::string& address,
     PortType port,
@@ -224,40 +287,26 @@ int connect(
       socketGuard.release();
       break;
 
+    } catch (std::system_error& e) {
+      handleConnectSystemError(
+          &nextAddr,
+          e,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     } catch (std::exception& e) {
-      // ECONNREFUSED happens if the server is not yet listening.
-      if (errno == ECONNREFUSED) {
-        anyRefused = true;
-      }
-      // ECONNRESET happens if the server's listen backlog is exhausted.
-      if (errno == ECONNRESET) {
-        anyReset = true;
-      }
-
-      // We need to move to the next address because this was not available
-      // to connect or to create a socket.
-      nextAddr = nextAddr->ai_next;
-
-      // We have tried all addresses but could not connect to any of them.
-      if (!nextAddr) {
-        if (!wait || (!anyRefused && !anyReset)) {
-          throw;
-        }
-
-        // if a timeout is specified, check time elapsed to see if we need to
-        // timeout. A timeout is specified if timeout != kNoTimeout.
-        if (timeout != kNoTimeout) {
-          const auto elapsed =
-              std::chrono::high_resolution_clock::now() - start;
-          if (elapsed > timeout) {
-            throw std::runtime_error(kConnectTimeoutMsg);
-          }
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        anyRefused = false;
-        anyReset = false;
-        nextAddr = addresses.get();
-      }
+      handleConnectException(
+          &nextAddr,
+          errno,
+          &anyRefused,
+          &anyReset,
+          wait,
+          start,
+          addresses,
+          timeout);
     }
   }
 
