@@ -1,7 +1,7 @@
 try:
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urlunparse
 except ImportError:
-    from urlparse import urlparse
+    from urlparse import urlparse, urlunparse
 
 import torch._six as six
 import numbers
@@ -54,21 +54,26 @@ def rendezvous(url, rank=-1, world_size=-1, **kwargs):
         raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
 
     # Append node-specific arguments.
+    result = urlparse(url)
     if rank != -1 or world_size != -1:
+        query_dict = dict(
+            pair.split("=") for pair in filter(None, result.query.split("&"))
+        )
         assert (
-            "?" not in url
+            "rank" not in query_dict and "world_size" not in query_dict
         ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
             url=url
         )
-        parts = []
         if rank != -1:
-            parts.append("rank={}".format(rank))
+            query_dict["rank"] = rank
         if world_size != -1:
-            parts.append("world_size={}".format(world_size))
-        if len(parts) > 0:
-            url += "?{parts}".format(parts="&".join(parts))
+            query_dict["world_size"] = world_size
 
-    result = urlparse(url)
+        result = result._replace(
+            query="{}".format("&".join(["{}={}".format(k, v) for k, v in query_dict.items()]))
+        )
+        url = urlunparse(result)
+
     if result.scheme not in _rendezvous_handlers:
         raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
     return _rendezvous_handlers[result.scheme](url, **kwargs)
@@ -131,8 +136,6 @@ def _env_rendezvous_handler(url):
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
 
-    if not url.startswith("env://"):
-        raise _error("url must be equal to `env://`")
     result = urlparse(url)
     query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
 
