@@ -61,7 +61,7 @@ if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
@@ -201,7 +201,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   assert_git_not_dirty
 
   # Test documentation build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
     pushd docs
     # TODO: Don't run this here
     pip_install -r requirements.txt || true
@@ -223,7 +223,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   assert_git_not_dirty
 else
   # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
     mkdir -p c10/build
     pushd c10/build
     cmake ..
