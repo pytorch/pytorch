@@ -281,7 +281,7 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 class _Uninitialized final {};
 
 template <class T>
-inline C10_TYPENAME_CONSTEXPR TypeMetaData _makeTypeMetaDataInstance() {
+inline TypeMetaData _makeTypeMetaDataInstance() {
   C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
   C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
@@ -423,7 +423,7 @@ class C10_API TypeMeta final {
    */
   template <typename T>
   static TypeMeta Make() {
-    static C10_TYPENAME_CONSTEXPR detail::TypeMetaData singleton =
+    static detail::TypeMetaData singleton =
         detail::_makeTypeMetaDataInstance<T>();
     return TypeMeta(&singleton);
   }
