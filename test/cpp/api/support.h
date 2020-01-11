@@ -68,13 +68,17 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
       // CPU half and bfloat16 tensors don't have the methods we need below
       a = a.to(torch::kFloat32);
     }
+    if (a.device().type() == torch::kCUDA && a.dtype() == torch::kBFloat16) {
+      // CUDA bfloat16 tensors don't have the methods we need below
+      a = a.to(torch::kFloat32);
+    }
     b = b.to(a);
 
     if ((a.dtype() == torch::kBool) != (b.dtype() == torch::kBool)) {
       TORCH_CHECK(false, "Was expecting both tensors to be bool type.");
     } else {
       if (a.dtype() == torch::kBool && b.dtype() == torch::kBool) {
-        // we want to respect precision but as bool doesn't support substraction,
+        // we want to respect precision but as bool doesn't support subtraction,
         // boolean tensor has to be converted to int
         a = a.to(torch::kInt);
         b = b.to(torch::kInt);
@@ -85,17 +89,17 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
         // check that NaNs are in the same locations
         auto nan_mask = torch::isnan(a);
         ASSERT_TRUE(torch::equal(nan_mask, torch::isnan(b)));
-        diff.idx_put_({nan_mask}, 0);
+        diff.index_put_({nan_mask}, 0);
         // inf check if allow_inf=true
         if (allow_inf) {
           auto inf_mask = torch::isinf(a);
           auto inf_sign = inf_mask.sign();
           ASSERT_TRUE(torch::equal(inf_sign, torch::isinf(b).sign()));
-          diff.idx_put_({inf_mask}, 0);
+          diff.index_put_({inf_mask}, 0);
         }
       }
       // TODO: implement abs on CharTensor (int8)
-      if (diff.is_signed() && diff.scalar_type() != torch::kInt8) {
+      if (diff.is_signed() && diff.dtype() != torch::kInt8) {
         diff = diff.abs();
       }
       auto max_err = diff.max().item<double>();
@@ -119,7 +123,7 @@ inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
     if (diff.is_signed()) {
       diff = diff.abs();
     }
-    diff.idx_put_({nan_mask}, 0);
+    diff.index_put_({nan_mask}, 0);
     // Use `item()` to work around:
     // https://github.com/pytorch/pytorch/issues/22301
     auto max_err = diff.max().item<double>();
