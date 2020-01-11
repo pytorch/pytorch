@@ -99,7 +99,9 @@ class LoopAxis : public Cloneable<LoopAxis, ScheduleObject> {
   // Whether this axis is a leaf axis. Only leaf axes can be used in other axis
   // transformations. Internal axes are tracked for future computation, but
   // logically they disappear from users' perspective.
-  bool is_leaf() const {}
+  bool is_leaf() const {
+    return true;
+  }
 
   void CloneFrom(const LoopAxis* other);
 
@@ -150,7 +152,9 @@ class LoopAxisTransform : public Cloneable<LoopAxisTransform, ScheduleObject> {
   LoopAxisTransform() {}
 
   // One Stmt for each output group
-  virtual Stmt ConvertToNewArgs(const Stmt& stmt, int group_index){};
+  virtual Stmt ConvertToNewArgs(const Stmt& stmt, int group_index) {
+    LOG(FATAL) << "unimplemented right now";
+  }
 
   int output_group_count() const {
     return outputs_.size();
