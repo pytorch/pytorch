@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import PackedSequence
 import numbers
 
 from torch.nn.rnn import apply_permutation
-from torch.nn.quantized.dynamic.modules import PackedParameter
+from torch.nn.quantized.dynamic.modules import PackedParameter  # noqa
 
 def _prepack(weight, bias=None):
     return torch.ops.quantized.linear_prepack(weight, bias)
@@ -39,8 +39,8 @@ class RNNBase(torch.nn.Module):
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False,
                  # Weight parameters
-                 flat_weights_names=None, # torch.nn.RNNBase._flat_weights_names
-                 flat_weights=None,       # torch.nn.RNNBase._flat_weights
+                 flat_weights_names=None,  # torch.nn.RNNBase._flat_weight_names
+                 flat_weights=None,        # torch.nn.RNNBase._flat_weight
                  weights_scale=None,        # Scale for the weights
                  weights_zero_point=None):  # ZP for the weights
         super(RNNBase, self).__init__()
@@ -80,7 +80,7 @@ class RNNBase(torch.nn.Module):
         self._flat_weights = []
         for idx in range(0, self._flat_weights_names, step):
             weight = self._all_weights[idx]
-            bias = self._all_weights[idx+1] if self.bias else None
+            bias = self._all_weights[idx + 1] if self.bias else None
             if weights_scale is None:
                 # Compute the weights here
                 min = weight.min().item()
@@ -88,7 +88,7 @@ class RNNBase(torch.nn.Module):
                 weights_scale = (max - min) / 256
                 weights_zero_point = 0
             wb = _prepack(weight, bias)
-            self._flat_weights.append(wb)
+            self._flat_weights.append(PackedParameter(wb))
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
