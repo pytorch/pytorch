@@ -1647,6 +1647,8 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 def _verify_batch_size(size):
+    # type: (List[int]) -> None
+    
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size
     # check to a simple equivalent for loop
