@@ -6207,6 +6207,9 @@ class TestNN(NNTestCase):
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
 
+    def test_batchnorm_running_stats_for_input_zero_dim(self):
+        
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
