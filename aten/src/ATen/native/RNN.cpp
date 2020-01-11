@@ -197,22 +197,16 @@ struct QuantizedCellParamsDynamic {
 
 struct QuantizedCellParamsStatic {
   QuantizedCellParamsStatic(const Tensor& _packed_w_ih,
-                            const Tensor& _packed_w_hh,
-                            const Scalar& _linear_scale_ih,
-                            const Scalar& _linear_scale_hh,
-                            const Scalar& _linear_zp_ih,
-                            const Scalar& _linear_zp_hh)
-    : packed_w_ih(_packed_w_ih), packed_w_hh(_packed_w_hh),
-      linear_scale_ih(_linear_scale_ih), linear_scale_hh(_linear_scale_hh),
-      linear_zp_ih(_linear_zp_ih), linear_zp_hh(_linear_zp_hh) {};
+                            const Tensor& _packed_w_hh)
+    : packed_w_ih(_packed_w_ih), packed_w_hh(_packed_w_hh) {};
 
   // use linear_prepack to get the packed weights.
   const Tensor& packed_w_ih;
   const Tensor& packed_w_hh;
-  const Scalar& linear_scale_ih;
-  const Scalar& linear_scale_hh;
-  const Scalar& linear_zp_ih;
-  const Scalar& linear_zp_hh;
+
+  // Assume [-8, 8] range
+  constexpr float kQ8BitScaleWithRange16 = 0.0625;
+  constexpr int kQ8BitZeroPoint = 0;
 
   Tensor matmul_ih(Tensor input) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
@@ -224,7 +218,8 @@ struct QuantizedCellParamsStatic {
     const auto kFuncName = "quantized::linear";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_ih_list =
-        callOp(kFuncName, kOvrldName, input, packed_w_ih, linear_scale_ih, linear_zp_ih);
+        callOp(kFuncName, kOvrldName, input, packed_w_ih,
+               kQ8BitScaleWithRange16, kQ8BitZeroPoint);
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exactly one element");
@@ -235,7 +230,8 @@ struct QuantizedCellParamsStatic {
     const auto kFuncName = "quantized::linear";
     const auto kOvrldName = "";
     const std::vector<c10::IValue> output_hh_list =
-        callOp(kFuncName, kOvrldName, h, packed_w_hh, linear_scale_hh, linear_zp_hh);
+        callOp(kFuncName, kOvrldName, h, packed_w_hh,
+               kQ8BitScaleWithRange16, kQ8BitZeroPoint);
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exactly one element");
@@ -358,12 +354,8 @@ static std::vector<QuantizedCellParamsStatic> gather_quantized_params_static(
               "Expecting 6 (w, out_scale, out_zp)*2, but got ",
               params.size());
   for (size_t i = 0; i < params.size(); ++i) {
-    result.emplace_back(params[i],      // packed weight + bias ih
-                        params[i + 1],  // packed weight + bias hh
-                        params[i + 2].item(),   // output scale ih
-                        params[i + 3].item(),   // output scale hh
-                        params[i + 4].item(),   // output zero_point ih
-                        params[i + 5].item());  // output zero_point hh
+    result.emplace_back(params[i],       // packed weight + bias ih
+                        params[i + 1]);  // packed weight + bias hh
   }
   return result;
 }
