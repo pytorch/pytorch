@@ -563,7 +563,7 @@ static ssize_t THMemoryFile_readString(THFile *self, const char *format, char **
   {
     int8_t *p = THCharStorage_data(mfself->storage)+mfself->position;
     int eolFound = 0;
-    ssize_t posEol;
+    ssize_t posEol = 0;
     ssize_t i;
     for(i = 0; i < mfself->size-mfself->position; i++)
     {

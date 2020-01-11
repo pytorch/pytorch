@@ -457,7 +457,6 @@ static void check_shape_forward(const at::Tensor& input,
       // If kernel size is incorrect
       std::ostringstream input_ss;
       std::ostringstream kernel_ss;
-      std::ostringstream output_ss;
       std::string separator = "";
 
       for (int i = 0, len = input_shape.size(); i < len; ++i) {

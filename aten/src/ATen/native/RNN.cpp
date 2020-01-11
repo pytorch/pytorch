@@ -293,10 +293,10 @@ static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
     auto bias_hh = packed_struct_hh.bias.value_or(undefined);
     result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
   }
-  return result;
 #else // USE_FBGEMM
   TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM!")
 #endif // USE_FBGEMM
+  return result;
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(

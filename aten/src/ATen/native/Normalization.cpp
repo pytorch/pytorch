@@ -457,8 +457,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("bias", num_features, bias.numel());
   }
 
-  bool use_cudnn = false;
-  use_cudnn = (input.is_cuda()
+  bool use_cudnn = (input.is_cuda()
                && (input.scalar_type() != at::kHalf
                  || weight.scalar_type() == at::kFloat)
                && weight.defined() && bias.defined()
