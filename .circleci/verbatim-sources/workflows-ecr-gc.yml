@@ -10,7 +10,7 @@
       - ecr_gc_job:
             name: ecr_gc_job_for_pytorch
             project: pytorch
-            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405"
+            tags_to_keep: "271,262,256,278,282,291,300,323,327,347,389,401,402,403,405,a8006f9a-272d-4478-b137-d121c6f05c83"
       - ecr_gc_job:
             name: ecr_gc_job_for_caffe2
             project: caffe2
@@ -23,5 +23,6 @@
             name: ecr_gc_job_for_tensorcomp
             project: tensorcomp
             tags_to_keep: "34"
+      - docker_hub_index_job
 
 

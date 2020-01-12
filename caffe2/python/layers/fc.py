@@ -27,6 +27,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
                  weight_reg=None, bias_reg=None, clip_param=None,
                  max_fc_size=None, axis=1, transposed=False,
+                 uniform_weight_init_scale_numerator=1.0,
                  **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), (
@@ -61,7 +62,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
             if clip_max is not None:
                 self.clip_args['max'] = clip_max
 
-        scale = math.sqrt(1.0 / input_dims)
+        scale = math.sqrt(uniform_weight_init_scale_numerator / input_dims)
         weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
         bias_init = bias_init if bias_init else (
