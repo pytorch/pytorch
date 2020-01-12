@@ -68,12 +68,31 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   }
 
   // Do padding
+  // Ignore string since math::Set does not support string.
+  // For all other cases, the behavior should mimic the GPU version where the
+  // padding is always zero for types other than float.
+  // TODO(xinyizhang): potentially restructure to clean up the logic here.
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
         output->numel(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
+  } else if (output->template IsType<int32_t>()) {
+    math::Set<int32_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int32_t>(),
+        &context_);
+  } else if (output->template IsType<int64_t>()) {
+    math::Set<int64_t, CPUContext>(
+        output->numel(),
+        0,
+        output->template mutable_data<int64_t>(),
+        &context_);
+  } else if (output->template IsType<char>()) {
+    math::Set<char, CPUContext>(
+        output->numel(), 0, output->template mutable_data<char>(), &context_);
   }
   if (return_presence_mask_) {
     memset(presence_mask_data, (int)false, presence_mask->numel());

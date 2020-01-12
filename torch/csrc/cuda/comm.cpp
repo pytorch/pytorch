@@ -222,7 +222,10 @@ at::Tensor gather(
   for (const auto& tensor : tensors) {
     TORCH_CHECK(
         tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    TORCH_CHECK(
+        tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
+        "Gather input tensors must have the same number of dimensions: got ",
+        tensor.ndimension(), ", but expected ", expected_size.size());
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       TORCH_CHECK(
