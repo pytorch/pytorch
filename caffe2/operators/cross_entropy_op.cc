@@ -6,7 +6,7 @@ namespace caffe2 {
 namespace {
 
 inline float sigmoid_xent_forward(float lgt, float tgt) {
-  return lgt * (tgt - (lgt >= 0)) - log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+  return lgt * (tgt - (lgt >= 0)) - log1p( exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float sigmoid_xent_backward(float lgt, float tgt) {
@@ -15,7 +15,7 @@ inline float sigmoid_xent_backward(float lgt, float tgt) {
 
 inline float sigmoid_partition(float lgt) {
   // computes log(1 + exp(lgt)) with only exp(x) function when x >= 0
-  return lgt * (lgt >= 0) + log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+  return lgt * (lgt >= 0) + log1p(exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float sigmoid_xent_forward_with_log_d_trick(float lgt, float tgt) {
@@ -28,7 +28,7 @@ inline float sigmoid_xent_backward_with_log_d_trick(float lgt, float tgt) {
 
 inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
   return lgt * tgt + (tgt - 1) * lgt * (lgt >= 0) -
-      (1 - tgt) * log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
+      (1 - tgt) * log1p(exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float unjoined_sigmoid_xent_backward(float lgt, float tgt) {
