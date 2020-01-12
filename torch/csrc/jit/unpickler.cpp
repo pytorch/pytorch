@@ -474,7 +474,6 @@ void Unpickler::readGlobal(
         auto data = stack_.back().toTuple()->elements().at(0).toGenericList();
         stack_.pop_back();
         data.unsafeSetElementType(elem_type);
-        std::cout << "BUILD SPEC LIST: " << data << " " << IValue(data).type()->python_str() << "\n";
         stack_.emplace_back(std::move(data));
       });
     }
