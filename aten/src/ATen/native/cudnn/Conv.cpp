@@ -968,15 +968,29 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight, grad_bias;
-  if (output_mask[0]) {
-    grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  if (input.numel() == 0) {
+    if (output_mask[0]) {
+      grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[2]) {
+      grad_bias = at::zeros({grad_output.size(1)}, grad_output.options());
+    }
   }
-  if (output_mask[1]) {
-    grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+  else {
+    if (output_mask[0]) {
+      grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    }
+    if (output_mask[2]) {
+      grad_bias = at::cudnn_convolution_backward_bias(grad_output);
+    }
   }
-  if (output_mask[2]) {
-    grad_bias = at::cudnn_convolution_backward_bias(grad_output);
-  }
+
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
@@ -1043,16 +1057,20 @@ Tensor cudnn_convolution_backward_input(
 {
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
-
+  
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
-
+  
   // Avoid "grad_input" when this is being used as transposed convolution
+
+  if (grad_input_t.numel() == 0) {
+    return grad_input_t;
+    // return at::empty(grad_input_t.sizes(), grad_output->options(), grad_output->suggest_memory_format());
+  }
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
   // See #4500
   Tensor weight_contig = weight->contiguous(grad_output->suggest_memory_format());
-
   raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
@@ -1124,10 +1142,12 @@ Tensor cudnn_convolution_transpose(
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
+
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
   CheckedFrom c = "cudnn_convolution_transpose";
+  
   auto output_t = cudnn_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
