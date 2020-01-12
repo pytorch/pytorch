@@ -1409,7 +1409,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, (3, 2)),
-        input_size=(0, 3, 7, 5),
+        input_size=(0, 3, 2, 2),
         cudnn=True,
         desc='zero_batch',
         check_with_long_tensor=True

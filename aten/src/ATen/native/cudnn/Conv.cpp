@@ -258,7 +258,7 @@ static void convolution_shape_check(
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
-
+  
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
   checkSize(c, input, input_channels_dim, weight->size(1) * groups);
@@ -793,11 +793,10 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
   checkAllSameType(c, {output, bias});
   checkAllSameGPU(c, {output, bias});
   checkSize(c, bias, { output->size(output_channels_dim) });
-
+  
   if (output.tensor.numel() == 0) {
     return;
   }
-
   // See Note [CuDNN broadcast padding].  Handle the left padding
   // ourselves, but use TensorDescriptor's padding argument to do the rest.
   TensorDescriptor bdesc, odesc;
@@ -970,7 +969,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
     if (output_mask[0]) {
-      grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (output_mask[1]) {
       grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -1060,10 +1059,8 @@ Tensor cudnn_convolution_backward_input(
   
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
   // Avoid "grad_input" when this is being used as transposed convolution
-
   if (grad_input_t.numel() == 0) {
     return grad_input_t;
-    // return at::empty(grad_input_t.sizes(), grad_output->options(), grad_output->suggest_memory_format());
   }
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
