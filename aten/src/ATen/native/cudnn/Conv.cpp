@@ -716,36 +716,6 @@ Workspace chooseAlgorithm(
   }
 }
 
-// ---------------------------------------------------------------------
-//
-// Bias addition
-//
-// ---------------------------------------------------------------------
-
-// In-place!
-void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const TensorArg& bias)
-{
-  checkAllSameType(c, {output, bias});
-  checkAllSameGPU(c, {output, bias});
-  checkSize(c, bias, { output->size(output_channels_dim) });
-  
-  if (output.tensor.numel() == 0) {
-    return;
-  }
-  // See Note [CuDNN broadcast padding].  Handle the left padding
-  // ourselves, but use TensorDescriptor's padding argument to do the rest.
-  TensorDescriptor bdesc, odesc;
-  bdesc.set(bias->expand({1, bias->size(0)}), output->dim());
-  odesc.set(*output);
-
-  auto handle = getCudnnHandle();
-  auto dataType = getCudnnDataType(*bias);
-  Constant one(dataType, 1);
-
-  AT_CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
-                                     &one, odesc.desc(), output->data_ptr()));
-}
-
 // NOTE [ Convolution design ]
 //
 // cuDNN convolutions does not handle bias. Bias is handled outside.
@@ -966,16 +936,13 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
   
-  Tensor grad_input, grad_weight, grad_bias;
+  Tensor grad_input, grad_weight;
   if (input.numel() == 0) {
     if (output_mask[0]) {
       grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (output_mask[1]) {
       grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (output_mask[2]) {
-      grad_bias = at::zeros({grad_output.size(1)}, grad_output.options());
     }
   }
   else {
@@ -985,12 +952,9 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     if (output_mask[1]) {
       grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
     }
-    if (output_mask[2]) {
-      grad_bias = at::cudnn_convolution_backward_bias(grad_output);
-    }
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
 }
 
 // ---------------------------------------------------------------------
