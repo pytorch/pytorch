@@ -1059,7 +1059,6 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
   
   auto grad_input_t = at::empty(input_size, grad_output->options(), grad_output->suggest_memory_format());
-  
   // Avoid "grad_input" when this is being used as transposed convolution
 
   if (grad_input_t.numel() == 0) {
