@@ -80,7 +80,7 @@ void IRPrinter::visit(const Load* v) {
 void IRPrinter::visit(const For* v) {
   std::string var_name = v->var().name_hint();
   os << "for (" << var_name << " = " << v->start() << "; "
-     << var_name << "< " << v->stop() << "; "
+     << var_name << " < " << v->stop() << "; "
      << var_name << "++) {" << std::endl;
   os << v->body() << std::endl;
   os << "}";

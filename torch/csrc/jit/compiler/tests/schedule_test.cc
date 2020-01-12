@@ -51,7 +51,7 @@ TEST(TensorExpr, Lower01) {
 
 TEST(TensorExpr, Simple02) {
   Tensor tensor = Compute(
-      "f", {Expr(18), Expr(5)}, {"x", "y"}, [](const Var& x, const Var& y) {
+      "f", {Expr(26), Expr(5)}, {"x", "y"}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   Var x = tensor.function().arg(0);
@@ -62,4 +62,11 @@ TEST(TensorExpr, Simple02) {
   Var x_tail;
   TensorOperation tail_op;
   tensor.SplitWithTail(x, 4, true, &x_outer, &x_inner, &x_tail, &tail_op);
+
+  Stmt stmt = sch.Lower();
+  std::ostringstream oss;
+  oss << stmt;
+  // TODO: switch to a better check
+  ASSERT_GT(oss.str().size(), 200);
+  ASSERT_LT(oss.str().size(), 500);
 }
