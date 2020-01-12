@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "torch/csrc/jit/compiler/include/eval.h"
+#include "torch/csrc/jit/compiler/include/ir_printer.h"
 
 namespace torch {
 namespace jit {
@@ -121,6 +122,8 @@ void ScheduleNode::SplitWithTail(
       CHECK(!expr_node || expr_node_clone)
           << "expr_node is not null, but its clone is";
       *tail_op = expr_node_clone;
+      DCHECK(expr_node_clone->is_tensor_expr_op());
+      expr_node_clone->tensor_expr_op()->ApplyLoopTransform(split_transform, 1);
     }
     tail_node->SetFirstChild(loop_child_clone);
     tail_node->SetNextSibling(loop_sibling);
@@ -128,6 +131,10 @@ void ScheduleNode::SplitWithTail(
   } else {
     outer_node->SetNextSibling(loop_sibling);
   }
+  CHECK(expr_node->is_tensor_expr_op());
+  // This transform is left after the tail axis is cloned, so it doesn't affect
+  // the tail axis.
+  expr_node->tensor_expr_op()->ApplyLoopTransform(split_transform, 0);
   TensorExprNode::ReplaceSubtree(loop_node, outer_node);
 }
 
@@ -385,8 +392,8 @@ SplitAxisWithTail::SplitAxisWithTail(
 
   int size = this->stop() - this->start();
   int split_count = size / factor;
-  int trail_size = size % factor;
-  int output_group_count = (trail_size > 0) ? 2 : 1;
+  int tail_size = size % factor;
+  int output_group_count = (tail_size > 0) ? 2 : 1;
 
   this->set_output_group_count(output_group_count);
   // The main group
@@ -398,16 +405,33 @@ SplitAxisWithTail::SplitAxisWithTail(
       Var(loop_var_name + ".inner", loop_var_dtype), Range(0, factor));
   this->set_output_group(0, {outer, inner});
 
-  // The trail group
-  if (trail_size) {
-    LoopAxis* trail = this->NewAxis(
-        Var(loop_var_name + ".trail", loop_var_dtype), Range(0, trail_size));
-    this->set_output_group(1, {trail});
+  // The tail group
+  if (tail_size) {
+    LoopAxis* tail = this->NewAxis(
+        Var(loop_var_name + ".tail", loop_var_dtype), Range(0, tail_size));
+    this->set_output_group(1, {tail});
   }
 }
 
-Stmt SplitAxisWithTail::ConvertToNewArgs(const Stmt& stmt, int output_group) {
-  LOG(FATAL) << "SplitAxisWithTail::ConvertToNewArgs unimplemented yet";
+Stmt SplitAxisWithTail::ConvertToNewArgs(Stmt* stmt, int output_group) {
+  LoopAxis* original_axis = this->input(0);
+  Var original_var = original_axis->var();
+  LoopAxis* outer = this->output(0, 0);
+  LoopAxis* inner = this->output(0, 1);
+  Expr combined_loop_index;
+  if (output_group == 0) {
+    // x -> x.outer * inner.size + x.inner
+    combined_loop_index = outer->var() * inner->range().stop() + inner->var();
+  } else if (output_group == 1) {
+    LoopAxis* tail = this->output(1, 0);
+    // x -> x.tail + outer.size * inner.size
+    combined_loop_index =
+        tail->var() + outer->range().stop() * inner->range().stop();
+  } else {
+    LOG(FATAL) << "invalid output_group: " << output_group;
+  }
+  Stmt new_stmt = Substitute(stmt, {{original_var, combined_loop_index}});
+  return new_stmt;
 }
 
 LoopAxis* LoopAxisTransform::NewAxis(

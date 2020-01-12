@@ -152,8 +152,8 @@ class LoopAxisTransform : public Cloneable<LoopAxisTransform, ScheduleObject> {
   LoopAxisTransform() {}
 
   // One Stmt for each output group
-  virtual Stmt ConvertToNewArgs(const Stmt& stmt, int group_index) {
-    LOG(FATAL) << "unimplemented right now";
+  virtual Stmt ConvertToNewArgs(Stmt* stmt, int group_index) {
+    LOG(FATAL) << "unmiplemented";
   }
 
   int output_group_count() const {
@@ -168,6 +168,15 @@ class LoopAxisTransform : public Cloneable<LoopAxisTransform, ScheduleObject> {
     std::vector<LoopAxis*>& output_group = outputs_[group_index];
     CHECK(index >= 0 && index < output_group.size());
     return output_group[index];
+  }
+
+  int input_size() const {
+    return inputs_.size();
+  }
+
+  LoopAxis* input(int index) {
+    CHECK(index >= 0 && index < inputs_.size());
+    return inputs_[index];
   }
 
   void CloneFrom(const LoopAxisTransform* other);
@@ -244,7 +253,7 @@ class SplitAxisWithTail
  public:
   using BaseClass = Cloneable<SplitAxisWithTail, SplitAxisTransform>;
   void CloneFrom(const SplitAxisWithTail* other);
-  Stmt ConvertToNewArgs(const Stmt& stmt, int output_group) override;
+  Stmt ConvertToNewArgs(Stmt* stmt, int output_group) override;
   SplitAxisWithTail() {}
 
  private:
@@ -276,21 +285,29 @@ class TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
 
   void CloneFrom(const TensorExprOp* other) {
     this->func_ = other->func_;
+    this->element_stmt_ = other->element_stmt_;
   }
 
-  Stmt ElementStmt() {
-    return this->func_.ElementStmt();
+  Stmt ElementStmt() const {
+    return this->element_stmt_;
+  }
+
+  void ApplyLoopTransform(LoopAxisTransform* loop_transform, int group_index) {
+    element_stmt_ =
+        loop_transform->ConvertToNewArgs(&element_stmt_, group_index);
   }
 
  private:
   friend class ScheduleNode;
   TensorExprOp() {}
-  explicit TensorExprOp(const Function& func) : func_(func) {}
+  explicit TensorExprOp(const Function& func)
+      : func_(func), element_stmt_(func_.ElementStmt()) {}
 
   // TODO: this needs more work.
   // The ancestor-axes mark the region to evaluate expression.
   // We still need to know the buffer this writes to.
   Function func_;
+  Stmt element_stmt_;
 };
 
 // Part of the recursive node structure in the tensor expr tree.
