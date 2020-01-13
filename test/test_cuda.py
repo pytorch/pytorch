@@ -2105,13 +2105,13 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
-    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None):
+    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch):
         with torch.cuda.amp.autocast():
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
             # Make sure the torch.* and Tensor.* variants, if present, have the same output dtype and numerics.
-            if hasattr(torch, op):
-                output = getattr(torch, op)(*args)
+            if hasattr(module, op):
+                output = getattr(module, op)(*args)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
                                     "autocast for torch.{} produced {}, should produce {}"
@@ -2122,6 +2122,9 @@ t2.start()
                     self.assertTrue(out_type == output_method.dtype,
                                     "autocast for torch.{} produced {}, should produce torch.{}"
                                     .format(op, output_method.dtype, out_type))
+            self.assertTrue((output is not None) or (output_method is not None),
+                            "{} not found as an attribute on either Tensor or the requested module {}".format(
+                            op, module))
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
@@ -2131,8 +2134,8 @@ t2.start()
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.cuda.amp.autocast(enabled=False):
-                if hasattr(torch, op):
-                    control = getattr(torch, op)(*(a.to(run_as_type) if (isinstance(a, torch.Tensor)
+                if hasattr(module, op):
+                    control = getattr(module, op)(*(a.to(run_as_type) if (isinstance(a, torch.Tensor)
                                                    and a.is_floating_point()) else a for a in args))
                 else:
                     control = getattr(args[0], op)(*(a.to(run_as_type) if (isinstance(a, torch.Tensor)
@@ -2165,6 +2168,12 @@ t2.start()
     def test_autocast_torch_expect_builtin_promote(self):
         for op, args, out_type in self.amp_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp16(self):
+        for op, args in self.amp_lists.nn_fp16:
+            self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
     def _run_autocast_user_supplied_out(self, op, args, run_as_type, out_type=None):
         # For ops with a user-supplied output, we can't cast the output.  Instead, backend runs

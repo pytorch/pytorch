@@ -56,6 +56,9 @@ class AmpLists(object):
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
             ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, False)),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
+            # versions with no bias
+            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
             ("prelu", pointwise0_fp32 + element0_fp32),
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
@@ -193,7 +196,9 @@ class AmpLists(object):
         #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
         #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
 
-        # self.nn_fp16 = []
+        self.nn_fp16 = [
+            ("linear", mat0_fp32 + mat1_fp32 + mat2_fp32),
+        ]
         # self.nn_fp16_inplace = []
         # self.nn_fp16_user_supplied_out = []
         # self.nn_fp32 = []
