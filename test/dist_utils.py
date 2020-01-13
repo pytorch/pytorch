@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import threading
+import time
 from functools import partial, wraps
 
 import torch.distributed as dist
@@ -127,7 +128,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
             # since we need to shutdown the RPC agent. If we don't shutdown the
             # RPC agent, tests would fail since RPC agent threads, locks and
             # condition variables are not properly terminated.
-            rpc.shutdown()
+            rpc.shutdown(graceful=clean_shutdown)
 
         return return_value
 
@@ -139,6 +140,33 @@ TEST_CONFIG.rpc_backend_name = "PROCESS_GROUP"
 TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry.construct_rpc_backend_options(
     test_object.rpc_backend,
     init_method=test_object.init_method,
-    # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
-    num_send_recv_threads=16,
+    # Some tests need additional threads (ex: test_trainer_ps)
+    num_send_recv_threads=8,
 )
+
+def noop():
+    pass
+
+def wait_until_node_failure(rank):
+    '''
+    Loops until an RPC to the given rank fails. This is used to
+    indicate that the node has failed in unit tests.
+    '''
+    while True:
+        try:
+            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            time.sleep(0.5)
+        except Exception:
+            break
+
+def initialize_pg(init_method, rank, world_size):
+    # This is for tests using `dist.barrier`.
+    # For `RpcAgent` other than `ProcessGroupAgent`,
+    # no `_default_pg` is initialized.
+    if not dist.is_initialized():
+        dist.init_process_group(
+            backend="gloo",
+            init_method=init_method,
+            rank=rank,
+            world_size=world_size,
+        )
