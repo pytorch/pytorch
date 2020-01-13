@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import dist_utils
-from dist_utils import dist_init
+from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from rpc_agent_test_fixture import RpcAgentTestFixture
 from torch.testing import FileCheck
 
@@ -116,22 +116,6 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     success = context_id_to_raised == known_context_ids
     return success
 
-def noop():
-    pass
-
-def wait_until_node_failure(rank):
-    '''
-    Loops until an RPC to the given rank fails. This is used to
-    indicate that the node has failed in unit tests.
-    '''
-    while True:
-        try:
-            rpc.rpc_sync("worker{}".format(rank), noop, args=())
-            time.sleep(0.1)
-        except Exception:
-            break
-
-
 
 # This function creates a dis atugorad context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
@@ -168,19 +152,6 @@ class ExecMode(Enum):
     not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
 class DistAutogradTest(RpcAgentTestFixture):
-
-    def _initialize_pg(self):
-        # This is for tests using `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
-
 
     def _exec_func(self, exec_mode, method, *args):
         if ExecMode.LOCAL == exec_mode:
@@ -342,7 +313,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _test_graph(self, fn, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
 
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -410,7 +381,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _test_graph_for_py_nested_call(self, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
 
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -490,7 +461,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _test_graph_for_py_nested_call_itself(self, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
 
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -559,7 +530,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
 
     def _test_no_graph_with_tensors_not_require_grad(self, exec_mode):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=False)
@@ -608,7 +579,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
 
     def _test_grad_only_on_return_value(self, exec_mode):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             if ExecMode.RPC_SYNC == exec_mode:
@@ -698,7 +669,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         self._test_rpc_complex_args(ExecMode.REMOTE)
 
     def context_cleanup_test_helper(self, rpc_args, func, nested=False):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         # test that in dist autograd, in the case that tensors communicated over RPC do
         # NOT require grad, we still cleanup the dist autograd contexts created
@@ -1081,7 +1052,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -1262,7 +1233,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure_python_udf(self):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -1363,7 +1334,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         It is fine for the 'backward' call to throw an exception in this test,
         but the process should not crash.
         '''
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         context = dist_autograd._new_context()
         context_id = context._context_id()
@@ -1489,7 +1460,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @dist_init
     def test_debug_info(self):
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -1559,7 +1530,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         hammering a single node with a lot of backward() calls.
         '''
 
-        self._initialize_pg()
+        initialize_pg(self.init_method, self.rank, self.world_size)
         if self.rank != 0:
             # All other ranks schedule work on rank 0.
             threads = []
