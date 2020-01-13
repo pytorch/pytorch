@@ -147,7 +147,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Tensor & self, Tensor result) {
-  return at::where(self == 0, at::zeros({}, grad.options()), grad * result * self.log());
+  return grad * result * self.log();
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, Tensor result) {
