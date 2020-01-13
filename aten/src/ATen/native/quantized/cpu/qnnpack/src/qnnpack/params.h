@@ -162,6 +162,12 @@ union pytorch_qnnp_conv_quantization_params {
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
 };
 
+struct pytorch_qnnp_conv_dynamic_quantization_params {
+  int16_t input_zero_point;
+  int16_t kernel_zero_point;
+  float multiplier;
+};
+
 union pytorch_qnnp_requantization_params {
   union pytorch_qnnp_precise_requantization_params precise;
   union pytorch_qnnp_fp32_requantization_params fp32;
@@ -273,6 +279,18 @@ typedef void (*pytorch_q8gemm_ukernel_function)(
     uint8_t* c,
     size_t c_stride,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
+
+typedef void (*pytorch_q8gemm_dq_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    size_t k,
+    const uint8_t* a,
+    size_t a_stride,
+    const void* w,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8conv_ukernel_function)(
     size_t mr,
