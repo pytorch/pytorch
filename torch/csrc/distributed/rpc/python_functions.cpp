@@ -132,7 +132,8 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
 
 py::object toPyObj(const Message& message) {
   MessageType msgType = message.type();
-  return toPyObjInternal(*deserializeResponse(message, msgType), msgType);
+  auto response = deserializeResponse(message, msgType);
+  return toPyObjInternal(*response, msgType);
 }
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(

@@ -136,8 +136,8 @@ IValue deserializeResptoIValueInternal(
 
 IValue deserializeRespToIValue(const Message& message) {
   MessageType msgType = message.type();
-  return deserializeResptoIValueInternal(
-      *deserializeResponse(message, msgType), msgType);
+  auto response = deserializeResponse(message, msgType);
+  return deserializeResptoIValueInternal(*response, msgType);
 }
 
 namespace {
