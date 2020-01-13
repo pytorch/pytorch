@@ -330,28 +330,38 @@ static void conv_depthwise3d_cuda_template(
           "but input has sizes ", input_.sizes(),
           " with dimension ", i, " being empty");
     }
+    for (int64_t i = 0; i < weight.ndimension(); i++) {
+      TORCH_CHECK(
+          weight.size(i) > 0,
+          "conv_depthwise3d_cuda(): expected weight to have non-empty dimensions, "
+          "but weight has sizes ", weight.sizes(),
+          " with dimension ", i, " being empty");
+    }
     
     TORCH_CHECK(
         (input_.ndimension() == 5),
         "non-empty 5D tensor expected for input "
         "but input has size ", input_.ndimension());
+      
+    // Weight Tensor is shape (output_channels, 1, kH, kW)
+    TORCH_CHECK(weight.size(1) == 1);
 
     // define kernel/stride/pad/dilation
-    int64_t kernelSizeW = kernel_size[2];
-    int64_t kernelSizeH = kernel_size[1];
-    int64_t kernelSizeT = kernel_size[0];
+    int64_t kW = kernel_size[2];
+    int64_t kH = kernel_size[1];
+    int64_t kT = kernel_size[0];
 
-    int64_t strideSizeW = stride_size[2];
-    int64_t strideSizeH = stride_size[1];
-    int64_t strideSizeT = stride_size[0];
+    int64_t dW = stride_size[2];
+    int64_t dH = stride_size[1];
+    int64_t dT = stride_size[0];
 
-    int64_t padSizeW = pad_size[2];
-    int64_t padSizeH = pad_size[1];
-    int64_t padSizeT = pad_size[0];
+    int64_t padW = pad_size[2];
+    int64_t padH = pad_size[1];
+    int64_t padT = pad_size[0];
 
-    int64_t dilSizeW = dilation_size[2];
-    int64_t dilSizeH = dilation_size[1];
-    int64_t dilSizeT = dilation_size[0];
+    int64_t dilationW = dilation_size[2];
+    int64_t dilationH = dilation_size[1];
+    int64_t dilationT = dilation_size[0];
     
     int64_t batch_size = input_.size(0);
     int64_t n_input_plane = input_.size(1);
@@ -359,35 +369,24 @@ static void conv_depthwise3d_cuda_template(
     int64_t input_height = input_.size(3);
     int64_t input_width = input_.size(4);
 
-    int64_t output_height = (input_height + 2 * padSizeH - 
-                            (dilSizeH * (kernelSizeH - 1) + 1)) / strideSizeH + 1;
-    int64_t output_width = (input_width + 2 * padSizeW -
-                           (dilSizeW * (kernelSizeW - 1) + 1)) / strideSizeW + 1;
-    int64_t output_temp = (input_temp + 2 * padSizeW -
-                          (dilSizeT * (kernelSizeW - 1) + 1)) / strideSizeT + 1;
+    int batchSize = input_.size(0);
+    int length = input_.size(2);
+    int height = input_.size(3);
+    int width = input_.size(4);
 
-    int64_t n_output_plane = n_input_plane;
-
+    int outputTime = (length + 2 * padT - (dilationT * (kT - 1) + 1)) / dT + 1;
+    int outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+    int outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1;
+    int outputChannels = weight.size(0);
+  
     // Pass empty contiguous tensor and resize it here
-    output.resize_({batch_size, n_output_plane, output_temp, output_height, output_width});
-
-    // input sizes
-    int64_t sizeB  = input_.size(0);
-    int64_t sizeD = input_.size(1);
-    int64_t isizeT = input_.size(2);
-    int64_t isizeH = input_.size(3);
-    int64_t isizeW = input_.size(4);
-
-    // 0th dimension is batchsize
-    int64_t osizeD = output.size(1);  // num out channels
-    int64_t osizeT = output.size(2);  // output time size
-    int64_t osizeH = output.size(3);  // output height
-    int64_t osizeW = output.size(4);  // output width
+    output.resize_({batchSize, outputChannels, outputTime, outputHeight, outputWidth});
 
     // make sure input is contiguous
     const Tensor& input = input_.contiguous();
-    
-    
+
+    int inputChannels = input.size(1);
+    TORCH_CHECK(outputChannels == inputChannels);
 
     bool bias_flag = !bias.defined();
 
@@ -407,34 +406,26 @@ static void conv_depthwise3d_cuda_template(
         scalar_t* weight_data = weight.data_ptr<scalar_t>();
         scalar_t* bias_data = bias.data_ptr<scalar_t>();
 
-        if (kernelSizeW == 3 && kernelSizeH == 3 && kernelSizeT == 3) {
+        if (kW == 3 && kH == 3 && kT == 3) {
           depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 3><<<grid, block, 0, stream>>>(
             input_data, output_data,
             weight_data,
             bias_data,
             bias_flag, // if true, bias is not null
             n, // totalElements
-            osizeD, // ouptut_channels
-            isizeW, isizeH, isizeT, // input
-            osizeW, osizeH, osizeT, // output
-            kernelSizeW, kernelSizeH, kernelSizeT,
-            strideSizeW, strideSizeH, strideSizeT,
-            padSizeW, padSizeH, padSizeT,
-            dilSizeW, dilSizeH, dilSizeT);
-        } else if (kernelSizeW == 1 && kernelSizeH == 1 && kernelSizeT == 1) {
+            outputChannels, // ouptut_channels
+            width, height, length, outputWidth, outputHeight, outputTime,
+            kW, kH, kT, dW, dH, dT, padW, padH, padT, dilationW, dilationH, dilationT);
+        } else if (kW == 1 && kH == 1 && kT == 1) {
           depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 1><<<grid, block, 0, stream>>>(
             input_data, output_data,
             weight_data,
             bias_data,
             bias_flag, // if true, bias is not null
             n, // totalElements
-            osizeD, // ouptut_channels
-            isizeW, isizeH, isizeT, // input
-            osizeW, osizeH, osizeT, // output
-            kernelSizeW, kernelSizeH, kernelSizeT,
-            strideSizeW, strideSizeH, strideSizeT,
-            padSizeW, padSizeH, padSizeT,
-            dilSizeW, dilSizeH, dilSizeT);
+            outputChannels, // ouptut_channels
+            width, height, length, outputWidth, outputHeight, outputTime,
+            kW, kH, kT, dW, dH, dT, padW, padH, padT, dilationW, dilationH, dilationT);
         } else {
           depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 0><<<grid, block, 0, stream>>>(
             input_data, output_data,
@@ -442,13 +433,9 @@ static void conv_depthwise3d_cuda_template(
             bias_data,
             bias_flag, // if true, bias is not null
             n, // totalElements
-            osizeD, // ouptut_channels
-            isizeW, isizeH, isizeT, // input
-            osizeW, osizeH, osizeT, // output
-            kernelSizeW, kernelSizeH, kernelSizeT,
-            strideSizeW, strideSizeH, strideSizeT,
-            padSizeW, padSizeH, padSizeT,
-            dilSizeW, dilSizeH, dilSizeT);
+            outputChannels, // ouptut_channels
+            width, height, length, outputWidth, outputHeight, outputTime,
+            kW, kH, kT, dW, dH, dT, padW, padH, padT, dilationW, dilationH, dilationT);
         }
     }); // A10 dispatch
 
