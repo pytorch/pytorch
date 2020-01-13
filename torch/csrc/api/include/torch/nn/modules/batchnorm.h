@@ -95,8 +95,8 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
       weight = this->register_parameter("weight", torch::empty({options.num_features()}));
       bias = this->register_parameter("bias", torch::empty({options.num_features()}));
     } else {
-      weight = this->register_parameter("weight", Tensor());
-      bias = this->register_parameter("bias", Tensor());
+      weight = this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
+      bias = this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
     }
     if (options.track_running_stats()) {
       running_mean = this->register_buffer("running_mean", torch::zeros({options.num_features()}));

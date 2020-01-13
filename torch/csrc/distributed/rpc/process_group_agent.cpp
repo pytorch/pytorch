@@ -110,6 +110,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 }
 
+ProcessGroupAgent::~ProcessGroupAgent() {
+  if (rpcRunning_) {
+    shutdown();
+  }
+}
+
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
     const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);
@@ -258,13 +264,13 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           std::forward_as_tuple(requestId),
           std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
-      auto& requestIdVec = futureTimeouts_[endTime];
-      requestIdVec.push_back(requestId);
+      auto& requestIds = futureTimeouts_[endTime];
+      requestIds.insert(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has earlier end time than other futures in the
       // map.
       if (futureTimeouts_.begin()->first == endTime &&
-          (requestIdVec.size() == 1)) {
+          (requestIds.size() == 1)) {
         notifyThread = true;
       }
     }
@@ -319,41 +325,54 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   return future;
 }
 
+void ProcessGroupAgent::handleSend(const SendWork& work) {
+  std::string serializedPayload =
+      wireSerialize(work.message_.payload(), work.message_.tensors());
+
+  std::vector<torch::Tensor> preamble = {torch::tensor(
+      {(int64_t)pg_->getRank(),
+       (int64_t)serializedPayload.length(),
+       (int64_t)work.message_.type(),
+       (int64_t)work.message_.id()},
+      {torch::kInt64})};
+
+  // ProcessGroup is not thread-safe when sending with the same tag,
+  // hence the lock
+  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
+  const auto dst = work.to_.id_;
+  std::vector<torch::Tensor> payload = {torch::from_blob(
+      (void*)serializedPayload.c_str(),
+      serializedPayload.length(),
+      {torch::kChar})};
+  pendingSends.reserve(2);
+
+  sendCounts_.increment(dst);
+
+  {
+    std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+    pendingSends.emplace_back(pg_->send(preamble, dst, dst /* channelTag */));
+    pendingSends.emplace_back(pg_->send(payload, dst, dst /* channelTag */));
+  }
+  for (auto& pendingSend : pendingSends) {
+    pendingSend->wait();
+  }
+}
+
 void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload =
-            wireSerialize(work.message_.payload(), work.message_.tensors());
-
-        std::vector<torch::Tensor> preamble = {torch::tensor(
-            {(int64_t)pg_->getRank(),
-             (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type(),
-             (int64_t)work.message_.id()},
-            {torch::kInt64})};
-
-        // ProcessGroup is not thread-safe when sending with the same tag, hence
-        // the lock
-        std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
-        const auto dst = work.to_.id_;
-        std::vector<torch::Tensor> payload = {torch::from_blob(
-            (void*)serializedPayload.c_str(),
-            serializedPayload.length(),
-            {torch::kChar})};
-        pendingSends.reserve(2);
-
-        sendCounts_.increment(dst);
-
-        {
-          std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-          pendingSends.emplace_back(
-              pg_->send(preamble, dst, dst /* channelTag */));
-          pendingSends.emplace_back(
-              pg_->send(payload, dst, dst /* channelTag */));
-        }
-        for (auto& pendingSend : pendingSends) {
-          pendingSend->wait();
+        try {
+          handleSend(work);
+        } catch (std::exception& e) {
+          if (work.message_.isRequest()) {
+            std::ostringstream ss;
+            ss << "Encountered exception in ProcessGroupAgent::enqueueSend: "
+               << e.what();
+            auto exceptionMsg =
+                rpc::createExceptionResponse(work.message_, ss.str());
+            markFutureWithError(exceptionMsg);
+          }
         }
       },
       std::move(work)));
@@ -422,7 +441,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[endTime];
-            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            auto it = futuresAtTime.find(id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
@@ -448,6 +467,42 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         recvCounts_.increment(work.from_.id_);
       },
       std::move(work)));
+}
+
+void ProcessGroupAgent::markFutureWithError(Message& message) {
+  TORCH_INTERNAL_ASSERT(
+      message.type() == MessageType::EXCEPTION,
+      "markFutureWithError should be only called with Message that has type Exception.");
+  auto id = message.id();
+  std::shared_ptr<FutureMessage> fm = nullptr;
+  {
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    const auto& futureInfo = futures_.find(id);
+
+    if (futureInfo == futures_.end()) {
+      // Did not find future in map - this can occur when the future has timed
+      // out and been processed accordingly.
+      return;
+    }
+    fm = futureInfo->second.future_;
+    auto rpcEndTime = futureInfo->second.endTime_;
+    futures_.erase(id);
+    // look up the corresponding future by its time out and request ID,
+    // and remove it from the timeouts map
+    auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+    auto it = futuresAtTime.find(id);
+    TORCH_INTERNAL_ASSERT(
+        it != futuresAtTime.end(),
+        "Error: could not find future in futureTimeouts map, race condition.");
+    futuresAtTime.erase(it);
+    if (futuresAtTime.empty()) {
+      // remove the key from futureTimeouts_
+      futureTimeouts_.erase(rpcEndTime);
+    }
+  }
+
+  fm->setError(std::string(message.payload().begin(), message.payload().end()));
+  futureCV_.notify_all();
 }
 
 void ProcessGroupAgent::listenLoop() {
@@ -553,7 +608,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
       // to check the remaining futures.
       break;
     } else {
-      const std::vector<int64_t>& futureIDs = it->second;
+      const auto& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
         auto futureIt = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
