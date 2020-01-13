@@ -256,6 +256,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
       // Original bias was float, so we requantize it here.
       auto bias = at::quantize_per_tensor(
           bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
       pack_ptr.w.reset();
@@ -317,7 +318,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
         (uint8_t*)output.data_ptr<c10::quint8>(),
         rows_w /* output_stride */,
         caffe2::mobile_pthreadpool() /* threadpool */);
-
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
         "failed to run QNNPACK Linear operator");
