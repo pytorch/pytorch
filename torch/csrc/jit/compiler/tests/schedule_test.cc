@@ -109,7 +109,7 @@ TEST(TensorExpr, Simple02) {
     float kPaddingValue = 0.1357;
     std::vector<float> f_v(26 * 5 + 2 * kPadding);
     std::vector<float> f_ref(26 * 5 + 2 * kPadding);
-    
+
     buffer_mapping[tensor.function().func_var().node()] = &f_v[kPadding];
     ir_eval.SetBufferMapping(buffer_mapping);
     stmt.accept(&ir_eval);
@@ -117,7 +117,7 @@ TEST(TensorExpr, Simple02) {
     float* f_ref_p = &f_ref[kPadding];
     for (int x = 0; x < 26; x++) {
       for (int y = 0; y < 5; y++) {
-	f_ref_p[x * 5 + y] = 1 + x * x + y * y;
+        f_ref_p[x * 5 + y] = 1 + x * x + y * y;
       }
     }
 
