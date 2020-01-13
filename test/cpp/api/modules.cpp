@@ -4529,20 +4529,3 @@ TEST_F(ModulesTest, PrettyPrintFeatureAlphaDropout) {
   ASSERT_EQ(c10::str(FeatureAlphaDropout(FeatureAlphaDropoutOptions(0.2).inplace(true))),
     "torch::nn::FeatureAlphaDropout(p=0.2, inplace=true)");
 }
-
-TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
-  ASSERT_EQ(c10::str(BCEWithLogitsLoss()), "torch::nn::BCEWithLogitsLoss()");
-  ASSERT_EQ(c10::str(BCEWithLogitsLoss(
-    BCEWithLogitsLossOptions()
-    .weight(torch::ones({3, 3}))
-    .pos_weight(torch::ones({3, 3}))
-    .reduction(torch::kSum))),
-    "torch::nn::BCEWithLogitsLoss()");
-}
-
-TEST_F(ModulesTest, PrettyPrintMultiheadAttention) {
-  ASSERT_EQ(c10::str(MultiheadAttention(20, 10)),
-    "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=true)\n)");
-  ASSERT_EQ(c10::str(MultiheadAttention(MultiheadAttentionOptions(20, 10).bias(false))),
-    "torch::nn::MultiheadAttention(\n  (out_proj): torch::nn::Linear(in_features=20, out_features=20, bias=false)\n)");
-}
