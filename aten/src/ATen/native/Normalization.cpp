@@ -57,7 +57,7 @@ struct Var {
 };
 
 template<typename scalar_t>
-void batch_norm_cpu_inference_collect_liner_and_constant_terms(
+void batch_norm_cpu_inference_collect_linear_and_constant_terms(
     scalar_t* alpha, scalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& mean, const Tensor& variance, double eps) {
@@ -71,7 +71,7 @@ void batch_norm_cpu_inference_collect_liner_and_constant_terms(
   /// output(n, c, h, w)
   ///     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   ///         + bias(c)
-  ///     = input(n, c, h, w) * inv_var(c) * weight(c) 
+  ///     = input(n, c, h, w) * inv_var(c) * weight(c)
   ///         - mean(c) * inv_var(c) * weight(c) + bias(c),
   /// where inv_var(c) = 1 / sqrt(var(c) + eps).
   /// So the linear term, alpha(c) = inv_var(c) * weight(c),
@@ -108,7 +108,7 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
@@ -161,7 +161,7 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
@@ -283,7 +283,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
-      
+
       // compute mean per input
       auto iter = TensorIterator();
       iter.add_input(in);
