@@ -365,46 +365,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(bool a) -> int",
-         [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (int)b);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(float a) -> int",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (int64_t)d);
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::Int(Scalar a) -> int",
-         [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isInt()) {
-             push(stack, std::move(scalar));
-           } else {
-             push(stack, static_cast<int64_t>(scalar.toDouble()));
-           }
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::Float(Tensor a) -> float",
          [](Stack& stack) {
            at::Tensor a;
@@ -800,7 +760,7 @@ RegisterOperators reg(
                    size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
-             push(stack, c10::impl::toList(std::move(size)));
+             push(stack, IValue(std::move(size)));
              return 0;
            };
          },
@@ -1004,7 +964,8 @@ RegisterOperators reg(
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
            auto s = self_size.toIntListRef();
-           if (s.equals(other_size.toIntListRef())) {
+           auto o = other_size.toIntListRef();
+           if (s == o) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -3374,14 +3335,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntListRef().vec();
+      return size.toIntListRef();
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = scale_factors.toDoubleListRef().vec();
+    scale_repeated = scale_factors.toDoubleListRef();
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
@@ -3405,7 +3366,7 @@ at::Tensor interpolate(
     const IValue& scale_factors,
     const std::string& mode,
     c10::optional<bool> align_corners,
-    c10::optional<bool> use_scale_factor) {
+    c10::optional<bool> recompute_scale_factor) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error(
@@ -3428,40 +3389,40 @@ at::Tensor interpolate(
   double scale_factors_2 = -1.0;
   double scale_factors_3 = -1.0;
 
-  if(!scale_factors.isNone() && use_scale_factor == c10::nullopt) {
-    use_scale_factor = false;
-    bool warn_use_scale_factor = false;
+  if(!scale_factors.isNone() && recompute_scale_factor == c10::nullopt) {
+    recompute_scale_factor = true;
+    bool warn_recompute_scale_factor = false;
 
     if (scale_factors.isDouble()) {
       // only warn when the scales have floating values since
-      // the result for ints is the same with/without use_scale_factor
+      // the result for ints is the same with/without recompute_scale_factor
       if (_is_floating_value(scale_factors.toDouble())){
-        warn_use_scale_factor = true;
+        warn_recompute_scale_factor = true;
       }
     } else if (scale_factors.isDoubleList()) {
       auto scale_factors_list = scale_factors.toDoubleList();
 
       for (const auto & scales : scale_factors_list) {
         // only warn when the scales have floating values since
-        // the result for ints is the same with/without use_scale_factor
+        // the result for ints is the same with/without recompute_scale_factor
         if(_is_floating_value(scales)) {
-          warn_use_scale_factor = true;
+          warn_recompute_scale_factor = true;
           break;
         }
       }
     }
 
-    if(warn_use_scale_factor) {
+    if(warn_recompute_scale_factor) {
       AT_WARN(
         "The default behavior for interpolate/upsample with float scale_factor will change "
         "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
         "instead of relying on the computed output size. "
-        "If you wish to keep the old behavior, please set use_scale_factor=False. "
+        "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
         "See the documentation of nn.Upsample for details.");
     }
   }
 
-  if(use_scale_factor) {
+  if(recompute_scale_factor == false) {
     if (scale_factors.isDouble()) {
       scale_factors_1 = scale_factors.toDouble();
       scale_factors_2 = scale_factors.toDouble();
@@ -3547,10 +3508,10 @@ Operation interpolate_op(const Node* n) {
     IValue scale_factors;
     std::string mode;
     IValue align_corners;
-    IValue use_scale_factor;
-    pop(stack, input, size, scale_factors, mode, align_corners, use_scale_factor);
+    IValue recompute_scale_factor;
+    pop(stack, input, size, scale_factors, mode, align_corners, recompute_scale_factor);
     at::Tensor res = interpolate(
-        input, size, scale_factors, mode, align_corners.toOptional<bool>(), use_scale_factor.toOptional<bool>());
+        input, size, scale_factors, mode, align_corners.toOptional<bool>(), recompute_scale_factor.toOptional<bool>());
     push(stack, std::move(res));
     return 0;
   };
@@ -3566,7 +3527,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   } else if (int_ivalue.isIntList()) {
     auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
-    scale_factor_double = c10::impl::toList(double_vec);
+    scale_factor_double = double_vec;
   } else if (int_ivalue.isNone()) {
     return IValue();
   } else {
@@ -3618,19 +3579,19 @@ int upsample_bilinear_op(Stack& stack) {
 
 RegisterOperators reg3({
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? use_scale_factor = None) -> Tensor",
+        "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
         interpolate_op,
         aliasAnalysisFromSchema()),
 
@@ -3675,7 +3636,7 @@ at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
 at::Tensor cat(const c10::List<at::Tensor>& tensors) {
-  return at::cat(c10::impl::toVector(tensors));
+  return at::cat(tensors.vec());
 }
 
 std::string get_first(const c10::List<c10::List<std::string>>& strings) {

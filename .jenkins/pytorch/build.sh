@@ -36,8 +36,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-mobile* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
 echo "Python version:"
@@ -48,6 +52,11 @@ gcc --version
 
 echo "CMake version:"
 cmake --version
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  echo "NVCC version:"
+  nvcc --version
+fi
 
 # TODO: Don't run this...
 pip_install -r requirements.txt || true

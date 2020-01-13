@@ -880,6 +880,27 @@ class TestAutograd(TestCase):
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
 
+    def test_set_grad_generator_functions(self):
+        @torch.no_grad()
+        def gen_no_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), False)
+                yield i
+
+        with torch.enable_grad():
+            for _ in gen_no_grad():
+                self.assertEqual(torch.is_grad_enabled(), True)
+
+        @torch.enable_grad()
+        def gen_enable_grad():
+            for i in range(10):
+                self.assertEqual(torch.is_grad_enabled(), True)
+                yield i
+
+        with torch.no_grad():
+            for _ in gen_enable_grad():
+                self.assertEqual(torch.is_grad_enabled(), False)
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -2536,6 +2557,19 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def test_record_function_callbacks(self):
+        x = torch.randn(10, 10)
+        with profile() as p:
+            rf = torch.autograd._RecordFunction()
+            torch.autograd._run_before_callbacks(rf, "foo")
+            y = x * 2 + 4
+            # ensure that we run destructor for RecordFunction, which invokes
+            # end callbacks
+            del rf
+        function_events = p.function_events
+        foo_event = [event for event in function_events if "foo" in event.name][0]
+        self.assertEqual(foo_event.count, 1)
+
     def test_profiler_aggregation_fake(self):
         events = EventList()
         id = [0]
@@ -3350,6 +3384,406 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+
+    def test_reentrant_with_callbacks(self):
+        counter = [0]
+
+        def inc_counter():
+            counter[0] += 1
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Add a callback to execute.
+                Variable._execution_engine.queue_callback(inc_counter)
+
+                return input
+
+        class MyReentrantFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, input):
+                # Reentrant backward call.
+                tmp_inp = input.detach().requires_grad_()
+                with torch.enable_grad():
+                    tmp_out = (MyFunc.apply(tmp_inp)).sum()
+                tmp_out.backward()
+                return input
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = MyReentrantFunc.apply(t1)
+        t3 = t2.sum()
+        torch.autograd.backward([t3])
+
+        # Verify callback is called only once.
+        self.assertEquals(1, counter[0])
+
+    def test_autograd_views_codegen(self):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        # This test checks the behavior of two codegen functions (view_as and unbind)
+        # with respect to view tracking and inplace operation on the output.
+
+        def run_test(grad_mode, requires_grad, is_view, should_raise_tuple):
+            def maybe_check_raise(fn, should_raise):
+                self.assertTrue(should_raise is None or isinstance(should_raise, str))
+                if should_raise is not None:
+                    with self.assertRaisesRegex(RuntimeError, should_raise):
+                        fn()
+                else:
+                    fn()
+
+            inp = torch.rand(2, requires_grad=requires_grad).clone()
+            with torch.set_grad_enabled(grad_mode):
+                out = inp.view_as(inp)
+            # Are they differentiable views?
+            self.assertTrue(out._is_view() == is_view)
+            # Are inplace allowed?
+            maybe_check_raise(lambda: out.add_(1), should_raise_tuple[0])
+
+            inp = torch.rand(2, requires_grad=requires_grad).clone()
+            with torch.set_grad_enabled(grad_mode):
+                out = inp.unbind()
+            # Are they differentiable views?
+            self.assertTrue(out[0]._is_view() == is_view)
+            self.assertTrue(out[1]._is_view() == is_view)
+            # Are inplace allowed?
+            maybe_check_raise(lambda: out[0].add_(1), should_raise_tuple[1])
+            maybe_check_raise(lambda: out[1].add_(1), should_raise_tuple[2])
+
+        # should_raise contains None if it should not raise
+        # should_raise contains a string of the error if it should raise
+        # The 3 elements are for view_as, first output of unbind and second output of unbind
+        run_test(grad_mode=True, requires_grad=False, is_view=True,
+                 should_raise_tuple=(None, None, None))
+        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
+        run_test(grad_mode=True, requires_grad=True, is_view=True,
+                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
+        # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
+        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        run_test(grad_mode=False, requires_grad=True, is_view=True,
+                 should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
+        run_test(grad_mode=False, requires_grad=False, is_view=True,
+                 should_raise_tuple=(None, None, None))
+
+    def test_autograd_simple_views_python(self):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        # This checks the autograd.Function behavior when we return one or multiple outputs
+        # while one of these is an input, a view of an input or of a temporary tensor.
+
+        # This indicator is used to track how many times the backward function was called
+        bw_called = [0]
+        # This indicator is used to check if the argument `ga` contains non-zero values
+        ga_nz = [False]
+
+        class IdOneOutput(Function):
+            @staticmethod
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                return a
+
+            @staticmethod
+            def backward(ctx, ga):
+                bw_called[0] += 1
+                return ga, None, None
+
+        class IdTwoOutput(Function):
+            @staticmethod
+            def forward(ctx, a, b, make_view):
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                return a, a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                if ga.eq(0).all():
+                    ga_nz[0] = False
+                else:
+                    ga_nz[0] = True
+                return ga + gab, gab, None
+
+        class ViewOfTemp(Function):
+            @staticmethod
+            def forward(ctx, a, make_view):
+                ctx.save_for_backward(a)
+                if make_view:
+                    a = a.narrow(0, 0, 2)
+                b = a.clone()
+                return b.select(0, 0)
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                a, = ctx.saved_tensors
+                res = torch.zeros_like(a)
+                res.select(0, 0).copy_(grad)
+                return res, None
+
+        for fn_id in ["one_output", "two_output", "view_of_temp"]:
+            for inplace in [True, False]:
+                for make_view in [True, False]:
+                    def fn(a, b):
+                        # never modify a, b inplace for gracheck
+                        a = a.clone()
+                        b = b.clone()
+                        if fn_id == "two_output":
+                            tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
+                            if inplace:
+                                tmp1 += 3
+                                tmp2 += 3
+                            else:
+                                tmp1 = tmp1 + 3
+                                tmp2 = tmp2 + 3
+                            tmp = tmp1 * tmp2
+                        else:
+                            if fn_id == "one_output":
+                                tmp = IdOneOutput.apply(a, b, make_view)
+                            else:
+                                tmp = ViewOfTemp.apply(a + b, make_view)
+                            if inplace:
+                                tmp += 3
+                            else:
+                                tmp = tmp + 3
+
+                        return tmp.sum()
+
+                    a = torch.ones(2, requires_grad=True)
+                    b = torch.ones(2, requires_grad=True)
+
+                    # Are the computed gradients correct ?
+                    if fn_id == "view_of_temp" and inplace:
+                        # TODO: This should compute the right gradients
+                        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                            gradcheck(fn, (a, b))
+                    else:
+                        gradcheck(fn, (a, b))
+
+                    # Was the custom backward called properly
+                    bw_called[0] = 0
+                    ga_nz[0] = True  # For the case where the backward is not called
+                    fn(a, b).backward()
+
+                    expected_called = 1
+                    expected_ga_nz = True
+                    if fn_id in ["one_output", "view_of_temp"] and inplace:
+                        # TODO: The custom backward is not called in this case
+                        expected_called = 0
+                    if fn_id == "two_output" and inplace:
+                        # TODO: The backward only sees part of the gradient as the other part
+                        # is computed with a AsStridedBackward
+                        expected_ga_nz = False
+                    self.assertTrue(bw_called[0] == expected_called)
+                    self.assertTrue(ga_nz[0] == expected_ga_nz)
+
+    def test_autograd_complex_views_python(self):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        # This checks that multiples views in the forward are properly traced and how they
+        # behave with respect to inplace operations.
+
+        # This indicator is used to track how many times the backward function was called
+        bw_called = [0]
+
+        class ComplexView(Function):
+            @staticmethod
+            def forward(ctx, a, idx):
+                res = a.narrow(0, idx, 1)
+                res = a.select(0, idx)
+                ctx.save_for_backward(a)
+                ctx.idx = idx
+                return res
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                a, = ctx.saved_tensors
+                res = torch.zeros_like(a)
+                res.select(0, ctx.idx).copy_(grad)
+                return res, None
+
+        a = torch.ones(2, requires_grad=True)
+        idx = 1
+
+        bw_called[0] = 0
+        out = ComplexView.apply(a.clone(), idx)
+        out.sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        bw_called[0] = 0
+        out = ComplexView.apply(a.clone(), idx)
+        out += 1
+        out.sum().backward()
+        # TODO: The custom backward is not called in this case
+        self.assertTrue(bw_called[0] == 0)
+
+        out = ComplexView.apply(a, idx)
+        out += 1
+        with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
+            out.sum().backward()
+
+    def test_autograd_inplace_views_python(self):
+        # This is not necessarily the absolute correct behavior, but this is the current
+        # one. This test is here to make sure that any change to this behavior is detected
+        # and not silent. The TODOs below mark the places with unexpected behavior.
+        # Note that any change in these test will be BC-breaking and should be done carefully.
+
+        # This test checks custom autograd.Function that perform inplace operations
+
+        bw_called = [0]
+
+        # I) Single output
+        class MyAdder(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                return grad, grad
+
+
+        a = torch.ones(2, requires_grad=True)
+        b = torch.ones(2, requires_grad=True)
+
+        # No extra inplace
+        c = MyAdder.apply(a.clone(), b)
+        c.sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # With extra inplace on the output
+        bw_called[0] = 0
+        c = MyAdder.apply(a.clone(), b)
+        c += 2
+        c.sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # The input is a view
+        bw_called[0] = 0
+        c = MyAdder.apply(a.clone().view_as(a), b)
+        c.sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # II) Multiple outputs
+        class MyBadAdder(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a, a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                return ga + gab, ga + gab
+
+        # No extra inplace
+        bw_called[0] = 0
+        c, d = MyBadAdder.apply(a.clone(), b)
+        (c * d).sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # With extra inplace on the output
+        bw_called[0] = 0
+        c, d = MyBadAdder.apply(a.clone(), b)
+        c += 2
+        (c * d).sum().backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        # The input is a view
+        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
+        # The "python_error" is for python 2.7 for which current error handling is not perfect.
+        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
+            # TODO: CopySlices does not handle Function with multiple outputs
+            (c * d).sum().backward()
+
+        # III) Inplace + other op
+        class MyOutPlaceAdder(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                a.add_(b)
+                ctx.mark_dirty(a)
+                return a.clone(), a + b
+
+            @staticmethod
+            def backward(ctx, ga, gab):
+                bw_called[0] += 1
+                return ga + gab, ga + 2 * gab
+
+        # We don't reuse the input
+        def fn(a, b):
+            orig_a = a.clone().view_as(a)
+            c, d = MyOutPlaceAdder.apply(orig_a, b)
+            return (c * d).sum()
+
+        bw_called[0] = 0
+        fn(a, b).backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        gradcheck(fn, (a, b))
+
+        # We reuse the input
+        def fn(a, b):
+            orig_a = a.clone()
+            c, d = MyOutPlaceAdder.apply(orig_a, b)
+            return (c * d * orig_a).sum()
+
+        bw_called[0] = 0
+        fn(a, b).backward()
+        self.assertTrue(bw_called[0] == 1)
+
+        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
+            # TODO: We are not rebasing the history and so the inplace computation is wrong
+            gradcheck(fn, (a, b))
+
+    def test_grad_mode_restored_reentrant(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, go):
+                original = torch._C.is_grad_enabled()
+                with torch.enable_grad():
+                    self.assertTrue(torch._C.is_grad_enabled())
+                    foo = torch.rand(go.size(), requires_grad=True)
+                    grad, = torch.autograd.grad(
+                        foo ** 3, foo, grad_outputs=go
+                    )
+                    self.assertTrue(torch._C.is_grad_enabled())
+                self.assertTrue(torch._C.is_grad_enabled() == original)
+                return grad
+
+        inp = torch.rand(3, requires_grad=True)
+
+        # Case where original==False
+        MyFunction.apply(inp).sum().backward()
+        # Case where original==True
+        MyFunction.apply(inp).sum().backward(create_graph=True)
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
