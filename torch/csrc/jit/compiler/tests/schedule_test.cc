@@ -66,12 +66,11 @@ TEST(TensorExpr, Simple02) {
   Stmt stmt = sch.Lower();
   std::ostringstream oss;
   oss << stmt;
-  // TODO: switch to a better check
-
   ASSERT_GT(oss.str().size(), 200);
   ASSERT_LT(oss.str().size(), 500);
 
   {
+    // Compare to a reference loop structure structure.
     Var x_outer("x.outer", kInt32);
     Var x_inner("x.inner", kInt32);
     Var y("y", kInt32);
@@ -99,5 +98,31 @@ TEST(TensorExpr, Simple02) {
     std::ostringstream oss_ref;
     oss_ref << stmt;
     ASSERT_EQ(oss.str(), oss_ref.str());
+  }
+
+  {
+    // Evaluate its execution
+    SimpleIREvaluator ir_eval;
+    SimpleIREvaluator::BufferMapping buffer_mapping;
+    // TODO: make this a standard testing helper.
+    const int kPadding = 8;
+    float kPaddingValue = 0.1357;
+    std::vector<float> f_v(26 * 5 + 2 * kPadding);
+    std::vector<float> f_ref(26 * 5 + 2 * kPadding);
+    
+    buffer_mapping[tensor.function().func_var().node()] = &f_v[kPadding];
+    ir_eval.SetBufferMapping(buffer_mapping);
+    stmt.accept(&ir_eval);
+
+    float* f_ref_p = &f_ref[kPadding];
+    for (int x = 0; x < 26; x++) {
+      for (int y = 0; y < 5; y++) {
+	f_ref_p[x * 5 + y] = 1 + x * x + y * y;
+      }
+    }
+
+    for (int i = 0; i < f_v.size(); i++) {
+      ASSERT_NEAR(f_v[i], f_ref[i], 1e-5);
+    }
   }
 }
