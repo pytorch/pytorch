@@ -64,32 +64,16 @@ at::Tensor castTensorTo(
   return self;
 }
 
-int64_t list_size(const IValue& list) {
-  if (list.isGenericList()) {
-    return list.toGenericListRef().size();
-  } else if (list.isIntList()) {
-    return list.toIntListRef().size();
-  } else if (list.isDoubleList()) {
-    return list.toDoubleListRef().size();
-  } else if (list.isBoolList()) {
-    return list.toBoolList().size();
-  }
-  AT_ASSERTM(0, "Unexpected list type", list);
-}
-
 std::vector<int64_t> compute_sizes(const IValue& seq) {
   std::vector<int64_t> sizes;
-  // because bool, int, and float lists are specialized, inner array will
-  // will not be generic list
-  auto seq_recur = seq;
-  while (seq_recur.isGenericList()) {
-    auto seq_list = seq_recur.toGenericListRef();
-    auto length = seq_list.size();
-    AT_ASSERT(length != 0);
-    sizes.push_back(length);
-    seq_recur = seq_list[0];
+  auto seq_recur = seq.toGenericList();
+  while (true) {
+    sizes.push_back(seq_recur.size());
+    if (seq_recur.size() == 0 || !seq_recur.get(0).isGenericList()) {
+      break;
+    }
+    seq_recur = seq_recur.get(0).toGenericList();
   }
-  sizes.push_back(list_size(seq_recur));
   return sizes;
 }
 
@@ -106,42 +90,24 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   }
 }
 
-template <typename DTYPE, typename List>
+template <typename DTYPE>
 void storeLastDimension(
     char* data,
     const std::vector<int64_t>& sizes,
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    List obj) {
+    at::ArrayRef<IValue> obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(DTYPE*)data = obj[i];
-    data += strides[dim] * elementSize;
-  }
-}
-
-template <>
-void storeLastDimension<bool>(
-    char* data,
-    const std::vector<int64_t>& sizes,
-    const c10::ArrayRef<int64_t>& strides,
-    int64_t dim,
-    int elementSize,
-    const c10::List<bool>& obj) {
-  auto n = sizes[dim];
-  auto seq_size = obj.size();
-  checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
-    *(bool*)data = static_cast<bool>(obj[i]);
+    *(DTYPE*)data = obj[i].to<DTYPE>();
     data += strides[dim] * elementSize;
   }
 }
 
 // reference python implementation recursive_store in tensor_new.cpp
-
 void recursiveStore(
     char* data,
     const std::vector<int64_t>& sizes,
@@ -151,25 +117,21 @@ void recursiveStore(
     const IValue& obj) {
   auto ndim = sizes.size();
   auto n = sizes[dim];
-  auto seq_size = list_size(obj);
-  checkSequenceSize(n, dim, seq_size);
+  auto seq = obj.toGenericListRef();
+  checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
-    auto items = obj.toGenericListRef();
     for (int64_t i = 0; i < n; i++) {
-      recursiveStore(data, sizes, strides, dim + 1, elementSize, items[i]);
+      recursiveStore(data, sizes, strides, dim + 1, elementSize, seq[i]);
       data += strides[dim] * elementSize;
     }
   } else {
     AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
-      storeLastDimension<int64_t>(
-          data, sizes, strides, dim, elementSize, obj.toIntListRef());
+      storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, seq);
     } else if (obj.isDoubleList()) {
-      storeLastDimension<double>(
-          data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
+      storeLastDimension<double>(data, sizes, strides, dim, elementSize, seq);
     } else {
-      storeLastDimension<bool>(
-          data, sizes, strides, dim, elementSize, obj.toBoolList());
+      storeLastDimension<bool>(data, sizes, strides, dim, elementSize, seq);
     }
   }
 }
@@ -241,7 +203,7 @@ RegisterOperators reg({
               (std::move(peek(stack, 1, 3))).toIntListRef(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
-          pack(stack, c10::impl::toList(std::move(result)));
+          pack(stack, std::move(result));
           return 0;
         },
         aliasAnalysisFromSchema()),

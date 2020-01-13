@@ -20,8 +20,8 @@ namespace {
 template <typename dtype> // int64_t, bool, double
 void listConstruct(Stack& stack, int num_inputs) {
   auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-  c10::List<dtype> vals =
-      c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
+  c10::List<dtype> vals(
+      fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
   drop(stack, num_inputs);
   push(stack, std::move(vals));
 }

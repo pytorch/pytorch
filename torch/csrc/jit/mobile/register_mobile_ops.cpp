@@ -155,7 +155,7 @@ static auto registry = torch::RegisterOperators().op(
   #ifdef USE_STATIC_DISPATCH
    at::AutoNonVariableTypeMode non_var_type_mode(true);
   #endif
-   return at::adaptive_avg_pool2d(a, c10::impl::toVector(b));
+   return at::adaptive_avg_pool2d(a, b.vec());
   })
 ).op(
   "_aten::mm",
@@ -187,8 +187,8 @@ static auto registry = torch::RegisterOperators().op(
   #ifdef USE_STATIC_DISPATCH
      at::AutoNonVariableTypeMode non_var_type_mode(true);
   #endif
-     return at::max_pool2d_with_indices(self, c10::impl::toVector(kernel_size), c10::impl::toVector(stride),
-      c10::impl::toVector(padding), c10::impl::toVector(dilation), ceil_mode);
+     return at::max_pool2d_with_indices(self, kernel_size.vec(), stride.vec(),
+      padding.vec(), dilation.vec(), ceil_mode);
   })
 ).op(
   "_aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor",
@@ -197,7 +197,7 @@ static auto registry = torch::RegisterOperators().op(
 #ifdef USE_STATIC_DISPATCH
    at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
-   return at::max_pool2d(self, c10::impl::toVector(kernel_size), c10::impl::toVector(stride), c10::impl::toVector(padding), c10::impl::toVector(dilation), ceil_mode);
+   return at::max_pool2d(self, kernel_size.vec(), stride.vec(), padding.vec(), dilation.vec(), ceil_mode);
   })
 ).op(
   "_aten::threshold",

@@ -36,14 +36,6 @@ TypePtr IValue::type() const {
       return IntType::get();
     case Tag::Bool:
       return BoolType::get();
-    case Tag::IntList:
-      return ListType::ofInts();
-    case Tag::DoubleList:
-      return ListType::ofFloats();
-    case Tag::BoolList:
-      return ListType::ofBools();
-    case Tag::TensorList:
-      return ListType::ofTensors();
     case Tag::String:
       return StringType::get();
     case Tag::Blob:
@@ -148,16 +140,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       const auto& finish = elements.size() == 1 ? ",)" : ")";
       return printList(out, elements, "(", finish);
     }
-    case IValue::Tag::IntList:
-      return printList(out, v.toIntList(), "[", "]");
-    case IValue::Tag::DoubleList:
-      return printList(out, v.toDoubleList(), "[", "]");
-    case IValue::Tag::BoolList:
-      return printList(out, v.toBoolList(), "[", "]");
     case IValue::Tag::String:
       return out << v.toStringRef();
-    case IValue::Tag::TensorList:
-      return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
     case IValue::Tag::Capsule:
