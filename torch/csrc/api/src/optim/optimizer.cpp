@@ -44,11 +44,35 @@ std::unique_ptr<OptimizerParamState> OptimizerParamState::clone() const {
       "instead of torch::optim::OptimizerParamState to inherit the ability to clone.");
 }
 
+void OptimizerParamState::serialize(torch::serialize::InputArchive& archive) {
+  TORCH_CHECK(false,
+    "void serialize(torch::serialize::InputArchive& archive) has not been implemented for torch::optim::OptimizerParamState. ",
+    "You must override it in your subclass of torch::optim::OptimizerCloneableParamState<YourOptimizerParamState>.");
+}
+
+void OptimizerParamState::serialize(torch::serialize::OutputArchive& archive) const {
+  TORCH_CHECK(false,
+    "void serialize(torch::serialize::OutputArchive& archive) has not been implemented for torch::optim::OptimizerParamState. ",
+    "You must override it in your subclass of torch::optim::OptimizerCloneableParamState<YourOptimizerParamState>.");
+}
+
 std::unique_ptr<OptimizerOptions> OptimizerOptions::clone() const {
   TORCH_CHECK(false,
       "clone() has not been implemented for torch::optim::OptimizerOptions. ",
       "Subclass torch::optim::OptimizerCloneableOptions<YourOptimizerOptions> ",
       "instead of torch::optim::OptimizerOptions to inherit the ability to clone.");
+}
+
+void OptimizerOptions::serialize(torch::serialize::InputArchive& archive) {
+  TORCH_CHECK(false,
+    "void serialize(torch::serialize::InputArchive& archive) has not been implemented for torch::optim::OptimizerOptions. ",
+    "You must override it in your subclass of torch::optim::OptimizerCloneableOptions<YourOptimizerOptions>.");
+}
+
+void OptimizerOptions::serialize(torch::serialize::OutputArchive& archive) const {
+  TORCH_CHECK(false,
+    "void serialize(torch::serialize::OutputArchive& archive) has not been implemented for torch::optim::OptimizerOptions. ",
+    "You must override it in your subclass of torch::optim::OptimizerCloneableOptions<YourOptimizerOptions>.");
 }
 
 namespace detail {
@@ -106,6 +130,10 @@ size_t OptimizerBase::size() const noexcept {
 }
 
 OptimizerOptions& OptimizerBase::defaults() noexcept {
+  return *defaults_.get();
+}
+
+const OptimizerOptions& OptimizerBase::defaults() const noexcept {
   return *defaults_.get();
 }
 

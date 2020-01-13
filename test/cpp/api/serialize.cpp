@@ -55,8 +55,8 @@ void is_optimizer_state_equal(
 
   ASSERT_TRUE(lhs_state.size() == rhs_state.size());
   for (const auto& value : lhs_state) {
-    auto found = rhs.find(value.first);
-    ASSERT_TRUE(found != rhs.end());
+    auto found = rhs_state.find(value.first);
+    ASSERT_TRUE(found != rhs_state.end());
     const DerivedOptimizerParamState& lhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(value.second.get()));
     const DerivedOptimizerParamState& rhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(found->second.get()));
     ASSERT_TRUE(lhs_curr_state == rhs_curr_state);
@@ -130,7 +130,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
   for (int i = 0; i < optim3_2_param_groups.size(); i++) {
-    is_optimizer_param_groups_equal<DerivedOptimizerOptions>(
+    is_optimizer_param_group_equal<DerivedOptimizerOptions>(
       optim3_2_param_groups[i], optim1_param_groups[i]);
     is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim1_state);
   }

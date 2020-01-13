@@ -46,6 +46,7 @@ namespace detail {
   void serialize(
       serialize::OutputArchive& archive,
       const std::vector<OptimizerParamGroup>& param_groups) {
+    archive.write("param_groups/size", torch::tensor(static_cast<int64_t>(param_groups.size())));
     for (size_t i = 0; i < param_groups.size(); i++) {
       serialize::OutputArchive param_group_archive(archive.compilation_unit()); // For each OptimizerParamGroup
       std::vector<Tensor> params = param_groups[i].params();
@@ -68,11 +69,12 @@ namespace detail {
   void serialize(
       serialize::InputArchive& archive,
       std::vector<std::pair<std::vector<std::string>, std::unique_ptr<OptimizerOptions>>>& param_groups) {
-    std::vector<std::string> indices = archive.keys();
-    for (const std::string& param_group_key : indices) {
+    torch::Tensor param_groups_size_tensor;
+    archive.read("param_groups/size", param_groups_size_tensor);
+    const size_t param_groups_size = param_groups_size_tensor.item<int64_t>();
+    for (size_t i = 0; i < param_groups_size; i++) {
       serialize::InputArchive param_group_archive;
-      archive.read(param_group_key, param_group_archive); //confirm
-
+      archive.read("param_groups/" + c10::guts::to_string(i), param_group_archive);
       torch::Tensor size_tensor;
       param_group_archive.read("params/size", size_tensor);
       const size_t size = size_tensor.item<int64_t>();
@@ -86,7 +88,7 @@ namespace detail {
       }
       serialize::InputArchive param_group_options_archive;
       param_group_archive.read("options", param_group_options_archive);
-      DerivedOptimizerParamOptions param_group_options(0);
+      DerivedOptimizerParamOptions param_group_options;
       param_group_options.serialize(param_group_options_archive);
       param_groups.push_back(std::make_pair(params, std::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
     }
@@ -143,10 +145,8 @@ void serialize(
     serialize::InputArchive& archive,
     detail::OptimizerBase& optimizer) {
 
-    if (archive.keys().size() == 3) {
-      IValue pytorch_version;
-      archive.read("pytorch_version", pytorch_version);
-    }
+    IValue pytorch_version;
+    archive.try_read("pytorch_version", pytorch_version);
     serialize::InputArchive state_archive;
     archive.read("state", state_archive);
     ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state;
@@ -162,8 +162,8 @@ void serialize(
     for (size_t i = 0; i < param_groups.size(); i++) {
       std::vector<std::string> saved_group_keys = param_groups[i].first;
       std::vector<Tensor> params = optimizer.param_groups()[i].params();
-      TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that doesn't match the size of optimizer's group");
-      for (size_t idx = 0; idx<params.size(); idx++) {
+      TORCH_CHECK(saved_group_keys.size() == params.size(), "loaded state dict contains a parameter group that has a different size than the optimizer's parameter group");
+      for (size_t idx = 0; idx < params.size(); idx++) {
         optimizer.state()[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state[saved_group_keys[idx]]);
       }
     }

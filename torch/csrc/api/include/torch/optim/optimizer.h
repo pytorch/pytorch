@@ -34,8 +34,8 @@ namespace optim {
 class TORCH_API OptimizerParamState {
  public:
   virtual std::unique_ptr<OptimizerParamState> clone() const;
-  virtual void serialize(torch::serialize::InputArchive& archive) {}
-  virtual void serialize(torch::serialize::OutputArchive& archive) {}
+  virtual void serialize(torch::serialize::InputArchive& archive);
+  virtual void serialize(torch::serialize::OutputArchive& archive) const;
   virtual ~OptimizerParamState() = default;
 };
 
@@ -49,8 +49,8 @@ class TORCH_API OptimizerCloneableParamState : public OptimizerParamState {
 class TORCH_API OptimizerOptions {
  public:
   virtual std::unique_ptr<OptimizerOptions> clone() const;
-  virtual void serialize(torch::serialize::InputArchive& archive) {}
-  virtual void serialize(torch::serialize::OutputArchive& archive) {}
+  virtual void serialize(torch::serialize::InputArchive& archive);
+  virtual void serialize(torch::serialize::OutputArchive& archive) const;
   virtual ~OptimizerOptions() = default;
 };
 
@@ -127,6 +127,8 @@ class TORCH_API OptimizerBase {
   virtual size_t size() const noexcept;
 
   OptimizerOptions& defaults() noexcept;
+
+  const OptimizerOptions& defaults() const noexcept;
 
   /// Provides a reference to the param_groups this optimizer holds.
   std::vector<OptimizerParamGroup>& param_groups() noexcept;

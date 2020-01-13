@@ -27,8 +27,8 @@ struct TORCH_API AdagradOptions : public OptimizerCloneableOptions<AdagradOption
   TORCH_ARG(double, initial_accumulator_value) = 0;
   TORCH_ARG(double, eps) = 1e-10;
 public:
-  void serialize(torch::serialize::InputArchive& archive);
-  void serialize(torch::serialize::OutputArchive& archive) const;
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
   ~AdagradOptions() = default;
 };
@@ -38,8 +38,8 @@ struct TORCH_API AdagradParamState : public OptimizerCloneableParamState<Adagrad
   TORCH_ARG(int64_t, step);
 
 public:
-  void serialize(torch::serialize::InputArchive& archive);
-  void serialize(torch::serialize::OutputArchive& archive) const;
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs);
   ~AdagradParamState() = default;
 };
@@ -64,7 +64,6 @@ class TORCH_API Adagrad : public Optimizer {
     }
   }
 
-  // TODO: we might want to replace `std::vector<Tensor>` with `ParameterContainer` at some point
   explicit Adagrad(
       std::vector<Tensor> params,
       AdagradOptions defaults) : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}

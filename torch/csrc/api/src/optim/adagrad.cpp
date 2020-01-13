@@ -128,28 +128,26 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 }
 
 void Adagrad::load(serialize::InputArchive& archive) {
-  auto keys_ = archive.keys();
-  for (int i = 0; i < keys_.size(); i++) {
-    if (keys_[i] == "pytorch_version") {
-      serialize(*this, archive);
-      return;
-    }
+  IValue pytorch_version;
+  if(archive.try_read("pytorch_version", pytorch_version)){
+    serialize(*this, archive);
   }
-  TORCH_WARN(
-    "Your serialized Adagrad optimizer is still using the old serialization format. ",
-    "You should re-save your Adagrad optimizer to use the new serialization format.");
-  // deserializing archives saved in old format (prior to version 1.5.0)
-  std::vector<Tensor> sum_buffers;
-  std::vector<int64_t> step_buffers;
-  torch::optim::serialize(archive, "sum_buffers", sum_buffers);
-  torch::optim::serialize(archive, "step_buffers", step_buffers);
-  // since there were no param_groups before, assuming all tensors are now in one param_group
-  std::vector<Tensor> params = param_groups_[0].params();
-  for (size_t idx = 0; idx < params.size(); idx++) {
-    auto state = std::make_unique<AdagradParamState>();
-    state->step(step_buffers[idx]);
-    state->sum(sum_buffers[idx]);
-    state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+  else { // deserializing archives saved in old format (prior to version 1.5.0)
+    TORCH_WARN(
+      "Your serialized Adagrad optimizer is still using the old serialization format. ",
+      "You should re-save your Adagrad optimizer to use the new serialization format.");
+    std::vector<Tensor> sum_buffers;
+    std::vector<int64_t> step_buffers;
+    torch::optim::serialize(archive, "sum_buffers", sum_buffers);
+    torch::optim::serialize(archive, "step_buffers", step_buffers);
+    // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
+    std::vector<Tensor> params = param_groups_[0].params();
+    for (size_t idx = 0; idx < params.size(); idx++) {
+      auto state = std::make_unique<AdagradParamState>();
+      state->step(step_buffers[idx]);
+      state->sum(sum_buffers[idx]);
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+    }
   }
 }
 } // namespace optim
