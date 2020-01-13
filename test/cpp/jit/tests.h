@@ -76,7 +76,8 @@ namespace jit {
   _(LiteInterpreterPrimOverload)       \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
-  _(MobileTypeParser)
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterPrim)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -96,6 +97,8 @@ TH_FORALL_TESTS_CUDA(DECLARE_JIT_TEST)
 // and python test runners), but is instead invoked manually by the
 // torch_python_test.cpp
 void testEvalModeForLoadedModule();
+void testSerializationInterop();
+void testTorchSaveError();
 
 } // namespace jit
 } // namespace torch

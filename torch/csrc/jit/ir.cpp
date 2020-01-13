@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 template <typename T>
 static std::ostream& printValueRefs(
     std::ostream& out,
-    const at::ArrayRef<T>& nodes) {
+    const at::ArrayRef<T> nodes) {
   size_t i = 0;
   for (auto n : nodes) {
     if (i++ > 0) {
@@ -64,11 +64,11 @@ static std::ostream& printValueRefs(
 
 std::ostream& operator<<(
     std::ostream& out,
-    const at::ArrayRef<const Value*>& nodes) {
+    const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
+std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
