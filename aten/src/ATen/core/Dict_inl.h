@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
@@ -20,14 +19,28 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
   } else if (lhs.isBool()) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isIntList()) {
-    return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
+  } else if (lhs.isGenericList()) {
+    if (!rhs.isGenericList()) {
+      return false;
+    }
+    auto l = lhs.toGenericListRef();
+    auto r = rhs.toGenericListRef();
+    if (l.size() != r.size()) {
+      return false;
+    }
+    for (size_t i = 0, N = l.size(); i < N; ++i) {
+      if (!shallowEquals(l[i], r[i])) {
+        return false;
+      }
+    }
+    return true;
   } else if (lhs.isTensor()) {
     return lhs.toTensor().is_same(rhs.toTensor());
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
 }
+
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
