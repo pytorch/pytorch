@@ -27,7 +27,10 @@ add_definitions(${LLVM_DEFINITIONS})
 set(ASMJIT_EMBED TRUE)
 add_definitions(-DASMJIT_STATIC)
 
-set(ASMJIT_DIR "../../../../third_party/fbgemm/third_party/asmjit")
+get_filename_component(
+  ASMJIT_DIR
+  "../../../../third_party/fbgemm/third_party/asmjit"
+  ABSOLUTE)
 include("${ASMJIT_DIR}/CMakeLists.txt")
 include_directories("${ASMJIT_DIR}/src")
 
