@@ -661,40 +661,11 @@ void Unpickler::readList(IValue list_ivalue) {
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
   auto elements = at::ArrayRef<IValue>(stack_).slice(start);
-  if (list_ivalue.isIntList()) {
-    auto list = std::move(list_ivalue).toIntList();
-    list.reserve(num_elements);
-    for (const auto& elem : elements) {
-      list.emplace_back(elem.toInt());
-    }
-  } else if (list_ivalue.isTensorList()) {
-    auto list = std::move(list_ivalue).toTensorList();
-    list.reserve(num_elements);
-    for (const auto& elem : elements) {
-      list.emplace_back(elem.toTensor());
-    }
-  } else if (list_ivalue.isDoubleList()) {
-    auto list = std::move(list_ivalue).toDoubleList();
-    list.reserve(num_elements);
-    for (const auto& elem : elements) {
-      list.emplace_back(elem.toDouble());
-    }
-  } else if (list_ivalue.isBoolList()) {
-    auto list = std::move(list_ivalue).toBoolList();
-    list.reserve(num_elements);
-    for (const auto& elem : elements) {
-      list.push_back(elem.toBool());
-    }
-  } else if (list_ivalue.isList()) {
-    auto list = std::move(list_ivalue).toList();
-    list.reserve(num_elements);
-    for (const auto& elem : elements) {
-      list.emplace_back(elem);
-    }
-  } else {
-    AT_ERROR("Unknown IValue list kind: ", list_ivalue.tagKind());
+  auto list = std::move(list_ivalue).toList();
+  list.reserve(num_elements);
+  for (const auto& elem : elements) {
+    list.emplace_back(elem);
   }
-
   stack_.erase(stack_.begin() + start, stack_.end());
 }
 

@@ -779,11 +779,10 @@ struct PythonPrintImpl {
 
   void printMaybeAnnotatedConstantList(
       std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
       const IValue& the_list) {
-    if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
+    auto list = the_list.toList();
+    if (list.size() == 0) {
+      stmt << "annotate(List[" << list.elementType()->python_str() << "], [])";
     } else {
       stmt << the_list;
     }
@@ -809,13 +808,8 @@ struct PythonPrintImpl {
         delim = ", ";
       }
       ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntVector().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleVector().size(), v);
+    } else if (v.isList()) {
+      printMaybeAnnotatedConstantList(ss, v);
     } else {
       ss << v;
     }
