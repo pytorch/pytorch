@@ -5244,6 +5244,23 @@ a")
         traced = torch.jit.trace(Test(), ())
         torch.allclose(traced(), Test()())
 
+    def test_trace_save_load_copy(self):
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        traced = torch.jit.trace(Test(), torch.rand(1, 3, 224, 224))
+        buffer = io.BytesIO()
+        torch.jit.save(traced, buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        # should work
+        loaded.copy()
+
     def test_mul(self):
         def func(a, b):
             return a * b
@@ -5721,6 +5738,35 @@ a")
 
         graph_str = str(test.graph)
         self.assertTrue(graph_str.count("None = prim::Constant") == 1)
+
+    def test_constant_pooling_same_identity(self):
+        def foo():
+            a = torch.tensor([4])
+            b = (a,)
+            index = len(a) - 1
+            c = b[index]
+            d = b[index]
+            return c, d
+
+        foo_script = torch.jit.script(foo)
+        self.run_pass('constant_propagation', foo_script.graph)
+        self.run_pass('constant_pooling', foo_script.graph)
+        # even though the c & d escape scope, we are still able
+        # pool them into one constant because they are the same object
+        FileCheck().check_count("prim::Constant", 1, exactly=True).run(foo_script.graph)
+        self.assertEqual(foo(), foo_script())
+
+    def test_constant_pooling_introduce_aliasing(self):
+        @torch.jit.script
+        def foo():
+            a = torch.tensor(1)
+            b = torch.tensor(2)
+            return a, b
+
+        self.run_pass('constant_propagation', foo.graph)
+        self.run_pass('constant_pooling', foo.graph)
+        # dont pool constants bc it would introduce observable alias relationship changing
+        FileCheck().check_count("prim::Constant", 2, exactly=True).run(foo.graph)
 
     def test_literal(self):
         def func1(a, b):
@@ -7754,7 +7800,7 @@ a")
             )
 
         ops = ['is', 'is not']
-        type_literals = [True, False, None, [1, 1]]
+        type_literals = [True, False, None, [1, 1], 1, 2, .5, 1.5]
 
         # do literals product to try any types combinations
         for op, lhs, rhs in product(ops, type_literals, type_literals):
@@ -10091,6 +10137,24 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    def test_trace_with_tensor_list_output(self):
+        def f():
+            return [torch.zeros(1), torch.zeros(5)]
+        traced_f = torch.jit.trace(f, [])
+        self.assertEqual(traced_f(), f())
+
+    def test_trace_with_number_list_output(self):
+        def f():
+            return [1, 5]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_tensor_list_output(self):
+        def f():
+            return [[torch.zeros(1)], [torch.zeros(5)]]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
     def test_script_copy(self):
         class M(torch.nn.Module):
             __annotations__ = {
@@ -10508,7 +10572,7 @@ a")
             fn = torch.jit.ignore(fn)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected a value of type 'Tensor' for argument"
-                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
+                                                      r" 'x' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -10587,11 +10651,11 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Expected at most 2 arguments but found 3"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided."):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
