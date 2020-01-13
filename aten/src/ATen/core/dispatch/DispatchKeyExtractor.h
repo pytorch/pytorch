@@ -79,7 +79,7 @@ public:
         // no safe toTensorRef method, alas)
         ts = ts | ivalue.unsafeToTensorImpl()->type_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const auto& tensor : ivalue.toTensorListRef()) {
+        for (const at::Tensor& tensor : ivalue.toTensorList()) {
           ts = ts | tensor.type_set();
         }
       }
