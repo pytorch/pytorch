@@ -148,12 +148,11 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 
 // Caveats:
 // We define d(a^b)/db at a = 0 and b < 0 to be -inf. This is due to
-// * d(a^b)/db -> -inf for a fixed b as a -> +0
-// * convenience of implementation: no need to have a second at::where statement
+// d(a^b)/db -> -inf for a fixed b as a -> +0
 // Currently, tensorflow defines d(a^b)/db = nan for a = 0 and b < 0.
 //
 // We define d(a^b)/db = 0 for a = 0 and b = 0 by continuity as
-// d(a^b)/db = 0 for a = 0 and b > 0.
+// d(a^b)/db = 0 for a > 0 and b -> +0.
 // Currently, tensorflow agrees with us.
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   return grad * at::where(at::logical_and(self == 0, exponent >= 0),
