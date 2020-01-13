@@ -185,9 +185,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
     auto& tensor = outputs[i][0];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      ASSERT_EQ(data[j], expected);
     }
   }
 }
@@ -238,9 +236,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           auto& tensor = outputs[k][l];
           auto data = tensor.data_ptr<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
-            if (data[n] != expected) {
-              throw std::runtime_error("BOOM!");
-            }
+            ASSERT_EQ(data[n], expected);
           }
         }
       }
@@ -354,22 +350,16 @@ TEST(ProcessGroupGlooTest, testExceptionsThrown) {
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
-    }
+    ASSERT_FALSE(work->isSuccess());
+    EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
   }
 
   // test SIGKILL
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGKILL);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
-    }
+    ASSERT_FALSE(work->isSuccess());
+    EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
   }
 }
 
