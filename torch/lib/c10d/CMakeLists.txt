@@ -56,7 +56,6 @@ set(C10D_SRCS
   )
 
 set(C10D_LIBS torch)
-list(APPEND C10D_LIBS gtest)
 
 if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp NCCLUtils.cpp)
