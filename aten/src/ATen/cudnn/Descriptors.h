@@ -39,14 +39,6 @@ static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
     std::vector<int64_t> size_v = {size[0], size[1], size[2], size[3]};
     std::vector<int64_t> stride_v = {stride[0], stride[1], stride[2], stride[3]};
     if (get_channels_last_strides(size_v) == stride_v) {
-      // spetial stride correction for channels last;
-      for(auto&d : {1, 3, 2, 0}) {
-        if (size[d] == 1) {
-          stride[d] = z;
-        } else {
-          z *= size[d];
-        }
-      }
       return;
     }
   }
@@ -152,7 +144,7 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0, bool check_nhwc = false);
+  void set(const at::Tensor &t, int64_t pad = 0, bool overwrite_nhwc = false);
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {

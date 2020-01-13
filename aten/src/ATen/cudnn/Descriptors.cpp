@@ -102,7 +102,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool check_nhwc) {
+void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool overwrite_nhwc) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -110,12 +110,13 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool check_nhwc) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous(t.suggest_memory_format(/*channels_last_strides_exact_match=*/check_nhwc))) {
+  auto memory_format = overwrite_nhwc ? at::MemoryFormat::ChannelsLast : t.suggest_memory_format();
+  if (!t.is_contiguous(memory_format)) {
     // NB: It is possible for this test to be insufficient, because the
     // Tensor passed in to set the filter descriptor may not be the actual
     // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
     // that is the common case, so we can catch most client errors with this test.
-    throw std::runtime_error("cuDNN filters (a.k.a. weights) must be contiguous");
+    throw std::runtime_error("cuDNN filters (a.k.a. weights) must be contiguous in desired memory_format");
   }
   int size[CUDNN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
@@ -125,9 +126,16 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad, bool check_nhwc) {
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
-  cudnnTensorFormat_t filter_format = CUDNN_TENSOR_NCHW;
-  if (t.suggest_memory_format(/*channels_last_strides_exact_match=*/check_nhwc) == at::MemoryFormat::ChannelsLast) {
+  cudnnTensorFormat_t filter_format;
+  switch(memory_format) {
+  case at::MemoryFormat::Contiguous:
+    filter_format = CUDNN_TENSOR_NCHW;
+    break;
+  case at::MemoryFormat::ChannelsLast:
     filter_format = CUDNN_TENSOR_NHWC;
+    break;
+  default:
+    throw std::runtime_error("unsurpported memory_format for cuDNN filters");
   }
   set(getDataType(t), (int) dim, size, filter_format);
 }
