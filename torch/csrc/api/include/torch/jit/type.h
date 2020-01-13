@@ -1,10 +1,12 @@
+#pragma once
+
 #include <vector>
 #include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 
-struct Dict;
-struct List;
+// struct Dict;
+// struct List;
 struct Tuple;
 struct Object;
 struct Value;

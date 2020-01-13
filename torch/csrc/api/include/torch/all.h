@@ -4,6 +4,7 @@
 #include <torch/data.h>
 #include <torch/enum.h>
 #include <torch/jit.h>
+#include <torch/jit/value.h>
 #include <torch/nn.h>
 #include <torch/optim.h>
 #include <torch/serialize.h>
