@@ -133,7 +133,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   }
 
   // simple executor
-  if (!getProfilingMode() || num_bailouts_ == 0) {
+  if (num_bailouts_ == 0) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
