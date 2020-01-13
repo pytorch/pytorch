@@ -68,7 +68,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntListRef().equals(rhs.toIntListRef());
+    return lhs.toIntListRef() == rhs.toIntListRef();
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
@@ -168,11 +168,14 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     auto listType = v->node()->output()->type();
     auto containedType = listType->containedTypes().at(0);
     if (containedType == IntType::get()) {
-      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toInt(); }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toInt(); }));
     } else if (containedType == FloatType::get()) {
-      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toDouble(); }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toDouble(); }));
     } else if (containedType->isSubtypeOf(TensorType::get())) {
-      return c10::impl::toList(fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
       return c10::nullopt;
     }

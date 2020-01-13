@@ -61,7 +61,7 @@ c10::optional<Value*> tryInsertConstant(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntListRef().vec());
+    n->is_(attr::value, val.toIntListRef());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
     n->ts_(
@@ -176,7 +176,7 @@ RegisterOperators reg({
 });
 
 c10::optional<IValue> toIValue(const Value* v) {
-  if (v->node()->kind() != prim::Constant) {
+  if (v->node()->kind() != prim::Constant || v->type()->cast<FunctionType>()) {
     return c10::nullopt;
   }
   // use implemenation of prim::Constant to compute the output IValue
