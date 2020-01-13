@@ -383,6 +383,16 @@ struct PeepholeOptimizeImpl {
     }
   }
 
+  bool safeToChangeAliasingRelationship(Node* node) {
+    if (changed_) {
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      changed_ = false;
+    }
+
+    return aliasDb_->safeToChangeAliasingRelationship(
+        node->inputs(), node->outputs());
+  }
+
   // if either the inputs or outputs of an op alias graph's inputs or
   // outputs, the transformations below are invalid
   // An example:
@@ -394,15 +404,7 @@ struct PeepholeOptimizeImpl {
   //     return s
   //
   void runAliasingSensitivePeepholeTransformations(Node* node) {
-    if (changed_) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
-      changed_ = false;
-    }
 
-    if (!aliasDb_->safeToChangeAliasingRelationship(
-            node->inputs(), node->outputs())) {
-      return;
-    }
 
     if (node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
@@ -413,6 +415,9 @@ struct PeepholeOptimizeImpl {
       // x + 0 == x - 0 == x
       if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+        if (!safeToChangeAliasingRelationship(node)) {
+          return;
+        }
         GRAPH_UPDATE(
             *node,
             " (x + 0 == x - 0 == x) is replaced with ",
@@ -429,6 +434,9 @@ struct PeepholeOptimizeImpl {
             /*const_inputs=*/attr::other)) {
       // x * 1 == x / 1 == x
       if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+        if (!safeToChangeAliasingRelationship(node)) {
+          return;
+        }
         GRAPH_UPDATE(
             *node,
             " (x * 1 == x / 1 == x) is replaced with ",
