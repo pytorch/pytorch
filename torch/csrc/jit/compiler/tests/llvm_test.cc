@@ -16,8 +16,16 @@ TEST(LLVMTest, IntImmTest) {
   auto a = IntImm::make(2);
   LLVMCodeGen cg;
   a.accept(&cg);
-  EXPECT_EQ(cg.value(), 2);
+  EXPECT_EQ(cg.value<int>(), 2);
 }
+
+TEST(LLVMTest, FloatImmTest) {
+  auto a = FloatImm::make(1.0);
+  LLVMCodeGen cg;
+  a.accept(&cg);
+  EXPECT_EQ(cg.value<float>(), 1.0);
+}
+
 
 TEST(LLVMTest, IntAddTest) {
   auto a = IntImm::make(2);
@@ -25,7 +33,7 @@ TEST(LLVMTest, IntAddTest) {
   auto c = Add::make(a, b);
   LLVMCodeGen cg;
   c.accept(&cg);
-  EXPECT_EQ(cg.value(), 5);
+  EXPECT_EQ(cg.value<int>(), 5);
 }
 
 TEST(LLVMTest, IntSubTest) {
@@ -34,7 +42,7 @@ TEST(LLVMTest, IntSubTest) {
   auto c = Sub::make(a, b);
   LLVMCodeGen cg;
   c.accept(&cg);
-  EXPECT_EQ(cg.value(), -1);
+  EXPECT_EQ(cg.value<int>(), -1);
 }
 
 TEST(LLVMTest, IntMulTest) {
@@ -43,7 +51,7 @@ TEST(LLVMTest, IntMulTest) {
   auto c = Mul::make(a, b);
   LLVMCodeGen cg;
   c.accept(&cg);
-  EXPECT_EQ(cg.value(), 6);
+  EXPECT_EQ(cg.value<int>(), 6);
 }
 
 TEST(LLVMTest, IntDivTest) {
@@ -52,7 +60,7 @@ TEST(LLVMTest, IntDivTest) {
   auto c = Div::make(a, b);
   LLVMCodeGen cg;
   c.accept(&cg);
-  EXPECT_EQ(cg.value(), 2);
+  EXPECT_EQ(cg.value<int>(), 2);
 }
 
 TEST(LLVMTest, BufferTest) {
@@ -62,7 +70,7 @@ TEST(LLVMTest, BufferTest) {
   std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
   rv.accept(&cg);
-  EXPECT_EQ(cg.value(args), 0);
+  EXPECT_EQ(cg.value<int>(args), 0);
 }
 
 TEST(LLVMTest, LoadStoreTest) {
@@ -79,7 +87,7 @@ TEST(LLVMTest, LoadStoreTest) {
       IntImm::make(1));
   store.accept(&cg);
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  EXPECT_EQ(cg.value(args), 0);
+  EXPECT_EQ(cg.value<int>(args), 0);
   EXPECT_EQ(a_buffer[0], 42);
   EXPECT_EQ(b_buffer[0], 42);
 }
@@ -100,7 +108,7 @@ TEST(LLVMTest, MemcpyTest) {
   memcpy_expr.accept(&cg);
 
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});
-  ASSERT_EQ(cg.value(args), 0);
+  ASSERT_EQ(cg.value<int>(args), 0);
 
   ASSERT_EQ(a_buffer.size(), N);
   ASSERT_EQ(b_buffer.size(), N);
@@ -122,7 +130,7 @@ TEST(LLVMTest, BzeroTest) {
   memcpy_expr.accept(&cg);
 
   std::vector<void*> args({b_buffer.data()});
-  ASSERT_EQ(cg.value(args), 0);
+  ASSERT_EQ(cg.value<int>(args), 0);
 
   ASSERT_EQ(b_buffer.size(), N);
   assertAllEqual(b_buffer, 0);
@@ -153,7 +161,7 @@ TEST(LLVMTest, ElemwiseAdd) {
   memcpy_expr.accept(&cg);
 
   std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
-  ASSERT_EQ(cg.value(args), 0);
+  ASSERT_EQ(cg.value<int>(args), 0);
 
   ASSERT_EQ(a_buffer.size(), N);
   ASSERT_EQ(b_buffer.size(), N);

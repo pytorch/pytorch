@@ -23,6 +23,7 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
       jit_->getTargetMachine().getTargetTriple().normalize());
 
   int32Ty_ = llvm::Type::getInt32Ty(context_);
+  floatTy_ = llvm::Type::getFloatTy(context_);
 
   // Emit prototype.
   std::vector<llvm::Type*> params;
@@ -102,7 +103,8 @@ void LLVMCodeGen::visit(const IntImm* v) {
 }
 
 void LLVMCodeGen::visit(const FloatImm* v) {
-  assert(false && "Integer only now sorry");
+  value_ = 
+    llvm::ConstantFP::get(floatTy_, v->value());
 }
 
 void LLVMCodeGen::visit(const Cast* v) {}
@@ -184,7 +186,7 @@ void LLVMCodeGen::visit(const Store* v) {
 
 void LLVMCodeGen::visit(const Broadcast* v) {}
 
-void optimize(llvm::TargetMachine& TM, llvm::Module& M) {
+void LLVMCodeGen::optimize(llvm::TargetMachine& TM, llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
 
@@ -207,38 +209,4 @@ void optimize(llvm::TargetMachine& TM, llvm::Module& M) {
   }
   FPM.doFinalization();
   PM.run(M);
-}
-
-int LLVMCodeGen::value() {
-  std::vector<void*> args;
-  return value(args);
-}
-
-int LLVMCodeGen::value(std::vector<void*>& args) {
-  irb_.CreateRet(value_);
-  assert(!llvm::verifyFunction(*fn_, &llvm::outs()));
-  optimize(jit_->getTargetMachine(), *module_);
-
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  jit_->getTargetMachine().addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
-#endif
-
-  auto key = jit_->addModule(std::move(module_));
-  auto sym = jit_->findSymbol("wrapper");
-  auto addr = sym.getAddress();
-  assert(addr);
-  int (*fp)(void**) = (int (*)(void**))addr.get();
-  int rv = fp(args.data());
-  jit_->removeModule(key);
-  return rv;
 }
