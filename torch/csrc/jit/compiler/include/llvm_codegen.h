@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/compiler/include/ir_visitor.h"
 #include "torch/csrc/jit/compiler/include/ir.h"
+#include "torch/csrc/jit/compiler/include/ir_visitor.h"
 #include "torch/csrc/jit/compiler/include/llvm_jit.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -22,11 +22,11 @@ class LLVMCodeGen : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_;
   llvm::Type* int32Ty_;
-  std::unordered_map<const BaseExprNode *, int> varToArg_;
-  std::unordered_map<const Variable *, llvm::Value *> varToVal_;
+  std::unordered_map<const BaseExprNode*, int> varToArg_;
+  std::unordered_map<const Variable*, llvm::Value*> varToVal_;
 
  public:
-  explicit LLVMCodeGen(const std::vector<Buffer *> &args);
+  explicit LLVMCodeGen(const std::vector<Buffer*>& args);
   LLVMCodeGen();
 
   void visit(const Add* v) override;
@@ -46,7 +46,7 @@ class LLVMCodeGen : public IRVisitor {
   void visit(const Broadcast* v) override;
 
   int value();
-  int value(std::vector<void *> &args);
+  int value(std::vector<void*>& args);
 };
 
 } // namespace compiler

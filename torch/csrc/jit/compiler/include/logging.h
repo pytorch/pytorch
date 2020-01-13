@@ -15,8 +15,7 @@ const int ERROR = 2;
 const int WARNING = 1;
 const int INFO = 0;
 
-__attribute__((noreturn))
-inline void assert_unreachable(const char *msg) {
+__attribute__((noreturn)) inline void assert_unreachable(const char* msg) {
   std::cerr << msg << "\n";
   std::abort();
 }
@@ -38,8 +37,7 @@ class MessageLogger {
     assert_unreachable("No such severity level");
   }
 
-  MessageLogger(const char* file, int line)
-      : severity_(severity) {
+  MessageLogger(const char* file, int line) : severity_(severity) {
     stream_ << SeverityToString(severity) << ":" << file << ":" << line << ": ";
   }
 
@@ -52,8 +50,7 @@ class MessageLogger {
 
  private:
   // When there is a fatal log, we simply abort.
-__attribute__((noreturn))
-  void DealWithFatal() {
+  __attribute__((noreturn)) void DealWithFatal() {
     abort();
   }
 
@@ -76,12 +73,11 @@ MessageLogger<severity>::~MessageLogger() {
 }
 
 template <>
-__attribute__((noreturn))
-inline MessageLogger<FATAL>::~MessageLogger() {
+__attribute__((noreturn)) inline MessageLogger<FATAL>::~MessageLogger() {
   std::cerr << stream_.str() << std::flush;
   DealWithFatal();
 }
- 
+
 // Log a message and terminate.
 template <class T>
 void LogMessageFatal(const char* file, int line, const T& message) {
