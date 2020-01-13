@@ -170,3 +170,18 @@ TEST(LLVMTest, ElemwiseAdd) {
   assertAllEqual(b_buffer, 1);
   assertAllEqual(c_buffer, 42);
 }
+
+TEST(LLVMTest, StoreFloat) {
+  Buffer result(Var("result", kHandle), kFloat32, {1});
+  std::vector<float> result_buffer = {0.0f};
+  auto expr = Store::make(
+    result,
+    IntImm::make(0),
+    FloatImm::make(3.14f),
+    IntImm::make(1));
+  LLVMCodeGen cg({&result});
+  expr.accept(&cg);
+  std::vector<void *> args({result_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  EXPECT_EQ(result_buffer[0], 3.14f);
+}

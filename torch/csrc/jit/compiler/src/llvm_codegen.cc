@@ -28,7 +28,12 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
   // Emit prototype.
   std::vector<llvm::Type*> params;
   for (int i = 0; i < args.size(); i++) {
-    params.push_back(llvm::Type::getInt32PtrTy(context_));
+    auto const &arg = args[i];
+    if (arg->dtype() == kInt32) {
+      params.push_back(llvm::Type::getInt32PtrTy(context_));
+    } else if (arg->dtype() == kFloat32) {
+      params.push_back(llvm::Type::getFloatPtrTy(context_));
+    }
     varToArg_[args[i]->data().node()] = i;
   }
   llvm::FunctionType* fntype = llvm::FunctionType::get(int32Ty_, params, false);
@@ -39,9 +44,9 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
   }
 
   // Emit wrapper to unpack argument vector.
-  auto i32pp = int32Ty_->getPointerTo()->getPointerTo();
+  auto voidPP = llvm::Type::getVoidTy(context_)->getPointerTo()->getPointerTo();
   auto wrapper = llvm::Function::Create(
-      llvm::FunctionType::get(int32Ty_, {i32pp}, false),
+      llvm::FunctionType::get(int32Ty_, {voidPP}, false),
       llvm::Function::ExternalLinkage,
       "wrapper",
       module_.get());
