@@ -12,7 +12,7 @@
 
 using namespace torch::jit::compiler;
 
-LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer *> &args) : irb_(context_) {
+LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetAsmParser();
@@ -25,14 +25,14 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer *> &args) : irb_(context_) {
   int32Ty_ = llvm::Type::getInt32Ty(context_);
 
   // Emit prototype.
-  std::vector<llvm::Type *> params;
+  std::vector<llvm::Type*> params;
   for (int i = 0; i < args.size(); i++) {
     params.push_back(llvm::Type::getInt32PtrTy(context_));
     varToArg_[args[i]->data().node()] = i;
   }
   llvm::FunctionType* fntype = llvm::FunctionType::get(int32Ty_, params, false);
   fn_ = llvm::Function::Create(
-    fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
+      fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
   for (int i = 0; i < args.size(); i++) {
     fn_->addParamAttr(i, llvm::Attribute::NoAlias);
   }
@@ -40,15 +40,17 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer *> &args) : irb_(context_) {
   // Emit wrapper to unpack argument vector.
   auto i32pp = int32Ty_->getPointerTo()->getPointerTo();
   auto wrapper = llvm::Function::Create(
-    llvm::FunctionType::get(int32Ty_, {i32pp}, false),
-    llvm::Function::ExternalLinkage, "wrapper", module_.get());
+      llvm::FunctionType::get(int32Ty_, {i32pp}, false),
+      llvm::Function::ExternalLinkage,
+      "wrapper",
+      module_.get());
   auto wrapBB = llvm::BasicBlock::Create(context_, "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
-  llvm::SmallVector<llvm::Value *, 6> wrappedArgs;
-  for (size_t i = 0 ; i < args.size(); i++) {
+  llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
+  for (size_t i = 0; i < args.size(); i++) {
     auto argp = irb_.CreateGEP(
-      wrapper->arg_begin(),
-      llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, i)));
+        wrapper->arg_begin(),
+        llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, i)));
     auto arg = irb_.CreateLoad(argp);
     wrappedArgs.push_back(arg);
   }
@@ -147,7 +149,8 @@ void LLVMCodeGen::visit(const For* v) {
   v->body().accept(this);
 
   // Create the stop condition. and "after" block.
-  auto inc = irb_.CreateAdd(idx,  llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 1)));
+  auto inc = irb_.CreateAdd(
+      idx, llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 1)));
   v->stop().accept(this);
   auto stop = this->value_;
   auto cond = irb_.CreateICmpSLT(inc, stop);
@@ -181,7 +184,7 @@ void LLVMCodeGen::visit(const Store* v) {
 
 void LLVMCodeGen::visit(const Broadcast* v) {}
 
-void optimize(llvm::TargetMachine &TM, llvm::Module &M) {
+void optimize(llvm::TargetMachine& TM, llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
 
@@ -199,7 +202,7 @@ void optimize(llvm::TargetMachine &TM, llvm::Module &M) {
   PMB.populateModulePassManager(PM);
   FPM.doInitialization();
   PM.run(M);
-  for (auto &FF : M) {
+  for (auto& FF : M) {
     FPM.run(FF);
   }
   FPM.doFinalization();
@@ -207,11 +210,11 @@ void optimize(llvm::TargetMachine &TM, llvm::Module &M) {
 }
 
 int LLVMCodeGen::value() {
-  std::vector<void *> args;
+  std::vector<void*> args;
   return value(args);
 }
 
-int LLVMCodeGen::value(std::vector<void *> &args) {
+int LLVMCodeGen::value(std::vector<void*>& args) {
   irb_.CreateRet(value_);
   assert(!llvm::verifyFunction(*fn_, &llvm::outs()));
   optimize(jit_->getTargetMachine(), *module_);
@@ -222,8 +225,10 @@ int LLVMCodeGen::value(std::vector<void *> &args) {
   llvm::raw_svector_ostream asmStream(asmBuffer);
   llvm::legacy::PassManager PM;
   jit_->getTargetMachine().addPassesToEmitFile(
-    PM, asmStream, nullptr,
-    llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+      PM,
+      asmStream,
+      nullptr,
+      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
   PM.run(*module_);
   llvm::errs() << asmStream.str();
 #endif
@@ -232,7 +237,7 @@ int LLVMCodeGen::value(std::vector<void *> &args) {
   auto sym = jit_->findSymbol("wrapper");
   auto addr = sym.getAddress();
   assert(addr);
-  int (*fp)(void **) = (int (*)(void **))addr.get();
+  int (*fp)(void**) = (int (*)(void**))addr.get();
   int rv = fp(args.data());
   jit_->removeModule(key);
   return rv;

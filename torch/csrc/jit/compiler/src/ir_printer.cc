@@ -69,7 +69,8 @@ void IRPrinter::visit(const Let* v) {
 }
 
 void IRPrinter::visit(const Ramp* v) {
-  os << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes() << ")";
+  os << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes()
+     << ")";
 }
 
 void IRPrinter::visit(const Load* v) {
@@ -79,9 +80,8 @@ void IRPrinter::visit(const Load* v) {
 
 void IRPrinter::visit(const For* v) {
   std::string var_name = v->var().name_hint();
-  os << "for (" << var_name << " = " << v->start() << "; "
-     << var_name << " < " << v->stop() << "; "
-     << var_name << "++) {" << std::endl;
+  os << "for (" << var_name << " = " << v->start() << "; " << var_name << " < "
+     << v->stop() << "; " << var_name << "++) {" << std::endl;
   os << v->body() << std::endl;
   os << "}";
 }
@@ -94,8 +94,7 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
-  os << v->base_handle() << "[" << v->index() << "] = "
-     << v->value();
+  os << v->base_handle() << "[" << v->index() << "] = " << v->value();
 }
 
 void IRPrinter::visit(const Broadcast* v) {

@@ -5,9 +5,9 @@
 
 using namespace torch::jit::compiler;
 
-template<typename T>
-static void assertAllEqual(const std::vector<T> &vec, const T &val) {
-  for (auto const &elt : vec) {
+template <typename T>
+static void assertAllEqual(const std::vector<T>& vec, const T& val) {
+  for (auto const& elt : vec) {
     ASSERT_EQ(elt, val);
   }
 }
@@ -59,7 +59,7 @@ TEST(LLVMTest, BufferTest) {
   Buffer a(Var("A", kHandle), kFloat32, {32});
   LLVMCodeGen cg({&a});
   std::vector<int32_t> v(5);
-  std::vector<void *> args({v.data()});
+  std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
   rv.accept(&cg);
   EXPECT_EQ(cg.value(args), 0);
@@ -73,12 +73,12 @@ TEST(LLVMTest, LoadStoreTest) {
 
   LLVMCodeGen cg({&a, &b});
   auto store = Store::make(
-    b,
-    IntImm::make(0),
-    Load::make(a, IntImm::make(0), IntImm::make(1)),
-    IntImm::make(1));
+      b,
+      IntImm::make(0),
+      Load::make(a, IntImm::make(0), IntImm::make(1)),
+      IntImm::make(1));
   store.accept(&cg);
-  std::vector<void *> args({a_buffer.data(), b_buffer.data()});
+  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
   EXPECT_EQ(cg.value(args), 0);
   EXPECT_EQ(a_buffer[0], 42);
   EXPECT_EQ(b_buffer[0], 42);
@@ -93,14 +93,13 @@ TEST(LLVMTest, MemcpyTest) {
 
   auto mask = IntImm::make(1);
   Var i("i", kInt32);
-  auto memcpy_expr = For::make(
-    i, 0, N,
-    Store::make(b, i, Load::make(a, i, mask), mask));
+  auto memcpy_expr =
+      For::make(i, 0, N, Store::make(b, i, Load::make(a, i, mask), mask));
 
   LLVMCodeGen cg({&a, &b});
   memcpy_expr.accept(&cg);
 
-  std::vector<void *> args({a_buffer.data(), b_buffer.data()});
+  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
   ASSERT_EQ(cg.value(args), 0);
 
   ASSERT_EQ(a_buffer.size(), N);
@@ -116,14 +115,13 @@ TEST(LLVMTest, BzeroTest) {
 
   auto mask = IntImm::make(1);
   Var i("i", kInt32);
-  auto memcpy_expr = For::make(
-    i, 0, N,
-    Store::make(b, i, IntImm::make(0), mask));
+  auto memcpy_expr =
+      For::make(i, 0, N, Store::make(b, i, IntImm::make(0), mask));
 
   LLVMCodeGen cg({&b});
   memcpy_expr.accept(&cg);
 
-  std::vector<void *> args({b_buffer.data()});
+  std::vector<void*> args({b_buffer.data()});
   ASSERT_EQ(cg.value(args), 0);
 
   ASSERT_EQ(b_buffer.size(), N);
@@ -142,18 +140,19 @@ TEST(LLVMTest, ElemwiseAdd) {
   auto mask = IntImm::make(1);
   Var i("i", kInt32);
   auto memcpy_expr = For::make(
-    i, 0, N,
-    Store::make(
-      c, i,
-      Add::make(
-        Load::make(a, i, mask),
-        Load::make(b, i, mask)),
-      mask));
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          i,
+          Add::make(Load::make(a, i, mask), Load::make(b, i, mask)),
+          mask));
 
   LLVMCodeGen cg({&a, &b, &c});
   memcpy_expr.accept(&cg);
 
-  std::vector<void *> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
   ASSERT_EQ(cg.value(args), 0);
 
   ASSERT_EQ(a_buffer.size(), N);
