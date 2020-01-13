@@ -146,6 +146,7 @@ COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
+    '-fno-gpu-rdc'
 ]
 
 # See comment in load_inline for more information
@@ -329,10 +330,12 @@ class BuildExtension(build_ext, object):
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if ROCM_HOME:
-                        cflags = COMMON_HIPCC_FLAGS + cflags
+                        cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = COMMON_NVCC_FLAGS + ['--compiler-options',
                                                   "'-fPIC'"] + cflags + _get_cuda_arch_flags(cflags)
+                elif ROCM_HOME:
+                    cflags = COMMON_HIPCC_FLAGS + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
                 # NVCC does not allow multiple -std to be passed, so we avoid
@@ -560,6 +563,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['include_dirs'] = include_dirs
 
     kwargs['language'] = 'c++'
+
+    define_macros = kwargs.get('define_macros', [])
+    if ROCM_HOME:
+        define_macros += [('__HIP_PLATFORM_HCC__',1)]
+    kwargs['define_macros'] = define_macros
 
     return setuptools.Extension(name, sources, *args, **kwargs)
 
@@ -1100,6 +1108,20 @@ def _get_cuda_arch_flags(cflags=None):
                 flags.append('-gencode=arch=compute_{},code=compute_{}'.format(num, num))
 
     return list(set(flags))
+
+
+def _get_rocm_arch_flags(cflags=None):
+    # If cflags is given, there may already be user-provided arch flags in it
+    # (from `extra_compile_args`)
+    if cflags is not None:
+        for flag in cflags:
+            if 'amdgpu-target' in flag:
+                return []
+    return [
+        '--amdgpu-target=gfx803',
+        '--amdgpu-target=gfx900',
+        '--amdgpu-target=gfx906'
+    ]
 
 
 def _get_build_directory(name, verbose):
