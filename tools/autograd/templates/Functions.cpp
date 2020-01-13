@@ -152,7 +152,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 // Currently, tensorflow defines d(a^b)/db = nan for a = 0 and b < 0.
 //
 // We define d(a^b)/db = 0 for a = 0 and b = 0 by continuity as
-// d(a^b)/db -> 0 for a = 0 and b -> +0.
+// d(a^b)/db = 0 for a > 0 and b -> +0.
 // Currently, tensorflow agrees with us.
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   return grad * at::where(at::logical_and(self == 0, exponent >= 0),
