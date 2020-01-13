@@ -102,7 +102,7 @@
 #         - If there is only one differentiable output, this Tensor is marked as a
 #           differentiable view.
 #         - If there are more than one differentiable output, all the views are
-#           marked as differentiable views and with `disable_rebase_history(result)`.
+#           marked as differentiable views and created with allow_rebase_history=false.
 #           Meaning that any inplace operation on it will raise an error.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
