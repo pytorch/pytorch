@@ -5993,7 +5993,7 @@ The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
 The argument :attr:`diagonal` controls which diagonal to consider. If
-:attr:`diagonal` = 0, all elements on and below the main diagonal are
+:attr:`diagonal` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
 the main diagonal. The main diagonal are the set of indices
