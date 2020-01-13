@@ -105,9 +105,8 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
   // clear any residual undefinedness
   // double backward graph inputs'
-  // when constructed carry over
-  // undefinedness from profiled
-  // backward graphs
+  // may carry over undefinedness
+  // from profiled backward graphs
   ClearUndefinedness(copy);
   runRequiredPasses(copy);
   if (!getGraphExecutorOptimize()) {
