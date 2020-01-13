@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
@@ -184,7 +185,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      atomicAdd(&(gradInput[argmax]), z);
+      gpuAtomicAdd(&(gradInput[argmax]), z);
     }
   }
 }
