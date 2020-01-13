@@ -10541,6 +10541,28 @@ class TestTorchDeviceType(TestCase):
                                              [0, 0, 0],
                                              [1, 1, 1]]))
 
+        # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
+        # Also check that cumprod over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cumprod(dim=dim)
+                # Check that backward does not crash
+                integrated.sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cumprod(dim=-1)
+        # Check that backward does not crash
+        integrated.sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -10917,6 +10939,10 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensordot(a, b, dims=2).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=2))
+
+        with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
+            torch.tensordot(a, b, dims=-1)
+
         self.assertEqual(c, cn)
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
@@ -14122,23 +14148,69 @@ class TestTorchDeviceType(TestCase):
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
+# NOTE [Linspace+Logspace precision override]
+# Our Linspace and logspace torch.half CUDA kernels are not very precise.
+# Since linspace/logspace are deterministic, we can compute an expected
+# amount of error (by testing without a precision override), adding a tiny
+# amount (EPS) to that, and using that value as the override.
+LINSPACE_LOGSPACE_EXTRA_EPS = 1e-5
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
-    def test_linspace(self, device):
-        a = torch.linspace(0, 10, 10, device=device)
-        b = torch.linspace(0, 10, 10)
+
+    # The implementation of linspace+logspace goes through a different path
+    # when the steps arg is equal to 0 or 1. For other values of `steps`
+    # they call specialized linspace (or logspace) kernels.
+    LINSPACE_LOGSPACE_SPECIAL_STEPS = [0, 1]
+
+    def _test_linspace(self, device, dtype, steps):
+        a = torch.linspace(0, 10, steps=steps, dtype=dtype, device=device)
+        b = torch.linspace(0, 10, steps=steps)
         self.assertEqual(a, b)
 
-    @dtypes(torch.double)
+    # See NOTE [Linspace+Logspace precision override]
+    @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_linspace(self, device, dtype):
+        self._test_linspace(device, dtype, steps=10)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_linspace_special_steps(self, device, dtype):
+        for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
+            self._test_linspace(device, dtype, steps=steps)
+
+    def _test_logspace(self, device, dtype, steps):
+        a = torch.logspace(1, 1.1, steps=steps, dtype=dtype, device=device)
+        b = torch.logspace(1, 1.1, steps=steps)
+        self.assertEqual(a, b)
+
+    def _test_logspace_base2(self, device, dtype, steps):
+        a = torch.logspace(1, 1.1, steps=steps, base=2, dtype=dtype, device=device)
+        b = torch.logspace(1, 1.1, steps=steps, base=2)
+        self.assertEqual(a, b)
+
+    # See NOTE [Linspace+Logspace precision override]
+    @precisionOverride({torch.half: 0.0157 + LINSPACE_LOGSPACE_EXTRA_EPS})
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
     def test_logspace(self, device, dtype):
-        a = torch.logspace(1, 10, 10, dtype=dtype, device=device)
-        b = torch.logspace(1, 10, 10, dtype=dtype, device='cpu')
-        self.assertEqual(a, b)
+        self._test_logspace(device, dtype, steps=10)
 
-        # Check non-default base=2
-        a = torch.logspace(1, 10, 10, 2, dtype=dtype, device=device)
-        b = torch.logspace(1, 10, 10, 2, dtype=dtype, device='cpu')
-        self.assertEqual(a, b)
+    # See NOTE [Linspace+Logspace precision override]
+    @precisionOverride({torch.half: 0.00201 + LINSPACE_LOGSPACE_EXTRA_EPS})
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_logspace_base2(self, device, dtype):
+        self._test_logspace_base2(device, dtype, steps=10)
+
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    def test_logspace_special_steps(self, device, dtype):
+        for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
+            self._test_logspace(device, dtype, steps=steps)
+            self._test_logspace_base2(device, dtype, steps=steps)
 
     # Note: ROCm fails when using float tensors
     @dtypes(torch.double)
