@@ -82,10 +82,10 @@ class TestFakeQuantizePerTensor(TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
     def test_backward_per_tensor(self, device, X):
         r"""Tests the backward method.
         """
@@ -105,11 +105,11 @@ class TestFakeQuantizePerTensor(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    # https://github.com/pytorch/pytorch/issues/30604
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    # https://github.com/pytorch/pytorch/issues/30604
-    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_tensor(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
@@ -125,6 +125,7 @@ class TestFakeQuantizePerTensor(TestCase):
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
@@ -246,10 +247,10 @@ class TestFakeQuantizePerChannel(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_channel(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """
@@ -267,6 +268,7 @@ class TestFakeQuantizePerChannel(TestCase):
             X, scale, zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
            qparams=hu.qparams(dtypes=torch.qint8)))
