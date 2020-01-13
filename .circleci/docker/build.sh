@@ -103,7 +103,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
     ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7)
     CUDA_VERSION=9.2
