@@ -8,6 +8,12 @@
 #include <unordered_map>
 #include <vector>
 
+#define DEBUG_PRINT 0
+
+#if DEBUG_PRINT
+#include <llvm/IR/LegacyPassManager.h>
+#endif
+
 namespace torch {
 namespace jit {
 namespace compiler {
@@ -62,7 +68,7 @@ class LLVMCodeGen : public IRVisitor {
     assert(!llvm::verifyFunction(*fn_, &llvm::outs()));
     optimize(jit_->getTargetMachine(), *module_);
 
-  #if DEBUG_PRINT
+#if DEBUG_PRINT
     llvm::errs() << *module_;
     llvm::SmallVector<char, 0> asmBuffer;
     llvm::raw_svector_ostream asmStream(asmBuffer);
@@ -74,7 +80,7 @@ class LLVMCodeGen : public IRVisitor {
         llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
     PM.run(*module_);
     llvm::errs() << asmStream.str();
-  #endif
+#endif
 
     auto key = jit_->addModule(std::move(module_));
     auto sym = jit_->findSymbol("wrapper");
