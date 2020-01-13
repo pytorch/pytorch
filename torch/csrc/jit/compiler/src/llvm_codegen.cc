@@ -12,7 +12,7 @@
 
 using namespace torch::jit::compiler;
 
-LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
+LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(context_) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetAsmParser();
@@ -26,6 +26,12 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
   floatTy_ = llvm::Type::getFloatTy(context_);
 
   // Emit prototype.
+  llvm::Type* ret_ty = nullptr;
+  if (dtype == kInt32) {
+    ret_ty = int32Ty_;
+  } else if (dtype == kFloat32) {
+    ret_ty = floatTy_;
+  }
   std::vector<llvm::Type*> params;
   for (int i = 0; i < args.size(); i++) {
     auto const &arg = args[i];
@@ -36,7 +42,7 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args) : irb_(context_) {
     }
     varToArg_[args[i]->data().node()] = i;
   }
-  llvm::FunctionType* fntype = llvm::FunctionType::get(int32Ty_, params, false);
+  llvm::FunctionType* fntype = llvm::FunctionType::get(ret_ty, params, false);
   fn_ = llvm::Function::Create(
       fntype, llvm::Function::PrivateLinkage, "pytorch", module_.get());
   for (int i = 0; i < args.size(); i++) {
@@ -112,7 +118,25 @@ void LLVMCodeGen::visit(const FloatImm* v) {
     llvm::ConstantFP::get(floatTy_, v->value());
 }
 
-void LLVMCodeGen::visit(const Cast* v) {}
+void LLVMCodeGen::visit(const Cast* v) {
+  v->src_value().accept(this);
+
+  if (v->dtype().lanes() == 1) {
+    if (v->dtype() == kInt32 &&
+        v->src_value().dtype() == kFloat32) {
+      value_ = irb_.CreateFPToSI(value_, int32Ty_);
+      return;
+    }
+
+    if (v->dtype() == kFloat32 &&
+        v->src_value().dtype() == kInt32) {
+      value_ = irb_.CreateSIToFP(value_, floatTy_);
+      return;
+    }
+  }
+
+  assert(0 && "Unhandled cast");
+}
 
 void LLVMCodeGen::visit(const Variable* v) {
   if (varToArg_.count(v)) {

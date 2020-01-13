@@ -21,11 +21,10 @@ TEST(LLVMTest, IntImmTest) {
 
 TEST(LLVMTest, FloatImmTest) {
   auto a = FloatImm::make(1.0);
-  LLVMCodeGen cg;
+  LLVMCodeGen cg({}, kFloat32);
   a.accept(&cg);
   EXPECT_EQ(cg.value<float>(), 1.0);
 }
-
 
 TEST(LLVMTest, IntAddTest) {
   auto a = IntImm::make(2);
@@ -60,6 +59,22 @@ TEST(LLVMTest, IntDivTest) {
   auto c = Div::make(a, b);
   LLVMCodeGen cg;
   c.accept(&cg);
+  EXPECT_EQ(cg.value<int>(), 2);
+}
+
+TEST(LLVMTest, IntToFloatCastTest) {
+  auto a = IntImm::make(2);
+  auto b = Cast::make(kFloat32, a);
+  LLVMCodeGen cg({}, kFloat32);
+  b.accept(&cg);
+  EXPECT_EQ(cg.value<float>(), 2.0);
+}
+
+TEST(LLVMTest, FloatToIntCastTest) {
+  auto a = FloatImm::make(2.0);
+  auto b = Cast::make(kInt32, a);
+  LLVMCodeGen cg;
+  b.accept(&cg);
   EXPECT_EQ(cg.value<int>(), 2);
 }
 
