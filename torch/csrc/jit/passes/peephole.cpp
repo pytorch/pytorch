@@ -50,7 +50,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
         auto input_type_sizes = input_type->sizes().concrete_sizes();
         if (expanded_sizes.has_value() && input_type_sizes &&
-            c10::impl::toVector(*expanded_sizes) == *input_type_sizes) {
+            expanded_sizes->vec() == *input_type_sizes) {
           GRAPH_UPDATE(
               *node,
               " (x.expand(x.size()) == x) is replaced with ",

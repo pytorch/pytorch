@@ -79,7 +79,7 @@ CUDA accessors
       PackedTensorAccessor64<float, 2> foo,
       float* trace) {
     int i=threadIdx.x
-    atomicAdd(trace, foo[i][i])
+    gpuAtomicAdd(trace, foo[i][i])
   }
 
   torch::Tensor foo = torch::rand({12, 12});
