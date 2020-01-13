@@ -58,6 +58,8 @@ class NCCLComm {
   NCCLComm() : NCCLComm(nullptr) {}
 
   ~NCCLComm() noexcept {
+    // Add lock in this destructor, as aborted_ needs to be read after memory
+    // barrier here.
     std::unique_lock<std::mutex> lock(mutex_);
     if (ncclComm_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
