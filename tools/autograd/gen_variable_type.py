@@ -761,38 +761,35 @@ def emit_body(declaration):
         return '\n'.join(names)
 
     def wrap_output(call):
-        # Returns a 2-tuple `(wrapped_call, extra_wrapping_stmts)`, where
-        # `wrapped_call` is to drop-in replace `call`, and
-        # `extra_wrapping_stmts` is a list of extra statements to run after
-        # `call`.
+        # Returns `wrapped_call` which is a drop-in replacement for `call`
         if 'Tensor' not in declaration['return_type']:
-            return call, []
+            return call
         elif view_info is not None:
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
-            tensor_output_vars = {r['name'] for r in returns if 'Tensor' in r['type']}
 
             if not isinstance(view_info, str):
-                raise TypeError("The view info should be a string for {}".format(base_name))
+                raise TypeError("The view info should be a string for {}, but it is: {}".format(base_name, view_info))
 
             if len(differentiable_output_vars) == 0:
-                # no output is differentiable
-                return 'as_view({}, {}, false)'.format(view_info, call), []
+                # no output is differentiable (.indices() for SparseTensors for example)
+                return 'as_non_differentiable_view({}, {})'.format(view_info, call)
             elif len(differentiable_output_vars) == 1:
-                # Single differentiable output
-                extra = []
-                is_differentiable_view = 'true'
-                wrapped_call = 'as_view({}, {}, {})'.format(view_info, call, is_differentiable_view)
+                # Single differentiable output (Tensor or Tensor[])
                 return_info = returns[0]
-                if return_info['type'] != 'Tensor':
-                    # We return a collection of Tensors so we disallow rebase history
-                    extra.append('disable_rebase_history({});\n'.format(return_info['name']))
-                return wrapped_call, extra
+                # We only support simple Tensor or a TensorList for functions that return views
+                if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
+                    raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
+                # Only allow rebasing of the history if we return a single Tensor
+                allow_rebase_history = 'true' if return_info['dynamic_type'] == 'Tensor' else 'false'
+                wrapped_call = 'as_differentiable_view({}, {}, {})'.format(view_info, call, allow_rebase_history)
+                return wrapped_call
             else:
+                # This could be supported but we don't need it at the moment, so keeping things simple.
                 raise RuntimeError("Function that return multiple differentiable output "
                                    "when at least one of them is view is not supported.")
         else:
-            return 'std::move({})'.format(call), []
+            return 'std::move({})'.format(call)
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -819,7 +816,6 @@ def emit_body(declaration):
 
     def emit_call(env):
         combined = nested_dict(env, declaration)
-        extra_wrapping_stmts = []
         if strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
@@ -833,7 +829,7 @@ def emit_body(declaration):
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
                     combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
-                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
+                rhs_value = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
                     base_type_call=base_type_call,
                     return_values=tie_return_values(),
@@ -846,8 +842,6 @@ def emit_body(declaration):
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'
-        for stmt in extra_wrapping_stmts:
-            call += '\n' + stmt
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
