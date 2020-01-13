@@ -73,7 +73,7 @@ class PytorchLLVMJITImpl {
               return nullptr;
             },
             [](Error Err) { cantFail(std::move(Err), "lookupFlags failed"); })),
-        TM(EngineBuilder().selectTarget(
+        TM(EngineBuilder().setCodeModel(CodeModel::Medium).selectTarget(
             llvm::Triple(),
             "",
             llvm::sys::getHostCPUName(),
