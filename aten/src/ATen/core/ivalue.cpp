@@ -45,7 +45,7 @@ TypePtr IValue::type() const {
       return DictType::create(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return ListType::create(toGenericList().elementType());
+      return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
     case Tag::Device:
@@ -147,7 +147,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Capsule:
       return out << "Capsule";
     case IValue::Tag::GenericList:
-      return printList(out, v.toGenericList(), "[", "]");
+      return printList(out, v.toList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:

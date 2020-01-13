@@ -804,7 +804,7 @@ struct PythonPrintImpl {
     } else if (v.isTensorList()) {
       ss << "[";
       const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorVector()) {
         ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
@@ -812,10 +812,10 @@ struct PythonPrintImpl {
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
+      printMaybeAnnotatedConstantList(ss, "int", v.toIntVector().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
+          ss, "float", v.toDoubleVector().size(), v);
     } else {
       ss << v;
     }
