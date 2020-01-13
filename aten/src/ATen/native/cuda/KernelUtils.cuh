@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
@@ -16,7 +17,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 #if (                         \
     (CUDA_VERSION < 10000) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  atomicAdd(
+  gpuAtomicAdd(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
 #else
@@ -51,7 +52,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     size_t index,
     const size_t numel,
     scalar_t value) {
-  atomicAdd(tensor + index, value);
+  gpuAtomicAdd(tensor + index, value);
 }
 
 template <class scalar_t>
@@ -64,7 +65,7 @@ __device__ __forceinline__ void fastAtomicAdd(
   if (fast_atomics) {
     fastSpecializedAtomicAdd(tensor, index, numel, value);
   } else {
-    atomicAdd(tensor + index, value);
+    gpuAtomicAdd(tensor + index, value);
   }
 }
 

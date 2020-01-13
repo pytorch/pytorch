@@ -65,7 +65,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
   }
 }
 
-std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
+std::unique_ptr<RpcCommandBase> deserializeResponse(
+    const Message& response,
+    MessageType& wrappedMsgType) {
   switch (response.type()) {
     case MessageType::SCRIPT_RET: {
       return ScriptResp::fromMessage(response);
@@ -86,7 +88,20 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
       return RRefAck::fromMessage(response);
     }
     case MessageType::FORWARD_AUTOGRAD_RESP: {
-      return autograd::RpcWithAutograd::fromMessage(response);
+      std::unique_ptr<RpcCommandBase> rpcPtr =
+          autograd::RpcWithAutograd::fromMessage(response);
+      RpcCommandBase& rpc = *rpcPtr;
+      auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      wrappedMsgType = rpcWithAutograd.wrappedMessageType();
+
+      return std::move(rpcWithAutograd).moveWrappedRpc();
     }
     case MessageType::BACKWARD_AUTOGRAD_RESP: {
       return autograd::PropagateGradientsResp::fromMessage(response);
@@ -109,20 +124,6 @@ IValue deserializeResptoIValueInternal(
       auto& ret = static_cast<ScriptResp&>(rpc);
       return ret.value();
     }
-    case MessageType::FORWARD_AUTOGRAD_RESP: {
-      auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(rpc);
-
-      // Attach 'recv' autograd function.
-      addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(),
-          rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
-
-      // Handle the original RPC.
-      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      return deserializeResptoIValueInternal(
-          rpcWithAutograd.wrappedRpc(), wrappedMessageType);
-    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false,
@@ -134,8 +135,9 @@ IValue deserializeResptoIValueInternal(
 }
 
 IValue deserializeRespToIValue(const Message& message) {
+  MessageType msgType = message.type();
   return deserializeResptoIValueInternal(
-      *deserializeResponse(message), message.type());
+      *deserializeResponse(message, msgType), msgType);
 }
 
 namespace {

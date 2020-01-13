@@ -18,6 +18,12 @@ from torch._C import parse_schema
 # Whitelist entries can be removed after the date listed on them passes.
 white_list = [
     ('c10_experimental', datetime.date(2222, 1, 1)),
+    ('cudnn_convolution', datetime.date(2020, 2, 1)),
+    ('cudnn_convolution_backward', datetime.date(2020, 2, 1)),
+    ('cudnn_convolution_backward_bias', datetime.date(2020, 2, 1)),
+    ('cudnn_convolution_transpose', datetime.date(2020, 2, 1)),
+    ('cudnn_convolution_transpose_backward', datetime.date(2020, 2, 1)),
+    ('cudnn_convolution_transpose_backward_bias', datetime.date(2020, 2, 1)),
     ('prim::AutogradAnyNonZero', datetime.date(2020, 2, 1)),
     ('upsample_linear1d.out', datetime.date(9999, 1, 1)),
     ('upsample_linear1d', datetime.date(9999, 1, 1)),
@@ -50,6 +56,19 @@ white_list = [
     ('_test_optional_float', datetime.date(9999, 1, 1)),
     ('aten::Int', datetime.date(2020, 1, 30)),
 ]
+
+jit_test_functions = [
+    '_TorchScriptTesting_StackString::pop',
+    '_TorchScriptTesting_StackString::push',
+    '_TorchScriptTesting_StackString::__init__',
+    '_TorchScriptTesting_Foo::combine',
+    '_TorchScriptTesting_Foo::add',
+    '_TorchScriptTesting_Foo::increment',
+    '_TorchScriptTesting_Foo::info',
+    '_TorchScriptTesting_Foo::__init__',
+]
+for fn in jit_test_functions:
+    white_list.append((fn, datetime.date(2020, 3, 1)))
 
 
 def white_listed(schema, white_list):
@@ -110,9 +129,6 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "__torch__.torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
-                continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

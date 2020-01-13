@@ -14,7 +14,8 @@ TORCH_API std::unique_ptr<RpcCommandBase> deserializeRequest(
 // Given an RPC message received as a response over the wire, deserialize it
 // into the appropriate 'RpcCommandBase' type.
 TORCH_API std::unique_ptr<RpcCommandBase> deserializeResponse(
-    const Message& response);
+    const Message& response,
+    MessageType& wrappedMsgType);
 
 // Given an RPC message received as a response over the wire, deserialize it
 // into the valid IValue if the message is for a script rpc result,

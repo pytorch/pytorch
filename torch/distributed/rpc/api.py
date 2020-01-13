@@ -11,7 +11,12 @@ from . import (
     _start_rpc_agent,
     backend_registry,
 )
-from .internal import _internal_rpc_pickler, PythonUDF
+from .internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    _start_record_function,
+)
 
 import contextlib
 import functools
@@ -20,6 +25,7 @@ import sys
 import torch
 import torch.distributed as dist
 
+from torch._jit_internal import _qualified_name
 
 _agent = None
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
@@ -186,7 +192,7 @@ def _to_worker_info(name_or_info):
     elif isinstance(name_or_info, str):
         return get_worker_info(name_or_info)
     else:
-        raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
@@ -255,40 +261,61 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
+    info = _to_worker_info(to)
+
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            RPCExecMode.REMOTE,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
         return _invoke_remote_builtin(
-            _agent, info, qualified_name, *args, **kwargs)
+            _agent, info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if not callable(func):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
+    info = _to_worker_info(to)
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            rpc_type,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, *args, **kwargs
+            _agent, info, qualified_name, rf, *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -301,8 +328,8 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         :meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): any callable function. builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -331,9 +358,32 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
-    return fut.wait()
+    # If invoking an annotated TorchScript function,
+    # call the internal API _rpc_sync_torchscript()
+    if isinstance(func, torch.jit.ScriptFunction):
+        return _rpc_sync_torchscript(to, _qualified_name(func), args, kwargs)
+    else:
+        fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
+        return fut.wait()
 
 
 @_require_initialized
@@ -346,8 +396,8 @@ def rpc_async(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         :meth:`torch.add`) can be sent over RPC more efficiently.
+        func (callable): any callable function. builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -380,19 +430,47 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> ret = fut.wait()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    # If invoking an annotated TorchScript function,
+    # call the internal API _rpc_async_torchscript()
+    if isinstance(func, torch.jit.ScriptFunction):
+        fut = _rpc_async_torchscript(to, _qualified_name(func), args, kwargs)
+    else:
+        fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
     return fut
 
 
-# All below private APIs are for making rpc torch script call.
-# Right now, rpc torch script call requires qualified_name to look up
-# compliation unit function, so rpc torch script call APIs are different
-# from rpc APIs for python call and built in operator call.
-# These private APIs are subject to be merged with above public rpc APIs when
-# jit supports torch script funciton to be a jit type.
+# All below private APIs are for making rpc torch script call that can be
+# serialized, deserialized and exectued in C++ without GIL.
+# These APIs will be binded to JIT and can be called in torch script
+# function/class/module in the future. But since JIT does not support torch
+# script function to be a jit type yet, the future binded APIs can only accept
+# qualified_name of the function as arg, that is why these APIs are made
+# to be private and different from above public rpc APIs.
+# Because JIT does not support torch script function to be a jit type, right now
+# these APIs can only accept torch script call to only be user annotated
+# torchscript function, they do not accept annotated torchscript class name or
+# script module class name or their class method name right now.
 @_require_initialized
-def _rpc_sync(to, qualified_name, args=None, kwargs=None):
+def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None):
     r"""
     Make a blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -428,7 +506,7 @@ def _rpc_sync(to, qualified_name, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> from torch._jit_internal import _qualified_name
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> ret = rpc._rpc_sync("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> ret = rpc._rpc_sync_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
         >>> rpc.shutdown()
 
         >>> # On worker 1:
@@ -443,7 +521,7 @@ def _rpc_sync(to, qualified_name, args=None, kwargs=None):
 
 
 @_require_initialized
-def _rpc_async(to, qualified_name, args=None, kwargs=None):
+def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -482,7 +560,7 @@ def _rpc_async(to, qualified_name, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> from torch._jit_internal import _qualified_name
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> fut = rpc._rpc_async("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> fut = rpc._rpc_async_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
         >>> ret = fut.wait()
         >>> rpc.shutdown()
 
