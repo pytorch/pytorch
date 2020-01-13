@@ -1016,7 +1016,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:a8006f9a-272d-4478-b137-d121c6f05c83"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:a8006f9a-272d-4478-b137-d121c6f05c83"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -1061,7 +1061,7 @@ jobs:
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:a8006f9a-272d-4478-b137-d121c6f05c83"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:a8006f9a-272d-4478-b137-d121c6f05c83"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -1818,6 +1818,12 @@ workflows:
           build_environment: "pytorch-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:a8006f9a-272d-4478-b137-d121c6f05c83"
           resource_class: large
+      - pytorch_python_doc_push:
+          requires:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_cpp_doc_push:
+          requires:
+            - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:
           name: pytorch_linux_backward_compatibility_check_test
           requires:
@@ -1965,12 +1971,6 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-nogpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:a8006f9a-272d-4478-b137-d121c6f05c83"
           resource_class: large
-      - pytorch_python_doc_push:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_cpp_doc_push:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
       - pytorch_linux_build:
           name: pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_build
           requires:
