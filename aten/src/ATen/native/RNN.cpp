@@ -44,12 +44,12 @@ struct PackedSequence {
   Tensor batch_sizes;
 };
 
-// TODO: Remove the once https://github.com/pytorch/pytorch/issues/30987 is closed
+// TODO: Remove this once https://github.com/pytorch/pytorch/issues/30987 is closed
 // This is used to avoid limitations with the autograd inplace verification check
 // that cannot detect non-overlapping changes.
 std::vector<Tensor> unsafe_chunk_no_version_check(const Tensor& self, int chunks, int dim) {
   const auto results = self.chunk(chunks, dim);
-  // Each result has its own version counter as they don't overlap.
+  // Each result gets its own version counter as they don't overlap.
   // This is still unsafe as changes to self will not be properly tracked as modifying results
   for (auto& t: results) {
     t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
