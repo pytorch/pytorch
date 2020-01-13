@@ -119,6 +119,7 @@ private:
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
+  [[noreturn]] static void reportError(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey);
 
   const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
 
