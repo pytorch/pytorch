@@ -571,6 +571,20 @@ bitwise_and_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_and`
 """)
 
+add_docstr_all('bitwise_or',
+               r"""
+bitwise_or() -> Tensor
+
+See :func:`torch.bitwise_or`
+""")
+
+add_docstr_all('bitwise_or_',
+               r"""
+bitwise_or_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_or`
+""")
+
 add_docstr_all('bitwise_xor',
                r"""
 bitwise_xor() -> Tensor
@@ -3413,7 +3427,7 @@ Out-of-place version of :meth:`torch.Tensor.index_fill_`
 
 add_docstr_all('scatter',
                r"""
-scatter(dim, index, source) -> Tensor
+scatter(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
 """)

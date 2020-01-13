@@ -361,6 +361,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
+      // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
     case prim::Uninitialized:
       giveFreshAlias(node->output());
@@ -850,8 +851,8 @@ bool AliasDb::mayContainAlias(Value* a, Value* b) const {
 }
 
 bool AliasDb::mayContainAlias(
-    const at::ArrayRef<Value*>& a,
-    const at::ArrayRef<Value*>& b) const {
+    const at::ArrayRef<Value*> a,
+    const at::ArrayRef<Value*> b) const {
   std::vector<Element*> a_elements;
   bool a_cannot_check_containment = false;
   for (const auto& val : a) {
@@ -941,6 +942,31 @@ bool AliasDb::moveBeforeTopologicallyValid(Node* n, Node* movePoint) {
 
 bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
+}
+
+bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
+  return std::any_of(values.begin(), values.end(), [&](Value* value) {
+    return hasWriters(value);
+  });
+}
+
+bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
+  return mayContainAlias(graph_->inputs(), vs) ||
+      mayContainAlias(graph_->outputs(), vs) || mayAliasWildcard(vs);
+}
+
+// Correctness conditions:
+// no values in either set can have writers, and values in both sets
+// cannot escape the current graph scope. Values can escape the current scope
+// by aliasing a graph output or input, or by aliasing the wildcard set.
+bool AliasDb::safeToChangeAliasingRelationship(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  if (hasWriters(a) || hasWriters(b)) {
+    return false;
+  }
+
+  return !(escapesScope(a) && escapesScope(b));
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.
@@ -1294,6 +1320,11 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
   }
   // There were no wildcards of this type, so return false.
   return false;
+}
+
+bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
+  return std::any_of(
+      vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
 }
 
 // Search the wildcard index for an element that corresponds to the given type.

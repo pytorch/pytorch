@@ -183,31 +183,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
-    def test_googlenet_quantization(self):
-        model = torchvision.models.quantization.googlenet(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_inception_quantization(self):
-        model = torchvision.models.quantization.inception_v3(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_mobilenet_quantization(self):
-        model = torchvision.models.quantization.mobilenet_v2(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
-    def test_resnet_quantization(self):
-        model = torchvision.models.quantization.resnet50(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,))
-
-    def test_shufflenet_quantization(self):
-        model = torchvision.models.quantization.shufflenet_v2_x1_0(pretrained=True)
-        x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-
     def test_r3d_18_video(self):
         model = torchvision.models.video.r3d_18(pretrained=True)
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
@@ -223,6 +198,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_reshape_constant_fold(self):
+        class Reshape(torch.nn.Module):
+            def __init__(self, ):
+                super(Reshape, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                scale_1 = self.weight.reshape(1, -1, 1, 1)
+                return x * scale_1
+
+        x = torch.randn(4, 5)
+        self.run_test(Reshape(), (x,), rtol=1e-3, atol=1e-5)
+
     def run_word_language_model(self, model_name):
         ntokens = 50
         emsize = 5
@@ -237,6 +225,70 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(0, ntokens).long().view(-1, batchsize)
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_faster_rcnn(self):
+        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
+                                                                                 max_size=300)
+        model.eval()
+        x = torch.randn(2, 3, 200, 300, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def get_image_from_url(self, url):
+        import sys
+        import os
+        if sys.version_info < (3,):
+            from urlparse import urlsplit
+            import urllib2
+            request = urllib2
+        else:
+            from urllib.parse import urlsplit
+            from urllib import request
+        from PIL import Image
+        from torchvision import transforms
+        from torch._utils_internal import get_writable_path
+
+        filename = os.path.basename(urlsplit(url)[2])
+        data_dir = get_writable_path(os.path.join(os.path.dirname(__file__)))
+        path = os.path.join(data_dir, filename)
+        data = request.urlopen(url, timeout=15).read()
+        with open(path, 'wb') as f:
+            f.write(data)
+        image = Image.open(path).convert("RGB")
+        image = image.resize((300, 200), Image.BILINEAR)
+        to_tensor = transforms.ToTensor()
+        return to_tensor(image)
+
+    def get_test_images(self):
+        image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
+        image = self.get_image_from_url(url=image_url)
+        images = [image]
+        return images
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_mask_rcnn(self):
+        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
+                                                                             max_size=300)
+        images = self.get_test_images()
+        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_keypoint_rcnn(self):
+        class KeyPointRCNN(torch.nn.Module):
+            def __init__(self):
+                super(KeyPointRCNN, self).__init__()
+                self.model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True,
+                                                                                                  min_size=200,
+                                                                                                  max_size=300)
+
+            def forward(self, images):
+                output = self.model(images)
+                # TODO: The keypoints_scores require the use of Argmax that is updated in ONNX.
+                #       For now we are testing all the output of KeypointRCNN except keypoints_scores.
+                #       Enable When Argmax is updated in ONNX Runtime.
+                return output[0]['boxes'], output[0]['labels'], output[0]['scores'], output[0]['keypoints']
+        images = self.get_test_images()
+        self.run_test(KeyPointRCNN(), (images,), rtol=1e-3, atol=1e-5)
 
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
@@ -782,6 +834,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         update = torch.arange(2 * 5).to(torch.float).view(2, 5)
         self.run_test(IndexPutModel6(), (x, update))
+
+        class IndexPutModel7(torch.nn.Module):
+            def forward(self, x, update):
+                x[1:, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(2 * 5).to(torch.float).view(2, 5)
+        self.run_test(IndexPutModel7(), (x, update))
+
+        class IndexPutModel8(torch.nn.Module):
+            def forward(self, x, update):
+                x[:3, 0] = update
+                return x
+
+        x = torch.randn(3, 4, 5)
+        update = torch.arange(3 * 5).to(torch.float).view(3, 5)
+        self.run_test(IndexPutModel8(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_ellipsis(self):

@@ -412,7 +412,7 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
+            return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
             c10::List<double> repeated;
@@ -424,7 +424,7 @@ inline IValue toIValue(
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<double>>(obj));
+            return IValue(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
@@ -435,9 +435,9 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::BoolType:
-          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
+          return IValue(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
-          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
+          return IValue(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -639,14 +639,6 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
-  } else if (ivalue.isIntList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
-  } else if (ivalue.isDoubleList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
-  } else if (ivalue.isBoolList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
-  } else if (ivalue.isTensorList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
   } else if (ivalue.isGenericList()) {
     auto list = std::move(ivalue).toGenericList();
     py::list t{list.size()};
