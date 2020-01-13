@@ -68,11 +68,6 @@ test_libtorch() {
 
     echo "Testing libtorch"
 
-    # yf225 DEBUG
-    echo $PWD
-    ls
-    # yf225 DEBUG end
-
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       build/bin/test_jit
