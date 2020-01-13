@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/compiler/include/llvm_jit.h"
 
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Verifier.h>
 #include <unordered_map>
 #include <vector>
 
@@ -35,8 +36,9 @@ class LLVMCodeGen : public IRVisitor {
   std::unordered_map<const Variable*, llvm::Value*> varToVal_;
 
  public:
-  explicit LLVMCodeGen(const std::vector<Buffer*>& args);
+  explicit LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype = kInt32);
   LLVMCodeGen();
+
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
