@@ -155,4 +155,20 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   listeners_->addListener(std::move(listener));
 }
 
+[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) {
+  if (!dispatchKey.has_value() || *dispatchKey == TensorTypeId::UndefinedTensorId) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
+
+  const std::string dispatchKeyStr = toString(*dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
+}
+
 }
