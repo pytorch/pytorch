@@ -73,10 +73,19 @@ public:
   c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
-   * Variant of findSchema that results in less code generated at the call site
-   * if you have string literals.
+   * Variant of findSchema that results in less code generated at the call site.
+   * It (1) takes const char* pointer rather than OperatorName (so we skip
+   * generating std::string constructor calls at the call site), and (2)
+   * it raises an exception if the operator is not found (so we skip
+   * generating exception raising code at the call site)
+   *
+   * Irritatingly, we still have to generate the handful of instructions
+   * for dealing with an exception being thrown during static initialization
+   * (e.g. __cxa_guard_abort).  If we could annotate this method noexcept we
+   * could avoid this code too, but as the name of the function suggests,
+   * it does throw exceptions.
    */
-  c10::optional<OperatorHandle> findSchema(const char* name, const char* overload_name);
+  OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
   /**
    * Register a kernel to the dispatch table for an operator.
