@@ -1251,6 +1251,7 @@ class RpcTest(RpcAgentTestFixture):
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         # foo
+        # foo foo foo
         from torch.distributed.rpc.api import _agent
         initialize_pg(self.init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
