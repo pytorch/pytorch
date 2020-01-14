@@ -12,6 +12,11 @@ C10_DEFINE_bool(
     true,
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
 
+C10_DEFINE_bool(
+    merge_fp32_inputs_into_fp16,
+    false,
+    "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
+
 C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
@@ -115,6 +120,7 @@ void onnxifi(
   opts.adjust_batch = FLAGS_onnxifi_adjust_batch;
   opts.min_ops = FLAGS_onnxifi_min_ops;
   opts.load_model_by_blob = load_model_by_blob;
+  opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
 
   auto more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

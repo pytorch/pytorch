@@ -54,10 +54,8 @@ void EliminateCommonSubexpression(
     auto parent_lookup = parent_lookup_fn(node);
     auto g_out = node->owningGraph()->outputs();
     if (parent_lookup) {
-      // since the graph outputs may be mutated after they are returned,
-      // don't introduce new aliasing among graph outputs
-      if (aliasDb.mayContainAlias(node->outputs(), g_out) &&
-          aliasDb.mayContainAlias(parent_lookup->outputs(), g_out)) {
+      if (!aliasDb.safeToChangeAliasingRelationship(
+              node->outputs(), parent_lookup->outputs())) {
         continue;
       }
 
