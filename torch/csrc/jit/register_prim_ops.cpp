@@ -2062,10 +2062,12 @@ int listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
   std::sort(
-      list.begin(), list.end(), [](const at::Tensor& a, const at::Tensor& b) {
+      list_copied.begin(),
+      list_copied.end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
         return a.lt(b).is_nonzero();
       });
-  push(stack, list);
+  push(stack, list_copied);
   return 0;
 }
 
