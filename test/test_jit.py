@@ -21,7 +21,7 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins  # noqa: F401
-from jit.unsupported_ops import TestUnsupportedOps  # noqa: F401
+from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -2300,6 +2300,7 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
@@ -2309,6 +2310,7 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
