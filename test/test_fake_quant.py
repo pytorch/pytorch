@@ -65,6 +65,7 @@ tolerance = 1e-6
 
 class TestFakeQuantizePerTensor(TestCase):
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
@@ -205,6 +206,7 @@ class TestFakeQuantizePerTensor(TestCase):
 
 class TestFakeQuantizePerChannel(TestCase):
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
@@ -224,6 +226,7 @@ class TestFakeQuantizePerChannel(TestCase):
             X, scale, zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
+    @unittest.skip("temporarily disable the test")
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
