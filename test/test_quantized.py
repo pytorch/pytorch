@@ -1919,6 +1919,34 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
+    def test_qnnpack_sigmoid_sweep(self, X):
+        # Input parameters
+        f_min = -4.0
+        f_max = 4.0
+        scale = (f_max - f_min) / 256.0
+        zero_point = 128
+        dtype = torch.quint8
+
+        step = scale / 2.0
+        x = np.arange(f_min, f_max + step, step)
+        X = torch.from_numpy(x)
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=dtype)
+
+        # Floating point reference
+        Y = torch.sigmoid(X)
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 256, zero_point=0,
+                                       dtype=torch.quint8)
+        with override_quantized_engine('fbgemm'):
+            qYserver = torch.sigmoid(qX)
+        with override_quantized_engine('qnnpack'):
+            qY_hat = torch.sigmoid(qX)
+            self.assertEqual(qY, qY_hat,
+                             message="QNNPACK Sigmoid failed (FP ref)!")
+            self.assertEqual(qYserver, qY_hat,
+                             message="QNNPACK Sigmoid failed (FBGEMM ref)!")
+
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @settings(suppress_health_check=(HealthCheck.filter_too_much,))
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

@@ -11,13 +11,15 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import RRef
 from common_utils import load_tests, IS_MACOS
+from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 import dist_utils
 from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
+from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch._jit_internal import _qualified_name
+
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -223,6 +225,23 @@ def set_global_rref(rref):
 def clear_global_rref():
     global global_rref
     global_rref = None
+
+
+@torch.jit.script
+class MyScriptClass:
+    def __init__(self):
+        self.a = 10
+
+
+class MyScriptModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.a = 10
+
+    @torch.jit.script_method
+    def my_method(self):
+        self.a = 11
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -524,6 +543,68 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
+        dst = (self.rank + 1) % self.world_size
+        # only run profiler on rank 1.
+        if self.rank == 1:
+            with torch.autograd.profiler.profile() as prof:
+                if rpc_exec_mode == RPCExecMode.SYNC:
+                    rpc.rpc_sync("worker{}".format(dst), func, args=args)
+                elif rpc_exec_mode == RPCExecMode.ASYNC:
+                    fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
+                    fut.wait()
+                else:
+                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                    rref = rpc.remote("worker{}".format(dst), func, args=args)
+                    rref.to_here()
+                    # We need to wait for the instance to be created on
+                    # the owner, and get back a positive confirmation.
+                    # Calling to_here does not ensure that we have finished
+                    # processing the Owner's confirmation of this RRef. To do
+                    # this, we wait until the current RRef context doesn't have
+                    # any pending users, which indicates that the confirmation
+                    # was processed on this worker.
+                    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+                    while num_pending_users != 0:
+                        time.sleep(0.1)
+                        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+
+            events = prof.function_events
+            rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
+            # the sender, dest worker, function run, and type of RPC should all
+            # be recorded.
+            self_worker_name = "worker{}".format(self.rank)
+            dst_worker_name = "worker{}".format(dst)
+            self.assertTrue(self_worker_name in rpc_event.name)
+            self.assertTrue(dst_worker_name in rpc_event.name)
+            self.assertTrue(func.__name__ in rpc_event.name)
+            self.assertTrue(rpc_exec_mode.value in rpc_event.name)
+            self.assertEqual(rpc_event.count, 1)
+
+    @dist_init
+    def test_profiler_with_sync_rpc_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
+
+    @dist_init
+    def test_profiler_with_async_rpc_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_async_rpc_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
+
+    @dist_init
+    def test_profiler_with_remote_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_remote_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
+
     @dist_init
     def test_py_class_constructor(self):
         n = self.rank + 1
@@ -647,6 +728,51 @@ class RpcTest(RpcAgentTestFixture):
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
+
+    @dist_init
+    def test_script_function_exception(self):
+        @torch.jit.script
+        def no_args():
+            a = 1
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(Exception, "no_args"):
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
+
+    @dist_init
+    def test_script_functions_not_supported(self):
+        # Right now _rpc_sync_torchscript does not accept annotated torchscript
+        # class name or script module class name or their class method names.
+        # But rpc_sync still accepts script class name and run it in
+        # the same code path as python call.
+        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
+        # accept script module and script module method.
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptClass),
+                args=())
+        ret = rpc.rpc_sync(
+            'worker{}'.format(dst_rank), MyScriptClass, args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule),
+                args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule().my_method),
+                args=())
+        with self.assertRaisesRegex(TypeError, "can't pickle"):
+            ret = rpc.rpc_sync(
+                'worker{}'.format(dst_rank),
+                MyScriptModule().my_method,
+                args=())
 
     @dist_init
     def test_nested_rpc(self):
@@ -1118,7 +1244,6 @@ class RpcTest(RpcAgentTestFixture):
         # change gets into the current check.
         initialize_pg(self.init_method, self.rank, self.world_size)
 
-        from torch.distributed.rpc import _rref_context_get_debug_info
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
 
@@ -1277,10 +1402,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
-        from torch.distributed.rpc import (
-            _get_debug_info,
-            _rref_context_get_debug_info
-        )
         from torch.distributed.rpc.api import _agent
         import torch.distributed.autograd as dist_autograd
 
