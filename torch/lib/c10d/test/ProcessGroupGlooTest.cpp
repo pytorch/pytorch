@@ -345,22 +345,20 @@ void testRecv(const std::string& path) {
   ASSERT_TRUE(recvCompleted);
 }
 
-TEST(ProcessGroupGlooTest, testExceptionsThrown) {
+TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGSTOP);
-    ASSERT_FALSE(work->isSuccess());
-    EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
-  }
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGSTOP);
+  ASSERT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+}
 
+TEST(ProcessGroupGlooTest, testSIGKILLException) {
   // test SIGKILL
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGKILL);
-    ASSERT_FALSE(work->isSuccess());
-    EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
-  }
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGKILL);
+  ASSERT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
 }
 
 TEST(ProcessGroupGlooTest, testAllReduceCPU) {
