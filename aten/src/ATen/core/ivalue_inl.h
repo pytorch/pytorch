@@ -576,61 +576,71 @@ inline T IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
 }
 
+template<typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  std::vector<T> result;
+  result.reserve(impl->list.size());
+  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
+    result.push_back(impl->list[i].to<T>());
+  }
+  return result;
+}
+
 inline c10::List<int64_t> IValue::toIntList() && {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
-  return c10::List<int64_t>(moveToIntrusivePtr<c10::detail::ListImpl<int64_t>>());
+  return c10::List<int64_t>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<int64_t> IValue::toIntList() const & {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
-  return c10::List<int64_t>(toIntrusivePtr<c10::detail::ListImpl<int64_t>>());
+  return c10::List<int64_t>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::ArrayRef<int64_t> IValue::toIntListRef() const {
+inline std::vector<int64_t> IValue::toIntListRef() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<int64_t>*>(payload.as_intrusive_ptr)->list;
+  return createVectorFromList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
-  return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl<double>>());
+  return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<double> IValue::toDoubleList() const & {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
-  return c10::List<double>(toIntrusivePtr<c10::detail::ListImpl<double>>());
+  return c10::List<double>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::ArrayRef<double> IValue::toDoubleListRef() const {
+inline std::vector<double> IValue::toDoubleListRef() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<double>*>(payload.as_intrusive_ptr)->list;
+  return createVectorFromList<double>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {
   AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
-  return c10::List<bool>(moveToIntrusivePtr<c10::detail::ListImpl<bool>>());
+  return c10::List<bool>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<bool> IValue::toBoolList() const & {
   AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
-  return c10::List<bool>(toIntrusivePtr<c10::detail::ListImpl<bool>>());
+  return c10::List<bool>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() && {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
-  return c10::List<at::Tensor>(moveToIntrusivePtr<c10::detail::ListImpl<at::Tensor>>());
+  return c10::List<at::Tensor>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() const & {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
-  return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl<at::Tensor>>());
+  return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::ArrayRef<at::Tensor> IValue::toTensorListRef() const {
+inline std::vector<at::Tensor> IValue::toTensorListRef() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<at::Tensor>*>(payload.as_intrusive_ptr)->list;
+  return createVectorFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toGenericList() && {
   AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
-  return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>());
+  return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<IValue> IValue::toGenericList() const & {
   AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
-  return c10::List<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>());
+  return c10::List<IValue>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::ArrayRef<IValue> IValue::toGenericListRef() const {
   AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
+  return static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() && {
   AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
@@ -664,14 +674,6 @@ inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
           std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args...>, t))) {
 }
-inline IValue::IValue(c10::List<int64_t> v)
-: tag(Tag::IntList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
-}
-inline IValue::IValue(std::vector<int64_t> v)
-: IValue(c10::impl::toList(v)) {}
-inline IValue::IValue(c10::ArrayRef<int64_t> v)
-: IValue(c10::List<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -680,26 +682,6 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 inline IValue::IValue(std::string v)
 : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
-inline IValue::IValue(c10::List<double> v)
-: tag(Tag::DoubleList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
-}
-inline IValue::IValue(std::vector<double> v)
-: IValue(c10::impl::toList(std::move(v))) {}
-
-inline IValue::IValue(c10::List<bool> v)
-: tag(Tag::BoolList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
-}
-inline IValue::IValue(std::vector<bool> v)
-: IValue(c10::impl::toList(std::move(v))) {}
-
-inline IValue::IValue(c10::List<at::Tensor> v)
-: tag(Tag::TensorList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
-}
-inline IValue::IValue(std::vector<at::Tensor> v)
-: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::impl::GenericList v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
@@ -707,16 +689,21 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template<class T> inline IValue::IValue(c10::List<T> v)
-: IValue(impl::toGenericList<T>(std::move(v))) {
-  static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
-}
-template<class T> inline IValue::IValue(std::vector<T> v)
+: IValue(impl::toGenericList<T>(std::move(v))) {}
+template<class T> inline IValue::IValue(at::ArrayRef<T> v)
 : IValue(c10::List<T>()) {
-  static_assert(std::is_same<IValue, typename c10::List<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::List<T>>();
   list.reserve(v.size());
-  for (auto& e : v) {
-    list.push_back(std::move(e));
+  for (const auto& e : v) {
+    list.push_back(e);
+  }
+}
+template<class T> inline IValue::IValue(const std::vector<T>& v)
+: IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  for (const auto& e : v) {
+    list.push_back(e);
   }
 }
 
@@ -774,7 +761,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // We choose to not use memcmp for payload check due to potential random padding characters on union type
 
   // Semantics:
-  // 1. None is None, False is False, and True is True are all true
+  // 1. Immutable primitive values of the same type (Int, Double, None, Bool, Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
   // 4. If it is a reference type (i.e. is_intrusive_ptr), then is is True when the pointed-to object is the same.
@@ -793,6 +780,12 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   } else if (this->isNone() && rhs.isTensor()) {
     // special case: undefined tensor and None are the same identity
     return !rhs.is_intrusive_ptr;
+  } else if (this->isInt() && rhs.isInt()) {
+    return this->toInt() == rhs.toInt();
+  } else if (this->isDouble() && rhs.isDouble()) {
+    return this->toDouble() == rhs.toDouble();
+  } else if (this->isString() && rhs.isString()) {
+    return this->toStringRef() == rhs.toStringRef();
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr
