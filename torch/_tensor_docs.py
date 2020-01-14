@@ -3527,6 +3527,11 @@ add_docstr_all('is_cuda',
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 """)
 
+add_docstr_all('is_quantized',
+               r"""
+Is ``True`` if the Tensor is quantized, ``False`` otherwise.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
