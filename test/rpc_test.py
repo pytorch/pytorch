@@ -1249,7 +1249,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_disable_metrics_profiling(self):
-        # test that _agent._set_metrics_profiling(false) will result in more
+        # test that rpc.set_metrics_profiling(false) will result in more
         # expensive metrics such as GIL wait time not being recorded.
         from torch.distributed.rpc.api import _agent
         rpc.set_metrics_profiling(False)
