@@ -89,7 +89,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), c10::impl::toVector(iter->toBoolList()));
+                  node, args[i].name().c_str(), iter->toBoolList().vec());
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
@@ -167,9 +167,19 @@ struct Registerer final {
   }
 };
 
-// global instance to run its constructor on startup
-Registerer registerer;
+Registerer& registerer() {
+  static Registerer registerer;
+  return registerer;
+}
 
+// global instance to run its constructor on startup
+Registerer& dummy = registerer();
+
+} // namespace
+
+void ensure_c10_registerer_defined() {
+  registerer();
 }
-}
+
+} // namespace jit
 }

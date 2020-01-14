@@ -231,6 +231,42 @@ class TestTensorPackOps(serial.SerializedTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
+    def test_pad_no_minf(self):
+        workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
+        workspace.FeedBlob(
+            'd',
+            np.array([
+                [1.0, 1.1],
+                [2.0, 2.1],
+                [2.2, 2.2],
+                [3.0, 3.1],
+                [3.2, 3.3],
+                [3.4, 3.5]],
+                dtype=np.float32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'd'], ['t'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t')
+        assert(result[0, -1, 0] == 0.0)
+
+        workspace.FeedBlob(
+            'i',
+            np.array([
+                [1, 1],
+                [2, 2],
+                [2, 2],
+                [3, 3],
+                [3, 3],
+                [3, 3]],
+                dtype=np.int32))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                'PackSegments', ['l', 'i'], ['t2'], pad_minf=False),
+        )
+        result = workspace.FetchBlob('t2')
+        assert(result[0, -1, 0] == 0)
+
     @given(**hu.gcs)
     def test_presence_mask(self, gc, dc):
         lengths = np.array([1, 2, 3], dtype=np.int32)
