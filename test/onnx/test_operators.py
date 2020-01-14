@@ -852,6 +852,10 @@ class TestOperators(TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
+    def test_dim(self):
+        x = torch.ones((2, 2), requires_grad=True)
+        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
+
     @skipIfNoLapack
     def test_det(self):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
