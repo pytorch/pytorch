@@ -91,7 +91,7 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
   for (size_t i = 0; i < args.size(); i++) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(),
-        llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, i)));
+        llvm::ConstantInt::getSigned(int32Ty_, i));
     auto arg = irb_.CreateLoad(argp);
     wrappedArgs.push_back(arg);
   }
@@ -179,7 +179,7 @@ void LLVMCodeGen::visit(const Div* v) {
 
 void LLVMCodeGen::visit(const IntImm* v) {
   value_ =
-      llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, v->value()));
+      llvm::ConstantInt::getSigned(int32Ty_, v->value());
 }
 
 void LLVMCodeGen::visit(const FloatImm* v) {
@@ -250,7 +250,7 @@ void LLVMCodeGen::visit(const For* v) {
 
   // Create the stop condition. and "after" block.
   auto inc = irb_.CreateAdd(
-      idx, llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 1)));
+      idx, llvm::ConstantInt::getSigned(int32Ty_, 1));
   v->stop().accept(this);
   auto stop = this->value_;
   auto cond = irb_.CreateICmpSLT(inc, stop);
@@ -261,7 +261,7 @@ void LLVMCodeGen::visit(const For* v) {
   irb_.CreateCondBr(cond, loop, after);
   irb_.SetInsertPoint(after);
   idx->addIncoming(inc, end_loop);
-  value_ = llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 0));
+  value_ = llvm::ConstantInt::get(int32Ty_, 0);
 }
 
 void LLVMCodeGen::visit(const Block* v) {
@@ -279,7 +279,7 @@ void LLVMCodeGen::visit(const Store* v) {
   auto val = this->value_;
   auto addr = irb_.CreateGEP(base, idx);
   irb_.CreateStore(val, addr);
-  value_ = llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 0));
+  value_ = llvm::ConstantInt::get(int32Ty_, 0);
 }
 
 void LLVMCodeGen::visit(const Broadcast* v) {
