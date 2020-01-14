@@ -114,26 +114,7 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (sizes_.size() == 4) {
-    int64_t min = 0;
-    // special case for trivial C dimension. default to NCHW
-    if (stride(1)==0) {
-      return false;
-    }
-    for (auto& d : {1, 3, 2, 0}) {
-      if (strides_[d] < min) {
-        return false;
-      }
-      // special case for N111, so we have NCHW as default layout;
-      // There's no way to disambiguate the memory format: issue #24090
-      if (d==0 && min==1) {
-        return false;
-      }
-      min = std::max(strides_[d], sizes_[d]);
-    }
-    return true;
-  }
-  return false;
+  return is_channels_last_strides(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {

@@ -60,4 +60,30 @@ inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
   return strides;
 }
 
+inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef strides) {
+  if (sizes.size() == 4) {
+    int64_t min = 0;
+    // special case for trivial C dimension. default to NCHW
+    if (strides[1]==0) {
+      return false;
+    }
+    for (auto& d : {1, 3, 2, 0}) {
+      if (strides[d] < min) {
+        return false;
+      }
+      // special case for N111, so we have NCHW as default layout;
+      // There's no way to disambiguate the memory format: issue #24090
+      if (d==0 && min==1) {
+        return false;
+      }
+      // This is necessary to distinguish the memory_format of N1H1;
+      // [H, 1, 1, 1] channels_last stride
+      // [H, H, 1, 1] contiguous stride
+      min = std::max(strides[d], sizes[d]);
+    }
+    return true;
+  }
+  return false;
+}
+
 } // namespace c10
