@@ -551,7 +551,7 @@ Object* CloneObject(Object* object) {
 class Schedule : RefHandle<ScheduleNode> {
  public:
   static Schedule make(const std::vector<Tensor>& funcs) {
-    return std::move(Schedule(new ScheduleNode(funcs)));
+    return Schedule(new ScheduleNode(funcs));
   }
 
   explicit Schedule(const std::vector<Tensor>& funcs)
