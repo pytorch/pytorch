@@ -20,6 +20,7 @@ class LayerNormalization(ModelLayer):
         epsilon=1e-4,
         axis=1,
         use_layer_norm_op=True,
+        scale_init_value=1.0,
         **kwargs
     ):
         super(LayerNormalization, self).__init__(
@@ -42,7 +43,7 @@ class LayerNormalization(ModelLayer):
 
         self.scale = self.create_param(param_name='scale',
                                        shape=[input_dims],
-                                       initializer=('ConstantFill', {'value': 1.0}),
+                                       initializer=('ConstantFill', {'value': scale_init_value}),
                                        optimizer=scale_optim)
         self.bias = self.create_param(param_name='bias',
                                        shape=[input_dims],

@@ -81,8 +81,18 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.signature.deprecated) {
-    TORCH_WARN("This signature for ", r.signature.name, " is deprecated:\n",
+    auto msg = c10::str(
+        "This overload of ", r.signature.name, " is deprecated:\n",
         "${name}", r.signature.toString());
+    auto signatures = parser.get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n${name}";
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
   }
   ${check_has_torch_function}
   ${declare_namedtuple_return_types}
