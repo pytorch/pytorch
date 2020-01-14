@@ -131,8 +131,8 @@ static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, 
   return self.select(dim, unpacked_index);
 }
 
-static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
+static Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
