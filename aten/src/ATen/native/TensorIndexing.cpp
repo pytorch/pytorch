@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIndexing.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/tracer.h>
 
 namespace at {
 namespace indexing {
@@ -12,7 +13,19 @@ namespace indexing {
 const EllipsisIndexType Ellipsis = EllipsisIndexType();
 
 Slice::Slice() {}
-Slice::Slice(int64_t start, int64_t stop, int64_t step) : start_(start), stop_(stop), step_(step) {}
+Slice::Slice(
+    int64_t start,
+    int64_t stop,
+    int64_t step,
+    Tensor start_tensor,
+    Tensor stop_tensor,
+    Tensor step_tensor)
+  : start_(start),
+    stop_(stop),
+    step_(step),
+    start_tensor_(start_tensor),
+    stop_tensor_(stop_tensor),
+    step_tensor_(step_tensor) {}
 
 int64_t Slice::start() const {
   return start_;
@@ -26,6 +39,18 @@ int64_t Slice::step() const {
   return step_;
 }
 
+const Tensor& start_tensor() const {
+  return start_tensor_;
+}
+
+const Tensor& stop_tensor() const {
+  return stop_tensor_;
+}
+
+const Tensor& step_tensor() const {
+  return step_tensor_;
+}
+
 std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
   stream << slice.start() << ":" << slice.stop() << ":" << slice.step();
   return stream;
@@ -35,7 +60,10 @@ std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
 Slice unpackSlice(
     c10::optional<int64_t> start_index = at::indexing::None,
     c10::optional<int64_t> stop_index = at::indexing::None,
-    c10::optional<int64_t> step_index = at::indexing::None) {
+    c10::optional<int64_t> step_index = at::indexing::None,
+    Tensor start_index_tensor = {},
+    Tensor stop_index_tensor = {},
+    Tensor step_index_tensor = {}) {
   int64_t start, stop, step;
   if (!step_index.has_value()) {
     step = 1;
@@ -61,7 +89,7 @@ Slice unpackSlice(
   } else {
     stop = stop_index.value();
   }
-  return Slice(start, stop, step);
+  return Slice(start, stop, step, start_index_tensor, stop_index_tensor, step_index_tensor);
 }
 
 TensorIndex::TensorIndex(c10::nullopt_t) : type_(TensorIndexType::None) {}
@@ -71,21 +99,33 @@ TensorIndex::TensorIndex(const char *str) : TensorIndex(at::indexing::Ellipsis) 
     strcmp(str, "...") == 0,
     "Expected \"...\" to represent an ellipsis index, but got \"", str, "\"");
 }
-TensorIndex::TensorIndex(int64_t integer) : integer_(integer), type_(TensorIndexType::Integer) {}
+TensorIndex::TensorIndex(int64_t integer, Tensor tensor) : integer_(integer), tensor_(tensor), type_(TensorIndexType::Integer) {}
 TensorIndex::TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
-TensorIndex::TensorIndex(std::initializer_list<c10::optional<int64_t>> init_list)
+TensorIndex::TensorIndex(
+    std::initializer_list<c10::optional<int64_t>> slice,
+    std::initializer_list<Tensor> slice_tensors);
     : type_(TensorIndexType::Slice) {
-  if (init_list.size() == 0) {
+  if (slice.size() == 0) {
     slice_ = unpackSlice();
-  } else if (init_list.size() == 2) {
-    slice_ = unpackSlice(*init_list.begin(), *(init_list.begin() + 1));
-  } else if (init_list.size() == 3) {
-    slice_ = unpackSlice(*init_list.begin(), *(init_list.begin() + 1), *(init_list.begin() + 2));
+  } else if (slice.size() == 2) {
+    slice_ = unpackSlice(
+      *slice.begin(),
+      *(slice.begin() + 1),
+      *slice_tensors.begin(),
+      *(slice_tensors.begin() + 1));
+  } else if (slice.size() == 3) {
+    slice_ = unpackSlice(
+      *slice.begin(),
+      *(slice.begin() + 1),
+      *(slice.begin() + 2),
+      *slice_tensors.begin(),
+      *(slice_tensors.begin() + 1),
+      *(slice_tensors.begin() + 2));
   } else {
     TORCH_CHECK(
       false,
       "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got ",
-      init_list.size(),
+      slice.size(),
       " element(s)");
   }
 }
@@ -185,6 +225,7 @@ Tensor applySlice(const Tensor& self, int64_t dim, const Slice& slice, bool ensu
   const auto& stop = slice.stop();
   const auto& step = slice.step();
   const auto& length = self.size(dim);
+
   if (step == 0) {
     TORCH_CHECK(false, "step cannot be zero");
   }
@@ -192,28 +233,53 @@ Tensor applySlice(const Tensor& self, int64_t dim, const Slice& slice, bool ensu
     // TODO: implement negative step
     TORCH_CHECK(false, "negative step not yet supported");
   }
-  if (!ensure_view && start == 0 && stop == length && step == 1) {
+
+  if (jit::tracer::isTracing() && slice.start_tensor().defined()) {
+    auto& var = slice.start_tensor();
+    jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, var, jit::IntType::get());
+  }
+  if (jit::tracer::isTracing() && slice.stop_tensor().defined()) {
+    auto& var = slice.stop_tensor();
+    jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, var, jit::IntType::get());
+  }
+  if (jit::tracer::isTracing() && slice.step_tensor().defined()) {
+    auto& var = slice.step_tensor();
+    jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, var, jit::IntType::get());
+  }
+
+  // Skip this optimization if we are tracing, as the trace may be polymorphic
+  // over the shape of the `self` tensor, and we still want to record
+  // the slice.
+  if (!ensure_view && start == 0 && stop == length && step == 1 && !jit::tracer::isTracing()) {
     return self;
   }
   return self.slice(dim, start, stop, step);
 }
 
 // This mirrors `applySelect` in torch/csrc/autograd/python_variable_indexing.cpp
-Tensor applySelect(const Tensor& self, int64_t dim, int64_t index, int64_t real_dim=0) {
-  if (index == 0 && dim == 0 && self.dim() == 0) {
+Tensor applySelect(const Tensor& self, int64_t dim, const TensorIndex& index, int64_t real_dim=0) {
+  TORCH_INTERNAL_CHECK(index.is_integer());
+
+  if (jit::tracer::isTracing() && index.tensor().defined()) {
+    auto& var = index.tensor();
+    jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
+  }
+
+  int64_t unpacked_index = index.integer();
+  if (unpacked_index == 0 && dim == 0 && self.dim() == 0) {
     TORCH_CHECK(false,
         "invalid index of a 0-dim tensor. ",
-        "Use tensor.item() to convert a 0-dim tensor to a Python number");
+        "Use tensor.item() to convert a 0-dim tensor to a number");
   }
   int64_t size = self.size(dim);
-  if (index < -size || index >= size) {
+  if (unpacked_index < -size || unpacked_index >= size) {
     TORCH_CHECK(false,
-      "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
+      "index ", unpacked_index, " is out of bounds for dimension ", real_dim, " with size ", size);
   }
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
   // aten::select also works on negative indices
-  return self.select(dim, index);
+  return self.select(dim, unpacked_index);
 }
 
 // This mirrors `valueToTensor` in torch/csrc/autograd/python_variable_indexing.cpp
@@ -316,7 +382,7 @@ Tensor dispatch_index_put_(Tensor& self, const std::vector<Tensor>& indices, con
   return self.index_put_(converted_indices, value);
 }
 
-// This mirrors `get_item` in torch/csrc/autograd/python_variable_indexing.cpp
+// This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
 Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   OptionalDeviceGuard device_guard(device_of(self));
 
@@ -373,7 +439,7 @@ void copy_to(Tensor dst, const Tensor& src) {
   dst.copy_(b_src);
 }
 
-// This mirrors `set_item` in torch/csrc/autograd/python_variable_indexing.cpp
+// This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
 void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
   OptionalDeviceGuard device_guard(device_of(self));
