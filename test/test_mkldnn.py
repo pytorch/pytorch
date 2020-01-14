@@ -12,6 +12,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.jit
+import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
@@ -105,7 +106,7 @@ class TestMkldnn(TestCase):
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             for bias in [True, False]:
                 conv2d = torch.nn.Conv2d(in_channels=C,
                                          out_channels=M,
@@ -115,9 +116,10 @@ class TestMkldnn(TestCase):
                                          bias=bias,
                                          groups=groups).float()
                 mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                self.assertEqual(
-                    conv2d(x),
-                    mkldnn_conv2d(x.to_mkldnn()).to_dense())
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv2d(x)
+                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
 
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))

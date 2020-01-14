@@ -15,7 +15,9 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided));
-  stensor.to_public(cpu_tensor.template data_ptr<float>());
+  if (stensor.is_empty()) return cpu_tensor;
+  auto pub_tensor = stensor.to_public(cpu_tensor.template data_ptr<float>());
+  cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   return cpu_tensor;
 }
 
@@ -79,7 +81,7 @@ Tensor mkldnn_reorder_conv2d_weight(
           groups,
           ideep::algorithm::convolution_direct);
   ideep::tensor result;
-  result.init<AllocForMKLDNN>(desc);
+  result.init(desc);
   result.feed_from(w);
 
   return new_with_itensor_mkldnn(std::move(result), self.options());
