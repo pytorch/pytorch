@@ -66,10 +66,11 @@ class MixtureSameFamily(Distribution):
         # Check that batch size matches
         mdbs = self._mixture_distribution.batch_shape
         cdbs = self._component_distribution.batch_shape[:-1]
-        if len(mdbs) != 0 and mdbs != cdbs:
-            raise ValueError("`mixture_distribution.batch_shape` ({0}) is not "
-                             "compatible with `component_distribution."
-                             "batch_shape`({1})".format(mdbs, cdbs))
+        for size1, size2 in zip(reversed(mdbs), reversed(cdbs)):
+            if size1 != 1 and size2 != 1 and size1 != size2:
+                raise ValueError("`mixture_distribution.batch_shape` ({0}) is not "
+                                 "compatible with `component_distribution."
+                                 "batch_shape`({1})".format(mdbs, cdbs))
 
         # Check that the number of mixture component matches
         km = self._mixture_distribution.logits.shape[-1]
@@ -105,6 +106,8 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
+        # FIXME this may have the wrong shape when support contains batched 
+        # parameters
         return self._component_distribution.support
 
     @property
