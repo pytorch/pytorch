@@ -9361,20 +9361,22 @@ class TestNNDeviceType(NNTestCase):
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
-        input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
+        input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
         # forward
         ret = conv(input_large)
         self.assertEqual(ret[:2048], conv(input_large[:2048]))
-        self.assertEqual(ret[2048:], conv(input_large[2048:]))
+        self.assertEqual(ret[2048:4096], conv(input_large[2048:4096]))
+        self.assertEqual(ret[4096:], conv(input_large[4096:]))
 
         # backward
         conv.zero_grad()
-        ret.view(4096, -1).max(dim=1).values.sum().backward()
+        ret.view(4097, -1).max(dim=1).values.sum().backward()
         del ret
         grad1 = conv.weight.grad.detach().clone()
         conv.zero_grad()
         conv(input_large[:2048]).view(2048, -1).max(dim=1).values.sum().backward()
-        conv(input_large[2048:]).view(2048, -1).max(dim=1).values.sum().backward()
+        conv(input_large[2048:4096]).view(2048, -1).max(dim=1).values.sum().backward()
+        conv(input_large[4096:]).view(1, -1).max(dim=1).values.sum().backward()
         grad2 = conv.weight.grad.detach().clone()
         # gradients are at the order of hundreds, we need to scale it to
         # the order of one so that we can compare
