@@ -282,7 +282,12 @@ void LLVMCodeGen::visit(const Store* v) {
   value_ = llvm::Constant::getIntegerValue(int32Ty_, llvm::APInt(32, 0));
 }
 
-void LLVMCodeGen::visit(const Broadcast* v) {}
+void LLVMCodeGen::visit(const Broadcast* v) {
+  v->value().accept(this);
+  Dtype dtype = v->value().dtype();
+  int lanes = v->lanes();
+  value_ = irb_.CreateVectorSplat(lanes, value_);
+}
 
 void LLVMCodeGen::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
