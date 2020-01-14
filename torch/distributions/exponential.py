@@ -79,5 +79,9 @@ class Exponential(ExponentialFamily):
     def _natural_params(self):
         return (-self.rate, )
 
+    @staticmethod
+    def _from_natural_params(p, **kwargs):
+        return Exponential(rate=-p, **kwargs)
+
     def _log_normalizer(self, x):
         return -torch.log(-x)

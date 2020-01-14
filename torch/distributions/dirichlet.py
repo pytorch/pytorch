@@ -91,5 +91,9 @@ class Dirichlet(ExponentialFamily):
     def _natural_params(self):
         return (self.concentration, )
 
+    @staticmethod
+    def _from_natural_params(p, **kwargs):
+        return Dirichlet(p, **kwargs)
+
     def _log_normalizer(self, x):
         return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

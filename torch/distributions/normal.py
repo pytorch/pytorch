@@ -92,5 +92,11 @@ class Normal(ExponentialFamily):
     def _natural_params(self):
         return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
+    @staticmethod
+    def _from_natural_params(p1, p2, **kwargs):
+        loc = (-0.5) * p1 / p2
+        scale = torch.rsqrt(p2 * (-2))
+        return Normal(loc, scale, **kwargs)
+
     def _log_normalizer(self, x, y):
         return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

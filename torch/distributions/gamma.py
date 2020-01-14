@@ -78,5 +78,11 @@ class Gamma(ExponentialFamily):
     def _natural_params(self):
         return (self.concentration - 1, -self.rate)
 
+    @staticmethod
+    def _from_natural_params(p1, p2, **kwargs):
+        concentration = p1 + 1
+        rate = -p2
+        return Gamma(concentration, rate, **kwargs)
+
     def _log_normalizer(self, x, y):
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())

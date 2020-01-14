@@ -58,3 +58,14 @@ class ExponentialFamily(Distribution):
         for np, g in zip(nparams, gradients):
             result -= np * g
         return result
+
+    @staticmethod
+    def _from_natural_params(*params):
+        raise NotImplementedError
+
+    def product_along_axis(self, dim=-1, keepdim=True):
+        if dim >= 0:
+            dim = dim - len(self.batch_shape) - 1
+        dim = dim - len(self.event_shape)
+        params = [p.sum(dim, keepdim=keepdim) for p in self._natural_params]
+        return self._from_natural_params(*params)

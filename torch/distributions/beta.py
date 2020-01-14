@@ -86,5 +86,9 @@ class Beta(ExponentialFamily):
     def _natural_params(self):
         return (self.concentration1, self.concentration0)
 
+    @staticmethod
+    def _from_natural_params(p1, p2, **kwargs):
+        return Beta(p1, p2, **kwargs)
+
     def _log_normalizer(self, x, y):
         return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)

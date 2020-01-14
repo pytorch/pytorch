@@ -68,3 +68,7 @@ class Poisson(ExponentialFamily):
 
     def _log_normalizer(self, x):
         return torch.exp(x)
+
+    @staticmethod
+    def _from_natural_params(p, **kwargs):
+        return Poisson(torch.exp(p), **kwargs)

@@ -108,5 +108,9 @@ class Bernoulli(ExponentialFamily):
     def _natural_params(self):
         return (torch.log(self.probs / (1 - self.probs)), )
 
+    @staticmethod
+    def _from_natural_params(p, **kwargs):
+        return Bernoulli(logits=p, **kwargs)
+
     def _log_normalizer(self, x):
         return torch.log(1 + torch.exp(x))
