@@ -19,16 +19,28 @@ CAFFE2_API extern const EllipsisIndexType Ellipsis;
 struct CAFFE2_API Slice final {
  public:
   Slice();
-  Slice(int64_t start, int64_t stop, int64_t step);
+  Slice(
+    int64_t start,
+    int64_t stop,
+    int64_t step,
+    Tensor start_tensor = {},
+    Tensor stop_tensor = {},
+    Tensor step_tensor = {});
 
   int64_t start() const;
   int64_t stop() const;
   int64_t step() const;
+  const Tensor& start_tensor() const;
+  const Tensor& stop_tensor() const;
+  const Tensor& step_tensor() const;
 
  private:
   int64_t start_;
   int64_t stop_;
   int64_t step_;
+  Tensor start_tensor_;
+  Tensor stop_tensor_;
+  Tensor step_tensor_;
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
@@ -66,8 +78,8 @@ struct CAFFE2_API TensorIndex final {
   TensorIndex(at::indexing::EllipsisIndexType);
   TensorIndex(const char *str);
 
-  // Case 3: Integer value
-  TensorIndex(int64_t integer);
+  // Case 3: Integer value (the tensor form can optionally be provided)
+  TensorIndex(int64_t integer, Tensor tensor = {});
   TensorIndex(int integer);
 
   // Case 4: Boolean value
@@ -76,8 +88,11 @@ struct CAFFE2_API TensorIndex final {
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `{start, stop, step}` form,
-  // where `start` / `stop` / `step` can be integer or `at::indexing::None`
-  TensorIndex(std::initializer_list<c10::optional<int64_t>> init_list);
+  // where `start` / `stop` / `step` can be integer or `at::indexing::None`.
+  // The tensor form can optionally be provided.
+  TensorIndex(
+    std::initializer_list<c10::optional<int64_t>> slice,
+    std::initializer_list<Tensor> slice_tensors = {});
 
   // Case 5: Tensor value
   TensorIndex(Tensor tensor);
