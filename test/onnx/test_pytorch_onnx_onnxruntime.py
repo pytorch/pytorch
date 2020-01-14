@@ -2430,6 +2430,34 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LogDet(), x)
 
+    def test_dim(self):
+        class DimModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input * 2
+                out *= out.dim()
+                return out
+        empty_input = torch.randn(0, requires_grad=True)
+        multi_dim_input = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(DimModel(), empty_input)
+        self.run_test(DimModel(), multi_dim_input)
+
+    def test_empty_branch(self):
+        class EmptyBranchModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input + 1
+                if out.dim() > 2:
+                    if out.dim() > 3:
+                        out += 3
+                    else:
+                        pass
+                else:
+                    pass
+                return out
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(EmptyBranchModel(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
