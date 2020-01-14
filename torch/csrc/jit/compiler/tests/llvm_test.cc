@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <numeric>
+
 using namespace torch::jit::compiler;
 using namespace torch::jit::compiler::schedule;
 
@@ -286,4 +288,38 @@ TEST(LLVMTest, ComputeMul) {
   std::vector<void*> args({a_vec.data(), b_vec.data(), c_vec.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
   assertAllEqual(c_vec, 42.0f);
+}
+
+TEST(LLVMTest, BroadcastAdd) {
+  const int M = 32;
+  const int N = 1024;
+  Buffer a(Var("a", kHandle), kFloat32, {M, N});
+  Buffer b(Var("b", kHandle), kFloat32, {N});
+  Tensor c = Compute(
+    "c", {Expr(M), Expr(N)}, {"i", "j"},
+    [&](const Var& i, const Var& j) {
+      Expr mask(1);
+      return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
+  });
+
+  Buffer c_buf(c.function().func_var(), kFloat32, {M, N});
+  Schedule sch = Schedule::make({c});
+  Stmt s = sch.Lower();
+
+  LLVMCodeGen cg({&a, &b, &c_buf});
+  s.accept(&cg);
+
+  std::vector<float> av(M * N);
+  std::iota(av.begin(), av.end(), 0);
+  std::vector<float> bv(N);
+  std::iota(bv.begin(), bv.end(), 0);
+  std::vector<float> cv(M * N, 0);
+  std::vector<void *> args({av.data(), bv.data(), cv.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      ASSERT_EQ(cv[i * N + j], av[i * N + j] + bv[j]);
+    }
+  }
 }
