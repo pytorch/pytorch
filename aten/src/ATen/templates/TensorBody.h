@@ -238,7 +238,7 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        dispatchKeyToBackend(legacyExtractTypeId(key_set())),
+        dispatchKeyToBackend(legacyExtractDispatchKey(key_set())),
         scalar_type());
   }
   DispatchKeySet key_set() const {
@@ -523,8 +523,8 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace detail
 
-static inline DispatchKey legacyExtractTypeId(const Tensor& t) {
-  return legacyExtractTypeId(t.key_set());
+static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
+  return legacyExtractDispatchKey(t.key_set());
 }
 
 } // namespace at

@@ -81,6 +81,6 @@ void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
 
 // NB: This is not really sound, but all of the type sets constructed here
 // are singletons so it's fine
-static inline c10::DispatchKey extractTypeId(const at::Tensor& t) {
-  return legacyExtractTypeId(t.key_set());
+static inline c10::DispatchKey extractDispatchKey(const at::Tensor& t) {
+  return legacyExtractDispatchKey(t.key_set());
 }

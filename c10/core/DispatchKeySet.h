@@ -114,14 +114,14 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // checks; if at all possible, refactor the code to stop using DispatchKey
 // in those cases.
 //
-// What's the difference between 'legacyExtractTypeId(s) == id'
-// and 's.has(id)'?  legacyExtractTypeId will NEVER return VariableTensorId;
+// What's the difference between 'legacyExtractDispatchKey(s) == id'
+// and 's.has(id)'?  legacyExtractDispatchKey will NEVER return VariableTensorId;
 // but s.has(VariableTensorId) will evaluate to true if s has VariableTensorId.
 // For non-VariableTensorId equality tests, they are indistinguishable.
 //
 // NB: If you add other non-VariableTensorId other keys to this set, you'll
 // have to adjust this some more (sorry.)
-static inline DispatchKey legacyExtractTypeId(DispatchKeySet s) {
+static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   return s.remove(DispatchKey::VariableTensorId).highestPriorityTypeId();
 }
 

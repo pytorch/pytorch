@@ -11,7 +11,7 @@ namespace c10 {
 namespace impl {
 
 // Take a DispatchKeySet for a Tensor, and combine it with the current thread
-// local valid (implemented) and enabled (not implemented) TensorTypeSets
+// local valid (implemented) and enabled (not implemented) DispatchKeySets
 // to determine what the actual dispatch DispatchKey should be.  Unlike
 // Tensor::key_set(), the value of this on a tensor can change depending
 // on TLS.
@@ -84,22 +84,22 @@ public:
         }
       }
     }
-    return typeSetToDispatchKey_(ts);
+    return dispatchKeySetToDispatchKey_(ts);
   }
 
   template<class... Args>
   c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
     auto key_set = detail::multi_dispatch_key_set(args...);
-    return typeSetToDispatchKey_(key_set);
+    return dispatchKeySetToDispatchKey_(key_set);
   }
 
 private:
-  static c10::optional<DispatchKey> typeSetToDispatchKey_(const DispatchKeySet& typeSet) {
-    if (C10_UNLIKELY(typeSet.empty())) {
+  static c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(const DispatchKeySet& keySet) {
+    if (C10_UNLIKELY(keySet.empty())) {
       return c10::nullopt;
     }
 
-    return impl::dispatchTypeId(typeSet);
+    return impl::dispatchTypeId(keySet);
   }
 
   explicit DispatchKeyExtractor(size_t num_args)

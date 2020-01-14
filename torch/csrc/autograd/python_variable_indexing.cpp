@@ -213,7 +213,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (PySequence_Check(obj)) {
       // TODO: Naughty naughty get out of jail free
       // (Fixing this means I have to fix the call chain though :/)
-      handle_var(sequenceToVariable(legacyExtractTypeId(self), obj));
+      handle_var(sequenceToVariable(legacyExtractDispatchKey(self), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {
