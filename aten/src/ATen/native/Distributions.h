@@ -18,14 +18,14 @@
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
 #define compat_exp c10::hip::compat::exp
-#define compat_exp c10::hip::compat::ceil
+#define compat_ceil c10::hip::compat::ceil
 #define compat_floor c10::hip::compat::floor
 #define compat_log c10::hip::compat::log
 #define compat_pow c10::hip::compat::pow
 #define compat_sqrt c10::hip::compat::sqrt
 #define compat_tan c10::hip::compat::tan
-#define compat_exp c10::hip::compat::abs
-#define compat_exp c10::hip::compat::log1p
+#define compat_abs c10::hip::compat::abs
+#define compat_log1p c10::hip::compat::log1p
 #else
 #define compat_exp std::exp
 #define compat_ceil std::ceil
