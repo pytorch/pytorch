@@ -12,7 +12,9 @@ TORCH_API std::unique_ptr<RpcCommandBase> deserializeRequest(
     const Message& request);
 
 // Given an RPC message received as a response over the wire, deserialize it
-// into the appropriate 'RpcCommandBase' type.
+// into the appropriate 'RpcCommandBase' type, if the response is
+// FORWARD_AUTOGRAD_RESP type, unwrap it, attach recvBackward() functions
+// to received tensors and set the wrappedMsgType to its wrapped message type.
 TORCH_API std::unique_ptr<RpcCommandBase> deserializeResponse(
     const Message& response,
     MessageType& wrappedMsgType);

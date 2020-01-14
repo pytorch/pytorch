@@ -53,6 +53,11 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  echo "NVCC version:"
+  nvcc --version
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 

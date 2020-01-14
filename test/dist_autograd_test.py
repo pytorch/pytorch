@@ -12,7 +12,6 @@ import dist_utils
 from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from rpc_agent_test_fixture import RpcAgentTestFixture
 from torch.testing import FileCheck
-from torch._jit_internal import _qualified_name
 
 import threading
 
@@ -83,20 +82,6 @@ def my_rref_add(rref_t1, t2):
 @torch.jit.script
 def my_script_add(t1, t2):
     return torch.add(t1, t2)
-
-@torch.jit.script
-class MyScriptClass:
-    def __init__(self):
-        self.a = 10
-
-class MyScriptModule(torch.jit.ScriptModule):
-    def __init__(self):
-        super().__init__()
-        self.a = 10
-
-    @torch.jit.script_method
-    def my_method(self):
-        self.a = 11
 
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
@@ -1205,40 +1190,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 loss = ret.sum()
                 ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
                 local_grads = ret if ret else local_grads
-
-        # Right now _rpc_sync_torchscript does not accept annotated torchscript
-        # class name or script module class name or their class method names.
-        # But rpc_sync still accepts script class name and run it in
-        # the same code path as python call.
-        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
-        # accept script module and script module method.
-        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
-            ret = rpc._rpc_sync_torchscript(
-                'worker{}'.format(self._next_rank()),
-                _qualified_name(MyScriptClass),
-                args=())
-        ret = rpc.rpc_sync(
-            'worker{}'.format(self._next_rank()), MyScriptClass, args=())
-
-        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
-            ret = rpc._rpc_sync_torchscript(
-                'worker{}'.format(self._next_rank()),
-                _qualified_name(MyScriptModule),
-                args=())
-        with self.assertRaisesRegex(RuntimeError, "PickleError:"):
-            ret = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()), MyScriptModule, args=())
-
-        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
-            ret = rpc._rpc_sync_torchscript(
-                'worker{}'.format(self._next_rank()),
-                _qualified_name(MyScriptModule().my_method),
-                args=())
-        with self.assertRaisesRegex(TypeError, "can't pickle"):
-            ret = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()),
-                MyScriptModule().my_method,
-                args=())
 
     @staticmethod
     def _complex_python_udf(t1, t2):

@@ -162,7 +162,7 @@ RpcCommandBase& RpcWithAutograd::wrappedRpc() {
   return *wrappedRpc_;
 }
 
-std::unique_ptr<RpcCommandBase>&& RpcWithAutograd::moveWrappedRpc() && {
+std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   return std::move(wrappedRpc_);
 }
