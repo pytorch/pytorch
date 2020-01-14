@@ -985,6 +985,28 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(found, msg)
 
     @contextmanager
+    def maybeWarnsRegex(self, category, regex=''):
+        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
+
+        This filters expected warnings from the test log and fails the test if
+        any unexpected warnings are caught.
+        """
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            # Ignore expected warnings
+            warnings.filterwarnings("ignore", message=regex, category=category)
+            try:
+                yield
+            finally:
+                if len(ws) != 0:
+                    msg = 'Caught unexpected warnings:\n'
+                    for w in ws:
+                        msg += warnings.formatwarning(
+                            w.message, w.category, w.filename, w.lineno, w.line)
+                        msg += '\n'
+                    self.fail(msg)
+
+    @contextmanager
     def _reset_warning_registry(self):
         r"""
         warnings.catch_warnings() in Python 2 misses already registered
