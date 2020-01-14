@@ -67,7 +67,8 @@ class LLVMCodeGen : public IRVisitor {
   template<typename T>
   T value(std::vector<void*>& args) {
     irb_.CreateRet(value_);
-    assert(!llvm::verifyFunction(*fn_, &llvm::outs()));
+    CHECK(!llvm::verifyFunction(*fn_, &llvm::outs()))
+      << "Function verification failed";
     optimize(jit_->getTargetMachine(), *module_);
 
 #if DEBUG_PRINT
