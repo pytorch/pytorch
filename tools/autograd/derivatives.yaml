@@ -682,7 +682,7 @@
   exponent: pow_backward_exponent(grad, self, exponent, result)
 
 - name: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
-  exponent: pow_backward_exponent(grad, self, result)
+  exponent: pow_backward_exponent(grad, self, exponent, result)
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result)

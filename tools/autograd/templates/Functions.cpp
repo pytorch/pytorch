@@ -160,8 +160,14 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
                           result * self.log());
 }
 
-Tensor pow_backward_exponent(Tensor grad, const Scalar & base, Tensor result) {
-  return grad * result * std::log(base.toDouble());
+Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
+  if (base.toDouble() == 0) {
+    return grad * at::where(exponent >= 0,
+                            at::zeros({}, grad.options()),
+                            result * std::log(base.toDouble()));
+  } else {
+    return grad * result * std::log(base.toDouble());
+  }
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
