@@ -782,7 +782,8 @@ def emit_body(declaration):
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
                 # Only allow rebasing of the history if we return a single Tensor
                 allow_rebase_history = 'true' if return_info['dynamic_type'] == 'Tensor' else 'false'
-                wrapped_call = 'as_differentiable_view(/* base */{}, /* output */ {}, /* allow_rebase_history */ {})'.format(view_info, call, allow_rebase_history)
+                wrapped_call = ("as_differentiable_view(/* base */{}, /* output */ {}, "
+                                "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
                 return wrapped_call
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
