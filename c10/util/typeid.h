@@ -63,7 +63,7 @@ class C10_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  static C10_HOST_CONSTEXPR TypeIdentifier Get() noexcept {
+  static C10_TYPENAME_CONSTEXPR TypeIdentifier Get() noexcept {
     return TypeIdentifier(c10::util::get_type_index<T>());
   }
 
@@ -282,7 +282,7 @@ class _Uninitialized final {};
 
 template <class T>
 inline TypeMetaData _makeTypeMetaDataInstance() {
-  C10_HOST_CONSTEXPR_VAR auto typeId = TypeIdentifier::Get<T>();
+  C10_TYPENAME_CONSTEXPR auto typeId = TypeIdentifier::Get<T>();
   C10_TYPENAME_CONSTEXPR auto typeName = c10::util::get_fully_qualified_type_name<T>();
 
   return {sizeof(T),

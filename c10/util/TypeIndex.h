@@ -4,6 +4,8 @@
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
+#include <c10/util/Optional.h>
+#include <c10/util/Exception.h>
 #include <cinttypes>
 #include <functional>
 
@@ -133,6 +135,36 @@ inline C10_TYPENAME_CONSTEXPR string_view get_fully_qualified_type_name() noexce
   #endif
   string_view name = detail::fully_qualified_type_name_impl<T>();
   return name;
+}
+
+
+namespace detail {
+class CompilerClashChecker final {
+public:
+  static CompilerClashChecker& singleton();
+
+  void check() {
+    if (id_for_float.has_value()) {
+      if (*id_for_float != get_type_index<float>()) {
+        TORCH_INTERNAL_ASSERT(false,
+          "PyTorch was compiled using multiple different and incompatible compilers. ",
+          "One compiler assigned float the typeid ", *id_for_float,
+          " while the other compiler assigned it the typeid ", get_type_index<float>());
+      }
+    } else {
+      id_for_float = get_type_index<float>();
+    }
+  }
+
+  struct RunOnBootup final {
+    RunOnBootup() {
+      CompilerClashChecker::singleton().check();
+    }
+  };
+private:
+  c10::optional<type_index> id_for_float = c10::nullopt;
+};
+static auto _run_on_boot = CompilerClashChecker::RunOnBootup();
 }
 } // namespace util
 } // namespace c10
