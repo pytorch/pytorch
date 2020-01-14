@@ -318,12 +318,12 @@ if hypothesis_version < (3, 56, 10):
 else:
     define_setting = settings._define_setting
 if hypothesis_version < (3, 27, 0):
-    # We set the deadline in the currently loaded profile.
-    # Creating (and loading) a separate profile overrides any settings the user
-    # already specified.
     define_setting('deadline', 'Hypothesis deadline hack',
                    default=None, validator=lambda *args: True)
 settings._settings__definitions_are_locked = True
+# We set the deadline in the currently loaded profile.
+# Creating (and loading) a separate profile overrides any settings the user
+# already specified.
 current_settings = settings._profiles[settings._current_profile].__dict__
 current_settings['deadline'] = None
 def assert_deadline_disabled():
