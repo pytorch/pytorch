@@ -551,14 +551,24 @@ Object* CloneObject(Object* object) {
 class Schedule : RefHandle<ScheduleNode> {
  public:
   static Schedule make(const std::vector<Tensor>& funcs) {
-    return Schedule(new ScheduleNode(funcs));
+    return std::move(Schedule(new ScheduleNode(funcs)));
   }
+
+  explicit Schedule(const std::vector<Tensor>& funcs)
+      : BaseClass(new ScheduleNode(funcs)) {}
 
   Stmt Lower() {
     return node()->Lower();
   }
 
+  Schedule(Schedule&& other) : BaseClass(std::move(other)) {}
+
  private:
+  // TODO: temporarily disable the copy. We should decide whether the semantics
+  // of this object.
+  Schedule(const Schedule&) = delete;
+  Schedule& operator=(const Schedule&) = delete;
+
   using BaseClass = RefHandle<ScheduleNode>;
   Schedule(ScheduleNode* node) : BaseClass(node) {}
 };

@@ -126,3 +126,63 @@ TEST(TensorExpr, Simple02) {
     }
   }
 }
+
+TEST(TestSchedule, BroadcastAddBuffer) {
+  const int M = 4;
+  const int N = 5;
+  const int K = 6;
+  Buffer a_buf("a", kFloat32, {M, N});
+  Buffer b_buf("b", kFloat32, {N, K});
+  Tensor c = Compute(
+      "broadcast_add",
+      {M, N, K},
+      {"m", "n", "k"},
+      [&](const Var& m, const Var& n, const Var& k) {
+        return a_buf(m, n) + b_buf(n, k);
+      });
+  Schedule sch({c});
+  Stmt stmt = sch.Lower();
+
+  const int kPaddingSize = 8;
+  float kPaddingValue = 0.1357;
+  std::vector<float> a_vec(M * N + 2 * kPaddingSize, kPaddingValue);
+  std::vector<float> b_vec(N * K + 2 * kPaddingSize, kPaddingValue);
+  std::vector<float> c_vec(M * N * K + 2 * kPaddingSize, kPaddingValue);
+
+  std::vector<float> c_ref(c_vec);
+  float* a_ptr = &a_vec[kPaddingSize];
+  float* b_ptr = &b_vec[kPaddingSize];
+  float* c_ptr = &c_ref[kPaddingSize];
+
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      a_ptr[m * N + n] = 7 * m * n;
+    }
+  }
+  for (int n = 0; n < N; n++) {
+    for (int k = 0; k < K; k++) {
+      b_ptr[n * K + k] = 11 * n * k;
+    }
+  }
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      for (int k = 0; k < K; k++) {
+        c_ptr[m * N * K + n * K + k] = 7 * m * n + 11 * n * k;
+      }
+    }
+  }
+  std::vector<float> a_ref(a_vec);
+  std::vector<float> b_ref(b_vec);
+
+  SimpleIREvaluator ir_eval;
+  ir_eval.SetBufferMapping({
+      {a_buf.data(), a_ptr},
+      {b_buf.data(), b_ptr},
+      {c.function().func_var(), &c_vec[kPaddingSize]},
+  });
+  stmt.accept(&ir_eval);
+
+  ExpectAllNear(a_vec, a_ref, 1e-5, "a");
+  ExpectAllNear(b_vec, b_ref, 1e-5, "b");
+  ExpectAllNear(c_vec, c_ref, 1e-5, "c");
+}

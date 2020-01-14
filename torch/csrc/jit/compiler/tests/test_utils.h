@@ -53,6 +53,19 @@ class SimpleTensorEvaluator {
   SimpleIREvaluator expr_eval_;
 };
 
+template <typename U, typename V>
+void ExpectAllNear(
+    const std::vector<U>& v1,
+    const std::vector<U>& v2,
+    V threshold,
+    const std::string& name = "") {
+  ASSERT_EQ(v1.size(), v2.size());
+  for (int i = 0; i < v1.size(); i++) {
+    EXPECT_NEAR(v1[i], v2[i], threshold)
+        << "element index: " << i << ", name: " << name;
+  }
+}
+
 } // namespace compiler
 } // namespace jit
 } // namespace torch

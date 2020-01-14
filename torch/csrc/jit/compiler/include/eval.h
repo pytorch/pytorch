@@ -305,6 +305,11 @@ class SimpleIREvaluator : public IRVisitor {
   void SetBufferMapping(const BufferMapping& buffer_mapping) {
     buffer_mapping_ = buffer_mapping;
   }
+  void SetBufferMapping(const std::vector<std::pair<Var, void*>>& entries) {
+    for (const std::pair<Var, void*>& entry : entries) {
+      buffer_mapping_[entry.first.node()] = entry.second;
+    }
+  }
 
   Value value() const {
     return value_;
