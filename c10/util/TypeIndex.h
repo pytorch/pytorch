@@ -126,13 +126,7 @@ inline constexpr type_index get_type_index() {
 
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
-  #if C10_TYPENAME_SUPPORTS_CONSTEXPR
-  constexpr
-  #else
-  static
-  #endif
-  string_view name = detail::fully_qualified_type_name_impl<T>();
-  return name;
+  return detail::fully_qualified_type_name_impl<T>();
 }
 } // namespace util
 } // namespace c10
