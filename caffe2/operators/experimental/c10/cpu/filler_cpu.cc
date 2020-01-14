@@ -38,7 +38,7 @@ void filler_init(
     real_shape.insert(real_shape.end(), extra_shape.begin(), extra_shape.end());
     output.Resize(real_shape);
   } else {
-    output.Resize(c10::impl::toVector(shape));
+    output.Resize(shape.vec());
   }
 }
 
