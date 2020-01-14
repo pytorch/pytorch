@@ -104,7 +104,7 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-    Tensor loss;
+    Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
 }
 
@@ -116,7 +116,7 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
 
     // Binary cross entropy tensor is defined by the equation:
     // L = -w (y ln(x) + (1-y) ln(1-x))
-    loss = (target - 1).mul_(
+    loss.fill_(-1).add_(target).mul_(
       (1 - input).log_().clamp_min_(-100)
     ).add_(
       (-target).mul_(
@@ -128,12 +128,15 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
       loss.mul_(weight);
     }
 
-    loss = apply_loss_reduction(loss, reduction);
+    if (reduction != at::Reduction::None) {
+      Tensor loss_reduced = apply_loss_reduction(loss, reduction);
+      loss.resize_as_(loss_reduced).copy_(loss_reduced);
+    }
     return loss;
 }
 
 Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
-    Tensor grad_input;
+    Tensor grad_input = at::empty_like(input);
     return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
 }
 
@@ -141,18 +144,19 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     // The gradient is the partial derivative of BCELoss
     // with respect to x
     // d(L)/d(x) = -w (y - x) / (x - x^2)
-    grad_input = (input - target).div_(
+    Tensor grad_input_tmp = (input - target).div_(
       (1 - input).mul_(input).clamp_min_(EPSILON)
     ).mul_(grad);
 
     if (weight.defined()) {
-      grad_input.mul_(weight);
+      grad_input_tmp.mul_(weight);
     }
 
     if (reduction == at::Reduction::Mean) {
-        grad_input.div_(input.numel());
+        grad_input_tmp.div_(input.numel());
     }
 
+    grad_input.copy_(grad_input_tmp);
     return grad_input;
 }
 
