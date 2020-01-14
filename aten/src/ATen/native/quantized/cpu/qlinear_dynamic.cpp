@@ -76,8 +76,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*preserve_sparsity=*/false);
 
     q_params.precision = precision;
-    std::cout << "Input scale is " << q_params.scale << " min " << x_min
-              << " max " << x_max << std::endl;
     // ReQuantizeForFloat requires pointers to the zero point values,
     // since in the case of rowwise quantization these will be arrays rather
     // than scalars. But in this case, we're doing whole-tensor quantization so
@@ -289,9 +287,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     float x_min = std::numeric_limits<float>::infinity(),
           x_max = -std::numeric_limits<float>::infinity();
     auto input_numel = input_contig.numel();
-    std::cout << "Input data ";
     for (int64_t i = 0; i < input_numel; ++i) {
-      std::cout << " " << input_ptr[i];
       auto curr = input_ptr[i];
       if (curr < x_min) {
         x_min = curr;
@@ -300,15 +296,11 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         x_max = curr;
       }
     }
-    std::cout << "\n";
     auto q_params = chooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
         0,
         255);
-    std::cout << "Input scale is " << q_params.scale << " min " << x_min
-              << " max " << x_max << std::endl;
-    std::cout << "kernel scale is " << kernel_scale <<" zp " <<kernel_zp << std::endl;
     if (!pack_ptr.input_scale.has_value()) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
@@ -320,12 +312,9 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
           kernel_zp);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
       auto wt_numel = weight_contig.numel();
-      std::cout << "weight data ";
       for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
-        std::cout << " " << w_data[i] + 128;
       }
-      std::cout << std::endl;
       // Pass in dummy zero bias to pack function
       auto bias_fp32 = at::zeros(rows_w, weight_contig.options().dtype(at::kFloat));
 
@@ -354,7 +343,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
     std::vector<int64_t> out_sizes = input.sizes().vec();
     out_sizes.back() = rows_w;
-    std::cout << "input sizes are " << input_contig.sizes()  <<" output sizes are " << out_sizes << std::endl;
 
     auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
 
@@ -363,7 +351,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
       rows_input *= input_contig.size(i);
     }
-    std::cout << " input stride " << cols_input << " output stride " << rows_w << std::endl;
     pytorch_qnnp_status runStatus = qnnpack::qnnpackLinearDynamic(
         rows_input /* batch_size */,
         cols_input /* input_channels */,
@@ -379,8 +366,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         output.data_ptr<float>(),
         rows_w /* output_stride */,
         caffe2::mobile_pthreadpool() /* threadpool */);
-
-    std::cout << "run status " << runStatus << std::endl;
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,

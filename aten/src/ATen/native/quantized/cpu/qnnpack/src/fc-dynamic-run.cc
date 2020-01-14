@@ -47,7 +47,7 @@ static void compute_q8gemm_dq(
       a + (pixel_index + mr_block_start) * a_stride + group_index * k,
       a_stride,
       (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
-      bias,
+      bias + nr_block_start,
       c + (pixel_index + mr_block_start) * c_stride * sizeof(float) + nr_block_start + group_index * n, // TODO verify this math
       c_stride * sizeof(float),
       &context->quantization_params);
