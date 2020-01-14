@@ -283,7 +283,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
-#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -295,6 +295,16 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() {
+        return true;
+      })
+#else
+      .def("_jit_run_cpp_tests", []() {
+        throw std::exception();
+      })
+      .def("_jit_has_cpp_tests", []() {
+        return false;
+      })
 #endif
       .def(
           "_jit_flatten",
