@@ -195,23 +195,19 @@ TEST(LLVMTest, StoreFloat) {
   Buffer result(Var("result", kHandle), kFloat32, {1});
   std::vector<float> result_buffer = {0.0f};
   auto expr = Store::make(
-    result,
-    IntImm::make(0),
-    FloatImm::make(3.14f),
-    IntImm::make(1));
+      result, IntImm::make(0), FloatImm::make(3.14f), IntImm::make(1));
   LLVMCodeGen cg({&result});
   expr.accept(&cg);
-  std::vector<void *> args({result_buffer.data()});
+  std::vector<void*> args({result_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
   EXPECT_EQ(result_buffer[0], 3.14f);
 }
 
-TEST(LLVMTest, DISABLED_SimpleMath01) {
+TEST(LLVMTest, SimpleMath01) {
   const int N = 1024;
-  // Tensor tensor = Compute("f", {Expr(N)}, {"i"}, [](const Var& i) { return
-  // cast<float>(i * i + 1); });
-  Tensor tensor = Compute(
-      "f", {Expr(N)}, {"i"}, [](const Var& i) { return cast<float>(i); });
+  Tensor tensor = Compute("f", {Expr(N)}, {"i"}, [](const Var& i) {
+    return cast<float>(i * i + 1);
+  });
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
   Buffer f_buf(tensor.function().func_var(), kFloat32, {N});
@@ -229,6 +225,6 @@ TEST(LLVMTest, DISABLED_SimpleMath01) {
     f_ref[i + kPaddingSize] = i * i + 1;
   }
   for (int i = 0; i < f_ref.size(); ++i) {
-    ASSERT_NEAR(f_vec[i], f_ref[i], 1e-5) << "element index: " << i;
+    EXPECT_NEAR(f_vec[i], f_ref[i], 1e-5) << "element index: " << i;
   }
 }
