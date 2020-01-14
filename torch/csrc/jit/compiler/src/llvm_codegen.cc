@@ -76,36 +76,79 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(c
 
 LLVMCodeGen::LLVMCodeGen() : LLVMCodeGen({}) {}
 
+
+// TODO: The binary ops are copypasta.
+
 void LLVMCodeGen::visit(const Add* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
   v->rhs().accept(this);
   auto rhs = this->value_;
-  value_ = irb_.CreateAdd(lhs, rhs);
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  // TODO: Handle arg promotion.
+  if (lfp && rfp) {
+    value_ = irb_.CreateFAdd(lhs, rhs);
+  } else if (!lfp && !rfp) {
+    value_ = irb_.CreateAdd(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch add arg types";
+  }
 }
 
 void LLVMCodeGen::visit(const Sub* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
   v->rhs().accept(this);
   auto rhs = this->value_;
-  value_ = irb_.CreateSub(lhs, rhs);
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  // TODO: Handle arg promotion.
+  if (lfp && rfp) {
+    value_ = irb_.CreateFSub(lhs, rhs);
+  } else if (!lfp && !rfp) {
+    value_ = irb_.CreateSub(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch sub arg types";
+  }
 }
 
 void LLVMCodeGen::visit(const Mul* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
   v->rhs().accept(this);
   auto rhs = this->value_;
-  value_ = irb_.CreateMul(lhs, rhs);
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  // TODO: Handle arg promotion.
+  if (lfp && rfp) {
+    value_ = irb_.CreateFMul(lhs, rhs);
+  } else if (!lfp && !rfp) {
+    value_ = irb_.CreateMul(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch mul arg types";
+  }
 }
 
 void LLVMCodeGen::visit(const Div* v) {
   v->lhs().accept(this);
   auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
   v->rhs().accept(this);
   auto rhs = this->value_;
-  value_ = irb_.CreateSDiv(lhs, rhs);
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  // TODO: Handle arg promotion.
+  if (lfp && rfp) {
+    value_ = irb_.CreateFDiv(lhs, rhs);
+  } else if (!lfp && !rfp) {
+    value_ = irb_.CreateSDiv(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch div arg types";
+  }
 }
 
 void LLVMCodeGen::visit(const IntImm* v) {

@@ -191,6 +191,41 @@ TEST(LLVMTest, ElemwiseAdd) {
   assertAllEqual(c_buffer, 42);
 }
 
+TEST(LLVMTest, ElemwiseAddFloat) {
+  constexpr int N = 1024;
+  Buffer a(Var("A", kHandle), kFloat32, {N});
+  Buffer b(Var("B", kHandle), kFloat32, {N});
+  Buffer c(Var("C", kHandle), kFloat32, {N});
+  std::vector<float> a_buffer(N, 41);
+  std::vector<float> b_buffer(N, 1);
+  std::vector<float> c_buffer(N, 1);
+
+  auto mask = IntImm::make(1);
+  Var i("i", kInt32);
+  auto memcpy_expr = For::make(
+      i,
+      0,
+      N,
+      Store::make(
+          c,
+          i,
+          Load::make(a, i, mask) + Load::make(b, i, mask),
+          mask));
+
+  LLVMCodeGen cg({&a, &b, &c});
+  memcpy_expr.accept(&cg);
+
+  std::vector<void*> args({a_buffer.data(), b_buffer.data(), c_buffer.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+
+  ASSERT_EQ(a_buffer.size(), N);
+  ASSERT_EQ(b_buffer.size(), N);
+  ASSERT_EQ(c_buffer.size(), N);
+  assertAllEqual(a_buffer, 41.0f);
+  assertAllEqual(b_buffer, 1.0f);
+  assertAllEqual(c_buffer, 42.0f);
+}
+
 TEST(LLVMTest, StoreFloat) {
   Buffer result(Var("result", kHandle), kFloat32, {1});
   std::vector<float> result_buffer = {0.0f};
