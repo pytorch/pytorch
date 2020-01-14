@@ -303,7 +303,7 @@ class ShapePropagator {
                          ->create(
                              aten::expand,
                              {node->inputs().at(input_idx),
-                              graph->insertConstant(c10::impl::toList(expected_size)),
+                              graph->insertConstant(expected_size),
                               graph->insertConstant(false)})
                          ->insertBefore(node);
       PropagateShapeOnNode(expand);
@@ -1997,7 +1997,7 @@ class ShapePropagator {
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;
       }
-      node->output()->setType(tensor_types.at(0)->withSizes(c10::impl::toVector(std::move(sizes))));
+      node->output()->setType(tensor_types.at(0)->withSizes(sizes.vec()));
       return true;
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
@@ -2019,8 +2019,7 @@ class ShapePropagator {
       std::tie(sizes, strides) = at::inferExpandGeometry(
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
-          c10::impl::toVector(
-              node->get<c10::List<int64_t>>(attr::size).value()));
+          node->get<c10::List<int64_t>>(attr::size).value().vec());
       node->output()->setType(tp->withSizesStrides(sizes, strides));
       return true;
     } else if (
