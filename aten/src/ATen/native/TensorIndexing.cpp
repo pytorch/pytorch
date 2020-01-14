@@ -39,15 +39,15 @@ int64_t Slice::step() const {
   return step_;
 }
 
-const Tensor& start_tensor() const {
+const Tensor& Slice::start_tensor() const {
   return start_tensor_;
 }
 
-const Tensor& stop_tensor() const {
+const Tensor& Slice::stop_tensor() const {
   return stop_tensor_;
 }
 
-const Tensor& step_tensor() const {
+const Tensor& Slice::step_tensor() const {
   return step_tensor_;
 }
 
