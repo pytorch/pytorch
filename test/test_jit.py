@@ -4061,6 +4061,25 @@ def foo(x):
         cu.define(dedent(inspect.getsource(ok)))
         check(cu.ok)
 
+    def test_kwarg_support(self):
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
+            class M(nn.Module):
+                def forward(self, *, n_tokens: int, device_name: str=2):
+                    pass
+            torch.jit.script(M())
+
+        class M(nn.Module):
+            def forward(self, *, n_tokens: int, device_name: str):
+                return n_tokens, device_name
+
+        sm = torch.jit.script(M())
+
+        with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
+            sm()
+
+        input = (3, 'hello')
+        self.assertEqual(sm(*input), input)
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))

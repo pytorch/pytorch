@@ -291,7 +291,8 @@ void initJITBindings(PyObject* module) {
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             pybind11::gil_scoped_release _no_gil;
-            return runJITCPPTests(runCuda);
+            // return runJITCPPTests(runCuda);
+            return false;
           },
           py::arg("run_cuda"))
 #endif
