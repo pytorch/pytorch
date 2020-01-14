@@ -118,7 +118,9 @@ class Linear(torch.nn.Module):
 
     def __repr__(self):
         # We don't want to show `LinearPackedParams` children, hence custom
-        # `__repr__`. You should still override `extra_repr` to add more info.
+        # `__repr__`. This is the same as nn.Module.__repr__, except the check
+        # for the `LinearPackedParams`.
+        # You should still override `extra_repr` to add more info.
         extra_lines = []
         extra_repr = self.extra_repr()
         # empty string will be split into list ['']
