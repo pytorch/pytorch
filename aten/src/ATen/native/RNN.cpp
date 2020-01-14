@@ -205,8 +205,8 @@ struct QuantizedCellParamsStatic {
   const Tensor& packed_w_hh;
 
   // Assume [-8, 8] range
-  constexpr float kQ8BitScaleWithRange16 = 0.0625;
-  constexpr int kQ8BitZeroPoint = 0;
+  static constexpr float kQ8BitScaleWithRange16 = 0.0625;
+  static constexpr int kQ8BitZeroPoint = 0;
 
   Tensor matmul_ih(Tensor input) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
