@@ -1870,6 +1870,8 @@ class TestNN(NNTestCase):
             self.assertEqual(norm, norm_before)
             self.assertEqual(norm_after, max_norm)
             self.assertLessEqual(norm_after, norm_before)
+            # should return python float, so that __round__ is defined
+            self.assertEqual(round(norm, 5), norm)
             compare_scaling(grads)
 
         # Small gradients should be left unchanged
@@ -1895,6 +1897,13 @@ class TestNN(NNTestCase):
             clip_grad_norm_(p1, max_norm, norm_type=norm_type)
             clip_grad_norm_([p2], max_norm, norm_type=norm_type)
             self.assertEqual(p1.grad, p2.grad)
+
+        # Should accept an empty list/list of parameters w/o grad as input
+        p1 = torch.randn(10, 10)
+        for norm_type in [0.5, 1.5, 2, 4, 'inf']:
+            norm = clip_grad_norm_([p1], max_norm, norm_type=norm_type)
+            self.assertEqual(norm, 0)
+
 
     def test_clip_grad_value(self):
         l = nn.Linear(10, 10)
