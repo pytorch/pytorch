@@ -10,13 +10,45 @@
 namespace c10 {
 namespace util {
 
-#if (defined(_MSC_VER) && defined(__CUDACC__)) || (!defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 9)
-// GCC<9 has issues with our implementation for constexpr typenames.
-// So does nvcc on Windows.
-// Any version of MSVC or Clang and GCC 9 are fine with it.
 // TODO Make it work for more compilers
+
+// Clang works
+#if defined(__clang__)
+
+// except for NVCC
+#if defined(__CUDACC__)
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
 #define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// Windows works
+#elif defined(_MSC_VER)
+
+// except for NVCC
+#if defined(__CUDACC__)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// GCC works
+#elif defined(__GNUC__)
+
+// except when gcc < 9
+#if (__GNUC__ < 9)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
+#define C10_TYPENAME_CONSTEXPR
+#else
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
+// some other compiler we don't know about
 #else
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
 #define C10_TYPENAME_CONSTEXPR constexpr
