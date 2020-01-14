@@ -58,12 +58,12 @@ std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
 
 // This mirrors `__PySlice_Unpack` in torch/csrc/utils/python_compat.h
 Slice unpackSlice(
-    c10::optional<int64_t> start_index = at::indexing::None,
-    c10::optional<int64_t> stop_index = at::indexing::None,
-    c10::optional<int64_t> step_index = at::indexing::None,
-    Tensor start_index_tensor = {},
-    Tensor stop_index_tensor = {},
-    Tensor step_index_tensor = {}) {
+    c10::optional<int64_t> start_index,
+    c10::optional<int64_t> stop_index,
+    c10::optional<int64_t> step_index,
+    Tensor start_index_tensor,
+    Tensor stop_index_tensor,
+    Tensor step_index_tensor) {
   int64_t start, stop, step;
   if (!step_index.has_value()) {
     step = 1;
@@ -103,16 +103,18 @@ TensorIndex::TensorIndex(int64_t integer, Tensor tensor) : integer_(integer), te
 TensorIndex::TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
 TensorIndex::TensorIndex(
     std::initializer_list<c10::optional<int64_t>> slice,
-    std::initializer_list<Tensor> slice_tensors);
+    std::initializer_list<Tensor> slice_tensors)
     : type_(TensorIndexType::Slice) {
   if (slice.size() == 0) {
-    slice_ = unpackSlice();
+    slice_ = unpackSlice(None, None, None, {}, {}, {});
   } else if (slice.size() == 2) {
     slice_ = unpackSlice(
       *slice.begin(),
       *(slice.begin() + 1),
+      None,
       *slice_tensors.begin(),
-      *(slice_tensors.begin() + 1));
+      *(slice_tensors.begin() + 1),
+      {});
   } else if (slice.size() == 3) {
     slice_ = unpackSlice(
       *slice.begin(),
