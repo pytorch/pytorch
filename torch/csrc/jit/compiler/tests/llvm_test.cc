@@ -1,9 +1,14 @@
 #include "torch/csrc/jit/compiler/include/ir.h"
+#include "torch/csrc/jit/compiler/include/ir_printer.h"
 #include "torch/csrc/jit/compiler/include/llvm_codegen.h"
+#include "torch/csrc/jit/compiler/include/schedule.h"
+#include "torch/csrc/jit/compiler/include/tensor.h"
+#include "torch/csrc/jit/compiler/tests/test_utils.h"
 
 #include <gtest/gtest.h>
 
 using namespace torch::jit::compiler;
+using namespace torch::jit::compiler::schedule;
 
 template <typename T>
 static void assertAllEqual(const std::vector<T>& vec, const T& val) {
@@ -199,4 +204,31 @@ TEST(LLVMTest, StoreFloat) {
   std::vector<void *> args({result_buffer.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
   EXPECT_EQ(result_buffer[0], 3.14f);
+}
+
+TEST(LLVMTest, DISABLED_SimpleMath01) {
+  const int N = 1024;
+  // Tensor tensor = Compute("f", {Expr(N)}, {"i"}, [](const Var& i) { return
+  // cast<float>(i * i + 1); });
+  Tensor tensor = Compute(
+      "f", {Expr(N)}, {"i"}, [](const Var& i) { return cast<float>(i); });
+  Schedule sch = Schedule::make({tensor});
+  Stmt stmt = sch.Lower();
+  Buffer f_buf(tensor.function().func_var(), kFloat32, {N});
+  LLVMCodeGen cg({&f_buf});
+  stmt.accept(&cg);
+
+  int kPaddingSize = 8;
+  float kPaddingValue = 0.1357;
+  std::vector<float> f_vec(N + 2 * kPaddingSize, kPaddingValue);
+  std::vector<void*> args({f_vec.data() + kPaddingSize});
+  int value = cg.value<int>(args);
+  ASSERT_EQ(value, 0);
+  std::vector<float> f_ref(N + 2 * kPaddingSize, kPaddingValue);
+  for (int i = 0; i < N; i++) {
+    f_ref[i + kPaddingSize] = i * i + 1;
+  }
+  for (int i = 0; i < f_ref.size(); ++i) {
+    ASSERT_NEAR(f_vec[i], f_ref[i], 1e-5) << "element index: " << i;
+  }
 }
