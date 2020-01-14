@@ -49,15 +49,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // sc is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
-      at::IValue res;
-      if (scriptCall.hasOp()) {
-        scriptCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptCall.qualifiedName())
-            .run(stack);
-      }
+      scriptCall.op()->getOperation()(stack);
 
       TORCH_INTERNAL_ASSERT(
           stack.size() == 1,
