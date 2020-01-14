@@ -109,6 +109,11 @@ training iteration.
   start from the same state and they receive the same averaged gradients in
   every iteration.
 
+
+.. image:: https://user-images.githubusercontent.com/16999635/72313121-4e7c1c80-3658-11ea-9e3a-ca75f697b9de.png
+    :alt: ddp_grad_sync.png
+    :width: 500 px
+
 Implementation
 ^^^^^^^^^^^^^^
 
@@ -147,3 +152,9 @@ DistributedDataParallel
 - `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
   provides the core implementation for gradient synchronization in the backward
   pass.
+
+The following stack graph shows the structure of code.
+
+.. image:: https://user-images.githubusercontent.com/16999635/72313120-4e7c1c80-3658-11ea-9c6d-44336b2daeac.png
+    :alt: ddp_code.png
+    :width: 500 px
