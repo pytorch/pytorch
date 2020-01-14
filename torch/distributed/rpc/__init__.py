@@ -19,6 +19,7 @@ if is_available() and not torch._C._rpc_init():
 
 if is_available():
     from .api import _init_rpc_backend, _require_initialized
+    from .api import _rpc_sync_torchscript, _rpc_async_torchscript
     from .api import *  # noqa: F401
     import torch.distributed.autograd as dist_autograd
 

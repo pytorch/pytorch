@@ -57,6 +57,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
@@ -77,6 +79,13 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
+
+  // Shared ptr to python compilation unit in jit, it is constructed in python
+  // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
+  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
+  // We import the compilation unit here only once for less cost and thread
+  // safety.
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
 };
 
 } // namespace rpc
