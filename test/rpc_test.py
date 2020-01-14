@@ -1255,7 +1255,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertIn("num_pending_users", info)
         # RRef on local value is not added to context until shared across RPC
         # foo
-        # foobar
         self.assertEqual(0, int(info["num_owner_rrefs"]))
         self.assertEqual(0, int(info["num_pending_users"]))
         # barrier after the check 1
