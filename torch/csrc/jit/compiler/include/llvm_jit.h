@@ -2,6 +2,7 @@
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/Target/TargetMachine.h"
 
 #include <memory>
@@ -16,11 +17,13 @@ class PytorchLLVMJIT {
  public:
   PytorchLLVMJIT();
   ~PytorchLLVMJIT();
-  TargetMachine& getTargetMachine();
-  VModuleKey addModule(std::unique_ptr<Module> M);
+
+  Error addModule(ThreadSafeModule M);
+
   JITSymbol findSymbol(const std::string Name);
-  JITTargetAddress getSymbolAddress(const std::string Name);
-  void removeModule(VModuleKey K);
+
+  TargetMachine& getTargetMachine();
+  const DataLayout& getDataLayout();
 
  private:
   // Use PImpl idiom here to hide the no-rtti parts of the JIT structure.

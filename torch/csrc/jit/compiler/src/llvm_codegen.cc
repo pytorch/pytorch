@@ -8,22 +8,51 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include <memory>
 
 using namespace torch::jit::compiler;
 
-LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(context_) {
+LLVMCodeGen::LLVMCodeGen() : LLVMCodeGen(std::vector<Buffer*>()) { }
+
+LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
+    : context_(std::make_unique<llvm::LLVMContext>()),
+      irb_(*context_.getContext())
+      {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetAsmParser();
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
-  module_ = std::make_unique<llvm::Module>("pytorch", context_);
-  module_->setDataLayout(jit_->getTargetMachine().createDataLayout());
-  module_->setTargetTriple(
-      jit_->getTargetMachine().getTargetTriple().normalize());
 
-  int32Ty_ = llvm::Type::getInt32Ty(context_);
-  floatTy_ = llvm::Type::getFloatTy(context_);
+#if 0
+  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
+  // once LLVM 10 is available.
+  auto JTMB = llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
+#else
+  llvm::orc::JITTargetMachineBuilder JTMB((llvm::Triple(llvm::sys::getProcessTriple())));
+
+  // Retrieve host CPU name and sub-target features and add them to builder.
+  // Relocation model, code model and codegen opt level are kept to default
+  // values.
+  llvm::SubtargetFeatures SubtargetFeatures;
+  llvm::StringMap<bool> FeatureMap;
+  llvm::sys::getHostCPUFeatures(FeatureMap);
+  for (auto &Feature : FeatureMap) {
+      SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
+  }
+
+  JTMB.setCPU(llvm::sys::getHostCPUName());
+  JTMB.addFeatures(SubtargetFeatures.getFeatures());
+#endif
+
+  TM = llvm::cantFail(JTMB.createTargetMachine());
+
+  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
+  module_ = std::make_unique<llvm::Module>("pytorch", *context_.getContext());
+  module_->setDataLayout(cantFail(JTMB.getDefaultDataLayoutForTarget()));
+  module_->setTargetTriple(JTMB.getTargetTriple().str());
+
+  int32Ty_ = llvm::Type::getInt32Ty(*context_.getContext());
+  floatTy_ = llvm::Type::getFloatTy(*context_.getContext());
 
   // Emit prototype.
   llvm::Type* ret_ty = nullptr;
@@ -36,9 +65,9 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(c
   for (int i = 0; i < args.size(); i++) {
     auto const &arg = args[i];
     if (arg->dtype() == kInt32) {
-      params.push_back(llvm::Type::getInt32PtrTy(context_));
+      params.push_back(llvm::Type::getInt32PtrTy(*context_.getContext()));
     } else if (arg->dtype() == kFloat32) {
-      params.push_back(llvm::Type::getFloatPtrTy(context_));
+      params.push_back(llvm::Type::getFloatPtrTy(*context_.getContext()));
     }
     varToArg_[args[i]->data().node()] = i;
   }
@@ -50,13 +79,13 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(c
   }
 
   // Emit wrapper to unpack argument vector.
-  auto voidPP = llvm::Type::getVoidTy(context_)->getPointerTo()->getPointerTo();
+  auto voidPP = llvm::Type::getVoidTy(*context_.getContext())->getPointerTo()->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(int32Ty_, {voidPP}, false),
       llvm::Function::ExternalLinkage,
       "wrapper",
       module_.get());
-  auto wrapBB = llvm::BasicBlock::Create(context_, "wrapBB", wrapper);
+  auto wrapBB = llvm::BasicBlock::Create(*context_.getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
   for (size_t i = 0; i < args.size(); i++) {
@@ -70,12 +99,9 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype) : irb_(c
   irb_.CreateRet(cc);
 
   // Set insert point to the real function.
-  bb_ = llvm::BasicBlock::Create(context_, "entry", fn_);
+  bb_ = llvm::BasicBlock::Create(*context_.getContext(), "entry", fn_);
   irb_.SetInsertPoint(bb_);
 }
-
-LLVMCodeGen::LLVMCodeGen() : LLVMCodeGen({}) {}
-
 
 // TODO: The binary ops are copypasta.
 
@@ -210,7 +236,7 @@ void LLVMCodeGen::visit(const For* v) {
 
   // Create loop preheader and body.
   auto preheader = irb_.GetInsertBlock();
-  auto loop = llvm::BasicBlock::Create(context_, "loop", fn_);
+  auto loop = llvm::BasicBlock::Create(*context_.getContext(), "loop", fn_);
   irb_.CreateBr(loop);
   irb_.SetInsertPoint(loop);
 
@@ -231,7 +257,7 @@ void LLVMCodeGen::visit(const For* v) {
 
   // Branch back to top of loop and finish phi for index variable.
   auto end_loop = irb_.GetInsertBlock();
-  auto after = llvm::BasicBlock::Create(context_, "after", fn_);
+  auto after = llvm::BasicBlock::Create(*context_.getContext(), "after", fn_);
   irb_.CreateCondBr(cond, loop, after);
   irb_.SetInsertPoint(after);
   idx->addIncoming(inc, end_loop);
@@ -258,19 +284,19 @@ void LLVMCodeGen::visit(const Store* v) {
 
 void LLVMCodeGen::visit(const Broadcast* v) {}
 
-void LLVMCodeGen::optimize(llvm::TargetMachine& TM, llvm::Module& M) {
+void LLVMCodeGen::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
 
   // Add internal analysis passes from the target machine.
-  PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
-  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+  PM.add(llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
+  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 
   llvm::PassManagerBuilder PMB;
   PMB.OptLevel = 3;
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
-  TM.adjustPassManager(PMB);
+  TM->adjustPassManager(PMB);
 
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);

@@ -3,9 +3,11 @@
 #include "torch/csrc/jit/compiler/include/ir.h"
 #include "torch/csrc/jit/compiler/include/ir_visitor.h"
 #include "torch/csrc/jit/compiler/include/llvm_jit.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <unordered_map>
 #include <vector>
 
@@ -21,8 +23,9 @@ namespace compiler {
 
 class LLVMCodeGen : public IRVisitor {
  private:
-  llvm::LLVMContext context_;
+  llvm::orc::ThreadSafeContext context_;
   llvm::IRBuilder<> irb_;
+  std::unique_ptr<llvm::TargetMachine> TM;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
@@ -56,7 +59,7 @@ class LLVMCodeGen : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
 
-  void optimize(llvm::TargetMachine& TM, llvm::Module& M);
+  void optimize(llvm::Module& M);
 
 
   template<typename T> T value() {
@@ -72,14 +75,14 @@ class LLVMCodeGen : public IRVisitor {
 #endif
     CHECK(!llvm::verifyFunction(*fn_, &llvm::outs()))
       << "Function verification failed";
-    optimize(jit_->getTargetMachine(), *module_);
+    optimize(*module_);
 
 #if DEBUG_PRINT
     llvm::errs() << *module_;
     llvm::SmallVector<char, 0> asmBuffer;
     llvm::raw_svector_ostream asmStream(asmBuffer);
     llvm::legacy::PassManager PM;
-    jit_->getTargetMachine().addPassesToEmitFile(
+    TM->addPassesToEmitFile(
         PM,
         asmStream,
         nullptr,
@@ -88,13 +91,12 @@ class LLVMCodeGen : public IRVisitor {
     llvm::errs() << asmStream.str();
 #endif
 
-    auto key = jit_->addModule(std::move(module_));
+    cantFail(jit_->addModule(llvm::orc::ThreadSafeModule(std::move(module_), context_)));
     auto sym = jit_->findSymbol("wrapper");
     auto addr = sym.getAddress();
     assert(addr);
     T (*fp)(void**) = (T (*)(void**))addr.get();
     T rv = fp(args.data());
-    jit_->removeModule(key);
     return rv;
   }
 };
