@@ -18,11 +18,13 @@
 #include <ATen/ExpandUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/native/TensorIndexing.h>
 
 #include <vector>
 #include <tuple>
 
 using namespace at;
+using namespace at::indexing;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
