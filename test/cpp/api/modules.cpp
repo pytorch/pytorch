@@ -2258,7 +2258,7 @@ TEST_F(ModulesTest, ELU) {
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = torch::max(torch::zeros_like(x), x) +
-                 torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+                 torch::min(torch::zeros_like(x), alpha * torch::expm1(x));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
@@ -2272,7 +2272,7 @@ TEST_F(ModulesTest, SELU) {
   auto zero = torch::zeros_like(input);
   auto expected = scale *
       (torch::max(zero, input) +
-       torch::min(zero, alpha * (torch::exp(input) - 1)));
+       torch::min(zero, alpha * torch::expm1(input));
   auto s = output.sum();
   s.backward();
 
@@ -2519,7 +2519,7 @@ TEST_F(ModulesTest, CELU) {
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = torch::max(torch::zeros_like(x), x) +
-        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+        torch::min(torch::zeros_like(x), alpha * torch::expm1(x / alpha));
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
