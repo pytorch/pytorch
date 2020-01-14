@@ -11,6 +11,8 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   source activate testenv >/dev/null
 elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
   export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
+elif [[ "$DESIRED_PYTHON" == 3.8m ]]; then
+  export PATH="/opt/python/cp38-cp38/bin:\$PATH"
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
   export PATH="/opt/python/cp\$python_nodot-cp\${python_nodot}m/bin:\$PATH"
