@@ -3144,7 +3144,7 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::dict((" key_type ", tVal)[] inputs) -> Dict(" key_type       \
-          "(a -> *), tVal(b -> *))",                                          \
+          ", tVal)",                                                          \
           dictConstructFromList,                                              \
           aliasAnalysisFromSchema())
 
