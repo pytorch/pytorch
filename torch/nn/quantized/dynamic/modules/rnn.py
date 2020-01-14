@@ -41,7 +41,7 @@ class PackedParameter(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         weight = state_dict[prefix + 'weight']
         bias = state_dict[prefix + 'bias']
-        self.param = torch.ops.quantized.linear_prepack(weight)
+        self.param = torch.ops.quantized.linear_prepack(weight, bias)
         state_dict.pop(prefix + 'weight')
         state_dict.pop(prefix + 'bias')
 
@@ -182,7 +182,9 @@ class RNNBase(torch.nn.Module):
 
     def __repr__(self):
         # We don't want to show `ModuleList` children, hence custom
-        # `__repr__`. You should still override `extra_repr` to add more info.
+        # `__repr__`. This is the same as nn.Module.__repr__, except the check
+        # for the `PackedParameter` and `nn.ModuleList`.
+        # You should still override `extra_repr` to add more info.
         extra_lines = []
         extra_repr = self.extra_repr()
         # empty string will be split into list ['']
