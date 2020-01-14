@@ -762,9 +762,6 @@ class RpcTest(RpcAgentTestFixture):
                 'worker{}'.format(dst_rank),
                 _qualified_name(MyScriptModule),
                 args=())
-        with self.assertRaisesRegex(RuntimeError, "PickleError:"):
-            ret = rpc.rpc_sync(
-                'worker{}'.format(dst_rank), MyScriptModule, args=())
 
         with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
             ret = rpc._rpc_sync_torchscript(
