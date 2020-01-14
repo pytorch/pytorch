@@ -217,9 +217,9 @@ def _sort_helper(g, input, dim, decending=True, out=None):
     if _export_onnx_opset_version <= 10:
         if not decending:
             _unimplemented("Sort", "Ascending is not supported")
-        return g.op("TopK", input, index_, axis_i=dim, outputs=2)
+        return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
     else:
-        return g.op("TopK", input, index_, axis_i=dim, largest_i=decending, outputs=2)
+        return g.op("TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2)
 
 
 def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
