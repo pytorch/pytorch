@@ -321,8 +321,8 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   THTensor_(set)(self, src);
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
 
-  std::vector<int64_t> newSize(self->dim()-1);
-  std::vector<int64_t> newStride(self->dim()-1);
+  DimVector newSize(self->dim()-1);
+  DimVector newStride(self->dim()-1);
   for (d = 0; d < dimension; d++)
   {
     newSize[d] = self->size(d);
@@ -373,8 +373,8 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
-    std::vector<int64_t> newSize(self->dim() - 1);
-    std::vector<int64_t> newStride(self->dim() - 1);
+    DimVector newSize(self->dim() - 1);
+    DimVector newStride(self->dim() - 1);
     for (d = 0; d < dimension; d++)
     {
       newSize[d] = self->size(d);
@@ -401,8 +401,8 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-  std::vector<int64_t> newSize(/* size */ self->dim()+1);
-  std::vector<int64_t> newStride(/* size */ self->dim()+1);
+  DimVector newSize(/* size */ self->dim()+1);
+  DimVector newStride(/* size */ self->dim()+1);
 
   for(d = self->dim(); d > dimension; d--)
   {
@@ -665,7 +665,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 
   // Compute the size of the result
-  std::vector<int64_t> size(nDims);
+  DimVector size(nDims);
   for (int dim = 0; dim < nDims; dim++) {
     int64_t result_dim_size = notSkippedTensor->size(dim);
     if (dim == dimension) {
