@@ -944,6 +944,15 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
         self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
+ 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_binomial_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for prob in [0.01, 0.1, 0.5, 0.8, 0.9]:
+            for count in [2, 10, 100, 500]:
+                self._check_sampler_discrete(Binomial(total_count=count, probs=prob),
+                                             scipy.stats.binom(count, prob),
+                                             'Binomial(total_count={}, probs={})'.format(count, prob))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob(self):
