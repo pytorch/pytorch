@@ -318,7 +318,7 @@ if hypothesis_version < (3, 27, 0):
     # Creating (and loading) a separate profile overrides any settings the user
     # already specified.
     settings._define_setting('deadline', 'Hypothesis deadline hack',
-                               default=None, validator=lambda *args: True)
+                             default=None, validator=lambda *args: True)
 settings._settings__definitions_are_locked = True
 current_settings = settings._profiles[settings._current_profile].__dict__
 current_settings['deadline'] = None
