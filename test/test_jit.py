@@ -17602,8 +17602,9 @@ class TestDocs(unittest.TestCase):
         def report_error(result):
             out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && pip install -r requirements.txt && make doctest`)".format(err, out))
-
+            raise RuntimeError("{}\n{}\n".format(err, out) +
+                               "Docs build failed (run `cd docs && " +
+                               "pip install -r requirements.txt && make doctest`)")
         result = subprocess.run(
             ['pip', 'install', '-r', 'requirements.txt'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
