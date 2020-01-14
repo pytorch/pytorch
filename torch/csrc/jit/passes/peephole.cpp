@@ -404,8 +404,6 @@ struct PeepholeOptimizeImpl {
   //     return s
   //
   void runAliasingSensitivePeepholeTransformations(Node* node) {
-
-
     if (node->matches(
             "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             /*const_inputs=*/{attr::alpha, attr::other}) ||

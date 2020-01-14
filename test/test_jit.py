@@ -557,7 +557,7 @@ class TestJit(JitTestCase):
             z.add_(t)
             # this makes sure z isn't blasted out of existence
             # because it isn't returned or used in a side-effectful
-            # way 
+            # way
             nomnom(z)
             return y + y
 
@@ -580,8 +580,7 @@ class TestJit(JitTestCase):
         c = torch.tensor([0], dtype=torch.int32)
 
         def f(x, y):
-            z = x.type_as(y)
-            return z * 3
+            return x.type_as(y)
 
         tf = torch.jit.trace(f, (a, b))
         FileCheck().check("type_as").run(str(tf.graph))
@@ -608,8 +607,7 @@ class TestJit(JitTestCase):
         c = torch.tensor([0.7], device='cuda')
 
         def f(x, y):
-            z = x.type_as(y)
-            return z * 3
+            return x.type_as(y)
 
         trace = torch.jit.trace(f, (a, c))
         s = str(trace.graph)
