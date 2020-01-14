@@ -263,3 +263,27 @@ TEST(LLVMTest, SimpleMath01) {
     EXPECT_NEAR(f_vec[i], f_ref[i], 1e-5) << "element index: " << i;
   }
 }
+
+TEST(LLVMTest, ComputeMul) {
+  const int N = 1024;
+  Buffer a(Var("a", kHandle), kFloat32, {N});
+  Buffer b(Var("b", kHandle), kFloat32, {N});
+  Tensor c = Compute("c", {Expr(N)}, {"i"}, [&a, &b](const Var& i) {
+      Expr mask(1);
+      return Load::make(a, i, mask) * Load::make(b, i, mask);
+  });
+
+  Buffer c_buf(c.function().func_var(), kFloat32, {N});
+  Schedule sch = Schedule::make({c});
+  Stmt s = sch.Lower();
+
+  LLVMCodeGen cg({&a, &b, &c_buf});
+  s.accept(&cg);
+
+  std::vector<float> a_vec(N, 21.0f);
+  std::vector<float> b_vec(N, 2.0f);
+  std::vector<float> c_vec(N, 0.0f);
+  std::vector<void*> args({a_vec.data(), b_vec.data(), c_vec.data()});
+  ASSERT_EQ(cg.value<int>(args), 0);
+  assertAllEqual(c_vec, 42.0f);
+}
