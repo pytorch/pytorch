@@ -93,7 +93,7 @@ void OptimizerBase::add_param_group(const OptimizerParamGroup& param_group) {
     TORCH_CHECK(state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
       "some parameters appear in more than one parameter group");
   }
-  param_groups_.push_back(std::move(param_group_));
+  param_groups_.emplace_back(std::move(param_group_));
 }
 
 void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
@@ -157,7 +157,7 @@ Tensor& OptimizerBase::buffer_at(std::vector<Tensor>& buffers, size_t index) {
   if (buffers.size() <= index) {
     buffers.reserve(index);
     for (auto i = buffers.size(); i <= index; ++i) {
-      buffers.push_back(torch::zeros_like(parameters_.at(i)));
+      buffers.emplace_back(torch::zeros_like(parameters_.at(i)));
     }
   }
   // Copy the buffer to the device and dtype of the parameter.

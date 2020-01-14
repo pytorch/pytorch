@@ -84,13 +84,13 @@ namespace detail {
         param_group_archive.read(
           "params/" + c10::to_string(index), ivalue);
         std::string element = ivalue.toStringRef();
-        params.push_back(element);
+        params.emplace_back(element);
       }
       serialize::InputArchive param_group_options_archive;
       param_group_archive.read("options", param_group_options_archive);
       DerivedOptimizerParamOptions param_group_options;
       param_group_options.serialize(param_group_options_archive);
-      param_groups.push_back(std::make_pair(params, std::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
+      param_groups.emplace_back(std::make_pair(params, std::make_unique<DerivedOptimizerParamOptions>(param_group_options)));
     }
   }
 } // namespace detail

@@ -12,8 +12,7 @@
 namespace torch {
 namespace optim {
 
-AdagradOptions::AdagradOptions(double lr)
-    : lr_(lr) {}
+AdagradOptions::AdagradOptions(double lr) : lr_(lr) {}
 
 bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs) {
   return (lhs.lr() == rhs.lr()) &&
@@ -82,7 +81,7 @@ void Adagrad::step() {
         auto grad_values = grad._values();
         auto size = grad.sizes();
 
-        auto make_sparse = [&] (Tensor values) -> Tensor /*confirm*/ {
+        auto make_sparse = [&] (const Tensor& values) -> Tensor {
           if (grad_indices.dim() == 0 || values.dim() == 0) {
             return torch::empty({0}, grad.options()).resize_as_(grad);
           }
@@ -104,7 +103,7 @@ void Adagrad::step() {
 }
 
 void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.push_back(OptimizerParamGroup(parameters, defaults_->clone()));
+  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {

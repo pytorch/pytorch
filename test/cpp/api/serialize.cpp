@@ -434,8 +434,8 @@ TEST(SerializeTest, Optim_Adagrad) {
   for (size_t i = 0; i < params_.size(); i++) {
     auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
     const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
-    sum_buffers.push_back(curr_state_.sum());
-    step_buffers.push_back(curr_state_.step());
+    sum_buffers.emplace_back(curr_state_.sum());
+    step_buffers.emplace_back(curr_state_.step());
   }
   // write sum_buffers and step_buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
