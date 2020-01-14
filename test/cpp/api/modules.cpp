@@ -2271,7 +2271,7 @@ TEST_F(ModulesTest, SELU) {
   const double alpha = 1.6732632423543772848170429916717;
   auto zero = torch::zeros_like(input);
   auto expected = scale *
-      (torch::max(zero, input) +
+       torch::max(zero, input) +
        torch::min(zero, alpha * torch::expm1(input));
   auto s = output.sum();
   s.backward();

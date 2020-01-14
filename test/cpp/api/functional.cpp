@@ -774,7 +774,7 @@ TEST_F(FunctionalTest, ELU) {
       auto x = torch::linspace(-10.0, 10.0, size * size * size);
       x.resize_({size, size, size});
       auto y_exp = torch::max(torch::zeros_like(x), x) +
-                torch::min(torch::zeros_like(x), alpha * torch::exp1m(x));
+                torch::min(torch::zeros_like(x), alpha * torch::expm1(x));
       auto y = F::elu(x, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
@@ -795,7 +795,7 @@ TEST_F(FunctionalTest, SELU) {
     for (const auto inplace : {false, true}) {
       auto input = torch::randn({5, 5});
       auto expected = scale *
-          (torch::max(torch::zeros_like(input), input) +
+           torch::max(torch::zeros_like(input), input) +
            torch::min(
                torch::zeros_like(input), alpha * torch::expm1(input));
       auto output = F::selu(input, inplace);
