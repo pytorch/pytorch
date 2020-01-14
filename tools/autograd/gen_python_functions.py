@@ -70,7 +70,7 @@ BINARY_OP_NAMES = [
     '__or__', '__ror__', '__ior__',
 ]
 
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
+PY_VARIABLE_METHOD_VARARGS = CodeTemplate(r"""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -80,6 +80,20 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.signature.deprecated) {
+    auto msg = c10::str(
+        "This overload of ", r.signature.name, " is deprecated:\n",
+        "${name}", r.signature.toString());
+    auto signatures = parser.get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n${name}";
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
+  }
   ${check_has_torch_function}
   ${declare_namedtuple_return_types}
   ${dispatch}
