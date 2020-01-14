@@ -11,7 +11,7 @@
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 
-#define EPSILON 1e-12
+constexpr float EPSILON = 1e-12;
 #define _USE_MATH_DEFINES
 
 

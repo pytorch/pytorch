@@ -3,7 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#define EPSILON 1e-12
+constexpr float EPSILON = 1e-12;
 
 namespace {
 
