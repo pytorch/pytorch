@@ -310,14 +310,18 @@ def tensor_conv(
 
     return X, W, b, groups
 
-# We set the deadline in the currently loaded profile.
-# Creating (and loading) a separate profile overrides any settings the user
-# already specified.
+
 hypothesis_version = hypothesis.version.__version_info__
+settings._settings__definitions_are_locked = False
+if hypothesis_version < (3, 27, 0):
+    # We set the deadline in the currently loaded profile.
+    # Creating (and loading) a separate profile overrides any settings the user
+    # already specified.
+    settings._define_setting('deadline', 'Hypothesis deadline hack',
+                               default=None, validator=lambda *args: True)
+settings._settings__definitions_are_locked = True
 current_settings = settings._profiles[settings._current_profile].__dict__
 current_settings['deadline'] = None
-if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
-    current_settings['timeout'] = hypothesis.unlimited
 def assert_deadline_disabled():
     assert settings().deadline is None
     if hypothesis_version < (3, 27, 0):
