@@ -329,7 +329,7 @@ struct slot_iterator_impl {
   }
 
   // advance to the next slot in a depth first pre-order traversal of the
-  // modules slots. This function does not guarentee the next slot is a
+  // modules slots. This function does not guarantee the next slot is a
   // valid element of the iteration. That is done by valid().
   // invariant: !cursors_.empty()
   void next() {

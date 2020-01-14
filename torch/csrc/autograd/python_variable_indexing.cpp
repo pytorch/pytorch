@@ -149,7 +149,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,
-    torch::utils::type_to_string(getDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
+    torch::utils::options_to_string(options).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
@@ -240,14 +240,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);

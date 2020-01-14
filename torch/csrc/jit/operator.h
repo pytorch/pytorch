@@ -150,6 +150,15 @@ struct TORCH_API Operator {
   }
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
+    if (isC10Op()) {
+      const FunctionSchema& schemaRef = schema();
+      TORCH_CHECK(
+          options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
+              !schemaRef.hasAnyAliasInfo(),
+          "In operator registration: Tried to register operator ",
+          schemaRef,
+          " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
+    }
     return options_.aliasAnalysis();
   }
 
@@ -208,6 +217,13 @@ struct OperatorSet {
  private:
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
 };
+
+// Ensure the thing that registers c10 ops is defined.
+// Otherwise, our registry will not have c10 ops. You can run into this
+// scenario if you're querying registered ops during static init.
+//
+// This fn is defined in register_c10_ops.cpp
+TORCH_API void ensure_c10_registerer_defined();
 
 } // namespace jit
 } // namespace torch

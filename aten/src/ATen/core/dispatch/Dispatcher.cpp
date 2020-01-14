@@ -32,7 +32,7 @@ Dispatcher::Dispatcher()
 : operators_()
 , operatorLookupTable_()
 , backendFallbackKernels_()
-, listeners_(guts::make_unique<detail::RegistrationListenerList>())
+, listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
 Dispatcher::~Dispatcher() {}

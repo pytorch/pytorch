@@ -84,17 +84,13 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
-#ifdef BUILD_NAMEDTENSOR
     NoNamesGuard guard;
-#endif
     if (train && is_fused_kernel_acceptable(input, p)) {
       return std::get<0>(at::_fused_dropout(input, 1 - p));
     }
     return _dropout<false>(input, p, train);
   }();
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, input);
-#endif
   return result;
 }
 
