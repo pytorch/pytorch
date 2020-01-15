@@ -117,18 +117,20 @@ PRINT_VALUE(double)
     }                                                    \
     out << "]";                                          \
   }
-//
+
+// clang-format off
 PRINT_LIST(std::vector, int64_t, item)
 PRINT_LIST(c10::List, int64_t, item)
 
 /* use ivalue printing to corretly format floats with no decimal */
 PRINT_LIST(std::vector, double, IValue(item))
-    PRINT_LIST(c10::List, double, IValue(item))
+PRINT_LIST(c10::List, double, IValue(item))
 
-    // bool[] attributes stored as int64_t[], no need for std::vector overload
-    PRINT_LIST(c10::List, bool, item)
+// bool[] attributes stored as int64_t[], no need for std::vector overload
+PRINT_LIST(c10::List, bool, item)
+// clang-format on
 
-        static void printAttribute(std::ostream& out, const std::string& attr) {
+static void printAttribute(std::ostream& out, const std::string& attr) {
   c10::printQuotedString(out, attr);
 }
 
@@ -291,8 +293,8 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void Node::printAttributes(std::ostream &out,
-                           bool ignore_subgraph = false) const {
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -328,10 +330,14 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream &Node::print(std::ostream &out, size_t level,
-                          std::vector<const Node *> *groups,
-                          bool print_source_locations, bool print_attributes,
-                          bool print_scopes, bool print_body) const {
+std::ostream& Node::print(
+    std::ostream& out,
+    size_t level,
+    std::vector<const Node*>* groups,
+    bool print_source_locations,
+    bool print_attributes,
+    bool print_scopes,
+    bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -914,16 +920,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
 }
 
 void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
-  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
     if (u.user->isAfter(node)) {
       u.user->inputs_[u.offset] = newValue;
       newValue->uses_.push_back(u);
     }
   });
 
-  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
-    return u.user->isAfter(node);
-  }), uses_.end());
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
 }
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
