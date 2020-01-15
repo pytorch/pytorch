@@ -730,7 +730,14 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  output.mul_(std).add_(mean);
+  if (mean.numel() == std.numel() && !at::is_expandable_to(std.sizes(), mean.sizes())) {
+    TORCH_WARN_ONCE("Reshape std to the same shape of mean due to not broadcastable");
+    //Reshape std to the same shape mean if they have same number of element but not broadcastable
+    output.mul_(std.reshape(mean.sizes())).add_(mean);
+  }
+  else {
+    output.mul_(std).add_(mean);
+  }
   return output;
 }
 
