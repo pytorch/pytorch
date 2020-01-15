@@ -65,7 +65,6 @@ if platform.system() == 'Windows':
         dll_paths = list(filter(None, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path, os.environ['PATH']]))
 
         os.environ['PATH'] = ';'.join(dll_paths)
-    
 
 
 # See Note [Global dependencies]
