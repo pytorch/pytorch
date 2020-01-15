@@ -32,7 +32,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   } else if (steps == 1) {
     r.fill_(start);
   } else if (isIntegralType(r.scalar_type(), 0)) {
-    AT_DISPATCH_INTEGRAL_TYPES(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
