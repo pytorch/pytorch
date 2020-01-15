@@ -58,7 +58,7 @@ class TORCH_API Future final {
 
   void markCompleted(T value) {
     std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(!completed());
+    TORCH_CHECK(!completed_);
     // Set value first as completed_ is accessed without lock
     value_ = std::move(value);
     completed_ = true;
@@ -68,18 +68,18 @@ class TORCH_API Future final {
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
+    finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
       callback(value_, error_);
     }
-    finished_cv_.notify_all();
   }
 
   void setError(std::string errorMsg) {
     std::unique_lock<std::mutex> lock(mutex_);
-    TORCH_CHECK(!completed());
+    TORCH_CHECK(!completed_);
     // Set error first as completed_ is accessed without lock
     error_ = FutureError(std::move(errorMsg));
     completed_ = true;
@@ -89,13 +89,13 @@ class TORCH_API Future final {
     std::vector<Callback> cbs;
     cbs.swap(callbacks_);
     lock.unlock();
+    finished_cv_.notify_all();
     // There is no need to protect callbacks_ with the lock.
     // Once completed_ is set to true, no one can add new callback to the
     // list. pass value_, error_ for callback to easily check state.
     for (auto& callback : cbs) {
       callback(value_, error_);
     }
-    finished_cv_.notify_all();
   }
 
   bool completed() const {
@@ -115,7 +115,7 @@ class TORCH_API Future final {
   // If completed() the callback will be invoked in-place.
   void addCallback(const Callback& callback) {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (completed()) {
+    if (completed_) {
       lock.unlock();
       callback(value_, error_);
       return;

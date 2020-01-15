@@ -845,6 +845,26 @@ Example:
     tensor([ False, True, False])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_or,
+           r"""
+bitwise_or(input, other, out=None) -> Tensor
+
+Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical OR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -2,  3], dtype=torch.int8)
+    >>> torch.bitwise_or(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, True, False])
+""".format(**common_args))
+
 add_docstr(torch.bitwise_xor,
            r"""
 bitwise_xor(input, other, out=None) -> Tensor
@@ -1357,6 +1377,30 @@ Example::
             [-0.8304, -1.3037,  0.5650],
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
+
+add_docstr(torch.cummax,
+           r"""
+cummax(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
+         1.9946, -0.8209])
+    >>> torch.cummax(a, dim=0)
+    torch.return_types.cummax(
+        values=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
+         1.9946,  1.9946]),
+        indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumprod,
            r"""
@@ -2457,6 +2501,22 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
+add_docstr(torch.isinf,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([False,  True,  False,  True,  False])
+""")
+
 add_docstr(torch.isfinite,
            r"""
 Returns a new tensor with boolean elements representing if each element is `Finite` or not.
@@ -3335,7 +3395,7 @@ Example::
     >>> torch.median(a)
     tensor(0.2202)
 
-.. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+.. function:: median(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the median
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3352,8 +3412,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
 
@@ -3590,7 +3649,7 @@ Example::
 
 add_docstr(torch.mode,
            r"""
-mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3610,8 +3669,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
 
@@ -4150,7 +4208,7 @@ Example::
     tensor([[9., 1., 3., 5.],
             [8., 6., 6., 0.],
             [0., 4., 5., 3.],
-            [2., 1., 4., 2.]])    
+            [2., 1., 4., 2.]])
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
@@ -5959,7 +6017,7 @@ The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
 The argument :attr:`diagonal` controls which diagonal to consider. If
-:attr:`diagonal` = 0, all elements on and below the main diagonal are
+:attr:`diagonal` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
 the main diagonal. The main diagonal are the set of indices

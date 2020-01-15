@@ -185,7 +185,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
               .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>>(::c10::TensorTypeId::CPUTensorId));
+                      OperatorClass>>(::c10::DispatchKey::CPUTensorId));
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
@@ -196,7 +196,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
               .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>>(::c10::TensorTypeId::CUDATensorId));
+                      OperatorClass>>(::c10::DispatchKey::CUDATensorId));
 
 // You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
 // The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
@@ -210,7 +210,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
               .kernel<                                                       \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
-                      OperatorClass>>(::c10::TensorTypeId::HIPTensorId));
+                      OperatorClass>>(::c10::DispatchKey::HIPTensorId));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size
