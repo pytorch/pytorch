@@ -236,7 +236,7 @@ void test_TorchTensorCtorScalarFloatingType_expected_dtype(c10::ScalarType defau
   auto tensor = torch::tensor(123.456f);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor, 123.456f));
 
   tensor = torch::tensor(123.456);
@@ -283,7 +283,7 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kLong);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
@@ -291,7 +291,7 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   tensor = torch::tensor(std::vector<int>({1, 2, 3}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_EQ(tensor.dtype(), at::kLong);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
@@ -328,7 +328,7 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5f));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25f));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125f));
@@ -336,7 +336,7 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   tensor = torch::tensor(at::ArrayRef<float>({1.5, 2.25, 3.125}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
@@ -345,14 +345,14 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   tensor = torch::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
@@ -360,7 +360,7 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
