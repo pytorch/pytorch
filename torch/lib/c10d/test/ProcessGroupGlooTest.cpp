@@ -9,6 +9,7 @@
 #include <sstream>
 #include <thread>
 
+#include <gtest/gtest.h>
 #include <torch/cuda.h>
 
 #include <c10d/FileStore.hpp>
@@ -370,7 +371,8 @@ void testRecv(const std::string& path) {
   senderThread.join();
 }
 
-int main(int argc, char** argv) {
+TEST(ProcessGroupGlooTest, testExceptionsThrown) {
+  // test SIGSTOP
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
@@ -381,6 +383,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  // test SIGKILL
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGKILL);
@@ -390,50 +393,61 @@ int main(int argc, char** argv) {
       std::cout << "SIGKILL test got: " << ex.what() << std::endl;
     }
   }
+}
 
+TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CPU);
   }
+}
+
+TEST(ProcessGroupGlooTest, testBroadcastCPU) {
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, at::DeviceType::CPU);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testBarrier) {
+  {
+    TemporaryFile file;
+    testBarrier(file.path);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testSend) {
+  {
+    TemporaryFile file;
+    testSend(file.path);
+  }
+}
+
+TEST(ProcessGroupGlooTest, testRecv) {
+  {
+    TemporaryFile file;
+    testRecv(file.path);
+  }
+}
 
 #ifdef USE_CUDA
+// CUDA-only tests
+TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
   {
     if (torch::cuda::is_available()) {
       TemporaryFile file;
       testAllreduce(file.path, at::DeviceType::CUDA);
     }
   }
-#endif
+}
 
-  {
-    TemporaryFile file;
-    testBroadcast(file.path, at::DeviceType::CPU);
-  }
-
-#ifdef USE_CUDA
+TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
   {
     if (torch::cuda::is_available()) {
       TemporaryFile file;
       testBroadcast(file.path, at::DeviceType::CUDA);
     }
   }
-#endif
-
-  {
-    TemporaryFile file;
-    testBarrier(file.path);
-  }
-
-  {
-    TemporaryFile file;
-    testSend(file.path);
-  }
-
-  {
-    TemporaryFile file;
-    testRecv(file.path);
-  }
-
-  std::cout << "Test successful" << std::endl;
-  return 0;
 }
+
+#endif
