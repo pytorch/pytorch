@@ -70,6 +70,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_conditionals.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
@@ -114,6 +115,7 @@ set(TORCH_PYTHON_SRCS
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+    add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       ${JIT_TEST_SRCS}
