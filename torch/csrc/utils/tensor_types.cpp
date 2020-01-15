@@ -50,7 +50,7 @@ at::TensorOptions options_from_string(const std::string& str) {
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    auto backend = tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id());
+    auto backend = dispatchKeyToBackend(torch::tensors::get_default_dispatch_key());
     auto scalar_type = torch::tensors::get_default_scalar_type();
     return getDeprecatedTypeProperties(backend, scalar_type).options();
   }

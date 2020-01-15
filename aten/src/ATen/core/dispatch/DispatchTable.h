@@ -4,7 +4,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
@@ -22,8 +22,8 @@ namespace c10 {
 
 namespace impl {
 /**
- * A KernelFunctionTable is a map from TensorTypeId to a KernelFunction.
- * It can store zero or one KernelFunctions for each TensorTypeId.
+ * A KernelFunctionTable is a map from DispatchKey to a KernelFunction.
+ * It can store zero or one KernelFunctions for each DispatchKey.
  */
 class KernelFunctionTable final {
 public:
@@ -32,8 +32,8 @@ public:
   , kernelCount_(0) {}
 
   enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
-  C10_NODISCARD SetKernelResult setKernel(TensorTypeId dispatchKey, KernelFunction kernel) {
-    TORCH_INTERNAL_ASSERT(dispatchKey != TensorTypeId::UndefinedTensorId);
+  C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::UndefinedTensorId);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     SetKernelResult result;;
     if (slot.isValid()) {
@@ -47,7 +47,7 @@ public:
   }
 
   enum class RemoveKernelIfExistsResult : uint8_t {REMOVED_KERNEL, KERNEL_DIDNT_EXIST};
-  RemoveKernelIfExistsResult removeKernelIfExists(TensorTypeId dispatchKey) {
+  RemoveKernelIfExistsResult removeKernelIfExists(DispatchKey dispatchKey) {
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     if (slot.isValid()) {
       --kernelCount_;
@@ -58,7 +58,7 @@ public:
     }
   }
 
-  const KernelFunction& operator[](TensorTypeId dispatchKey) const {
+  const KernelFunction& operator[](DispatchKey dispatchKey) const {
     return kernels_[static_cast<uint8_t>(dispatchKey)];
   }
 
@@ -67,7 +67,7 @@ public:
   }
 
 private:
-  std::array<KernelFunction, static_cast<uint8_t>(TensorTypeId::NumTensorIds)> kernels_;
+  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
   size_t kernelCount_;
 };
 }
@@ -94,7 +94,7 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected.
    * @param kernel Concrete kernel function implementation to register
    */
-  void setKernel(TensorTypeId dispatchKey, KernelFunction kernel) {
+  void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
       TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
@@ -106,7 +106,7 @@ class DispatchTable final {
    *
    * @param dispatch_key Dispatch key to unregister.
    */
-  void removeKernelIfExists(TensorTypeId dispatchKey) {
+  void removeKernelIfExists(DispatchKey dispatchKey) {
     kernels_.removeKernelIfExists(dispatchKey);
   }
 
@@ -140,14 +140,14 @@ class DispatchTable final {
     str << "[";
 
     bool has_kernels = false;
-    for (uint8_t iter = 0; iter != static_cast<uint8_t>(TensorTypeId::NumTensorIds); ++iter) {
-      if (!kernels_[static_cast<TensorTypeId>(iter)].isValid()) {
+    for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+      if (!kernels_[static_cast<DispatchKey>(iter)].isValid()) {
         continue;
       }
       if (has_kernels) {
         str << ", ";
       }
-      str << toString(static_cast<TensorTypeId>(iter));
+      str << toString(static_cast<DispatchKey>(iter));
       has_kernels = true;
     }
 
@@ -161,7 +161,7 @@ class DispatchTable final {
     return str.str();
   }
 
-  const KernelFunction* lookup(TensorTypeId dispatchKey) const {
+  const KernelFunction* lookup(DispatchKey dispatchKey) const {
     auto& slot = kernels_[dispatchKey];
     if (slot.isValid()) {
       return &slot;

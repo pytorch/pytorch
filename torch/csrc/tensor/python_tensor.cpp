@@ -42,8 +42,8 @@ struct PyTensorType {
     return static_cast<Backend>(backend);
   }
 
-  TensorTypeId get_type_id() const {
-    return backendToTensorTypeId(static_cast<Backend>(backend));
+  DispatchKey get_dispatch_key() const {
+    return backendToDispatchKey(static_cast<Backend>(backend));
   }
 
   ScalarType get_scalar_type() const {
@@ -68,7 +68,7 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
   }
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_type_id(), tensor_type.get_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_dispatch_key(), tensor_type.get_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -87,9 +87,9 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
     //
-    // TODO: Stop using legacyExtractTypeId here (probably need to build
+    // TODO: Stop using legacyExtractDispatchKey here (probably need to build
     // in instanceof checking to Tensor class itself)
-    if (legacyExtractTypeId(var.type_set()) == self->get_type_id() &&
+    if (legacyExtractDispatchKey(var.key_set()) == self->get_dispatch_key() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
@@ -380,9 +380,9 @@ void py_set_default_dtype(PyObject* obj) {
   }
 }
 
-c10::TensorTypeId get_default_tensor_type_id() {
+c10::DispatchKey get_default_dispatch_key() {
   AT_ASSERT(default_tensor_type);
-  return default_tensor_type->get_type_id();
+  return default_tensor_type->get_dispatch_key();
 }
 
 ScalarType get_default_scalar_type() {

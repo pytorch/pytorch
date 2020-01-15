@@ -150,7 +150,7 @@ class QRelu6 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators()
 .op("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor",
-    c10::RegisterOperators::options().kernel<QRelu6>(TensorTypeId::QuantizedCPUTensorId));
+    c10::RegisterOperators::options().kernel<QRelu6>(DispatchKey::QuantizedCPUTensorId));
 } // namespace
 
 }}  // namespace at::native

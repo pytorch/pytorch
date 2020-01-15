@@ -206,7 +206,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
     c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
-        TensorTypeId::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

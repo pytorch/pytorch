@@ -88,7 +88,7 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::linear_unpack(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)",
     c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
-        TensorTypeId::CPUTensorId));
+        DispatchKey::CPUTensorId));
 
 } // namespace
 } // namespace native
