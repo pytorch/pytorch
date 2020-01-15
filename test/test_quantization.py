@@ -905,11 +905,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         result_script = model_script(self.img_data[0][0])
         self.assertEqual(result_eager, result_script)
 
-    @unittest.skip(
-        "Temporarily skip the test since we don't have"
-        "support for different quantization configurations for shared"
-        "ClassType right now, sub1.fc and fc3 shares the ClassType but for"
-        " sub1.fc qconfig is None, and fc3 is quantized with default_qconfig")
     def test_nested(self):
         # Eager mode
         eager_model = AnnotatedNestedModel()
