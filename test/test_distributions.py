@@ -1797,6 +1797,7 @@ class TestDistributions(TestCase):
         mean = torch.randn(3)
         l_factor = torch.randn(3, 3)
         cov = torch.matmul(l_factor, l_factor.t())
+        cov += 0.5 * torch.eye(3)
         prec = cov.inverse()
 
         dist1 = MultivariateNormal(mean, cov)
@@ -1808,7 +1809,7 @@ class TestDistributions(TestCase):
 
         mh_dist_np = scipy.spatial.distance.mahalanobis(test_point_np, mean_np, prec_np)
         mh_dist = dist1.mahalanobis(test_point).sqrt()
-        self.assertAlmostEqual(mh_dist_np, mh_dist.item(), places=3)
+        self.assertAlmostEqual(mh_dist_np, mh_dist.item(), places=2)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
