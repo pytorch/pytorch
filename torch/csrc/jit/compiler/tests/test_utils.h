@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "torch/csrc/jit/compiler/include/buffer.h"
 #include "torch/csrc/jit/compiler/include/eval.h"
 #include "torch/csrc/jit/compiler/include/function.h"
 #include "torch/csrc/jit/compiler/include/ir.h"

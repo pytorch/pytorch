@@ -38,6 +38,7 @@ include_directories("${ASMJIT_DIR}/src")
 add_library(nnc
   src/expr.cc
   src/function.cc
+  src/ir.cc
   src/ir_visitor.cc
   src/asmjit_codegen.cc
   src/llvm_codegen.cc
