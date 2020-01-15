@@ -208,11 +208,7 @@ TEST(LLVMTest, ElemwiseAddFloat) {
       i,
       0,
       N,
-      Store::make(
-          c,
-          i,
-          Load::make(a, i, mask) + Load::make(b, i, mask),
-          mask));
+      Store::make(c, i, Load::make(a, i, mask) + Load::make(b, i, mask), mask));
 
   LLVMCodeGen cg({&a, &b, &c});
   memcpy_expr.accept(&cg);
@@ -242,9 +238,8 @@ TEST(LLVMTest, StoreFloat) {
 
 TEST(LLVMTest, SimpleMath01) {
   const int N = 1024;
-  Tensor tensor = Compute("f", {{N, "i"}}, [](const Var& i) {
-    return cast<float>(i * i + 1);
-  });
+  Tensor tensor = Compute(
+      "f", {{N, "i"}}, [](const Var& i) { return cast<float>(i * i + 1); });
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
   Buffer f_buf(tensor.function().func_var(), kFloat32, {N});
@@ -271,7 +266,7 @@ TEST(LLVMTest, ComputeMul) {
   Buffer a(Var("a", kHandle), kFloat32, {N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
   Tensor c = Compute("c", {{N, "i"}}, [&](const Var& i) {
-      return Load::make(a, i, 1) * Load::make(b, i, 1);
+    return Load::make(a, i, 1) * Load::make(b, i, 1);
   });
 
   Buffer c_buf(c.function().func_var(), kFloat32, {N});
@@ -294,12 +289,11 @@ TEST(LLVMTest, BroadcastAdd) {
   const int N = 1024;
   Buffer a(Var("a", kHandle), kFloat32, {M, N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
-  Tensor c = Compute(
-    "c", {{M, "i"}, {N, "j"}},
-    [&](const Var& i, const Var& j) {
-      Expr mask(1);
-      return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
-  });
+  Tensor c =
+      Compute("c", {{M, "i"}, {N, "j"}}, [&](const Var& i, const Var& j) {
+        Expr mask(1);
+        return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
+      });
 
   Buffer c_buf(c.function().func_var(), kFloat32, {M, N});
   Schedule sch = Schedule::make({c});
@@ -313,7 +307,7 @@ TEST(LLVMTest, BroadcastAdd) {
   std::vector<float> bv(N);
   std::iota(bv.begin(), bv.end(), 0);
   std::vector<float> cv(M * N, 0);
-  std::vector<void *> args({av.data(), bv.data(), cv.data()});
+  std::vector<void*> args({av.data(), bv.data(), cv.data()});
   ASSERT_EQ(cg.value<int>(args), 0);
 
   for (int i = 0; i < M; i++) {

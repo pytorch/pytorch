@@ -130,24 +130,30 @@ class Tensor : public TensorOperation {
   }
 };
 
-// A helper structure to store the arguments to specify dimensions. In the Compute arugments for dim_args,
-// all of the following is supported. For example:
+// A helper structure to store the arguments to specify dimensions. In the
+// Compute arugments for dim_args, all of the following is supported. For
+// example:
 //    dim_args: {1, 2, 3, 4}
 //    dim_args: {{1, "x"}, {2, "y"}, {3, "z"}}
 //    dim_args: {1, 2, {3, "x"}}
 class DimArg {
  public:
   // Intentionally leave out explicit to allow implicit conversions.
-  DimArg(const Expr& dim) : dim_(dim){}
-  DimArg(const Expr&dim, const std::string& name_hint) : dim_(dim), name_hint_(name_hint) {}
-  const Expr& dim() const { return dim_; }
-  const std::string& name_hint() const { return name_hint_; }
+  DimArg(const Expr& dim) : dim_(dim) {}
+  DimArg(const Expr& dim, const std::string& name_hint)
+      : dim_(dim), name_hint_(name_hint) {}
+  const Expr& dim() const {
+    return dim_;
+  }
+  const std::string& name_hint() const {
+    return name_hint_;
+  }
 
  private:
   Expr dim_;
   std::string name_hint_;
 };
- 
+
 Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,

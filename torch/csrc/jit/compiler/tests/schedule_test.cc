@@ -14,7 +14,8 @@ using namespace torch::jit::compiler;
 using namespace torch::jit::compiler::schedule;
 
 TEST(TensorExpr, Simple01) {
-  Tensor tensor = Compute("f", {{16, "X"}, {5, "y"}}, [](const Var& x, const Var& y) {
+  Tensor tensor =
+      Compute("f", {{16, "X"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   Var x = tensor.function().arg(0);
@@ -34,8 +35,8 @@ TEST(TensorExpr, Simple01) {
 }
 
 TEST(TensorExpr, Lower01) {
-  Tensor tensor = Compute(
-      "f", {{16, "x"}, {5, "y"}}, [](const Var& x, const Var& y) {
+  Tensor tensor =
+      Compute("f", {{16, "x"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   Var x = tensor.function().arg(0);

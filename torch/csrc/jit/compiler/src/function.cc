@@ -9,7 +9,10 @@ namespace compiler {
 
 namespace {
 
-static void unpack_dim_args(const std::vector<DimArg>& dim_args, std::vector<Expr>* dims, std::vector<Var>* vars) {
+static void unpack_dim_args(
+    const std::vector<DimArg>& dim_args,
+    std::vector<Expr>* dims,
+    std::vector<Var>* vars) {
   dims->clear();
   vars->clear();
   for (int i = 0; i < dim_args.size(); i++) {
@@ -28,7 +31,8 @@ Tensor Compute(
   std::vector<Var> args;
   unpack_dim_args(dim_args, &dims, &args);
   Expr body = body_func(args);
-  Function func = Function(func_name, std::move(dims), std::move(args), std::move(body));
+  Function func =
+      Function(func_name, std::move(dims), std::move(args), std::move(body));
   return Tensor(func, 0);
 }
 
@@ -41,7 +45,8 @@ Tensor Compute(
   std::vector<Var> args;
   unpack_dim_args(dim_args, &dims, &args);
   Expr body = body_func(args[0]);
-  Function func = Function(func_name, std::move(dims), std::move(args), std::move(body));
+  Function func =
+      Function(func_name, std::move(dims), std::move(args), std::move(body));
   return Tensor(func, 0);
 }
 
@@ -54,7 +59,8 @@ Tensor Compute(
   std::vector<Var> args;
   unpack_dim_args(dim_args, &dims, &args);
   Expr body = body_func(args[0], args[1]);
-  Function func = Function(func_name, std::move(dims), std::move(args), std::move(body));
+  Function func =
+      Function(func_name, std::move(dims), std::move(args), std::move(body));
   return Tensor(func, 0);
 }
 
@@ -67,7 +73,8 @@ Tensor Compute(
   std::vector<Var> args;
   unpack_dim_args(dim_args, &dims, &args);
   Expr body = body_func(args[0], args[1], args[2]);
-  Function func = Function(func_name, std::move(dims), std::move(args), std::move(body));
+  Function func =
+      Function(func_name, std::move(dims), std::move(args), std::move(body));
   return Tensor(func, 0);
 }
 
@@ -81,7 +88,8 @@ Tensor Compute(
   std::vector<Var> args;
   unpack_dim_args(dim_args, &dims, &args);
   Expr body = body_func(args[0], args[1], args[2], args[3]);
-  Function func = Function(func_name, std::move(dims), std::move(args), std::move(body));
+  Function func =
+      Function(func_name, std::move(dims), std::move(args), std::move(body));
   return Tensor(func, 0);
 }
 

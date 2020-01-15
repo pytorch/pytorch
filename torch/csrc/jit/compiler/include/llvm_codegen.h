@@ -1,13 +1,13 @@
 #pragma once
 
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "torch/csrc/jit/compiler/include/ir.h"
 #include "torch/csrc/jit/compiler/include/ir_visitor.h"
 #include "torch/csrc/jit/compiler/include/llvm_jit.h"
-#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 
 #include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Verifier.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Verifier.h>
 #include <unordered_map>
 #include <vector>
 
@@ -42,7 +42,6 @@ class LLVMCodeGen : public IRVisitor {
   explicit LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype = kInt32);
   LLVMCodeGen();
 
-
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
   void visit(const Mul* v) override;
@@ -61,20 +60,20 @@ class LLVMCodeGen : public IRVisitor {
 
   void optimize(llvm::Module& M);
 
-
-  template<typename T> T value() {
+  template <typename T>
+  T value() {
     std::vector<void*> args;
     return value<T>(args);
   }
 
-  template<typename T>
+  template <typename T>
   T value(std::vector<void*>& args) {
     irb_.CreateRet(value_);
 #if DEBUG_PRINT
     llvm::errs() << *module_;
 #endif
     CHECK(!llvm::verifyFunction(*fn_, &llvm::outs()))
-      << "Function verification failed";
+        << "Function verification failed";
     optimize(*module_);
 
 #if DEBUG_PRINT
@@ -91,11 +90,12 @@ class LLVMCodeGen : public IRVisitor {
     llvm::errs() << asmStream.str();
 #endif
 
-    cantFail(jit_->addModule(llvm::orc::ThreadSafeModule(std::move(module_), context_)));
+    cantFail(jit_->addModule(
+        llvm::orc::ThreadSafeModule(std::move(module_), context_)));
     auto sym = jit_->findSymbol("wrapper");
     auto addr = sym.getAddress();
     assert(addr);
-    T (*fp)(void**) = (T (*)(void**))addr.get();
+    T (*fp)(void**) = (T(*)(void**))addr.get();
     T rv = fp(args.data());
     return rv;
   }

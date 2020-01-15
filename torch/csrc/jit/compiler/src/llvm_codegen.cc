@@ -8,17 +8,16 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
-#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include <memory>
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 
 using namespace torch::jit::compiler;
 
-LLVMCodeGen::LLVMCodeGen() : LLVMCodeGen(std::vector<Buffer*>()) { }
+LLVMCodeGen::LLVMCodeGen() : LLVMCodeGen(std::vector<Buffer*>()) {}
 
 LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
     : context_(std::make_unique<llvm::LLVMContext>()),
-      irb_(*context_.getContext())
-      {
+      irb_(*context_.getContext()) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   llvm::InitializeNativeTargetAsmParser();
@@ -28,7 +27,8 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
   // once LLVM 10 is available.
   auto JTMB = llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
 #else
-  llvm::orc::JITTargetMachineBuilder JTMB((llvm::Triple(llvm::sys::getProcessTriple())));
+  llvm::orc::JITTargetMachineBuilder JTMB(
+      (llvm::Triple(llvm::sys::getProcessTriple())));
 
   // Retrieve host CPU name and sub-target features and add them to builder.
   // Relocation model, code model and codegen opt level are kept to default
@@ -36,8 +36,8 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
   llvm::SubtargetFeatures SubtargetFeatures;
   llvm::StringMap<bool> FeatureMap;
   llvm::sys::getHostCPUFeatures(FeatureMap);
-  for (auto &Feature : FeatureMap) {
-      SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
+  for (auto& Feature : FeatureMap) {
+    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
   }
 
   JTMB.setCPU(llvm::sys::getHostCPUName());
@@ -63,7 +63,7 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
   }
   std::vector<llvm::Type*> params;
   for (int i = 0; i < args.size(); i++) {
-    auto const &arg = args[i];
+    auto const& arg = args[i];
     if (arg->dtype() == kInt32) {
       params.push_back(llvm::Type::getInt32PtrTy(*context_.getContext()));
     } else if (arg->dtype() == kFloat32) {
@@ -79,19 +79,21 @@ LLVMCodeGen::LLVMCodeGen(const std::vector<Buffer*>& args, Dtype dtype)
   }
 
   // Emit wrapper to unpack argument vector.
-  auto voidPP = llvm::Type::getVoidTy(*context_.getContext())->getPointerTo()->getPointerTo();
+  auto voidPP = llvm::Type::getVoidTy(*context_.getContext())
+                    ->getPointerTo()
+                    ->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(int32Ty_, {voidPP}, false),
       llvm::Function::ExternalLinkage,
       "wrapper",
       module_.get());
-  auto wrapBB = llvm::BasicBlock::Create(*context_.getContext(), "wrapBB", wrapper);
+  auto wrapBB =
+      llvm::BasicBlock::Create(*context_.getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
   for (size_t i = 0; i < args.size(); i++) {
     auto argp = irb_.CreateGEP(
-        wrapper->arg_begin(),
-        llvm::ConstantInt::getSigned(int32Ty_, i));
+        wrapper->arg_begin(), llvm::ConstantInt::getSigned(int32Ty_, i));
     auto arg = irb_.CreateLoad(argp);
     wrappedArgs.push_back(arg);
   }
@@ -178,27 +180,23 @@ void LLVMCodeGen::visit(const Div* v) {
 }
 
 void LLVMCodeGen::visit(const IntImm* v) {
-  value_ =
-      llvm::ConstantInt::getSigned(int32Ty_, v->value());
+  value_ = llvm::ConstantInt::getSigned(int32Ty_, v->value());
 }
 
 void LLVMCodeGen::visit(const FloatImm* v) {
-  value_ = 
-    llvm::ConstantFP::get(floatTy_, v->value());
+  value_ = llvm::ConstantFP::get(floatTy_, v->value());
 }
 
 void LLVMCodeGen::visit(const Cast* v) {
   v->src_value().accept(this);
 
   if (v->dtype().lanes() == 1) {
-    if (v->dtype() == kInt32 &&
-        v->src_value().dtype() == kFloat32) {
+    if (v->dtype() == kInt32 && v->src_value().dtype() == kFloat32) {
       value_ = irb_.CreateFPToSI(value_, int32Ty_);
       return;
     }
 
-    if (v->dtype() == kFloat32 &&
-        v->src_value().dtype() == kInt32) {
+    if (v->dtype() == kFloat32 && v->src_value().dtype() == kInt32) {
       value_ = irb_.CreateSIToFP(value_, floatTy_);
       return;
     }
@@ -249,8 +247,7 @@ void LLVMCodeGen::visit(const For* v) {
   v->body().accept(this);
 
   // Create the stop condition. and "after" block.
-  auto inc = irb_.CreateAdd(
-      idx, llvm::ConstantInt::getSigned(int32Ty_, 1));
+  auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(int32Ty_, 1));
   v->stop().accept(this);
   auto stop = this->value_;
   auto cond = irb_.CreateICmpSLT(inc, stop);
@@ -295,7 +292,8 @@ void LLVMCodeGen::optimize(llvm::Module& M) {
 
   // Add internal analysis passes from the target machine.
   PM.add(llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
-  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
+  FPM.add(
+      llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 
   llvm::PassManagerBuilder PMB;
   PMB.OptLevel = 3;

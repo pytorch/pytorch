@@ -12,11 +12,11 @@ namespace orc {
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
 class PytorchLLVMJITImpl {
-  private:
+ private:
   std::unique_ptr<LLJIT> LLJ;
-  
-  public:
-  PytorchLLVMJITImpl() : LLJ(cantFail(LLJITBuilder().create())) { }
+
+ public:
+  PytorchLLVMJITImpl() : LLJ(cantFail(LLJITBuilder().create())) {}
 
   Error addModule(ThreadSafeModule M) {
     if (auto Err = LLJ->addIRModule(std::move(M))) {
