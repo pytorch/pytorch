@@ -32,7 +32,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-TypeAndAlias SchemaTypeParser::parseBaseType() {
+TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
@@ -41,7 +41,10 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
       {"QScheme", QSchemeType::get()},
-      {"ConstQuantizerPtr", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
+      {"ConstQuantizerPtr",
+       IntType::get()}, // TODO This type should be removed from the schema
+                        // parser, it should use the custom class mechanism
+                        // instead. @jerryzh
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
@@ -62,11 +65,11 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
     if (text.size() > 0 && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
+      return VarType::create(text);
     }
     throw ErrorReport(tok.range) << "unknown type specifier";
   }
-  return TypeAndAlias(it->second, c10::nullopt);
+  return it->second;
 }
 
 // Examples:
@@ -240,9 +243,8 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
           << ". Please ensure it is registered.";
     }
   } else {
-    auto value_alias = parseBaseType();
-    value = value_alias.first;
-    alias_info = value_alias.second;
+    value = parseBaseType();
+    alias_info = parseAliasAnnotation();
   }
   while (true) {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
