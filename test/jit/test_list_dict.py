@@ -356,6 +356,14 @@ class TestList(JitTestCase):
         test_mutation()
         FileCheck().check("aten::sort").run(test_mutation.graph_for())
 
+        def test_sorted_copy():
+            a = [torch.tensor(2), torch.tensor(0), torch.tensor(1)]
+            b = sorted(a)
+            a[0] = torch.tensor(10)
+            return a, b
+
+        self.checkScript(test_sorted_copy, ())
+
     def test_list_slice(self):
         def test_regular_slice():
             a = [0, 1, 2, 3, 4]
