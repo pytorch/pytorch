@@ -89,6 +89,12 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
 
+    def test_types_as_values(self):
+        def fn(m: torch.Tensor) -> torch.device:
+            return m.device
+
+        self.checkScript(fn, [torch.randn(2, 2)])
+
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int

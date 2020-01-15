@@ -241,9 +241,9 @@ def try_ann_to_type(ann, resolver=None):
         return AnyType.get()
     elif ann is type(None):
         return NoneType.get()
-    elif hasattr(ann, "__torch_script_class__"):
+    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
-    elif hasattr(ann, "__torch_script_interface__"):
+    elif inspect.isclass(ann) and hasattr(ann, "__torch_script_interface__"):
         return InterfaceType(_qualified_name(ann))
     elif ann is torch.device:
         return DeviceObjType.get()

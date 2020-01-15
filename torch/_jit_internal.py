@@ -17,8 +17,15 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
 def createResolutionCallbackFromEnv(lookup_base):
+    """
+    Creates a resolution callback that will look up qualified names in an
+    environment, starting with `lookup_base` for the base of any qualified
+    names, then proceeding down the lookup chain with the resolved object.
+
+    You should not use this directly, it should only be used from the other
+    createResolutionCallbackFrom* functions.
+    """
     def env(qualified_name, module):
-        print('resolving', qualified_name)
         # We may need to resolve a qualified name, something like `torch.device`
         # or `a.b.c.d`. We first look up `torch` or `a` in the function's closed
         # over scope, then proceed to use the looked-up value to go down the
