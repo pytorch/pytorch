@@ -125,18 +125,6 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   return t.narrow(dim, group_idx * group_size, group_size);
 }
 
-bool support_channels_last(
-    const Tensor& input,
-    const Tensor& weight,
-    int groups) {
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
-    return false;
-  }
-  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-  return (cudnn_version >= 7603) &&
-  (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
-}
-
 // ---------------------------------------------------------------------
 //
 // Checking
@@ -878,7 +866,7 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto layout = support_channels_last(*input, *weight, groups) ?
+  auto layout = cudnn_conv_use_channels_last(*input, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
@@ -1024,7 +1012,7 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto layout = support_channels_last(*grad_output, *weight, groups) ?
+  auto layout = cudnn_conv_use_channels_last(*grad_output, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   auto grad_input_t = at::empty(input_size, grad_output->options(), layout);
 
@@ -1160,7 +1148,7 @@ Tensor cudnn_convolution_backward_weight(
 {
   TensorArg input{ input_t, "input", 2};
 
-  auto layout = support_channels_last(input_t, grad_output_t, groups) ?
+  auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
   Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
