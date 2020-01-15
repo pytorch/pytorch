@@ -47,7 +47,8 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      scalar_t diff = scalar_end - scalar_start;
+      scalar_t div = static_cast<scalar_t>(steps - 1);
 
       auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
