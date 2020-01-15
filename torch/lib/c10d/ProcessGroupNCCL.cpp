@@ -849,4 +849,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in NCCL process group");
+}
+
 } // namespace c10d
