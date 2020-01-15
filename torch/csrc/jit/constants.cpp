@@ -16,17 +16,37 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
 }
 } // namespace
 
-bool canInsertTuple(
-    Graph& g,
-    const IValue& ivalue,
-    const c10::optional<SourceRange>& loc,
-    const c10::optional<ScopePtr>& scope) {
-  for (const auto& elem : ivalue.toTuple()->elements()) {
-    if (tryInsertConstant(g, elem, loc, scope) == c10::nullopt) {
-      return false;
-    }
+bool insertableTensor(const at::Tensor& ten) {
+  return !ten.requires_grad();
+}
+
+bool insertableIValue(const IValue& ivalue) {
+  if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+    return true;
   }
-  return true;
+  if (ivalue.isTensor()) {
+    return insertableTensor(ivalue.toTensor());
+  }
+  if (ivalue.isBoolList() || ivalue.isDoubleList() || ivalue.isIntList() ||
+      ivalue.type()->isSubtypeOf(ListType::ofStrings())) {
+    return true;
+  }
+  if (ivalue.isTensorList()) {
+    auto ten_list = ivalue.toTensorList();
+    return std::all_of(
+        ten_list.begin(), ten_list.end(), [](const at::Tensor& tensor) {
+          return insertableTensor(tensor);
+        });
+  }
+  if (ivalue.isTuple()) {
+    auto tup_elems = ivalue.toTuple()->elements();
+    return std::all_of(
+        tup_elems.begin(), tup_elems.end(), [](const IValue& tup_elem) {
+          return insertableIValue(tup_elem);
+        });
+  }
+  return false;
 }
 
 Value* insertConstant(
@@ -107,7 +127,7 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else if (val.isTuple()) {
-    if (canInsertTuple(g, val, loc, scope)) {
+    if (insertableIValue(val)) {
       n->ival_(attr::value, val);
       n->output()->setType(val.type());
     } else {

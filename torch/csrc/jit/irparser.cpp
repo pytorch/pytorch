@@ -30,7 +30,7 @@ class IRParser {
 
   std::string parseVar();
   VarWithType parseVarWithType();
-  ParsedLiteral parseScalarLiteral();
+  ParsedLiteral parseScalarLiteral(Node* n);
 
   void parse();
   void parseGraphInputs();
@@ -48,7 +48,6 @@ class IRParser {
   void parseOperatorInputs(Node* n);
   void parseAttrs(Node* n);
   void parseAttr(Node* n);
-  IValue parseAttr();
 
   void parseList(
       int begin,
@@ -134,7 +133,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 }
 
 // Parse string or numeric literal and return it along with its type.
-ParsedLiteral IRParser::parseScalarLiteral() {
+ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
   ParsedLiteral r;
@@ -147,9 +146,11 @@ ParsedLiteral IRParser::parseScalarLiteral() {
     case '-':
       str = "-";
       L.next();
+      L.expect(TK_NUMBER);
       // Fallthrough
     case TK_NUMBER:
-      str += L.expect(TK_NUMBER).text();
+      str += L.cur().text();
+
       if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
@@ -158,6 +159,7 @@ ParsedLiteral IRParser::parseScalarLiteral() {
         r.k = AttributeKind::i;
         r.i = c10::stoll(str);
       }
+      L.next();
       return r;
     default:
       throw ErrorReport(token.range)
@@ -165,15 +167,30 @@ ParsedLiteral IRParser::parseScalarLiteral() {
   }
 }
 
-IValue IRParser::parseAttr() {
+/** \brief Parse attribute and add it to the node N.
+ *
+ * The function determines the attribute type (string, int, float, list of
+ * strings, list of ints, list of floats, and a list of tensors (currently only
+ * for empty lists)).
+ * An attribute looks like the following:
+ *   AttrName=AttrValue
+ *  Where AttrValue can be a list or a scalar literal, e.g.:
+ *   size = 27
+ *   name = "Bob"
+ *   coefs = [1.2, 3.4, 0.6]
+ */
+void IRParser::parseAttr(Node* n) {
+  std::string attrname = L.expect(TK_IDENT).text();
+  L.expect('=');
   if (L.cur().kind == '[') {
+    // list
     AttributeKind k = AttributeKind::ts;
     std::vector<int64_t> is;
     std::vector<std::string> ss;
     std::vector<double> fs;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
-      auto r = parseScalarLiteral();
+      ParsedLiteral r = parseScalarLiteral(n);
       switch (r.k) {
         case AttributeKind::s:
           ss.push_back(r.s);
@@ -196,91 +213,38 @@ IValue IRParser::parseAttr() {
     });
     switch (k) {
       case AttributeKind::ts:
-        return std::vector<at::Tensor>();
+        n->ts_(Symbol::attr(attrname), {});
+        break;
       case AttributeKind::ss:
-        return ss;
+        n->ss_(Symbol::attr(attrname), ss);
+        break;
       case AttributeKind::fs:
-        return fs;
+        n->fs_(Symbol::attr(attrname), fs);
+        break;
       case AttributeKind::is:
-        return is;
+        n->is_(Symbol::attr(attrname), is);
+        break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
-  }
-  if (L.cur().kind == '(') {
-    std::vector<IValue> tup;
-    parseList('(', ',', ')', [&] { tup.push_back(parseAttr()); });
-    return c10::ivalue::Tuple::create(std::move(tup));
-  } else if (L.nextIf(TK_NONE)) {
-    return IValue();
   } else {
-    ParsedLiteral r = parseScalarLiteral();
+    // scalar
+    ParsedLiteral r = parseScalarLiteral(n);
     switch (r.k) {
       case AttributeKind::s:
-        return r.s;
+        n->s_(Symbol::attr(attrname), r.s);
+        break;
       case AttributeKind::i:
-        return r.i;
+        n->i_(Symbol::attr(attrname), r.i);
+        break;
       case AttributeKind::f:
-        return r.f;
+        n->f_(Symbol::attr(attrname), r.f);
+        break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
-  }
-}
-
-/** \brief Parse attribute and add it to the node N.
- *
- * The function determines the attribute type (string, int, float, list of
- * strings, list of ints, list of floats, and a list of tensors (currently only
- * for empty lists)).
- * An attribute looks like the following:
- *   AttrName=AttrValue
- *  Where AttrValue can be a list or a scalar literal, e.g.:
- *   size = 27
- *   name = "Bob"
- *   coefs = [1.2, 3.4, 0.6]
- */
-void IRParser::parseAttr(Node* n) {
-  std::string attrname = L.expect(TK_IDENT).text();
-  L.expect('=');
-  IValue attr = parseAttr();
-#define SET_LISTATTR(type, dtype, accessor)       \
-  if (attr.is##type()) {                          \
-    auto li = attr.to##type();                    \
-    std::vector<dtype> vec(li.begin(), li.end()); \
-    n->accessor(Symbol::attr(attrname), vec);     \
-    return;                                       \
-  };
-  SET_LISTATTR(IntList, int64_t, is_);
-  SET_LISTATTR(DoubleList, double, fs_);
-  if (attr.isTensorList()) {
-    n->ts_(Symbol::attr(attrname), {});
     return;
   }
-#define SET_SCALARATTR(type, accessor)                    \
-  if (attr.is##type()) {                                  \
-    n->accessor(Symbol::attr(attrname), attr.to##type()); \
-    return;                                               \
-  };
-  SET_SCALARATTR(Int, i_);
-  SET_SCALARATTR(Double, f_);
-  if (attr.isTuple()) {
-    n->ival_(Symbol::attr(attrname), attr);
-    return;
-  }
-  if (attr.isString()) {
-    n->s_(Symbol::attr(attrname), attr.toStringRef());
-    return;
-  }
-  if (attr.type()->isSubtypeOf(ListType::ofStrings())) {
-    n->ss_(
-        Symbol::attr(attrname),
-        fmap(attr.toGenericListRef(), [](const IValue& ival) {
-          return ival.toStringRef();
-        }));
-    return;
-  }
-  TORCH_INTERNAL_ASSERT(false, "unexpected attr");
 }
 
 void IRParser::parseAttrs(Node* n) {

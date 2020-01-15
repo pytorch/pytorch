@@ -55,7 +55,6 @@ bool attributesEqual(
   return tensorListEqual(a1, a2);
 }
 
-// todo: merge with tensorLists Equal above
 bool attributesEqual(
     const c10::List<at::Tensor>& lhs,
     const c10::List<at::Tensor>& rhs) {
@@ -137,21 +136,20 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   COMPARE_IVALUE(DoubleList)
   COMPARE_IVALUE(Tensor)
   COMPARE_IVALUE(TensorList)
-  COMPARE_IVALUE(None)
   COMPARE_IVALUE(Tuple)
+  if (a1.isNone()) {
+    return true;
+  }
   if (a1.isString()) {
     return attributesEqual(a1.toStringRef(), a2.toStringRef());
   }
-
   if (!a1.type()->isSubtypeOf(a2.type()) ||
       !a2.type()->isSubtypeOf(a1.type())) {
     return false;
   }
-
   if (a1.type()->isSubtypeOf(ListType::ofStrings())) {
     return attributesEqual(toStringList(a1), toStringList(a2));
   }
-
   TORCH_INTERNAL_ASSERT(false);
 }
 

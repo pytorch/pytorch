@@ -3162,24 +3162,6 @@ graph(%Ra, %Rb):
             f_script = cu.func
             self.run_pass('constant_propagation', f_script.graph)
             FileCheck().check_count("prim::Constant", 1, exactly=True).run(f_script.graph)
-
-            def check_irparser_roundtrip():
-                graph_str = str(canonical(f_script.graph))
-                parsed_graph = parse_ir(graph_str)
-
-                def remove_sourcelines(graph_str):
-                    graph_str = graph_str.split("\n")
-                    lines = []
-                    for line in graph_str:
-                        source_occur = line.find(" #")
-                        lines.append(line if source_occur == -1 else line[0:source_occur])
-                    return "\n".join(lines)
-                self.assertEqual(remove_sourcelines(graph_str), remove_sourcelines(str(parsed_graph)))
-
-            # reparsing of tensor constants or empty lists NYI
-            if "tensor" not in constant_constructor and "annotate" not in constant_constructor:
-                check_irparser_roundtrip()
-
             self.assertEqual(scope['func'](), f_script())
             imported = self.getExportImportCopy(f_script)
             self.assertEqual(imported(), f_script())

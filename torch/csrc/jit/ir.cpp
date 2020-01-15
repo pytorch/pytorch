@@ -248,21 +248,34 @@ static void printTypeList(
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
-#define PRINT_ATTRIBUTE(selector)        \
-  case AttributeKind::selector:          \
-    printAttribute(out, selector(name)); \
-    break;
-
   switch (kindOf(name)) {
-    PRINT_ATTRIBUTE(f)
-    PRINT_ATTRIBUTE(fs)
-    PRINT_ATTRIBUTE(i)
-    PRINT_ATTRIBUTE(is)
-    PRINT_ATTRIBUTE(s)
-    PRINT_ATTRIBUTE(ss)
-    PRINT_ATTRIBUTE(t)
-    PRINT_ATTRIBUTE(ts)
-    PRINT_ATTRIBUTE(ival)
+    case AttributeKind::f:
+      printAttribute(out, f(name));
+      break;
+    case AttributeKind::fs:
+      printAttribute(out, fs(name));
+      break;
+    case AttributeKind::i:
+      printAttribute(out, i(name));
+      break;
+    case AttributeKind::is:
+      printAttribute(out, is(name));
+      break;
+    case AttributeKind::s:
+      printAttribute(out, s(name));
+      break;
+    case AttributeKind::ss:
+      printAttribute(out, ss(name));
+      break;
+    case AttributeKind::t:
+      printAttribute(out, t(name));
+      break;
+    case AttributeKind::ts:
+      printAttribute(out, ts(name));
+      break;
+    case AttributeKind::ival:
+      printAttribute(out, ival(name));
+      break;
     case AttributeKind::g:
       out << "<Graph>";
       break;

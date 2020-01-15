@@ -446,6 +446,25 @@ struct PythonPrintImpl {
     stmt << end;
   }
 
+  void printIValueList(
+      std::stringstream& stmt,
+      at::ArrayRef<IValue> list,
+      const char* begin = "",
+      const char* end = "") {
+    stmt << begin;
+    auto delimiter = "";
+    for (const auto& value : list) {
+      stmt << delimiter;
+      printConstant(stmt, value);
+      delimiter = ", ";
+    }
+    stmt << end;
+  }
+
+  std::string tuplePrintEndChar(size_t tuple_len) {
+    return tuple_len == 1 ? ",)" : ")";
+  }
+
   void printValueIndex(TaggedStringStream& stmt, at::ArrayRef<Value*> inputs) {
     const std::string val_name = useOf(inputs[0])->str();
     if (isValidIdentifier(val_name)) {
@@ -836,18 +855,12 @@ struct PythonPrintImpl {
         ss << "]";
       }
     } else if (v.isTuple()) {
-      const auto& elems = v.toTuple()->elements();
-      ss << "(";
-      const char* delim = "";
-      for (const auto& ivalue : elems) {
-        ss << delim;
-        printConstant(ss, ivalue);
-        delim = ", ";
-      }
-      if (elems.size() == 1) {
-        ss << ",";
-      }
-      ss << ")";
+      auto elems = v.toTuple()->elements();
+      printIValueList(
+          ss,
+          v.toTuple()->elements(),
+          "(",
+          tuplePrintEndChar(elems.size()).c_str());
     } else {
       ss << v;
     }
@@ -956,7 +969,10 @@ struct PythonPrintImpl {
           stmt << qualname->qualifiedName();
         }
         printValueList(
-            stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
+            stmt,
+            node->inputs(),
+            "(",
+            tuplePrintEndChar(node->inputs().size()).c_str());
       } break;
       case prim::TupleIndex: {
         stmt << "(" << useOf(node->inputs().at(0)) << ")["
