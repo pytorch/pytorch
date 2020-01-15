@@ -202,9 +202,17 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(TupleType::create(elements));
   }
 
+  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+    if (auto elem = unifyTypes(
+            t1->cast<FutureType>()->getElementType(),
+            t2->cast<FutureType>()->getElementType())) {
+      return FutureType::create(*elem);
+    }
+  }
+
   // Check direct subtyping relations again with Unshaped Types,
-  // to handle unification of container types which might contain two different
-  // specialized tensors (ListType / FutureType)
+  // to handle unification of mutable container types which might contain two different
+  // specialized tensors (ListType / DictType)
   auto t1_unshaped = unshapedType(t1);
   auto t2_unshaped = unshapedType(t2);
 
@@ -212,26 +220,6 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return t2_unshaped;
   } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
     return t1_unshaped;
-  }
-
-  // List unification is covered by direct subtyping relation check above
-  // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-  // int?[] = std::vector<IValue>  we don't unify list element types
-  // Without specializations we could attempt to unify the list element type
-
-  // Dicts are not specialized, so we can unify contained types, but we do not
-  // maintain Tensor Specialization in dictionary types bc of mutability
-  // so we run this after calling unshapedType
-  if (t1_unshaped->cast<DictType>() && t2_unshaped->cast<DictType>()) {
-    auto dict1 = t1_unshaped->cast<DictType>();
-    auto dict2 = t2_unshaped->cast<DictType>();
-
-    auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
-    auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
-    if (!unified_key || !unified_value) {
-      return c10::nullopt;
-    }
-    return DictType::create(*unified_key, *unified_value);
   }
 
   return c10::nullopt;

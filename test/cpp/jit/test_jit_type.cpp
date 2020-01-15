@@ -31,6 +31,18 @@ void testUnifyTypes() {
   testing::FileCheck()
       .check("Optional[Tuple[Optional[int], Optional[int]]]")
       ->run(ss.str());
+
+  auto fut_1 = FutureType::create(IntType::get());
+  auto fut_2 = FutureType::create(NoneType::get());
+  auto fut_out = unifyTypes(fut_1, fut_2);
+  TORCH_INTERNAL_ASSERT(fut_out);
+  TORCH_INTERNAL_ASSERT((*fut_out)->isSubtypeOf(
+      FutureType::create(OptionalType::create(IntType::get()))));
+
+  auto dict_1 = DictType::create(IntType::get(), NoneType::get());
+  auto dict_2 = DictType::create(IntType::get(), IntType::get());
+  auto dict_out = unifyTypes(dict_1, dict_2);
+  TORCH_INTERNAL_ASSERT(!dict_out);
 }
 
 } // namespace jit
