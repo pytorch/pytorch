@@ -38,6 +38,11 @@ enum class TensorTypeId : uint8_t {
   ComplexCPUTensorId, // PyTorch only
   ComplexCUDATensorId, // PyTorch only
 
+  // See Note [Private use TensorId]
+  PrivateUse1_TensorId,
+  PrivateUse2_TensorId,
+  PrivateUse3_TensorId,
+
   // Sparse has multi-dispatch with dense; handle it first
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
@@ -62,8 +67,37 @@ enum class TensorTypeId : uint8_t {
   // to operate on this type id.
   TESTING_ONLY_GenericModeTensorId,
 
+  // See Note [Private use TensorId]
+  PrivateUse1_PreAutogradTensorId,
+  PrivateUse2_PreAutogradTensorId,
+  PrivateUse3_PreAutogradTensorId,
+
   NumTensorIds, // Sentinel
 };
+
+// Note [Private use TensorId]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Private use tensor IDs are preallocated tensor type IDs for use in user
+// applications.  Similar to private use fields in HTTP, they can be used
+// by end users for experimental or private applications, without needing
+// to "standardize" the tensor ID (which would be done by submitting a PR
+// to PyTorch to add your type ID).
+//
+// Private use tensor IDs are appropriate to use if you want to experiment
+// with adding a new tensor type (without having to patch PyTorch first) or
+// have a private, non-distributed application that needs to make use of a
+// new tensor type.  Private use tensor IDs are NOT appropriate to use for
+// libraries intended to be distributed to further users: please contact
+// the PyTorch developers to get a type ID registered in this case.
+//
+// We provide two classes of private user tensor id: regular TensorIds
+// and PreAutogradTensorIds.  TensorIds serve the role of ordinary "backend"
+// TensorIds; if you were adding support for a new type of accelerator, you
+// would use a TensorId, and reuse autograd definitions already defined in
+// PyTorch for operators you define.  PreAutogradTensorIds serve as "wrapper"
+// TensorIds: they are most appropriate for tensors that compose multiple
+// internal tensors, and for cases when the built-in autograd formulas for
+// operators are not appropriate.
 
 static_assert(
   static_cast<uint8_t>(TensorTypeId::NumTensorIds) < 64,

@@ -259,16 +259,16 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
   int srcDims = src.dim();
 
   TORCH_CHECK(index.dim() <= 1, "Index must be vector or scalar");
-  TORCH_CHECK(dim >= 0 && dim < dstDims, "Indexing dim is out of bounds");
 
   ptrdiff_t dstSliceSize = 1;
+  TORCH_CHECK(dim >= 0 && dim < dstDims, "Indexing dim ", dim, " is out of bounds");
   for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
       dstSliceSize *= dst.size(d);
     }
   }
 
-  TORCH_CHECK(dim < srcDims, "Indexing dim is out of bounds");
+  TORCH_CHECK(dim < srcDims, "Indexing dim ", dim, " is out of bounds");
   TORCH_CHECK(index.numel() == src.size(dim),
              "length of src.size[dim] is not equal to length of indices");
 
@@ -442,6 +442,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   TORCH_CHECK(index.numel() == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
+  // Scalars are treated as 1-d tensor
+  Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
+  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+
   TORCH_CHECK(self.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(source.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
@@ -451,9 +455,9 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   // total size of the tensor ignoring dimension `dim`;
   // -the number of index we are choosing, which is the total size
   // of the tensor `index`.
-  ptrdiff_t sliceSize = getSliceSize(self, dim, index, source);
+  ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
   ptrdiff_t sourceTotalSize = source.numel();
-  int64_t selfAddDimSize = self.dim() == 0 ? 1 : self.size(dim);
+  int64_t selfAddDimSize = self_.size(dim);
   ptrdiff_t numIndex = index.numel();
 
   if (sliceSize == 0) {
@@ -491,12 +495,12 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
       cuda::detail::canUse32BitIndexMath(index)) {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
-          cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
+          cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
       int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
 
       auto sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, unsigned int>(source);
+        cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
       int sourceAddDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceAddDim);
 
@@ -541,12 +545,12 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
+        cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
       int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
 
       cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source);
+        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
       int sourceAddDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceAddDim);
 
