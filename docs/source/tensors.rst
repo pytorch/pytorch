@@ -146,6 +146,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_zeros
 
    .. autoattribute:: is_cuda
+   .. autoattribute:: is_quantized
    .. autoattribute:: device
    .. autoattribute:: grad
       :noindex:
@@ -194,7 +195,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bitwise_not
    .. automethod:: bitwise_not_
    .. automethod:: bitwise_and
-   .. automethod:: bitwise_and_ 
+   .. automethod:: bitwise_and_
    .. automethod:: bitwise_or
    .. automethod:: bitwise_or_
    .. automethod:: bitwise_xor
@@ -223,6 +224,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
+   .. automethod:: cummax
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
