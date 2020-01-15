@@ -14,8 +14,7 @@ using namespace torch::jit::compiler;
 using namespace torch::jit::compiler::schedule;
 
 TEST(TensorExpr, Simple01) {
-  Tensor tensor = Compute(
-      "f", {Expr(16), Expr(5)}, {"x", "y"}, [](const Var& x, const Var& y) {
+  Tensor tensor = Compute("f", {{16, "X"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   Var x = tensor.function().arg(0);
@@ -36,7 +35,7 @@ TEST(TensorExpr, Simple01) {
 
 TEST(TensorExpr, Lower01) {
   Tensor tensor = Compute(
-      "f", {Expr(16), Expr(5)}, {"x", "y"}, [](const Var& x, const Var& y) {
+      "f", {{16, "x"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   Var x = tensor.function().arg(0);
@@ -53,7 +52,7 @@ TEST(TensorExpr, Simple02) {
   auto func = [](const Expr& x, const Expr& y) {
     return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
-  Tensor tensor = Compute("f", {Expr(26), Expr(5)}, {"x", "y"}, func);
+  Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
   Var x = tensor.function().arg(0);
   Var y = tensor.function().arg(1);
   Schedule sch = Schedule::make({tensor});
@@ -135,8 +134,7 @@ TEST(TestSchedule, BroadcastAddBuffer) {
   Buffer b_buf("b", kFloat32, {N, K});
   Tensor c = Compute(
       "broadcast_add",
-      {M, N, K},
-      {"m", "n", "k"},
+      {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const Var& m, const Var& n, const Var& k) {
         return a_buf(m, n) + b_buf(n, k);
       });

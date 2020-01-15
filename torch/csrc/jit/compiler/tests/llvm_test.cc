@@ -242,7 +242,7 @@ TEST(LLVMTest, StoreFloat) {
 
 TEST(LLVMTest, SimpleMath01) {
   const int N = 1024;
-  Tensor tensor = Compute("f", {Expr(N)}, {"i"}, [](const Var& i) {
+  Tensor tensor = Compute("f", {{N, "i"}}, [](const Var& i) {
     return cast<float>(i * i + 1);
   });
   Schedule sch = Schedule::make({tensor});
@@ -270,9 +270,8 @@ TEST(LLVMTest, ComputeMul) {
   const int N = 1024;
   Buffer a(Var("a", kHandle), kFloat32, {N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
-  Tensor c = Compute("c", {Expr(N)}, {"i"}, [&a, &b](const Var& i) {
-      Expr mask(1);
-      return Load::make(a, i, mask) * Load::make(b, i, mask);
+  Tensor c = Compute("c", {{N, "i"}}, [&](const Var& i) {
+      return Load::make(a, i, 1) * Load::make(b, i, 1);
   });
 
   Buffer c_buf(c.function().func_var(), kFloat32, {N});
@@ -296,7 +295,7 @@ TEST(LLVMTest, BroadcastAdd) {
   Buffer a(Var("a", kHandle), kFloat32, {M, N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
   Tensor c = Compute(
-    "c", {Expr(M), Expr(N)}, {"i", "j"},
+    "c", {{M, "i"}, {N, "j"}},
     [&](const Var& i, const Var& j) {
       Expr mask(1);
       return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);

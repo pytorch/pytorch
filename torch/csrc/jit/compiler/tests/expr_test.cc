@@ -51,7 +51,8 @@ TEST(ExprTest, LetTest02) {
 
 TEST(ExprTest, Tensor01) {
   Tensor tensor = Compute(
-      "f", {Expr(3), Expr(4)}, {"x", "y"}, [](const Var& x, const Var& y) {
+      "f", {{3, "x"}, {4, "y"}},
+      [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
   std::vector<float> result;
