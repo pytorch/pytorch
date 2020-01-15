@@ -553,7 +553,7 @@ class TestFuser(JitTestCase):
                                                                   "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
+    @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
