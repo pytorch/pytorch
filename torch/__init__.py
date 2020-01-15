@@ -47,7 +47,7 @@ if platform.system() == 'Windows':
     
     import torch.version
     import glob
-    if len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
+    if torch.version.cuda and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
         cuda_version = torch.version.cuda
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
