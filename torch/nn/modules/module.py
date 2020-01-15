@@ -258,10 +258,11 @@ class Module(object):
 
         Example::
 
+            >>> @torch.no_grad()
             >>> def init_weights(m):
             >>>     print(m)
             >>>     if type(m) == nn.Linear:
-            >>>         m.weight.data.fill_(1.0)
+            >>>         m.weight.fill_(1.0)
             >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
@@ -866,9 +867,9 @@ class Module(object):
         Example::
 
             >>> for param in model.parameters():
-            >>>     print(type(param.data), param.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            >>>     print(type(param), param.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
         for name, param in self.named_parameters(recurse=recurse):
@@ -914,9 +915,9 @@ class Module(object):
         Example::
 
             >>> for buf in model.buffers():
-            >>>     print(type(buf.data), buf.size())
-            <class 'torch.FloatTensor'> (20L,)
-            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+            >>>     print(type(buf), buf.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
         for name, buf in self.named_buffers(recurse=recurse):
