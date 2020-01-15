@@ -178,16 +178,24 @@ namespace modern {
 
 namespace detail {
 
-template <typename func_t, typename array_t, std::size_t... I>
-__device__ inline constexpr decltype(auto) apply_impl(func_t f, array_t t, std::index_sequence<I...>)
-{
-    return f(t[I]...);
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 0), int> = 0>
+__device__ inline constexpr typename function_traits<func_t>::return_type array_apply(func_t f, array_t a) {
+  return f();
 }
 
-template <typename func_t, typename array_t>
-__device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
-  constexpr std::size_t arity = function_traits<func_t>::arity;
-  return apply_impl(f, a, std::make_index_sequence<arity>{});
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 1, int> = 0>
+__device__ inline constexpr typename function_traits<func_t>::return_type array_apply(func_t f, array_t a) {
+  return f(a[0]);
+}
+
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 2, int> = 0>
+__device__ inline constexpr typename function_traits<func_t>::return_type array_apply(func_t f, array_t a) {
+  return f(a[0], a[1]);
+}
+
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity > 2), int> = 0>
+__device__ inline constexpr typename function_traits<func_t>::return_type array_apply(func_t f, array_t a) {
+  assert(false);
 }
 
 }  // namespace detail
@@ -196,8 +204,8 @@ template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<(fu
 C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
-  // all arguments have the same type, which could be different from the return type
-  // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+  // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
+  // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
 
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
@@ -233,7 +241,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
-      results[i] = detail::array_apply(f, args[i]);
+      results[i] = detail::array_apply<func_t, arg_t[arity]>(f, args[i]);
     }
   }
 
