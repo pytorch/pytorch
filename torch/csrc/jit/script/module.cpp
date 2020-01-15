@@ -169,10 +169,21 @@ Module Module::clone() const {
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap) const {
   // Create a new _ivalue in the same compilation unit.
-  // The name is the same as for the original module, but it'll be mangled.
-  // The class type is also created from scratch.
-  Module r(*type()->name(), _ivalue()->compilation_unit(), true);
-  type_remap[type()] = r.type();
+  // Since now we have shared ClassType, we need to preserve the shared
+  // ClassType during cloning, so we first need to check if the type
+  // is already cloned, if so, we'll create a new module with the cloned
+  // ClassType, if not, we'll create a new module and a new ClassType.
+  bool type_already_cloned = type_remap.find(type()) != type_remap.end();
+  Module r;
+  if (type_already_cloned) {
+    // if we cloned the class type before, we'll reuse it
+    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    r = new_module;
+  } else {
+    Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
+    r = new_module;
+    type_remap[type()] = r.type();
+  }
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
@@ -192,9 +203,12 @@ Module Module::clone_impl(
     }
   }
 
-  // Clone methods remapping the types to the cloned ones.
-  for (auto& fn : type()->methods()) {
-    r.clone_method(*this, *fn, type_remap);
+  // only clone the methods if the ClassType is not cloned before
+  if (!type_already_cloned) {
+    // Clone methods remapping the types to the cloned ones.
+    for (auto& fn : type()->methods()) {
+      r.clone_method(*this, *fn, type_remap);
+    }
   }
   return r;
 }
