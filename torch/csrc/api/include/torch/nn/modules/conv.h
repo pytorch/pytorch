@@ -224,6 +224,28 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 /// Applies the ConvTranspose1d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose1d to
 /// learn about the exact behavior of this module.
+///
+/// NOTE: `ConvTranspose1d` currently cannot be used in a `Sequential` module,
+/// because `Sequential` module doesn't support modules with forward method that takes
+/// optional arguments. Users should create their own wrapper for `ConvTranspose1d`
+/// and have its forward method just accept a tensor, if they want to use it in a
+/// `Sequential` module.
+///
+/// Example:
+/// ```
+/// struct ConvTranspose1dWrapperImpl : public torch::nn::ConvTranspose1dImpl {
+///   using torch::nn::ConvTranspose1dImpl::ConvTranspose1dImpl;
+///
+///   torch::Tensor forward(const torch::Tensor& input) {
+///     return torch::nn::ConvTranspose1dImpl::forward(input, c10::nullopt);
+///   }
+/// };
+///
+/// TORCH_MODULE(ConvTranspose1dWrapper);
+///
+/// torch::nn::Sequential sequential(
+///   ConvTranspose1dWrapper(torch::nn::ConvTranspose1dOptions(3, 3, 4));
+/// ```
 class TORCH_API ConvTranspose1dImpl : public ConvTransposeNdImpl<1, ConvTranspose1dImpl> {
  public:
   ConvTranspose1dImpl(
@@ -244,6 +266,28 @@ TORCH_MODULE(ConvTranspose1d);
 /// Applies the ConvTranspose2d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose2d to
 /// learn about the exact behavior of this module.
+///
+/// NOTE: `ConvTranspose2d` currently cannot be used in a `Sequential` module,
+/// because `Sequential` module doesn't support modules with forward method that takes
+/// optional arguments. Users should create their own wrapper for `ConvTranspose2d`
+/// and have its forward method just accept a tensor, if they want to use it in a
+/// `Sequential` module.
+///
+/// Example:
+/// ```
+/// struct ConvTranspose2dWrapperImpl : public torch::nn::ConvTranspose2dImpl {
+///   using torch::nn::ConvTranspose2dImpl::ConvTranspose2dImpl;
+///
+///   torch::Tensor forward(const torch::Tensor& input) {
+///     return torch::nn::ConvTranspose2dImpl::forward(input, c10::nullopt);
+///   }
+/// };
+///
+/// TORCH_MODULE(ConvTranspose2dWrapper);
+///
+/// torch::nn::Sequential sequential(
+///   ConvTranspose2dWrapper(torch::nn::ConvTranspose2dOptions(3, 3, 4));
+/// ```
 class TORCH_API ConvTranspose2dImpl : public ConvTransposeNdImpl<2, ConvTranspose2dImpl> {
  public:
   ConvTranspose2dImpl(
@@ -264,6 +308,28 @@ TORCH_MODULE(ConvTranspose2d);
 /// Applies the ConvTranspose3d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.ConvTranspose3d to
 /// learn about the exact behavior of this module.
+///
+/// NOTE: `ConvTranspose3d` currently cannot be used in a `Sequential` module,
+/// because `Sequential` module doesn't support modules with forward method that takes
+/// optional arguments. Users should create their own wrapper for `ConvTranspose3d`
+/// and have its forward method just accept a tensor, if they want to use it in a
+/// `Sequential` module.
+///
+/// Example:
+/// ```
+/// struct ConvTranspose3dWrapperImpl : public torch::nn::ConvTranspose3dImpl {
+///   using torch::nn::ConvTranspose3dImpl::ConvTranspose3dImpl;
+///
+///   torch::Tensor forward(const torch::Tensor& input) {
+///     return torch::nn::ConvTranspose3dImpl::forward(input, c10::nullopt);
+///   }
+/// };
+///
+/// TORCH_MODULE(ConvTranspose3dWrapper);
+///
+/// torch::nn::Sequential sequential(
+///   ConvTranspose3dWrapper(torch::nn::ConvTranspose3dOptions(3, 3, 4));
+/// ```
 class TORCH_API ConvTranspose3dImpl : public ConvTransposeNdImpl<3, ConvTranspose3dImpl> {
  public:
   ConvTranspose3dImpl(
