@@ -226,7 +226,7 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 /// learn about the exact behavior of this module.
 ///
 /// NOTE: `ConvTranspose1d` currently cannot be used in a `Sequential` module,
-/// because `Sequential` module doesn't support modules with forward method that can take
+/// because `Sequential` module doesn't support modules with forward method that takes
 /// optional arguments. Users should create their own wrapper for `ConvTranspose1d`
 /// and have its forward method just accept a tensor, if they want to use it in a
 /// `Sequential` module.
@@ -268,7 +268,7 @@ TORCH_MODULE(ConvTranspose1d);
 /// learn about the exact behavior of this module.
 ///
 /// NOTE: `ConvTranspose2d` currently cannot be used in a `Sequential` module,
-/// because `Sequential` module doesn't support modules with forward method that can take
+/// because `Sequential` module doesn't support modules with forward method that takes
 /// optional arguments. Users should create their own wrapper for `ConvTranspose2d`
 /// and have its forward method just accept a tensor, if they want to use it in a
 /// `Sequential` module.
@@ -310,7 +310,7 @@ TORCH_MODULE(ConvTranspose2d);
 /// learn about the exact behavior of this module.
 ///
 /// NOTE: `ConvTranspose3d` currently cannot be used in a `Sequential` module,
-/// because `Sequential` module doesn't support modules with forward method that can take
+/// because `Sequential` module doesn't support modules with forward method that takes
 /// optional arguments. Users should create their own wrapper for `ConvTranspose3d`
 /// and have its forward method just accept a tensor, if they want to use it in a
 /// `Sequential` module.
