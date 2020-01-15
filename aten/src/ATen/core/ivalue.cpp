@@ -120,7 +120,6 @@ std::ostream& printDict(
 }
 }
 
-
 std::ostream& IValue::repr(
     std::ostream& out,
     std::function<bool(std::ostream&, const IValue& v)>
@@ -136,7 +135,7 @@ std::ostream& IValue::repr(
   };
   switch (v.tag) {
     case IValue::Tag::None:
-      return out << "None";
+      return out << v.toNone();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -188,7 +187,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
   };
   switch(v.tag) {
     case IValue::Tag::None:
-      return out << "None";
+      return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
     case IValue::Tag::Double: {
