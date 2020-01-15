@@ -10,9 +10,9 @@ import sys
 import shutil
 from collections import namedtuple, OrderedDict
 
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
-import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+# import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+# import cimodel.data.binary_build_definitions as binary_build_definitions
+# import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
@@ -78,40 +78,40 @@ YAML_SOURCES = [
     File("nightly-binary-build-defaults.yml"),
     Header("Build parameters"),
     File("pytorch-build-params.yml"),
-    File("caffe2-build-params.yml"),
+    # File("caffe2-build-params.yml"),
     File("binary-build-params.yml"),
     Header("Job specs"),
     File("pytorch-job-specs.yml"),
-    File("caffe2-job-specs.yml"),
+    # File("caffe2-job-specs.yml"),
     File("binary-job-specs.yml"),
     File("job-specs-setup.yml"),
-    File("job-specs-custom.yml"),
+    # File("job-specs-custom.yml"),
     File("binary_update_htmls.yml"),
     File("binary-build-tests.yml"),
     File("docker_jobs.yml"),
     File("workflows.yml"),
 
-    File("windows-build-test.yml"),
-    Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
-    File("workflows-pytorch-macos-builds.yml"),
-    File("workflows-pytorch-android-gradle-build.yml"),
-    File("workflows-pytorch-ios-builds.yml"),
-    File("workflows-pytorch-mobile-builds.yml"),
-    File("workflows-pytorch-ge-config-tests.yml"),
-    Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
-    File("workflows-binary-builds-smoke-subset.yml"),
-    Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
-    Listgen(binary_build_definitions.get_binary_build_jobs, 3),
+    # File("windows-build-test.yml"),
+    # Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
+    # File("workflows-pytorch-macos-builds.yml"),
+    # File("workflows-pytorch-android-gradle-build.yml"),
+    # File("workflows-pytorch-ios-builds.yml"),
+    # File("workflows-pytorch-mobile-builds.yml"),
+    # File("workflows-pytorch-ge-config-tests.yml"),
+    # Listgen(caffe2_build_definitions.get_workflow_jobs, 3),
+    # File("workflows-binary-builds-smoke-subset.yml"),
+    # Listgen(binary_build_definitions.get_binary_smoke_test_jobs, 3),
+    # Listgen(binary_build_definitions.get_binary_build_jobs, 3),
     File("workflows-nightly-ios-binary-builds.yml"),
-    File("workflows-nightly-android-binary-builds.yml"),
+    # File("workflows-nightly-android-binary-builds.yml"),
 
-    Header("Nightly tests"),
-    Listgen(binary_build_definitions.get_nightly_tests, 3),
-    File("workflows-nightly-uploads-header.yml"),
-    Listgen(binary_build_definitions.get_nightly_uploads, 3),
-    File("workflows-s3-html.yml"),
-    File("workflows-docker-builder.yml"),
-    File("workflows-ecr-gc.yml"),
+    # Header("Nightly tests"),
+    # Listgen(binary_build_definitions.get_nightly_tests, 3),
+    # File("workflows-nightly-uploads-header.yml"),
+    # Listgen(binary_build_definitions.get_nightly_uploads, 3),
+    # File("workflows-s3-html.yml"),
+    # File("workflows-docker-builder.yml"),
+    # File("workflows-ecr-gc.yml"),
 ]
 
 

@@ -9,3 +9,4 @@
 workflows:
   build:
     jobs:
+      - setup
