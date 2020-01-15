@@ -63,37 +63,35 @@ TypePtr IValue::type() const {
 }
 namespace {
 
+using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
+
 template <class T>
 std::ostream& printList(
     std::ostream& out,
     const T& list,
     const std::string start,
     const std::string finish,
-    bool use_repr) {
+    IValueFormatter formatter) {
   out << start;
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0)
+    if (i > 0){
       out << ", ";
-    // make sure we use ivalue printing, and not default printing for the
-    // element type
-    if (use_repr) {
-      IValue(list[i]).repr(out);
-    } else {
-      out << IValue(list[i]);
     }
+    formatter(out, IValue(list[i]));
   }
   out << finish;
   return out;
 }
 
-std::ostream& reprMaybeAnnotatedList(
+// Properly disambiguate the type of an empty list
+std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
-    const IValue& the_list) {
+    const IValue& the_list,
+    IValueFormatter formatter) {
   if (the_list.toGenericListRef().size() == 0) {
     out << "annotate(" << the_list.type()->python_str() << ", [])";
   } else {
-    return printList(
-        out, the_list.toGenericListRef(), "[", "]", /*use_repr=*/true);
+    return printList(out, the_list.toGenericListRef(), "[", "]", formatter);
   }
   return out;
 }
@@ -102,7 +100,7 @@ template <typename Dict>
 std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
-    bool use_repr) {
+    IValueFormatter formatter) {
   out << "{";
 
   bool first = true;
@@ -111,23 +109,31 @@ std::ostream& printDict(
       out << ", ";
     }
 
-    if (use_repr) {
-      pair.key().repr(out) << ": ";
-      pair.value().repr(out);
-    } else {
-      out << pair.key() << ": " << pair.value();
-    }
+    formatter(out, pair.key());
+    out << ": ";
+    formatter(out, pair.value());
     first = false;
   }
 
   out << "}";
   return out;
 }
+}
 
-} // anonymous namespace
 
-std::ostream& IValue::repr(std::ostream& out) const {
-  const auto& v = *this;
+std::ostream& IValue::repr(
+    std::ostream& out,
+    std::function<bool(std::ostream&, const IValue& v)>
+        customFormatter) const {
+  // First check if the caller has provided a custom formatter. Use that if possible.
+  if (customFormatter(out, *this)) {
+    return out;
+  }
+
+  const IValue& v = *this;
+  auto formatter = [&](std::ostream& out, const IValue& v) {
+    v.repr(out, customFormatter);
+  };
   switch (v.tag) {
     case IValue::Tag::None:
       return out << v.toNone();
@@ -151,13 +157,17 @@ std::ostream& IValue::repr(std::ostream& out) const {
     case IValue::Tag::Tuple: {
       const auto& elements = v.toTuple()->elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
-      return printList(out, elements, "(", finish, /*use_repr=*/true);
+      return printList(out, elements, "(", finish, formatter);
     }
     case IValue::Tag::String:
       c10::printQuotedString(out, v.toStringRef());
       return out;
-    case IValue::Tag::GenericList:
-      return reprMaybeAnnotatedList(out, *this);
+    case IValue::Tag::GenericList: {
+      auto formatter = [&](std::ostream& out, const IValue& v) {
+        v.repr(out, customFormatter);
+      };
+      return printMaybeAnnotatedList(out, *this, formatter);
+    }
     case IValue::Tag::Device: {
       std::stringstream device_stream;
       device_stream << v.toDevice();
@@ -166,13 +176,16 @@ std::ostream& IValue::repr(std::ostream& out) const {
       return out << ")";
     }
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict(), /*use_repr=*/true);
+      return printDict(out, v.toGenericDict(), formatter);
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
+  auto formatter = [&](std::ostream& out, const IValue& v) {
+    out << v;
+  };
   switch(v.tag) {
     case IValue::Tag::None:
       return out << v.toNone();
@@ -199,7 +212,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Tuple: {
       const auto& elements = v.toTuple()->elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
-      return printList(out, elements, "(", finish, /*use_repr=*/false);
+      return printList(out, elements, "(", finish, formatter);
     }
     case IValue::Tag::String:
       return out << v.toStringRef();
@@ -208,7 +221,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Capsule:
       return out << "Capsule";
     case IValue::Tag::GenericList:
-      return printList(out, v.toGenericList(), "[", "]", /*(use_repr=*/false);
+      return printList(out, v.toGenericList(), "[", "]", formatter);
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -216,7 +229,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Device:
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict(), /*(use_repr=*/false);
+      return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::Object:
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();

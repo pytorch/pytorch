@@ -462,8 +462,16 @@ struct CAFFE2_API IValue final {
   // TorchScript expression that can be used to recreate an IValue with the same
   // value (e.g. when we are printing constants in the serializer).
   //
+  // Callers can use `customFormatter` to override how `repr()` prints out an
+  // IValue. This is useful if you have some other environment where you can
+  // look up values, and you want to print a reference to that environment (like
+  // the serializer's constant table).
+  //
   // repr() is not necessarily defined on all objects!
-  std::ostream& repr(std::ostream& stream) const;
+  std::ostream& repr(
+      std::ostream& stream,
+      std::function<bool(std::ostream&, const IValue& v)> customFormatter)
+      const;
 
   // Computes an "informal" string representation of an IValue. This should be
   // used for debugging, or servicing `print()`-like functions.
