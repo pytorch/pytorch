@@ -79,29 +79,6 @@ void THCTensor_(div)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(rshift)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THCTensor_(mul)(state, self_, src_, pow(2, -value));
-#elif defined(THC_REAL_IS_HALF)
-  return THError("rshift not supported for torch.CudaHalfTensor");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorRShiftConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorRShiftConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
-
 void THCTensor_(fmod)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));

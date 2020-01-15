@@ -895,6 +895,20 @@
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
+
+- func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
+
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
 # convenience function that converts to intlists for you
@@ -2651,6 +2665,10 @@
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
+  dispatch:
+    CPU: tanh
+    CUDA: tanh
+    QuantizedCPU: quantized_tanh
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
@@ -4080,27 +4098,27 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_rshift
-    CUDA: legacy::cuda::_th_rshift
+    CPU: __rshift__
+    CUDA: __rshift__
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_rshift
-    CUDA: legacy::cuda::_th_rshift
+    CPU: __rshift__
+    CUDA: __rshift__
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_irshift_
-    CUDA: legacy::cuda::_th_irshift_
+    CPU: __irshift__
+    CUDA: __irshift__
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_irshift_
-    CUDA: legacy::cuda::_th_irshift_
+    CPU: __irshift__
+    CUDA: __irshift__
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
