@@ -351,6 +351,8 @@ struct CAFFE2_API IValue final {
   }
   std::string toNone() const {
     AT_ASSERT(isNone());
+    // TODO why are we returning a string for this...
+
     return "None";
   }
 
@@ -456,6 +458,18 @@ struct CAFFE2_API IValue final {
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
+  // Computes the "official" string representation of an IValue. This produces a
+  // TorchScript expression that can be used to recreate an IValue with the same
+  // value (e.g. when we are printing constants in the serializer).
+  //
+  // repr() is not necessarily defined on all objects!
+  std::ostream& repr(std::ostream& stream) const;
+
+  // Computes an "informal" string representation of an IValue. This should be
+  // used for debugging, or servicing `print()`-like functions.
+  // This is different from `repr()` in that there is no expectation that we can
+  // exactly reconstruct an IValue from the output; feel free to use a
+  // concise/pretty form
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
