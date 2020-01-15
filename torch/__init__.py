@@ -45,10 +45,9 @@ if platform.system() == 'Windows':
     else:
         nvtoolsext_dll_path = None
 
-    import .version as torch_version
+    from .version import cuda as cuda_version
     import glob
-    if torch_version.cuda and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
-        cuda_version = torch_version.cuda
+    if cuda_version and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
