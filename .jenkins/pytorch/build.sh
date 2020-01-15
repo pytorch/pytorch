@@ -4,8 +4,6 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-export SCCACHE_RECACHE=1
-
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
