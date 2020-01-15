@@ -45,11 +45,7 @@ struct Object;
   _(Int) \
   _(Bool) \
   _(Tuple) \
-  _(IntList) \
-  _(DoubleList) \
-  _(BoolList) \
   _(String) \
-  _(TensorList) \
   _(Blob) \
   _(GenericList) \
   _(GenericDict) \
@@ -59,8 +55,39 @@ struct Object;
   _(Uninitialized) \
   _(Capsule)
 
+// [doxygen private]
+// These methods are not actually private but we don't want to document them, so
+// they are marked `@private`, which hides them on the doxygen documentation for
+// this page.
+
+
+/// IValue (Interpreter Value) is a tagged union over the types supported by the
+/// TorchScript interpreter. IValues contain their values as an `IValue::Payload`,
+/// which holds primitive types (`int64_t`, `bool`, `double`, `Device`), as
+/// values and all other types as a `c10::intrusive_ptr`.
+///
+/// IValues are used as inputs to and outputs from the TorchScript interpreter.
+/// To retrieve the value contained within an IValue, use the `.toX()` methods,
+/// where `X` is the type you are trying to get. Note that neither the `.toX()`
+/// methods nor the templated `.to<T>` functions do any kind of casting, they
+/// only unwrap the contained value. For example:
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   // Make the IValue
+///   torch::IValue my_ivalue(26);
+///   std::cout << my_ivalue << "\n";
+///
+///   // Unwrap the IValue
+///   int64_t my_int = my_ivalue.toInt()
+///   std::cout << my_int << "\n";
+///
+///   // This will throw an error!
+///   // `my_ivalue` is tagged as an int and cannot be used as another type
+///   torch::Tensor my_tensor = my_ivalue.toTensor()
+/// \endrst
 struct CAFFE2_API IValue final {
-  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
   IValue(const IValue& rhs)
       : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr) {
@@ -70,22 +97,23 @@ struct CAFFE2_API IValue final {
   IValue(IValue&& rhs) noexcept : IValue() {
     swap(rhs);
   }
+  /// @private [doxygen private]
   ~IValue() {
     if (is_intrusive_ptr) {
       c10::raw::intrusive_ptr::decref(payload.as_intrusive_ptr);
     }
   }
-  IValue & operator=(IValue && rhs) & noexcept {
+  IValue& operator=(IValue&& rhs) & noexcept {
     IValue(std::move(rhs)).swap(*this); // this also sets rhs to None
     return *this;
   }
-  IValue & operator=(IValue const & rhs) & {
+  IValue& operator=(IValue const& rhs) & {
     IValue(rhs).swap(*this);
     return *this;
   }
-
   void dump() const;
 
+  /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
       // Trivially don't alias if the type is different
@@ -110,6 +138,7 @@ struct CAFFE2_API IValue final {
     return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 
+  /// @private [doxygen private]
   size_t use_count() const noexcept {
     if (!is_intrusive_ptr) {
       return 1;
@@ -118,6 +147,7 @@ struct CAFFE2_API IValue final {
     return c10::raw::intrusive_ptr::use_count(payload.as_intrusive_ptr);
   }
 
+  /// @private [doxygen private]
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
@@ -128,7 +158,6 @@ struct CAFFE2_API IValue final {
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  // Tensor
   IValue(at::Tensor t)
   : tag(Tag::Tensor), is_intrusive_ptr(t.defined())  {
     // Note: the undefined tensor is not refcounted, so while it
@@ -152,16 +181,23 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
+  /// @private [doxygen private]
   IValue(intrusive_ptr<caffe2::Blob> blob)
   : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and store it as a Tensor instead.
     payload.as_intrusive_ptr = blob.release();
   }
+
+  /// @private [doxygen private]
   bool isBlob() const {
     return Tag::Blob == tag;
   }
+
+  /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
+
+  /// @private [doxygen private]
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Capsule
@@ -234,16 +270,10 @@ struct CAFFE2_API IValue final {
   }
 
   // IntList
-  IValue(c10::List<int64_t> v);
-  IValue(c10::ArrayRef<int64_t> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<int64_t> v);
-  bool isIntList() const { return Tag::IntList == tag; }
+  bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  c10::ArrayRef<int64_t> toIntListRef() const;
+  std::vector<int64_t> toIntListRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -255,36 +285,21 @@ struct CAFFE2_API IValue final {
   const std::string& toStringRef() const;
 
   // DoubleList
-  IValue(c10::List<double> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<double> v);
-  bool isDoubleList() const { return Tag::DoubleList == tag; }
+  bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  c10::ArrayRef<double> toDoubleListRef() const;
+  std::vector<double> toDoubleListRef() const;
 
   // BoolList
-  IValue(c10::List<bool> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<bool> v);
-  bool isBoolList() const { return Tag::BoolList == tag; }
+  bool isBoolList() const;
   c10::List<bool> toBoolList() &&;
   c10::List<bool> toBoolList() const &;
 
   //TensorList
-  IValue(c10::List<at::Tensor> v);
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<at::Tensor> v);
-  bool isTensorList() const { return Tag::TensorList == tag; }
+  bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  c10::ArrayRef<at::Tensor> toTensorListRef() const;
+  std::vector<at::Tensor> toTensorListRef() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
@@ -296,10 +311,9 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::List<T> v);
   template<class T>
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<T> v);
+  IValue(at::ArrayRef<T> v);
+  template<class T>
+  IValue(const std::vector<T>& v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
@@ -331,6 +345,7 @@ struct CAFFE2_API IValue final {
   bool isModule() const;
 
   // None
+  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
   bool isNone() const {
     return Tag::None == tag;
   }
@@ -437,7 +452,8 @@ struct CAFFE2_API IValue final {
   template<typename T>
   optional<T> toOptional();
 
-  // this is a shallow comparison of two IValues to test the object identity
+  /// @private [doxygen private]
+  /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
   CAFFE2_API friend std::ostream& operator<<(
@@ -448,6 +464,7 @@ struct CAFFE2_API IValue final {
     return is_intrusive_ptr;
   }
 
+  /// @private [doxygen private]
   const void* internalToPointer() const {
     TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call internalToPointer() for pointer types");
     return payload.as_intrusive_ptr;

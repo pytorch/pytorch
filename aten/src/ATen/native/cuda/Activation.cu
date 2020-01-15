@@ -280,6 +280,27 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
   });
 }
 
+void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_cuda", [&]() {
+    auto beta = beta_.to<scalar_t>();
+    auto threshold = threshold_.to<scalar_t>();
+    gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return (a * beta) > threshold ? a : static_cast<scalar_t>(::log1p(std::exp(a * beta))) / beta;
+    });
+  });
+}
+
+void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_backward_cuda", [&]() {
+    auto beta = beta_.to<scalar_t>();
+    auto threshold = threshold_.to<scalar_t>();
+    gpu_kernel(iter, [beta, threshold]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      scalar_t z = std::exp(b * beta);
+      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+    });
+  });
+}
+
 template <typename scalar_t>
 void threshold_kernel_impl(TensorIterator& iter, scalar_t threshold, scalar_t value) {
   gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t x, scalar_t other) -> scalar_t {
@@ -344,6 +365,24 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
       });
 }
 
+void leaky_relu_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_cuda", [&]() {
+    auto negval = negval_.to<scalar_t>();
+    gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return a > scalar_t(0) ? a : a * negval;
+    });
+  });
+}
+
+void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "leaky_relu_backward_cuda", [&]() {
+    auto negval = negval_.to<scalar_t>();
+    gpu_kernel(iter, [negval]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a > scalar_t(0) ? b : b * negval;
+    });
+  });
+}
+
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
@@ -398,5 +437,9 @@ REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
+REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
+REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 
 }}  // namespace at::native

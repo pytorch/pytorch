@@ -71,6 +71,7 @@ namespace c10 {
   _(aten, Int)                       \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
@@ -210,6 +211,7 @@ namespace c10 {
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
+  _(onnx, Identity)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
