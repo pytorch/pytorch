@@ -17,10 +17,8 @@ cd ${ZIP_DIR}/install/lib
 target_libs=(libc10.a libclog.a libcpuinfo.a libeigen_blas.a libpytorch_qnnpack.a libtorch_cpu.a libtorch.a)
 for lib in ${target_libs[*]}
 do
-    lib_x86="${ARTIFACTS_DIR}/x86_64/lib/${lib}"
-    lib_arm64="${ARTIFACTS_DIR}/arm64/lib/${lib}"
-    if [ -f "${lib_x86}" ] && [ -f "${lib_arm64}" ]; then
-        libs=(${lib_x86} ${lib_arm64})
+    if [ -f "${ARTIFACTS_DIR}/x86_64/lib/${lib}" ] && [ -f "${ARTIFACTS_DIR}/arm64/lib/${lib}" ]; then
+        libs=("${ARTIFACTS_DIR}/x86_64/lib/${lib}" "${ARTIFACTS_DIR}/arm64/lib/${lib}")
         lipo -create "${libs[@]}" -o ${ZIP_DIR}/install/lib/${lib}
     fi
 done
