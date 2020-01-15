@@ -10,7 +10,7 @@ from hypothesis import given
 def compare_rowwise(emb_orig, emb_reconstructed, fp16):
     # there is an absolute error introduced per row through int8 quantization
     # and a relative error introduced when quantizing back from fp32 to fp16
-    assert(emb_orig.shape == emb_reconstructed.shape)
+    assert emb_orig.shape == emb_reconstructed.shape
     rtol = 1e-8
     if fp16:
         rtol = 1e-3
@@ -28,12 +28,12 @@ def compare_rowwise(emb_orig, emb_reconstructed, fp16):
         if n_violated > 0:
             print(isclose, threshold[i])
             print(i, r_orig, r_reconstructed, threshold[i], r_orig - r_reconstructed)
-        assert(n_violated == 0)
+        assert n_violated == 0
 
 
 class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
     @given(
-        batchsize=st.integers(1, 20),
+        num_rows=st.integers(1, 20),
         blocksize=st.sampled_from([8, 16, 32, 64, 85, 96, 128, 163]),
         weighted=st.booleans(),
         seed=st.integers(0, 2 ** 32 - 1),
@@ -41,32 +41,30 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         fp16=st.booleans(),
     )
     def test_sparse_lengths_sum(
-        self, batchsize, blocksize, weighted, seed, empty_indices, fp16
+        self, num_rows, blocksize, weighted, seed, empty_indices, fp16
     ):
         net = core.Net("bench")
 
         np.random.seed(seed)
 
-        if (fp16):
-            input_data = np.random.rand(batchsize, blocksize).astype(np.float16)
+        if fp16:
+            input_data = np.random.rand(num_rows, blocksize).astype(np.float16)
         else:
-            input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
+            input_data = np.random.rand(num_rows, blocksize).astype(np.float32)
         if empty_indices:
-            lengths = np.zeros(batchsize, dtype=np.int32)
+            lengths = np.zeros(num_rows, dtype=np.int32)
             num_indices = 0
         else:
             num_indices = np.random.randint(len(input_data))
-            num_lengths = np.clip(1, num_indices // 2, 10)
+            # the number of indices per sample
+            lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // num_lengths], dtype=np.int32) * num_lengths
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
             )
-            # readjust num_indices when num_lengths doesn't divide num_indices
-            num_indices = num_indices // num_lengths * num_lengths
+            # readjust num_indices when lengths_split doesn't divide num_indices
+            num_indices = num_indices // lengths_split * lengths_split
         indices = np.random.randint(
-            low=0,
-            high=len(input_data),
-            size=[num_indices],
-            dtype=np.int32,
+            low=0, high=len(input_data), size=[num_indices], dtype=np.int32
         )
         weights = np.random.uniform(size=[len(indices)]).astype(np.float32)
 
@@ -87,15 +85,14 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
 
         if weighted:
             net.SparseLengthsWeightedSum(
-                [dequantized_data, "weights", "indices", "lengths"],
-                "sum_reference",
+                [dequantized_data, "weights", "indices", "lengths"], "sum_reference"
             )
             net.SparseLengthsWeightedSumFused8BitRowwise(
                 [quantized_data, "weights", "indices", "lengths"], "sum_quantized"
             )
         else:
             net.SparseLengthsSum(
-                [dequantized_data, "indices", "lengths"], "sum_reference",
+                [dequantized_data, "indices", "lengths"], "sum_reference"
             )
             net.SparseLengthsSumFused8BitRowwise(
                 [quantized_data, "indices", "lengths"], "sum_quantized"
@@ -111,49 +108,51 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         workspace.RunNetOnce(net)
 
         dequantized_data = workspace.FetchBlob("dequantized_data")
-        np.testing.assert_array_almost_equal(input_data, workspace.FetchBlob("input_data"))
+        np.testing.assert_array_almost_equal(
+            input_data, workspace.FetchBlob("input_data")
+        )
         compare_rowwise(input_data, dequantized_data, fp16)
 
         sum_reference = workspace.FetchBlob("sum_reference")
         sum_quantized = workspace.FetchBlob("sum_quantized")
         if fp16:
-            np.testing.assert_array_almost_equal(sum_reference, sum_quantized, decimal=3)
+            np.testing.assert_array_almost_equal(
+                sum_reference, sum_quantized, decimal=3
+            )
         else:
             np.testing.assert_array_almost_equal(sum_reference, sum_quantized)
 
     @given(
-        batchsize=st.integers(1, 20),
+        num_rows=st.integers(1, 20),
         blocksize=st.sampled_from([8, 16, 32, 64, 85, 96, 128, 163]),
         seed=st.integers(0, 2 ** 32 - 1),
         empty_indices=st.booleans(),
         fp16=st.booleans(),
     )
-    def test_sparse_lengths_mean(self, batchsize, blocksize, seed, empty_indices, fp16):
+    def test_sparse_lengths_mean(self, num_rows, blocksize, seed, empty_indices, fp16):
         net = core.Net("bench")
 
         np.random.seed(seed)
 
         if fp16:
-            input_data = np.random.rand(batchsize, blocksize).astype(np.float16)
+            input_data = np.random.rand(num_rows, blocksize).astype(np.float16)
         else:
-            input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
+            input_data = np.random.rand(num_rows, blocksize).astype(np.float32)
 
         if empty_indices:
-            lengths = np.zeros(batchsize, dtype=np.int32)
+            lengths = np.zeros(num_rows, dtype=np.int32)
             num_indices = 0
         else:
             num_indices = np.random.randint(len(input_data))
-            num_lengths = np.clip(1, num_indices // 2, 10)
+            # the number of indices per sample
+            lengths_split = np.clip(num_indices // 2, 1, 10)
             lengths = (
-                np.ones([num_indices // num_lengths], dtype=np.int32) * num_lengths
+                np.ones([num_indices // lengths_split], dtype=np.int32) * lengths_split
             )
-            # readjust num_indices when num_lengths doesn't divide num_indices
-            num_indices = num_indices // num_lengths * num_lengths
+            # readjust num_indices when lengths_split doesn't divide num_indices
+            num_indices = num_indices // lengths_split * lengths_split
         indices = np.random.randint(
-            low=0,
-            high=len(input_data),
-            size=[num_indices],
-            dtype=np.int32,
+            low=0, high=len(input_data), size=[num_indices], dtype=np.int32
         )
         print(indices, lengths)
 
@@ -188,12 +187,16 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         workspace.RunNetOnce(net)
 
         dequantized_data = workspace.FetchBlob("dequantized_data")
-        np.testing.assert_array_almost_equal(input_data, workspace.FetchBlob("input_data"))
+        np.testing.assert_array_almost_equal(
+            input_data, workspace.FetchBlob("input_data")
+        )
         compare_rowwise(input_data, dequantized_data, fp16)
 
         mean_reference = workspace.FetchBlob("mean_reference")
         mean_quantized = workspace.FetchBlob("mean_quantized")
         if fp16:
-            np.testing.assert_array_almost_equal(mean_reference, mean_quantized, decimal=3)
+            np.testing.assert_array_almost_equal(
+                mean_reference, mean_quantized, decimal=3
+            )
         else:
             np.testing.assert_array_almost_equal(mean_reference, mean_quantized)
