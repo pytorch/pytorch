@@ -75,6 +75,7 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
+  _(LiteInterpreterFbnet)              \
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \

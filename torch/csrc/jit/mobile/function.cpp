@@ -38,7 +38,8 @@ void Function::append_operator(const std::string& name,
   auto opname = code_->op_names_.back();
   // Add "_" prefix to work around the double registration both of jit/generated
   // and here. TODO: remove it when we have separate build for lite interpreter.
-  if (opname.name != "aten::Int") {
+  std::unordered_set<std::string> quantized_ops = {"quantized::conv2d_relu", "quantized::conv2d", "quantized::add"};
+  if (opname.name != "aten::Int" && quantized_ops.find(opname.name) == quantized_ops.end()) {
     opname.name = "_" + opname.name;
   }
   auto op = c10::Dispatcher::singleton().findSchema(opname);
