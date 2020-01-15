@@ -1372,7 +1372,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         # receive gradients from the node that received an error (and as a
         # result it didn't execute the rest of the graph).
         dist.barrier()
-        rpc.shutdown()
+        rpc.shutdown(graceful=False)
         sys.exit(0)
 
     @classmethod
