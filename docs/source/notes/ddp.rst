@@ -5,12 +5,12 @@ Distributed Data Parallel
 
 .. warning::
   The implementation of :class:`torch.nn.parallel.DistributedDataParallel`
-  evolves over time. This design note is written based on the states as of v1.4.
+  evolves over time. This design note is written based on the state as of v1.4.
 
 
-:class:`torch.nn.parallel.DistributedDataParallel` (DDP) replicates model,
-splits input data, and transparently performs distributed data parallel
-training. This page describes how it works and reveals implementation details.
+:class:`torch.nn.parallel.DistributedDataParallel` (DDP) transparently performs
+distributed data parallel training. This page describes how it works and reveals
+implementation details.
 
 Example
 ^^^^^^^
@@ -73,13 +73,13 @@ every step in one iteration.
   Hence, applications must create ``ProcessGroup`` instances before constructing
   DDP.
 - **Construction**: The DDP constructor takes a reference to the local module,
-  and broadcasts ``state_dict()`` from rank0 process to all other processes in
-  the group to make sure that all model replicas start from the exact same
-  state. Then, each DDP process creates a local ``Reducer``, which later will
-  take care of the gradients synchronization during the backward pass. To
-  improve communication efficiency, the ``Reducer`` organizes parameter
-  gradients into buckets, and reduces one bucket at a time. Bucket size is
-  configuration by setting the `bucket_cap_mb` argument in DDP constructor. The
+  and broadcasts ``state_dict()`` from the process with rank 0 to all other
+  processes in the group to make sure that all model replicas start from the
+  exact same state. Then, each DDP process creates a local ``Reducer``, which
+  later will take care of the gradients synchronization during the backward
+  pass. To improve communication efficiency, the ``Reducer`` organizes parameter
+  gradients into buckets, and reduces one bucket at a time. Bucket size can be
+  configured by setting the `bucket_cap_mb` argument in DDP constructor. The
   mapping from parameter gradients to buckets is determined at the construction
   time, based on the bucket size limit and parameter sizes. Model parameters are
   allocated into buckets in (roughly) the reverse order of
@@ -150,8 +150,9 @@ ProcessGroup
   `ProcessGroupRoundRobin`, where `ProcessGroupRoundRobin` is a composition of
   multiple process group instances and launches collective communications in a
   round-robin manner. ``DistributedDataParallel`` uses
-  ``ProcessGroup::broadcast()`` to send model states from rank0 to others during
-  initialization and ``ProcessGroup::allreduce()`` to sum gradients.
+  ``ProcessGroup::broadcast()`` to send model states from the process with rank
+  0 to others during initialization and ``ProcessGroup::allreduce()`` to sum
+  gradients.
 
 
 - `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/Store.hpp>`__:
@@ -165,8 +166,9 @@ DistributedDataParallel
   the ``forward`` function for the ``nn.parallel.DistributedDataParallel``
   module which call into C++ libraries. Its ``_sync_param`` function performs
   intra-process parameter synchronization when one DDP process works on multiple
-  devices, and it also broadcast model buffers from rank0 to all other ranks.
-  The inter-process parameter synchronization happens in ``Reducer.cpp``.
+  devices, and it also broadcasts model buffers from the process with rank 0 to
+  all other processes. The inter-process parameter synchronization happens in
+  ``Reducer.cpp``.
 
 - `comm.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
   implements the coalesced broadcast helper function which is invoked to
