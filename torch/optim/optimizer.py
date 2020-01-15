@@ -203,7 +203,7 @@ class Optimizer(object):
                     if weight_decay > 0:
                         grad = grad.add_(weight_decay, p)
 
-                    update = self.get_update(p, grad, **group)
+                    update = self.get_update(p, **group)
 
                 p.add_(-lr, update)
 
