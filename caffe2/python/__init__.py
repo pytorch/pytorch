@@ -24,7 +24,7 @@ if platform.system() == 'Windows':
             os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
     else:
         nvtoolsext_dll_path = None
-    
+
     import torch.version
     import glob
     if torch.version.cuda and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
@@ -38,7 +38,7 @@ if platform.system() == 'Windows':
 
     if sys.version_info >= (3, 8):
         dll_paths = list(filter(None, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
-        
+
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
     else:
