@@ -204,6 +204,18 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val =
         at::cat(at::TensorList(inputTensorValues), node->i(attr::axis));
     return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Sqrt) {
+    updated_val =
+        at::sqrt(inputTensorValues[0]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Div) {
+    updated_val =
+        at::div(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Mul) {
+    updated_val =
+        at::mul(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("axes")) {

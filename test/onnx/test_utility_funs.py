@@ -223,6 +223,57 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1
 
+    def test_constant_fold_div(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                div = self.weight.div(torch.tensor([1, 2, 3, 4, 5]))
+                return div * x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Div"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_mul(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                mul = self.weight.mul(torch.tensor([1, 2, 3, 4, 5]))
+                return mul / x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Mul"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_sqrt(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                sqrt = torch.sqrt(self.weight)
+                return sqrt / x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Sqrt"
+        assert len(list(graph.nodes())) == 1
+
     def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
