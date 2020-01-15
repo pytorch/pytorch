@@ -136,7 +136,7 @@ std::ostream& IValue::repr(
   };
   switch (v.tag) {
     case IValue::Tag::None:
-      return out << v.toNone();
+      return out << "None";
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -188,7 +188,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
   };
   switch(v.tag) {
     case IValue::Tag::None:
-      return out << v.toNone();
+      return out << "None";
     case IValue::Tag::Tensor:
       return out << v.toTensor();
     case IValue::Tag::Double: {

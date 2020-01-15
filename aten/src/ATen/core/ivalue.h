@@ -349,12 +349,6 @@ struct CAFFE2_API IValue final {
   bool isNone() const {
     return Tag::None == tag;
   }
-  std::string toNone() const {
-    AT_ASSERT(isNone());
-    // TODO why are we returning a string for this...
-
-    return "None";
-  }
 
   static IValue uninitialized() {
     auto i = IValue();
