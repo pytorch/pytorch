@@ -179,6 +179,168 @@ Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
   return iter;
 }
 
+class ModuleCloneHelper {
+ public:
+/** Clone according to module qconfig map, this is for handling the case
+ *  where we have two module instances sharing the same ClassType
+ *  but configured with different QConfig
+ */
+script::Module clone(
+    const script::Module& module, const ModuleQConfigMap& module_qconfig_map) {
+  std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
+  return clone_impl(module, module_qconfig_map, type_remap);
+}
+
+ private:
+  script::Module clone_impl(
+      const script::Module& module,
+      const ModuleQConfigMap& module_qconfig_map,
+      std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
+    auto qconfig = module_qconfig_map.at(module._ivalue());
+    auto type = module.type();
+    // Create a new _ivalue in the same compilation unit.
+    // The name is the same as for the original module, but it'll be mangled.
+    // The class type is also created from scratch.
+    bool type_already_cloned = type_remap.find(type) != type_remap.end() &&
+      type_remap.at(type).find(qconfig) != type_remap.at(type).end();
+    script::Module r;
+    if (type_already_cloned) {
+      // if we cloned the class type before, we'll reuse it
+      script::Module new_module(module._ivalue()->compilation_unit(), type_remap.at(type).at(qconfig)->cast<ClassType>());
+      r = new_module;
+    } else {
+      script::Module new_module(*type->name(), module._ivalue()->compilation_unit(), true);
+      r = new_module;
+      type_remap[type][module_qconfig_map.at(module._ivalue())] = r.type();
+    }
+    // Copy slots. If a slot is a module - recursively clone it.
+    size_t N = type->numAttributes();
+    for (size_t i = 0; i < N; ++i) {
+      IValue s = module._ivalue()->getSlot(i);
+      if (type->getAttribute(i)->is_module()) {
+        const script::Module& orig = script::Module(s.toObject());
+        script::Module cloned = clone_impl(orig, module_qconfig_map, type_remap);
+        type_remap[orig.type()][module_qconfig_map.at(orig._ivalue())] = cloned.type();
+        r.register_module(type->getAttributeName(i), cloned);
+      } else {
+        r.register_attribute(
+            type->getAttributeName(i),
+            type->getAttribute(i),
+            s,
+            type->is_parameter(i));
+      }
+    }
+
+    // only clone the methods if the ClassType is not cloned before
+    if (!type_already_cloned) {
+      // Clone methods remapping the types to the cloned ones.
+      for (auto& fn : type->methods()) {
+        clone_method(module, r, *fn, module_qconfig_map, type_remap);
+      }
+    }
+    return r;
+  }
+
+  void remapTypes(Block* block,
+                  Value* self,
+                  const script::Module& source,
+                  script::Module& target,
+                  const ModuleQConfigMap& module_qconfig_map,
+                  const std::function<TypePtr(TypePtr, c10::optional<QConfig>)>& type_map) {
+    // remap of %self will be done outside of the function
+    // and we don't support the case when people pass in
+    // module as argument of the method because in that case
+    // we need to do more comprehensive analysis to decide the
+    // QConfig for the module
+    for (size_t i = 1; i < block->inputs().size(); ++i) {
+      TORCH_CHECK(
+          !block->inputs()[i]->type()->cast<ClassType>(),
+          "We don't support quantizing methods that has Object as arguments");
+    }
+    for (Node* node : block->nodes()) {
+      // remapping type for module instance
+      if (node->kind() == prim::CallMethod) {
+        std::vector<std::string> path;
+        Value* instance = node->inputs()[0];
+        Value* boundary_val = getModuleAccessPath(instance, path);
+        if (boundary_val == self) {
+          auto child = findChildModule(source, path);
+          auto qconfig = module_qconfig_map.at(child._ivalue());
+          instance->setType(type_map(instance->type(), qconfig));
+        } else {
+          GRAPH_DEBUG(
+              "Can't handle the access pattern of GetAttr ",
+              "in make submodule uses unique, traced back to ",
+              boundary_val->debugName(),
+              " which is not self: ",
+              self->debugName());
+        }
+      }
+      // We don't remap output and the remapping of module type
+      // will be done in CallMethod, we don't support type remapping
+      // for modules returned from methods or functions
+      for (Block* sub_block : node->blocks()) {
+        remapTypes(sub_block, self, source, target, module_qconfig_map, type_map);
+      }
+      for (Symbol name : node->attributeNames()) {
+        if (node->kindOf(name) == AttributeKind::g) {
+          remapTypes(node->g(name).get(), source, target, module_qconfig_map, type_map);
+        } else if (node->kindOf(name) == AttributeKind::gs) {
+          for (const auto& g : node->gs(name)) {
+            remapTypes(g.get(), source, target, module_qconfig_map, type_map);
+          }
+        }
+      }
+    }
+  }
+
+  void remapTypes(
+      Graph* graph,
+      const script::Module& source,
+      script::Module& target,
+      const ModuleQConfigMap& module_qconfig_map,
+      const std::function<TypePtr(TypePtr, c10::optional<QConfig>)>& type_map) {
+    remapTypes(graph->block(), graph->inputs()[0], source, target, module_qconfig_map, type_map);
+  }
+
+  void clone_method(
+      const script::Module& source,
+      script::Module& target,
+      const Function& method,
+      const ModuleQConfigMap& module_qconfig_map,
+      const std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
+    // type remapping - when we copy method implementations from one module
+    // singleton to another, we need to update the types of the self arguments
+    // to match the new module.
+    // XXX - this only handles modules that occur as variables, not modules
+    // that appear in aggregate types. Currently this works fine because
+    // we restrict how modules can be used during the lowering step. Eventually,
+    // we will need to decide what it means for us to 'copy' a module.
+    // For instance, we can copy just the state (parameters, attributes),
+    // but share the code. Or we can copy the code. If we choose to copy the
+    // code, what should we do about aggregate types that contain a module?
+    auto type_remap_fn = [&](TypePtr type_ptr, const c10::optional<QConfig>& qconfig) {
+      if (type_remap.find(type_ptr) != type_remap.end()) {
+        const auto& qconfig_map = type_remap.at(type_ptr);
+        if (qconfig_map.find(qconfig) != qconfig_map.end()) {
+          return qconfig_map.at(qconfig);
+        }
+      }
+      return type_ptr;
+    };
+    auto graph = method.graph()->copy();
+    remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
+    // remap self
+    graph->inputs()[0]->setType(target.type());
+    const auto this_method_name = c10::QualifiedName(*target.type()->name(), method.name());
+    auto copied =
+      target._ivalue()->compilation_unit()->create_function(this_method_name, graph);
+    target.type()->addMethod(copied);
+    // we'll use default schema for cloned method
+  }
+
+};
+
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
@@ -1198,7 +1360,10 @@ TORCH_API script::Module InsertObservers(
     const std::string& method_name,
     const QConfigDict& qconfig_dict,
     bool inplace) {
-  script::Module module = inplace ? input_module : input_module.clone();
+  ModuleQConfigMap map_before_clone;
+  fillQConfigMap(input_module, qconfig_dict, map_before_clone);
+  ModuleCloneHelper mh;
+  script::Module module = inplace ? input_module : mh.clone(input_module, map_before_clone);
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
