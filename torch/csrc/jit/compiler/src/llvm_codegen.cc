@@ -193,19 +193,31 @@ void LLVMCodeGen::visit(const FloatImm* v) {
 void LLVMCodeGen::visit(const Cast* v) {
   v->src_value().accept(this);
 
-  if (v->dtype().lanes() == 1) {
-    if (v->dtype() == kInt32 && v->src_value().dtype() == kFloat32) {
-      value_ = irb_.CreateFPToSI(value_, int32Ty_);
-      return;
-    }
-
-    if (v->dtype() == kFloat32 && v->src_value().dtype() == kInt32) {
-      value_ = irb_.CreateSIToFP(value_, floatTy_);
-      return;
-    }
+  llvm::Type* dstType = nullptr;
+  if (v->dtype().scalar_type() == kInt32) {
+    dstType = int32Ty_;
+  } else if (v->dtype().scalar_type() == kFloat32) {
+    dstType = floatTy_;
   }
 
-  assert(0 && "Unhandled cast");
+  if (v->dtype().lanes() > 1) {
+    dstType = llvm::VectorType::get(dstType, v->dtype().lanes());
+  }
+
+  // Scalar casts
+  if (v->dtype() == kInt32 &&
+      v->src_value().dtype() == kFloat32) {
+    value_ = irb_.CreateFPToSI(value_, dstType);
+    return;
+  }
+
+  if (v->dtype() == kFloat32 &&
+      v->src_value().dtype() == kInt32) {
+    value_ = irb_.CreateSIToFP(value_, dstType);
+    return;
+  }
+
+  LOG(FATAL) << "Unsupported cast!";
 }
 
 void LLVMCodeGen::visit(const Variable* v) {
