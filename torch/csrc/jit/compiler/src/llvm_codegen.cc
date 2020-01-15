@@ -238,8 +238,31 @@ void LLVMCodeGen::visit(const Load* v) {
   auto base = this->value_;
   v->index().accept(this);
   auto idx = this->value_;
+  v->mask().accept(this);
+  auto mask = this->value_;
+
+  // Create block structure for the masked load.
+  auto preheader = irb_.GetInsertBlock();
+  auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
+  auto tailblock = llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
+
+  // Test the mask
+  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::getTrue(int32Ty_));
+  irb_.CreateCondBr(cond, condblock, tailblock);
+
+  // Do the load
+  irb_.SetInsertPoint(condblock);
   auto addr = irb_.CreateGEP(base, idx);
-  value_ = irb_.CreateLoad(addr);
+  auto load = irb_.CreateLoad(addr);
+  irb_.CreateBr(tailblock);
+
+  // Merge the masked and unmasked CFG edges
+  irb_.SetInsertPoint(tailblock);
+  auto phi = irb_.CreatePHI(load->getType(), 2);
+  phi->addIncoming(llvm::UndefValue::get(load->getType()), preheader);
+  phi->addIncoming(load, condblock);
+
+  value_ = phi;
 }
 
 void LLVMCodeGen::visit(const For* v) {
@@ -287,10 +310,29 @@ void LLVMCodeGen::visit(const Store* v) {
   auto base = this->value_;
   v->index().accept(this);
   auto idx = this->value_;
+  v->mask().accept(this);
+  auto mask = this->value_;
   v->value().accept(this);
   auto val = this->value_;
+
+  // Create block structure for the masked store.
+  auto preheader = irb_.GetInsertBlock();
+  auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
+  auto tailblock = llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
+
+  // Test the mask
+  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::getTrue(int32Ty_));
+  irb_.CreateCondBr(cond, condblock, tailblock);
+
+  // Do the store
+  irb_.SetInsertPoint(condblock);
   auto addr = irb_.CreateGEP(base, idx);
   irb_.CreateStore(val, addr);
+  irb_.CreateBr(tailblock);
+
+  // Merge the masked and unmasked CFG edges
+  irb_.SetInsertPoint(tailblock);
+
   value_ = llvm::ConstantInt::get(int32Ty_, 0);
 }
 
