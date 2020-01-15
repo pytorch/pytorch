@@ -148,6 +148,37 @@ bool valueNeedsToBeQuantized(Value* v) {
   return false;
 }
 
+script::Module findChildModule(
+    const script::Module& module,
+    const std::vector<std::string>& path) {
+  script::Module m = module;
+  for (const auto& p : path) {
+    m = m.attr(p).toModule();
+  }
+  return m;
+}
+
+// Check if value is the input of the graph
+bool hitGraphInput(Value* value) {
+  Graph* graph = value->owningGraph();
+  const auto& inputs = graph->inputs();
+  return std::find(inputs.begin(), inputs.end(), value) != inputs.end();
+}
+
+Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
+  // Iterator to traverse back the GetAttr calls
+  Value* iter = instance;
+  // trace back the instance to recover the path of the submodule
+  while (!hitGraphInput(iter) && iter->node()->kind() == prim::GetAttr) {
+    Node* get_attr = iter->node();
+    // record the name of GetAttr
+    path.push_back(get_attr->s(attr::name));
+    // trace back the chain of GetAttr
+    iter = get_attr->inputs()[0];
+  }
+  return iter;
+}
+
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
@@ -1125,16 +1156,6 @@ class ModuleUseDeduper {
     }
   }
 
-  script::Module findChildModule(
-      const script::Module& module,
-      const std::vector<std::string>& path) {
-    script::Module m = module;
-    for (const auto& p : path) {
-      m = m.attr(p).toModule();
-    }
-    return m;
-  }
-
   std::string addChildModule(
       script::Module& module,
       const script::Module& child_module,
@@ -1155,27 +1176,6 @@ class ModuleUseDeduper {
     }
     parent_of_leaf.register_module(child_name, child_module.clone_instance());
     return child_name;
-  }
-
-  // Check if value is the input of the graph
-  bool hitGraphInput(Value* value) {
-    Graph* graph = value->owningGraph();
-    const auto& inputs = graph->inputs();
-    return std::find(inputs.begin(), inputs.end(), value) != inputs.end();
-  }
-
-  Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
-    // Iterator to traverse back the GetAttr calls
-    Value* iter = instance;
-    // trace back the instance to recover the path of the submodule
-    while (!hitGraphInput(iter) && iter->node()->kind() == prim::GetAttr) {
-      Node* get_attr = iter->node();
-      // record the name of GetAttr
-      path.push_back(get_attr->s(attr::name));
-      // trace back the chain of GetAttr
-      iter = get_attr->inputs()[0];
-    }
-    return iter;
   }
 
   script::Module module_;
