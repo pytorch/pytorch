@@ -10439,7 +10439,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_activations_bfloat16(self, device):
         def test(activation):
-	    # fp32 compute
+            # fp32 compute
             input1 = torch.randn(5, device=device, requires_grad=True)
             grad_input1 = torch.randn(5, device=device)
             out1 = activation(input1)
