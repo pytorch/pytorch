@@ -10095,6 +10095,11 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_eval(device)
 
+    @onlyCUDA
+    def test_batchnorm_eval_bfloat16(self, device):
+        with torch.backends.cudnn.flags(enabled=False):
+            self._test_batchnorm_eval(device, torch.bfloat16)
+
     def _test_batchnorm_simple_average(self, device, dtype):
         module = nn.BatchNorm1d(3, momentum=None).to(dtype=dtype, device=device)
         zeros = torch.zeros(3, dtype=dtype, device=device)
@@ -10430,6 +10435,33 @@ class TestNNDeviceType(NNTestCase):
         self.assertRaises(RuntimeError,
                           lambda: nn.functional.multi_margin_loss(torch.randn(5, device=device),
                                                                   torch.zeros(3, device=device)))
+
+    @onlyCUDA
+    def test_activations_bfloat16(self, device):
+        def test(activation):
+	    # fp32 compute
+            input1 = torch.randn(5, device=device, requires_grad=True)
+            grad_input1 = torch.randn(5, device=device)
+            out1 = activation(input1)
+            out1.backward(grad_input1)
+
+            # bfloat16 compute
+            activation2 = activation.bfloat16()
+            input2 = input1.detach().bfloat16().requires_grad_()
+            grad_input2 = grad_input1.bfloat16()
+            out2 = activation2(input2)
+            out2.backward(grad_input2)
+
+            self.assertEqual(out1, out2, prec=1e-2)
+            self.assertEqual(input1.grad.data, input2.grad.data, prec=1e-2)
+
+        test(torch.nn.ReLU())
+        test(torch.nn.Threshold(0.1, 20))
+        test(torch.nn.ELU())
+        test(torch.nn.Softplus())
+        test(torch.nn.Hardshrink())
+        test(torch.nn.Softshrink())
+        test(torch.nn.LeakyReLU())
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
