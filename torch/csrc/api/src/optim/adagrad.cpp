@@ -140,7 +140,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "sum_buffers", sum_buffers);
     torch::optim::serialize(archive, "step_buffers", step_buffers);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
-    std::vector<Tensor> params = param_groups_[0].params();
+    std::vector<Tensor> params = param_groups_.at(0).params();
     for (size_t idx = 0; idx < params.size(); idx++) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
