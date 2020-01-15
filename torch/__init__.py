@@ -339,6 +339,7 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
+import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
 import torch.quantization
