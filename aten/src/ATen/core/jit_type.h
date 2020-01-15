@@ -1258,6 +1258,13 @@ struct getTypePtr_ final {
 };
 
 template <>
+struct getTypePtr_<at::IValue> final {
+  static TypePtr call() {
+    return AnyType::get();
+  }
+};
+
+template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
@@ -1806,5 +1813,22 @@ static ScalarTypeTypePtr get();
 private:
 ScalarTypeType() : EnumerationType() {}
 };
+
+inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
+}
+
+inline bool IValue::isTensorList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(TensorType::get());
+}
+
+inline bool IValue::isIntList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(IntType::get());
+}
+
+inline bool IValue::isBoolList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(BoolType::get());
+}
 
 } // namespace c10

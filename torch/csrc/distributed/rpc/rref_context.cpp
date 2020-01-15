@@ -68,18 +68,17 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
       }
     }
 
-    if (ignoreRRefLeak) {
-      LOG(WARNING)
-          << "Detected RRef Leaks during shutdown. This usually "
-          << "occurs when the application code still holds references to RRef "
-          << "instances when calling shutdown(). If the program has "
-          << "completed correctly and the process is exiting, it is OK to "
-          << "ignore these leaks. However, if you program will keep running "
-          << "after this, these leaks could result in memory leaks on RRef "
-          << "owners. Please make sure all RRefs are out of scope and Python "
-          << "GC has deleted them before calling shutdown(): \n"
-          << ss.str();
-    } else {
+    LOG(WARNING)
+        << "Detected RRef Leaks during shutdown. This usually "
+        << "occurs when the application code still holds references to RRef "
+        << "instances when calling shutdown(). If the program has "
+        << "completed correctly and the process is exiting, it is OK to "
+        << "ignore these leaks. However, if you program will keep running "
+        << "after this, these leaks could result in memory leaks on RRef "
+        << "owners. Please make sure all RRefs are out of scope and Python "
+        << "GC has deleted them before calling shutdown(): \n"
+        << ss.str();
+    if (!ignoreRRefLeak) {
       TORCH_CHECK(false, ss.str());
     }
   }
@@ -150,12 +149,12 @@ void RRefContext::delUser(
       RRefContext::handleException(futErr);
     });
 
-    users_.erase(forkId);
+    confirmedUsers_.erase(forkId);
   }
 }
 
 void RRefContext::delAllUsers() {
-  for (auto user : users_) {
+  for (auto user : confirmedUsers_) {
     auto rref_ptr = user.second.lock();
     if (rref_ptr == nullptr) {
       continue;
@@ -367,7 +366,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
   TORCH_INTERNAL_ASSERT(
       iter != pendingUsers_.end(),
       "Inconsistent states: attempt to delete a non-exist UserRRef.");
-  users_.emplace(
+  confirmedUsers_.emplace(
       std::piecewise_construct,
       std::forward_as_tuple(forkId),
       std::forward_as_tuple(iter->second));

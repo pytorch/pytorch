@@ -11,7 +11,12 @@ from . import (
     _start_rpc_agent,
     backend_registry,
 )
-from .internal import _internal_rpc_pickler, PythonUDF
+from .internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    _start_record_function,
+)
 
 import contextlib
 from datetime import timedelta
@@ -203,14 +208,19 @@ def shutdown(graceful=True):
     if graceful:
         _wait_all_workers()
         _agent.join()
-    _destroy_rref_context(_ignore_rref_leak)
-    _agent.shutdown()
-    # clean up python rpc handler in shutdown(), see comments in
-    # PythonRpcHandler::cleanup(), call it in python API because the
-    # cleanup() function has python dependency, it assumes python
-    # interpreter exists
-    _cleanup_python_rpc_handler()
-    _agent = None
+    try:
+        # This raises a `TORCH_CHECK()` exception on RRef leak detected.
+        _destroy_rref_context(_ignore_rref_leak)
+    finally:
+        _agent.shutdown()
+        # clean up python rpc handler in shutdown(), see comments in
+        # PythonRpcHandler::cleanup(), call it in python API because the
+        # cleanup() function has python dependency, it assumes python
+        # interpreter exists.
+        # No matter if RRef leak exception is raised, this clean-up code
+        # must run to avoid destruction segfault in Python 3.5.
+        _cleanup_python_rpc_handler()
+        _agent = None
 
 
 # TODO: add a context manager to wrap _init_rpc_backend and shutdown
@@ -242,11 +252,12 @@ def _init_rpc_backend(
         world_size=world_size,
         rpc_backend_options=rpc_backend_options,
     )
-    _start_rpc_agent(_agent)
 
     worker_infos = _agent.get_worker_infos()
     global _ALL_WORKER_NAMES
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    _start_rpc_agent(_agent)
 
 
 @_require_initialized
@@ -277,7 +288,7 @@ def _to_worker_info(name_or_info):
     elif isinstance(name_or_info, str):
         return get_worker_info(name_or_info)
     else:
-        raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
@@ -346,40 +357,61 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
+    info = _to_worker_info(to)
+
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            RPCExecMode.REMOTE,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
         return _invoke_remote_builtin(
-            _agent, info, qualified_name, *args, **kwargs)
+            _agent, info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, args=None, kwargs=None):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if not callable(func):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
+    info = _to_worker_info(to)
+    # If profiling is enabled, kick off the timer and retrieve back a
+    # RecordFunction instance.
+    rf = None
+    if torch.autograd._profiler_enabled():
+        rf = _start_record_function(
+            rpc_type,
+            str(qualified_name) if qualified_name is not None else func.__qualname__,
+            get_worker_info().name,
+            info.name,
+        )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    info = _to_worker_info(to)
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, *args, **kwargs
+            _agent, info, qualified_name, rf, *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -423,7 +455,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
     return fut.wait()
 
 
@@ -472,5 +504,5 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _invoke_rpc(to, func, args, kwargs)
+    fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
     return fut

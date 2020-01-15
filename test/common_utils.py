@@ -141,9 +141,6 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
 
 # Used to run the same test with different tensor types
 def repeat_test_for_types(dtypes):
@@ -264,7 +261,9 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
-TEST_DILL = _check_module_exists('dill')
+
+# Skip the test until issue #28313 gets fixed on Py2.
+TEST_DILL = _check_module_exists('dill') and PY3
 
 # On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
 # see librosa/librosa#729.
@@ -289,6 +288,20 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# bfloat16 bringup is currently only available on ROCm
+# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
+# when bfloat16 bringup is complete on all platforms
+if TEST_WITH_ROCM:
+    ALL_TENSORTYPES2 = [torch.float,
+                        torch.double,
+                        torch.half,
+                        torch.bfloat16]
+else:
+    ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -970,6 +983,28 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
             self.assertTrue(found, msg)
+
+    @contextmanager
+    def maybeWarnsRegex(self, category, regex=''):
+        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
+
+        This filters expected warnings from the test log and fails the test if
+        any unexpected warnings are caught.
+        """
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            # Ignore expected warnings
+            warnings.filterwarnings("ignore", message=regex, category=category)
+            try:
+                yield
+            finally:
+                if len(ws) != 0:
+                    msg = 'Caught unexpected warnings:\n'
+                    for w in ws:
+                        msg += warnings.formatwarning(
+                            w.message, w.category, w.filename, w.lineno, w.line)
+                        msg += '\n'
+                    self.fail(msg)
 
     @contextmanager
     def _reset_warning_registry(self):
