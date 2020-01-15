@@ -73,12 +73,17 @@ set(TEST_SRCS
   tests/schedule_test.cc
   )
 
+add_library(test_lib
+  tests/padded_buffer.cc
+  )
+target_include_directories(test_lib PUBLIC "../../../../")
+
 foreach(test_path ${TEST_SRCS})
   get_filename_component(filename ${test_path} NAME)
   string(REPLACE ".cc" "" test_exec ${filename})
   add_executable(${test_exec} ${test_path})
   add_dependencies(cpptest ${test_exec})
-  target_link_libraries(${test_exec} nnc gtest_main gtest ${ASMJIT_DEPS})
+  target_link_libraries(${test_exec} test_lib nnc gtest_main gtest ${ASMJIT_DEPS})
   set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_ALL 1)
   set_target_properties(${test_exec} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
 endforeach()

@@ -270,19 +270,15 @@ TEST(LLVMTest, SimpleMath01) {
   LLVMCodeGen cg({&f_buf});
   stmt.accept(&cg);
 
-  int kPaddingSize = 8;
-  float kPaddingValue = 0.1357;
-  std::vector<float> f_vec(N + 2 * kPaddingSize, kPaddingValue);
-  std::vector<void*> args({f_vec.data() + kPaddingSize});
+  PaddedBuffer<float> f_v(N, "f_v");
+  std::vector<void*> args({f_v.data()});
   int value = cg.value<int>(args);
   ASSERT_EQ(value, 0);
-  std::vector<float> f_ref(N + 2 * kPaddingSize, kPaddingValue);
+  PaddedBuffer<float> f_ref(N, "f_ref");
   for (int i = 0; i < N; i++) {
-    f_ref[i + kPaddingSize] = i * i + 1;
+    f_ref(i) = i * i + 1;
   }
-  for (int i = 0; i < f_ref.size(); ++i) {
-    EXPECT_NEAR(f_vec[i], f_ref[i], 1e-5) << "element index: " << i;
-  }
+  ExpectAllNear(f_v, f_ref, 1e-5);
 }
 
 TEST(LLVMTest, ComputeMul) {

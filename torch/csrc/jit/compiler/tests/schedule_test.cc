@@ -105,25 +105,20 @@ TEST(TensorExpr, Simple02) {
     SimpleIREvaluator ir_eval;
     SimpleIREvaluator::BufferMapping buffer_mapping;
     // TODO: make this a standard testing helper.
-    const int kPadding = 8;
-    float kPaddingValue = 0.1357;
-    std::vector<float> f_v(26 * 5 + 2 * kPadding);
-    std::vector<float> f_ref(26 * 5 + 2 * kPadding);
+    PaddedBuffer<float> f_v(26, 5, "f_v");
+    PaddedBuffer<float> f_ref(26, 5, "f_res");
 
-    buffer_mapping[tensor.function().func_var().node()] = &f_v[kPadding];
+    buffer_mapping[tensor.function().func_var().node()] = f_v.data();
     ir_eval.SetBufferMapping(buffer_mapping);
     stmt.accept(&ir_eval);
 
-    float* f_ref_p = &f_ref[kPadding];
     for (int x = 0; x < 26; x++) {
       for (int y = 0; y < 5; y++) {
-        f_ref_p[x * 5 + y] = 1 + x * x + y * y;
+        f_ref(x, y) = 1 + x * x + y * y;
       }
     }
 
-    for (int i = 0; i < f_v.size(); i++) {
-      ASSERT_NEAR(f_v[i], f_ref[i], 1e-5);
-    }
+    ExpectAllNear(f_v, f_ref, 1e-5);
   }
 }
 
@@ -142,46 +137,40 @@ TEST(TestSchedule, BroadcastAddBuffer) {
   Schedule sch({c});
   Stmt stmt = sch.Lower();
 
-  const int kPaddingSize = 8;
-  float kPaddingValue = 0.1357;
-  std::vector<float> a_vec(M * N + 2 * kPaddingSize, kPaddingValue);
-  std::vector<float> b_vec(N * K + 2 * kPaddingSize, kPaddingValue);
-  std::vector<float> c_vec(M * N * K + 2 * kPaddingSize, kPaddingValue);
-
-  std::vector<float> c_ref(c_vec);
-  float* a_ptr = &a_vec[kPaddingSize];
-  float* b_ptr = &b_vec[kPaddingSize];
-  float* c_ptr = &c_ref[kPaddingSize];
-
+  PaddedBuffer<float> a_v(M, N, "a_v");
   for (int m = 0; m < M; m++) {
     for (int n = 0; n < N; n++) {
-      a_ptr[m * N + n] = 7 * m * n;
+      a_v(m, n) = 7 * m * n;
     }
   }
+  a_v.Backup();
+
+  PaddedBuffer<float> b_v(N, K, "b_v");
   for (int n = 0; n < N; n++) {
     for (int k = 0; k < K; k++) {
-      b_ptr[n * K + k] = 11 * n * k;
+      b_v(n, k) = 11 * n * k;
     }
   }
-  for (int m = 0; m < M; m++) {
-    for (int n = 0; n < N; n++) {
-      for (int k = 0; k < K; k++) {
-        c_ptr[m * N * K + n * K + k] = 7 * m * n + 11 * n * k;
-      }
-    }
-  }
-  std::vector<float> a_ref(a_vec);
-  std::vector<float> b_ref(b_vec);
+  b_v.Backup();
 
+  PaddedBuffer<float> c_v(M, N, K, "c_buf");
   SimpleIREvaluator ir_eval;
   ir_eval.SetBufferMapping({
-      {a_buf.data(), a_ptr},
-      {b_buf.data(), b_ptr},
-      {c.function().func_var(), &c_vec[kPaddingSize]},
+      {a_buf.data(), a_v.data()},
+      {b_buf.data(), b_v.data()},
+      {c.function().func_var(), c_v.data()},
   });
   stmt.accept(&ir_eval);
 
-  ExpectAllNear(a_vec, a_ref, 1e-5, "a");
-  ExpectAllNear(b_vec, b_ref, 1e-5, "b");
-  ExpectAllNear(c_vec, c_ref, 1e-5, "c");
+  a_v.CheckBackup();
+  b_v.CheckBackup();
+  PaddedBuffer<float> c_ref(M, N, K, "c_ref");
+  for (int m = 0; m < M; m++) {
+    for (int n = 0; n < N; n++) {
+      for (int k = 0; k < K; k++) {
+        c_ref(m, n, k) = 7 * m * n + 11 * n * k;
+      }
+    }
+  }
+  ExpectAllNear(c_v, c_ref, 1e-5);
 }

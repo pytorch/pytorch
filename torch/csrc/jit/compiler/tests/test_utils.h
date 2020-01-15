@@ -10,6 +10,7 @@
 #include "torch/csrc/jit/compiler/include/function.h"
 #include "torch/csrc/jit/compiler/include/ir.h"
 #include "torch/csrc/jit/compiler/include/tensor.h"
+#include "torch/csrc/jit/compiler/tests/padded_buffer.h"
 
 namespace torch {
 namespace jit {
