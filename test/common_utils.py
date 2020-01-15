@@ -12,6 +12,7 @@ import re
 import gc
 import types
 import inspect
+import io
 import argparse
 import unittest
 import warnings
@@ -1443,3 +1444,11 @@ def load_tests(loader, tests, pattern):
             check_test_defined_in_running_script(test)
             test_suite.addTest(test)
     return test_suite
+
+
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass

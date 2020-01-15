@@ -48,6 +48,7 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'sparse',
+    'serialization',
     'torch',
     'type_info',
     'type_hints',
