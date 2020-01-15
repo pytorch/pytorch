@@ -234,7 +234,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
   check_scalar_type_device_layout_equal(values, self);
-  check_scalar_type_device_layout_equal(indices, at::empty({}, self.options().dtype(at::kLong)));
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
     values.resize_(self.sizes());
@@ -270,7 +270,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 
 std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
   check_scalar_type_device_layout_equal(values, self);
-  check_scalar_type_device_layout_equal(indices, at::empty({}, self.options().dtype(at::kLong)));
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
     values.resize_(self.sizes());
