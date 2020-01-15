@@ -137,6 +137,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true); \
+    std::cout << "input dtype: " << scalar_type_ << std::endl; \
+    std::cout << "desired dtype: " << compute_desired_dtype(scalar_type_) << std::endl; \
     if (scalar_type_ == at::kBool) { \
       tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
@@ -150,7 +152,9 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
   // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
-  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:  // yf225 TODO: isn't there a mismatch between this type and the type in the example?
+  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
+  // yf225 TODO: isn't there a mismatch between the above mentioned type and the type in the example?
+  // yf225 TODO: can we actually remove the `std::vector` special handling? what would fail? can we repro?
   // ```
   // error: no matching function for call to 'tensor(const std::vector<int>&)'
   // no known conversion for argument 1 from 'const std::vector<int>' to
