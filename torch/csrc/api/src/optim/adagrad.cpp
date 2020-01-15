@@ -133,7 +133,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
   }
   else { // deserializing archives saved in old format (prior to version 1.5.0)
     TORCH_WARN(
-      "Your serialized Adagrad optimizer is still using the old serialization format. ",
+      "Your serialized Adagrad optimizer is still using the old serialization format. "
       "You should re-save your Adagrad optimizer to use the new serialization format.");
     std::vector<Tensor> sum_buffers;
     std::vector<int64_t> step_buffers;

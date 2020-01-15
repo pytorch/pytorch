@@ -70,34 +70,6 @@ void assign_parameter(
   parameter.set_requires_grad(true);
 }
 
-template <typename OptimizerClass, typename Options, typename OptimizerState>
-void test_new_design(Options options) {
-  std::vector<torch::Tensor> params;
-  for(int i=0; i<3; i++) {
-    params.push_back(torch::randn(10));
-  }
-  auto optimizer = OptimizerClass(params, options);
-  // test for defaults() method with non-const reference
-  Options options_ = static_cast<const Options&>(optimizer.defaults());
-  ASSERT_TRUE(options == options_);
-  // test for param_groups() with non-const reference return
-  auto params_groups = optimizer.param_groups();
-  params_groups.push_back(OptimizerParamGroup(params));
-  auto params_1 = params_groups[0].params();
-  for(size_t i = 0; i < params_1.size(); i++) {
-    torch::equal(params[i], params_1[i]);
-  }
-  // test for state() with non-const reference return
-  auto state_ = static_cast<const OptimizerState&>(*(optimizer.state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
-  state_.step(state_.step()+1);
-
-  const auto& optimizer_ = OptimizerClass(params, options);
-  optimizer_.defaults();
-  // test for param_groups() with const reference return
-  auto params_2 = optimizer_.param_groups();
-  // test for state() with const reference return
-  optimizer_.state();
-}
 template <typename OptimizerClass, typename Options>
 void check_exact_values(
     Options options,
@@ -156,6 +128,36 @@ void check_exact_values(
       }
     }
   }
+}
+
+
+TEST(OptimTest, NewOptimizerDesign) {
+  auto options = AdagradOptions(1.0);
+  std::vector<torch::Tensor> params;
+  for(int i=0; i<3; i++) {
+    params.push_back(torch::randn(10));
+  }
+  auto optimizer = Adagrad(params, options);
+  // test for defaults() method with non-const reference
+  auto options_ = static_cast<const AdagradOptions&>(optimizer.defaults());
+  ASSERT_TRUE(options == options_);
+  // test for param_groups() with non-const reference return
+  auto params_groups = optimizer.param_groups();
+  params_groups.push_back(OptimizerParamGroup(params));
+  auto params_1 = params_groups[0].params();
+  for(size_t i = 0; i < params_1.size(); i++) {
+    torch::equal(params[i], params_1[i]);
+  }
+  // test for state() with non-const reference return
+  auto state_ = static_cast<const AdagradParamState&>(*(optimizer.state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
+  state_.step(state_.step()+1);
+
+  const auto& optimizer_ = Adagrad(params, options);
+  optimizer_.defaults();
+  // test for param_groups() with const reference return
+  auto params_2 = optimizer_.param_groups();
+  // test for state() with const reference return
+  optimizer_.state();
 }
 
 TEST(OptimTest, BasicInterface) {
@@ -232,7 +234,6 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0), expected_parameters::Adagrad());
-  test_new_design<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1.0));
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecay) {
