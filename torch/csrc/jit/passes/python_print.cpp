@@ -816,6 +816,33 @@ struct PythonPrintImpl {
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
           ss, "float", v.toDoubleListRef().size(), v);
+    } else if (v.isGenericList()) {
+      auto tmp_stmt = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      (*tmp_stmt) << "[";
+      auto list = v.toGenericListRef();
+      for (size_t i = 0; i < list.size(); ++i) {
+        if (i > 0) {
+          (*tmp_stmt) << ",";
+        }
+        printConstant(*tmp_stmt, list[i]);
+      }
+      (*tmp_stmt) << "]";
+      ss << tmp_stmt->str();
+    } else if (v.isGenericDict()) {
+      auto tmp_stmt = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      (*tmp_stmt) << "{";
+      bool first = true;
+      for (const auto& pair : v.toGenericDict()) {
+        if (!first) {
+          (*tmp_stmt) << ", ";
+        }
+        printConstant(*tmp_stmt, pair.key());
+        (*tmp_stmt) << ": ";
+        printConstant(*tmp_stmt, pair.value());
+        first = false;
+      }
+      (*tmp_stmt) << "}";
+      ss << tmp_stmt->str();
     } else {
       ss << v;
     }
