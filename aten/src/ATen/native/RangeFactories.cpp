@@ -21,15 +21,16 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     r.fill_(start);
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(r.scalar_type(), "linspace_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r.scalar_type(), "linspace_cpu", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data_ptr<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      scalar_t diff = scalar_end - scalar_start;
+      scalar_t div = static_cast<scalar_t>(steps-1);
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
         scalar_t is = static_cast<scalar_t>(p_begin);
         for (int64_t i = p_begin; i < p_end; ++i, is+=1) { //std::complex does not support ++operator
-          data_ptr[i] = scalar_start + step*is;
+          data_ptr[i] = scalar_start + (is*diff) / div;
         }
       });
     });
