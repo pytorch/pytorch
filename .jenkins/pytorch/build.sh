@@ -205,16 +205,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   assert_git_not_dirty
 
-  # Test documentation build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
-    pushd docs
-    # TODO: Don't run this here
-    pip_install -r requirements.txt || true
-    LC_ALL=C make html
-    popd
-    assert_git_not_dirty
-  fi
-
   # Build custom operator tests.
   CUSTOM_OP_BUILD="$PWD/../custom-op-build"
   CUSTOM_OP_TEST="$PWD/test/custom_operator"
