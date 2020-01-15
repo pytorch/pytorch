@@ -32,14 +32,15 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   } else if (steps == 1) {
     r.fill_(start);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      scalar_t diff = scalar_end - scalar_start;
+      scalar_t div = static_cast<scalar_t>(steps - 1);
 
       auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
-          scalar_t inc = step * ind;
+      gpu_kernel_with_index(iter, [scalar_start, diff, div]GPU_LAMBDA(int ind) -> scalar_t {
+          scalar_t inc = (diff * ind) / div;
           scalar_t val = scalar_start + inc;
           return val;
         });
