@@ -134,7 +134,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #define TENSOR(T, S) \
   TensorDataContainer(at::ArrayRef<T> values) : \
       sizes_({(int64_t)values.size()}), \
-      scalar_type_(at::k##S), \
+      scalar_type_(compute_desired_dtype(at::k##S)), \
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true); \
     std::cout << "input dtype: " << scalar_type_ << std::endl; \
@@ -144,7 +144,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     } else { \
       tensor_ = at::tensor( \
         values, \
-        at::dtype(compute_desired_dtype(scalar_type_)).device(at::kCPU)); \
+        at::dtype(scalar_type_).device(at::kCPU)); \
     } \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
