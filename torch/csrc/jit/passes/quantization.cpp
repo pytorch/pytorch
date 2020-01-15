@@ -199,8 +199,10 @@ script::Module clone(
     auto qconfig = module_qconfig_map.at(module._ivalue());
     auto type = module.type();
     // Create a new _ivalue in the same compilation unit.
-    // The name is the same as for the original module, but it'll be mangled.
-    // The class type is also created from scratch.
+    // Since now we have shared ClassType, we need to preserve the shared
+    // ClassType during cloning, so we first use type and qconfig to check if the type
+    // is already cloned, if so, we'll create a new module with the cloned
+    // ClassType, if not, we'll create a new module and a new ClassType.
     bool type_already_cloned = type_remap.find(type) != type_remap.end() &&
       type_remap.at(type).find(qconfig) != type_remap.at(type).end();
     script::Module r;
