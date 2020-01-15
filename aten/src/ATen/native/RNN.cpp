@@ -54,7 +54,7 @@ std::vector<Tensor> unsafe_chunk_no_version_check(const Tensor& self, int chunks
   for (auto& t: results) {
     t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
   }
-  return std::move(results);
+  return results;
 }
 
 // Pretty much all cells we support take the same set of arguments, but threading those
