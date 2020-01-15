@@ -976,6 +976,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1199,6 +1200,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
       outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
+      inputs[i].copy_(output, /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }
