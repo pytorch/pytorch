@@ -2456,6 +2456,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
 
+    def test_onnx_proto_checker(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+            def forward(self, x):
+                return 2 * x
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(Model(), x, f)
+        data = list(f.getvalue())
+        data[1] = 0 #Set the IR version to 0 to force an onnx check error
+        data = bytes(data)
+        def check_proto():
+            torch._C._check_onnx_proto(data)
+        self.assertRaises(RuntimeError, check_proto)
+
+
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
