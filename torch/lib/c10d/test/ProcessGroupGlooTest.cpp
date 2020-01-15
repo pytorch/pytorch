@@ -347,6 +347,13 @@ void testRecv(const std::string& path) {
 
 TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0) {
+    return;
+  }
+
   TemporaryFile file;
   auto work = testSignal(file.path, SIGSTOP);
   ASSERT_FALSE(work->isSuccess());
@@ -355,6 +362,13 @@ TEST(ProcessGroupGlooTest, testSIGSTOPException) {
 
 TEST(ProcessGroupGlooTest, testSIGKILLException) {
   // test SIGKILL
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0) {
+    return;
+  }
+
   TemporaryFile file;
   auto work = testSignal(file.path, SIGKILL);
   ASSERT_FALSE(work->isSuccess());
