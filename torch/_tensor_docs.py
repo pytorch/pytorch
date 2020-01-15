@@ -831,6 +831,13 @@ Args:
         Otherwise, the argument has no effect. Default: ``False``.
 """)
 
+add_docstr_all('cummax',
+               r"""
+cummax(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummax`
+""")
+
 add_docstr_all('cumprod',
                r"""
 cumprod(dim, dtype=None) -> Tensor

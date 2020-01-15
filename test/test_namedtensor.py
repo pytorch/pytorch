@@ -977,6 +977,14 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
+    def test_cummax(self):
+        for device in torch.testing.get_all_device_types():
+            names = ('N', 'D')
+            tensor = torch.rand(2, 3, names=names)
+            result = torch.cummax(tensor, 0)
+            self.assertEqual(result[0].names, names)
+            self.assertEqual(result[1].names, names)
+
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'D')
