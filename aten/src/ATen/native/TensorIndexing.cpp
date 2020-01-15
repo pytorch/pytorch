@@ -236,17 +236,17 @@ Tensor applySlice(const Tensor& self, int64_t dim, const Slice& slice, bool ensu
     TORCH_CHECK(false, "negative step not yet supported");
   }
 
-  if (jit::tracer::isTracing() && slice.start_tensor().defined()) {
+  if (torch::jit::tracer::isTracing() && slice.start_tensor().defined()) {
     auto& var = slice.start_tensor();
-    jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, var, jit::IntType::get());
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, var, torch::jit::IntType::get());
   }
-  if (jit::tracer::isTracing() && slice.stop_tensor().defined()) {
+  if (torch::jit::tracer::isTracing() && slice.stop_tensor().defined()) {
     auto& var = slice.stop_tensor();
-    jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, var, jit::IntType::get());
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, var, torch::jit::IntType::get());
   }
-  if (jit::tracer::isTracing() && slice.step_tensor().defined()) {
+  if (torch::jit::tracer::isTracing() && slice.step_tensor().defined()) {
     auto& var = slice.step_tensor();
-    jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, var, jit::IntType::get());
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, var, torch::jit::IntType::get());
   }
 
   // Skip this optimization if we are tracing, as the trace may be polymorphic
@@ -262,9 +262,9 @@ Tensor applySlice(const Tensor& self, int64_t dim, const Slice& slice, bool ensu
 Tensor applySelect(const Tensor& self, int64_t dim, const TensorIndex& index, int64_t real_dim=0) {
   TORCH_INTERNAL_CHECK(index.is_integer());
 
-  if (jit::tracer::isTracing() && index.tensor().defined()) {
+  if (torch::jit::tracer::isTracing() && index.tensor().defined()) {
     auto& var = index.tensor();
-    jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, torch::jit::IntType::get());
   }
 
   int64_t unpacked_index = index.integer();
