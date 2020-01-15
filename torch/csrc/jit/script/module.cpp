@@ -172,7 +172,7 @@ Module Module::clone_impl(
   // Since now we have shared ClassType, we need to preserve the shared
   // ClassType during cloning, so we first need to check if the type
   // is already cloned, if so, we'll create a new module with the cloned
-  // ClassType, if not, we'll create a new module and a new cloned type.
+  // ClassType, if not, we'll create a new module and a new ClassType.
   bool type_already_cloned = type_remap.find(type()) != type_remap.end();
   Module r;
   if (type_already_cloned) {
