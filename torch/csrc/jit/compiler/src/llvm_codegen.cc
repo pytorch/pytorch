@@ -231,16 +231,29 @@ void LLVMCodeGen::visit(const Variable* v) {
 }
 
 void LLVMCodeGen::visit(const Let* v) {}
-void LLVMCodeGen::visit(const Ramp* v) {}
 
-void LLVMCodeGen::visit(const Load* v) {
-  v->base_handle().accept(this);
+void LLVMCodeGen::visit(const Ramp* v) {
+  v->base().accept(this);
   auto base = this->value_;
-  v->index().accept(this);
-  auto idx = this->value_;
-  v->mask().accept(this);
-  auto mask = this->value_;
+  v->stride().accept(this);
+  auto stride = this->value_;
+  int lanes = v->lanes();
 
+  llvm::Type* vecType = nullptr;
+  if (v->dtype().scalar_type() == kInt32) {
+    vecType = llvm::VectorType::get(int32Ty_, lanes);
+  } else if (v->dtype().scalar_type() == kFloat32) {
+    vecType = llvm::VectorType::get(floatTy_, lanes);
+  }
+
+  value_ = llvm::UndefValue::get(vecType);
+  for (int i = 0; i < lanes; ++i) {
+    value_ = irb_.CreateInsertElement(value_, base, i);
+    base = irb_.CreateAdd(base, stride);
+  }
+}
+
+llvm::Value* LLVMCodeGen::emitMaskedLoad(llvm::Value* base, llvm::Value* idx, llvm::Value* mask) {
   // Create block structure for the masked load.
   auto preheader = irb_.GetInsertBlock();
   auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
@@ -262,7 +275,39 @@ void LLVMCodeGen::visit(const Load* v) {
   phi->addIncoming(llvm::UndefValue::get(load->getType()), preheader);
   phi->addIncoming(load, condblock);
 
-  value_ = phi;
+  return phi;
+}
+
+
+void LLVMCodeGen::visit(const Load* v) {
+  v->base_handle().accept(this);
+  auto base = this->value_;
+  v->index().accept(this);
+  auto idx = this->value_;
+  v->mask().accept(this);
+  auto mask = this->value_;
+
+  if (v->dtype().lanes() == 1) {
+    value_ = emitMaskedLoad(base, idx, mask);
+    return;
+  }
+
+  llvm::Type* loadType = nullptr;
+  if (v->dtype().scalar_type() == kInt32) {
+    loadType = llvm::VectorType::get(int32Ty_, v->dtype().lanes());
+  } else if (v->dtype().scalar_type() == kFloat32) {
+    loadType = llvm::VectorType::get(floatTy_, v->dtype().lanes());
+  }
+
+  llvm::Value* load = llvm::UndefValue::get(loadType);
+  for (int i = 0; i < v->dtype().lanes(); ++i) {
+    auto sub_idx = irb_.CreateExtractElement(idx, i);
+    auto sub_mask = irb_.CreateExtractElement(mask, i);
+    auto sub_load = emitMaskedLoad(base, sub_idx, sub_mask);
+    load = irb_.CreateInsertElement(load, sub_load, i);
+  }
+
+  value_= load;
 }
 
 void LLVMCodeGen::visit(const For* v) {
@@ -305,16 +350,7 @@ void LLVMCodeGen::visit(const Block* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Store* v) {
-  v->base_handle().accept(this);
-  auto base = this->value_;
-  v->index().accept(this);
-  auto idx = this->value_;
-  v->mask().accept(this);
-  auto mask = this->value_;
-  v->value().accept(this);
-  auto val = this->value_;
-
+void LLVMCodeGen::emitMaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* mask, llvm::Value* val) {
   // Create block structure for the masked store.
   auto preheader = irb_.GetInsertBlock();
   auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
@@ -332,8 +368,31 @@ void LLVMCodeGen::visit(const Store* v) {
 
   // Merge the masked and unmasked CFG edges
   irb_.SetInsertPoint(tailblock);
+}
+
+void LLVMCodeGen::visit(const Store* v) {
+  v->base_handle().accept(this);
+  auto base = this->value_;
+  v->index().accept(this);
+  auto idx = this->value_;
+  v->mask().accept(this);
+  auto mask = this->value_;
+  v->value().accept(this);
+  auto val = this->value_;
 
   value_ = llvm::ConstantInt::get(int32Ty_, 0);
+
+  if (v->value().dtype().lanes() == 1) {
+    emitMaskedStore(base, idx, mask, val);
+    return;
+  }
+
+  for (int i = 0; i < v->value().dtype().lanes(); ++i) {
+    auto sub_idx = irb_.CreateExtractElement(idx, i);
+    auto sub_mask = irb_.CreateExtractElement(mask, i);
+    auto sub_val = irb_.CreateExtractElement(val, i);
+    emitMaskedStore(base, sub_idx, sub_mask, sub_val);
+  }
 }
 
 void LLVMCodeGen::visit(const Broadcast* v) {

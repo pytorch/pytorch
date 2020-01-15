@@ -58,6 +58,9 @@ class LLVMCodeGen : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Broadcast* v) override;
 
+  llvm::Value* emitMaskedLoad(llvm::Value* addr, llvm::Value* idx, llvm::Value* mask);
+  void emitMaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* mask, llvm::Value* val);
+
   void optimize(llvm::Module& M);
 
   template <typename T>

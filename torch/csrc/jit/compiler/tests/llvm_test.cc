@@ -114,6 +114,30 @@ TEST(LLVMTest, LoadStoreTest) {
   EXPECT_EQ(b_buffer[0], 42);
 }
 
+TEST(LLVMTest, VecLoadStoreTest) {
+  Buffer a(Var("A", kHandle), kInt32, {1});
+  Buffer b(Var("B", kHandle), kInt32, {1});
+  std::vector<int32_t> a_buffer = {1, 1, 1, 1};
+  std::vector<int32_t> b_buffer = {2, 2, 2, 2};
+
+  LLVMCodeGen cg({&a, &b});
+  auto store = Store::make(
+      b, Ramp::make(0, 1, 4),
+      Load::make(a, Ramp::make(0, 1, 4), Broadcast::make(IntImm::make(1), 4)),
+      Broadcast::make(IntImm::make(1), 4));
+  store.accept(&cg);
+  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
+  EXPECT_EQ(cg.value<int>(args), 0);
+  EXPECT_EQ(a_buffer[0], 1);
+  EXPECT_EQ(a_buffer[1], 1);
+  EXPECT_EQ(a_buffer[2], 1);
+  EXPECT_EQ(a_buffer[3], 1);
+  EXPECT_EQ(b_buffer[0], 1);
+  EXPECT_EQ(b_buffer[1], 1);
+  EXPECT_EQ(b_buffer[2], 1);
+  EXPECT_EQ(b_buffer[3], 1);
+}
+
 TEST(LLVMTest, MemcpyTest) {
   constexpr int N = 32;
   Buffer a(Var("A", kHandle), kInt32, {N});
