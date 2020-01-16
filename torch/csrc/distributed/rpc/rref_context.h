@@ -164,16 +164,18 @@ class RRefContext {
       RRefId::Hash>
       forks_;
 
-  // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
+  // The follow 3 maps keep UserRRefs alive by holding a shared_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
   // following two conditions is ture:
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //
   //     It can be used or shared, but cannot be deleted, and hence kept alive
-  //     in this map. A message of type RREF_USER_ACCEPT will remove the
-  //     corresponding RRef from this map.
+  //     in this map. A message of type RREF_USER_ACCEPT will move the
+  //     corresponding RRef from pendingUsers_ map to confirmedUsers_ map.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
+  //     confirmedUsers_ map is useful for proactively delete UserRRefs
+  //     on shutting down RPC stack, avoiding OwnerRRef leaks.
   std::unordered_map<ForkId, std::weak_ptr<RRef>, ForkId::Hash> confirmedUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by

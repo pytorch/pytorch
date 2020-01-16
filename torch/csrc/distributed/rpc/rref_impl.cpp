@@ -110,10 +110,11 @@ UserRRef<T>::UserRRef(
 
 template <typename T>
 void UserRRef<T>::tryDel() {
-  bool valid = valid_.exchange(false);
-  if (valid) {
+  std::lock_guard<std::mutex> lockGuard(sentDelUserMutex_);
+  if (!sentDelUser_) {
     try {
       RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
+      sentDelUser_ = true;
     } catch (const std::exception& ex) {
       LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
                  << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "

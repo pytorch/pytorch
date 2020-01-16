@@ -262,8 +262,9 @@ class UserRRef final : public RRef {
 
   const ForkId forkId_;
 
-  // Indicates if this fork has sent delete message to it's owner.
-  std::atomic<bool> valid_{true};
+  // Indicates if this user has sent delete message to it's owner.
+  std::mutex sentDelUserMutex_;
+  bool sentDelUser_{false};
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to

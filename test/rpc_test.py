@@ -1180,7 +1180,7 @@ class RpcTest(RpcAgentTestFixture):
     # through `torch.distributed.rpc.api`, so patching
     # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
     @mock.patch.object(torch.distributed.rpc.api, "_delete_all_user_rrefs")
-    def _test_rref_leak(self, mock_delete_all_user_rrefs, ignore_leak):
+    def _test_rref_leak(self, _mock_delete_all_user_rrefs, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
