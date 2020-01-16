@@ -159,6 +159,12 @@ static auto registry = torch::RegisterOperators().op(
                                              return at::add(a, b, c);
                                            })
 ).op(
+  "_aten::sub.Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar alpha) {
+     return at::sub(a, b, alpha);
+  })
+).op(
   "_aten::adaptive_avg_pool2d",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](at::Tensor a, c10::List<int64_t> b) -> at::Tensor {
@@ -368,6 +374,12 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
   [](Tensor self, at::Scalar min, at::Scalar max) {
      return at::hardtanh_(self, min, max);
+  })
+).op(
+  "_aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](const Tensor& self, at::Scalar beta, at::Scalar threshold) {
+     return at::softplus(self, beta, threshold);
   })
 ).op(
   "_aten::contiguous(Tensor self) -> Tensor",
