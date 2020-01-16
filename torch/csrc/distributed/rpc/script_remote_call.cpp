@@ -48,7 +48,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
-  return c10::guts::make_unique<ScriptRemoteCall>(
+  return std::make_unique<ScriptRemoteCall>(
       op, std::move(values), std::move(retRRefId), std::move(retForkId));
 }
 

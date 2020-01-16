@@ -41,12 +41,16 @@ class TORCH_API DistEngine {
   // This method is used to kick off the autograd computation on a node when it
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
-  void executeSendFunction(
-      DistAutogradContext& autogradContext,
+  std::shared_ptr<rpc::FutureMessage> executeSendFunctionAsync(
+      const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
   // Number of backward passes currently running for the Distributed Engine.
   size_t numBackwardPasses() const;
+
+  // Returns key-value pairs consisting of useful debugging information related
+  // to distributed autograd.
+  std::unordered_map<std::string, std::string> getDebugInfo() const;
 
  private:
   // Make sure this is a singleton.
@@ -73,7 +77,7 @@ class TORCH_API DistEngine {
   // We also determine all leaf nodes(functions) in the graph and accumulate
   // them in outputEdges.
   void computeDependencies(
-      DistAutogradContext& context,
+      const ContextPtr& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
@@ -82,8 +86,8 @@ class TORCH_API DistEngine {
   // Run the local autograd engine using the provided graphTask and graphRoot
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
-  void runEngineAndAccumulateGradients(
-      DistAutogradContext& autogradContext,
+  std::shared_ptr<rpc::FutureMessage> runEngineAndAccumulateGradients(
+      const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 

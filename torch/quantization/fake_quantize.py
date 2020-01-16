@@ -56,7 +56,7 @@ class FakeQuantize(Module):
         self.zero_point = None
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
-        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else 0
+        self.ch_axis = self.activation_post_process.ch_axis if hasattr(self.activation_post_process, 'ch_axis') else None
 
     def enable_fake_quant(self, enabled=True):
         self.fake_quant_enabled = enabled
@@ -107,9 +107,14 @@ class FakeQuantize(Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        self.scale = state_dict.pop(prefix + 'scale')
-        self.zero_point = state_dict.pop(prefix + 'zero_point')
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+        local_state = ['scale', 'zero_point']
+        for name in local_state:
+            key = prefix + name
+            if key in state_dict:
+                setattr(self, name, state_dict.pop(key))
+            elif strict:
+                missing_keys.append(key)
+        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,

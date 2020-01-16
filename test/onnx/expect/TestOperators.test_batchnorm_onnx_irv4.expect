@@ -1,6 +1,6 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     input: "input"
@@ -9,6 +9,7 @@ graph {
     input: "running_mean"
     input: "running_var"
     output: "6"
+    name: "BatchNormalization_0"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
@@ -26,11 +27,6 @@ graph {
     dims: 2
     data_type: 1
     name: "bias"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
-    data_type: 7
-    name: "num_batches_tracked"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {

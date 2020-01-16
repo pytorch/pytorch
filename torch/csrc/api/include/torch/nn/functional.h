@@ -14,3 +14,4 @@
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/functional/upsampling.h>
 #include <torch/nn/functional/vision.h>
+#include <torch/nn/functional/instancenorm.h>

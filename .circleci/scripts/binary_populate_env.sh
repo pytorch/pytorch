@@ -56,9 +56,9 @@ fi
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
-  export PYTORCH_BUILD_VERSION="1.4.0.dev$DATE"
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE"
 else
-  export PYTORCH_BUILD_VERSION="1.4.0.dev$DATE+$DESIRED_CUDA"
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE+$DESIRED_CUDA"
 fi
 export PYTORCH_BUILD_NUMBER=1
 
@@ -69,8 +69,7 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  # TODO: Fix Mac Java build
-  #POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
       echo "Found jni.h under $JH"
@@ -97,7 +96,7 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.4.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.5.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"

@@ -1,4 +1,3 @@
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
@@ -30,10 +29,12 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -45,6 +46,7 @@
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -53,7 +55,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -93,7 +94,9 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
+#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+#endif
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -134,6 +137,7 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -197,6 +201,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -278,6 +283,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -285,10 +291,21 @@ void initJITBindings(PyObject* module) {
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
-            AutoNoGIL _no_gil;
+            pybind11::gil_scoped_release _no_gil;
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() {
+        return true;
+      })
+#else
+      .def("_jit_run_cpp_tests", []() {
+        throw std::exception();
+      })
+      .def("_jit_has_cpp_tests", []() {
+        return false;
+      })
+#endif
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -303,6 +320,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -364,6 +382,13 @@ void initJITBindings(PyObject* module) {
                 UnpackQuantizedWeights(graph, paramsDict);
                 return paramsDict;
              },
+             pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict){
+                insertPermutes(graph, paramsDict);
+                return paramsDict;
+             },
              pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -420,7 +445,7 @@ void initJITBindings(PyObject* module) {
           buffer.attr("write")(std::move(bytes));
           return size;
         };
-        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void *, size_t)> &>())
       .def("write_record",
@@ -472,14 +497,17 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
-        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
-        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_all_records", [](PyTorchStreamReader& self) {
+        return self.getAllRecords();
       });
 
   m.def(
@@ -651,6 +679,7 @@ void initJITBindings(PyObject* module) {
     toIValue(obj, type);
   });
 
+  initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

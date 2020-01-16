@@ -101,7 +101,7 @@ def filter_files(files, file_patterns):
                 yield file
                 continue
         if VERBOSE:
-            print("{} ommitted due to file filters".format(file))
+            print("{} omitted due to file filters".format(file))
 
 
 def get_changed_files(revision, paths):
