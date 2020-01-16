@@ -456,6 +456,26 @@ struct CAFFE2_API IValue final {
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
+  // Computes the "official" string representation of an IValue. This produces a
+  // TorchScript expression that can be used to recreate an IValue with the same
+  // value (e.g. when we are printing constants in the serializer).
+  //
+  // Callers can use `customFormatter` to override how `repr()` prints out an
+  // IValue. This is useful if you have some other environment where you can
+  // look up values, and you want to print a reference to that environment (like
+  // the serializer's constant table).
+  //
+  // repr() is not necessarily defined on all objects!
+  std::ostream& repr(
+      std::ostream& stream,
+      std::function<bool(std::ostream&, const IValue& v)> customFormatter)
+      const;
+
+  // Computes an "informal" string representation of an IValue. This should be
+  // used for debugging, or servicing `print()`-like functions.
+  // This is different from `repr()` in that there is no expectation that we can
+  // exactly reconstruct an IValue from the output; feel free to use a
+  // concise/pretty form
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);

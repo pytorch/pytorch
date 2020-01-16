@@ -2061,13 +2061,14 @@ int listCopyAndSort(Stack& stack) {
 template <>
 int listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
+  auto list_copied = list.copy();
   std::sort(
-      list.begin(),
-      list.end(),
+      list_copied.begin(),
+      list_copied.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
         return a.lt(b).is_nonzero();
       });
-  push(stack, list);
+  push(stack, list_copied);
   return 0;
 }
 
@@ -3091,12 +3092,12 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
-          " key, t default_value) -> t(*)",                                   \
+          "(b -> *) key, t(c -> *) default_value) -> t(*)",                   \
           dictSetDefault,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::Delete(Dict(" key_type ", t)(a!) self, " key_type            \
-          " key) -> ()",                                                    \
+          " key) -> ()",                                                      \
           dictDelete,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -3139,7 +3140,7 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t(b -> *) v) -> ()",                                         \
+          "(b -> *) idx, t(c -> *) v) -> ()",                                 \
           dictSetItem,                                                        \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
