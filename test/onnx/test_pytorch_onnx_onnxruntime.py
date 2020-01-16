@@ -2466,7 +2466,8 @@ class TestONNXRuntime(unittest.TestCase):
         f = io.BytesIO()
         torch.onnx._export(Model(), x, f)
         data = list(f.getvalue())
-        data[1] = 0 #Set the IR version to 0 to force an onnx check error
+        # Set the IR version to 0 to force an ONNX check error
+        data[1] = 0
         data = bytes(data)
         def check_proto():
             torch._C._check_onnx_proto(data)
