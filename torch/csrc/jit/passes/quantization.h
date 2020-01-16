@@ -10,9 +10,11 @@
 
 namespace std {
 
-inline bool operator==(const torch::jit::script::Module& x, const torch::jit::script::Module& y) {
-  return x._ivalue() == y._ivalue();
-}
+// inline bool operator==(
+//     const torch::jit::script::Module& x,
+//     const torch::jit::script::Module& y) noexcept {
+//   return x._ivalue() == y._ivalue();
+// }
 
 template <>
 struct hash<torch::jit::script::Module> {
