@@ -178,48 +178,15 @@ namespace modern {
 
 namespace detail {
 
-// Note (@zasdfgbnm):
-//
-// The following code:
-//
-//    template <typename func_t, typename array_t, std::size_t... I>
-//    __device__ inline constexpr decltype(auto) apply_impl(func_t f, array_t t, std::index_sequence<I...>)
-//    {
-//        return f(t[I]...);
-//    }
-//    template <typename func_t, typename array_t>
-//    __device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
-//      constexpr auto arity = function_traits<func_t>::arity;
-//      return apply_impl(f, a, std::make_index_sequence<arity>{});
-//    }
-//
-// is definitely a better implementation of `array_apply` than the implementation below. The code below implements
-// `array_apply` by hard coding for array size, which does not sound like a good idea, but unfortunately there is a
-// compiler bug in CUDA that makes the implementation above generate wrong assemblies.
-
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 0), int> = 0>
-__device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
-  return f();
+template <typename func_t, typename array_t, std::size_t... I>
+__device__ inline constexpr decltype(auto) apply_impl(func_t f, array_t t, std::index_sequence<I...>)
+{
+    return f(t[I]...);
 }
-
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 1), int> = 0>
-__device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
-  return f(a[0]);
-}
-
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 2), int> = 0>
-__device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
-  return f(a[0], a[1]);
-}
-
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 3), int> = 0>
-__device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
-  return f(a[0], a[1], a[2]);
-}
-
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 4), int> = 0>
-__device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
-  return f(a[0], a[1], a[2], a[3]);
+template <typename func_t, typename array_t>
+__device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
+  constexpr auto arity = function_traits<func_t>::arity;
+  return apply_impl(f, a, std::make_index_sequence<arity>{});
 }
 
 }  // namespace detail
