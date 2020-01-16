@@ -1,10 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -71,14 +71,12 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
-
 template <typename T>
 static bool test_primitive(c10::optional<T> e, T a) {
   return !e.has_value() || e.value() == a;
 }
 
 static bool test_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
-
   if (!e.size().has_value()) {
     return true;
   }
@@ -97,18 +95,17 @@ static bool test_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
 }
 
 bool TensorType::isCompatibleWith(at::Tensor& t) const {
-
   if (!t.defined()) {
     return test_primitive(undefined(), !t.defined());
   }
 
-return
-  test_varying_shape(sizes(), t.sizes()) &&
-    (t.is_sparse() || t.is_mkldnn() || test_varying_shape(strides(), t.strides())) &&
-    test_primitive(requiresGrad(),t.requires_grad() && at::GradMode::is_enabled()) &&
-    test_primitive(scalarType(), t.scalar_type()) &&
-    test_primitive(device(), t.device());
-
+  return test_varying_shape(sizes(), t.sizes()) &&
+      (t.is_sparse() || t.is_mkldnn() ||
+       test_varying_shape(strides(), t.strides())) &&
+      test_primitive(
+             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
+      test_primitive(scalarType(), t.scalar_type()) &&
+      test_primitive(device(), t.device());
 }
 
 TensorTypePtr TensorType::get() {
