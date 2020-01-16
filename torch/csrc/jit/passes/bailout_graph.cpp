@@ -129,7 +129,6 @@ struct BailOutGraphBuilderForNode {
     auto one = copy_graph_->insertConstant({1});
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
-    TORCH_INTERNAL_ASSERT(old_to_new_.count(outer_node->inputs()[0]) != 0);
     auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
 
     // We need to be careful when mapping `block_outputs` to continuation
