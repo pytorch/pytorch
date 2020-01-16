@@ -1603,6 +1603,27 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
+    def test_normal_shape_cpu(self):
+        # CPU version normal is written in legacy code (TH).
+        # It won't support tensor broadcasting until it is migrated using new tensor iterator.
+        tensor23 = torch.rand(2, 3)
+        tensor21 = torch.rand(2, 1)
+        tensor6 = torch.rand(6)
+        tensor4 = torch.rand(4)
+        # normal case
+        self.assertEqual(torch.normal(tensor23, tensor23).size(), (2, 3))
+        # expandable (broadcasting) case (only when std or dev is scalar)
+        self.assertEqual(torch.normal(tensor23, 2).size(), (2, 3))
+        self.assertEqual(torch.normal(2, tensor23).size(), (2, 3))
+        # std and mean have same elements case
+        self.assertEqual(torch.normal(tensor23, tensor6).size(), (2, 3))
+        self.assertEqual(torch.normal(tensor6, tensor23).size(), (6,))
+        # std and mean have different number of element
+        with self.assertRaises(RuntimeError):
+            torch.normal(tensor23, tensor21)
+        with self.assertRaises(RuntimeError):
+            torch.normal(tensor23, tensor4)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal_shape_gpu(self):
         tensor23 = torch.rand(2, 3, device='cuda')
@@ -1613,7 +1634,7 @@ class TestDistributions(TestCase):
         tensor1 = torch.rand(1, device='cuda')
         # normal case
         self.assertEqual(torch.normal(tensor23, tensor23).size(), (2, 3))
-        # expandable case (including scalar case)
+        # expandable (broadcasting) case (including scalar case)
         self.assertEqual(torch.normal(tensor23, tensor21).size(), (2, 3))
         self.assertEqual(torch.normal(tensor23, tensor3).size(), (2, 3))
         self.assertEqual(torch.normal(tensor23, tensor1).size(), (2, 3))
