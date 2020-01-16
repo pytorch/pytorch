@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "torch/csrc/jit/compiler/include/eval.h"
+
 namespace torch {
 namespace jit {
 namespace compiler {
@@ -124,6 +126,10 @@ class PaddedBuffer : public PaddedBufferBase {
   std::vector<T> backup_data_;
   T kPaddingValue = DefaultPaddedValue<T>::kValue;
 };
+
+template <typename T>
+inline SimpleIREvaluator::CallArg::CallArg(const PaddedBuffer<T>& buffer)
+    : ptr_(const_cast<T*>(buffer.data())) {}
 
 } // namespace compiler
 } // namespace jit

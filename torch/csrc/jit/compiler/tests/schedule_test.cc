@@ -154,13 +154,8 @@ TEST(TestSchedule, BroadcastAddBuffer) {
   b_v.Backup();
 
   PaddedBuffer<float> c_v(M, N, K, "c_buf");
-  SimpleIREvaluator ir_eval;
-  ir_eval.SetBufferMapping({
-      {a_buf.data(), a_v.data()},
-      {b_buf.data(), b_v.data()},
-      {c.function().func_var(), c_v.data()},
-  });
-  stmt.accept(&ir_eval);
+  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c);
+  ir_eval(a_v, b_v, c_v);
 
   a_v.CheckBackup();
   b_v.CheckBackup();
