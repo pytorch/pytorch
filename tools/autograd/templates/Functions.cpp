@@ -442,6 +442,14 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
+Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
+  if (input.numel() == 0) {
+    return input;
+  }
+  auto result = at::zeros(input.sizes(), input.options());
+  return result.scatter_add_(dim, indices, grad);
+}
+
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());

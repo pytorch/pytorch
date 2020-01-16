@@ -895,6 +895,20 @@
 - func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
+
+- func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  supports_named_tensor: True
+
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
 # convenience function that converts to intlists for you
