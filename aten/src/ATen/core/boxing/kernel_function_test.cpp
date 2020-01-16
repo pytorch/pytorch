@@ -178,9 +178,9 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListOutp
   auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), dummyTensor(DispatchKey::CPUTensorId));
   EXPECT_EQ(1, result.size());
   EXPECT_EQ(3, result[0].toTensorVector().size());
-  EXPECT_EQ(TensorTypeId::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[0]));
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractDispatchKey(result[0].toTensorVector()[1]));
-  EXPECT_EQ(TensorTypeId::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[2]));
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensorVector()[1]));
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[2]));
 }
 
 c10::List<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
@@ -227,8 +227,8 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithMultipleOutput
   EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
   EXPECT_EQ(5, result[1].toInt());
   EXPECT_EQ(2, result[2].toTensorVector().size());
-  EXPECT_EQ(TensorTypeId::CPUTensorId, extractDispatchKey(result[2].toTensorVector()[0]));
-  EXPECT_EQ(TensorTypeId::CUDATensorId, extractDispatchKey(result[2].toTensorVector()[1]));
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[2].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[2].toTensorVector()[1]));
   EXPECT_EQ(0, result[3].toInt());
   auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());
