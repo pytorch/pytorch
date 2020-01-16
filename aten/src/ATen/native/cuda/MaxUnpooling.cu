@@ -399,7 +399,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   TORCH_CHECK(output_size.size() == 2, "output_size must have two elements");
 
-  int64_t nInputCols, nInputRows, nInputPlane, batchSize;
+  int64_t nInputCols, nInputRows, nInputPlane;
 
   int dimw = 2;
   int dimh = 1;
@@ -410,12 +410,10 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   if (self.ndimension() == 3) {
     nInputPlane = self.size(0);
-    batchSize = 1;
   } else {
     ++dimw;
     ++dimh;
     nInputPlane = self.size(1);
-    batchSize = self.size(0);
   }
 
   nInputCols = self.size(dimw);
