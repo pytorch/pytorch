@@ -28,6 +28,8 @@
 // See BinaryOpsKernel.cu for the complete implementation
 //
 
+#include <type_traits>
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
@@ -189,12 +191,28 @@ __device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
   return apply_impl(f, a, std::make_index_sequence<arity>{});
 }
 
+struct dont_care_t {};
+
+template <typename func_t, std::size_t arity>
+struct arg_type_helper {
+  using type = typename function_traits<func_t>::template arg<0>::type;
+};
+
+template <typename func_t>
+struct arg_type_helper<func_t, 0> {
+  using type = dont_care_t;
+};
+
+template <typename func_t>
+using arg_type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::type;
+
 }  // namespace detail
 
 template <typename func_t>
 using ptr_array_t = at::detail::Array<char*, function_traits<func_t>::arity + 1>;
 
-template<int nt, int vt, typename func_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
+
+template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
   // Assumption:
@@ -203,8 +221,9 @@ __global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
 
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
-  using arg_t = typename traits::template arg<0>::type;
+  using arg_t = detail::arg_type<func_t>;
   constexpr int arity = traits::arity;
+  constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
   int nv = nt * vt;
@@ -212,7 +231,7 @@ __global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  arg_t *args_base[arity];
+  arg_t *args_base[nargs];
   #pragma unroll
   for (int i = 0; i < arity; i++) {
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
@@ -220,7 +239,7 @@ __global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
 
   // fetch data
   return_t results[vt];
-  arg_t args[vt][arity];
+  arg_t args[vt][nargs];
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
@@ -235,42 +254,7 @@ __global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
-      results[i] = detail::array_apply<func_t, arg_t[arity]>(f, args[i]);
-    }
-  }
-
-  // store data
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
-    }
-  }
-}
-
-template<int nt, int vt, typename func_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
-C10_LAUNCH_BOUNDS_1(nt)
-__global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
-  // Assumption:
-  // all arguments have the same type, which could be different from the return type
-  // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
-
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
-
-  // compute base pointers
-  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  return_t results[vt];
-
-  // compute
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      results[i] = f();
+      results[i] = detail::array_apply<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
