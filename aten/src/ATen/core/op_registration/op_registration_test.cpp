@@ -513,15 +513,17 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
 
+  // Ensure that dispatcher doesn't take the dispatch key from the tensor but from the direct argument instead.
   called_kernel_cpu = false;
-  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPUTensorId, dummyTensor(c10::DispatchKey::CPUTensorId));
+  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPUTensorId, dummyTensor(c10::DispatchKey::CUDATensorId));
   EXPECT_TRUE(called_kernel_cpu);
 
+  // Ensure that disptach key from tensor is not used here.
   called_kernel_cpu = false;
   expectThrows<c10::Error>([&] {
-    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDATensorId, dummyTensor(c10::DispatchKey::CUDATensorId));
+    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDATensorId, dummyTensor(c10::DispatchKey::CPUTensorId));
   }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
-  " backend. '_test::dummy' is only available for these backends: [");
+  " backend. '_test::dummy' is only available for these backends: [CPUTensorId].");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
