@@ -221,10 +221,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
+                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
+                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at
