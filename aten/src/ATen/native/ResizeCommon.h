@@ -5,7 +5,6 @@
 
 namespace at { namespace native {
 
-#ifdef BUILD_NAMEDTENSOR
 inline Tensor& resize_named_tensor_(
     Tensor& self,
     IntArrayRef size,
@@ -28,5 +27,4 @@ inline Tensor& resize_named_tensor_(
       optional_memory_format.value());
   return self;
 }
-#endif
 }}

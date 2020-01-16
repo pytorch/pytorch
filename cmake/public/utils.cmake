@@ -12,6 +12,30 @@ endmacro()
 
 ##############################################################################
 # Add an interface library definition that is dependent on the source.
+#
+# It's probably easiest to explain why this macro exists, by describing
+# what things would look like if we didn't have this macro.
+#
+# Let's suppose we want to statically link against torch.  We've defined
+# a library in cmake called torch, and we might think that we just
+# target_link_libraries(my-app PUBLIC torch).  This will result in a
+# linker argument 'libtorch.a' getting passed to the linker.
+#
+# Unfortunately, this link command is wrong!  We have static
+# initializers in libtorch.a that would get improperly pruned by
+# the default link settings.  What we actually need is for you
+# to do -Wl,--whole-archive,libtorch.a -Wl,--no-whole-archive to ensure
+# that we keep all symbols, even if they are (seemingly) not used.
+#
+# What caffe2_interface_library does is create an interface library
+# that indirectly depends on the real library, but sets up the link
+# arguments so that you get all of the extra link settings you need.
+# The result is not a "real" library, and so we have to manually
+# copy over necessary properties from the original target.
+#
+# (The discussion above is about static libraries, but a similar
+# situation occurs for dynamic libraries: if no symbols are used from
+# a dynamic library, it will be pruned unless you are --no-as-needed)
 macro(caffe2_interface_library SRC DST)
   add_library(${DST} INTERFACE)
   add_dependencies(${DST} ${SRC})
@@ -194,7 +218,7 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 11)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
 
   if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # until they can be unified, keep these lists synced with setup.py
@@ -226,7 +250,7 @@ function(torch_compile_options libname)
         )
     else()
       target_compile_options(${libname} PUBLIC
-        #    -std=c++11
+        #    -std=c++14
         -Wall
         -Wextra
         -Wno-unused-parameter

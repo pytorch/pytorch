@@ -45,7 +45,7 @@ FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
 
-FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh")
+FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 FILE(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
 FILE(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip")
 FILE(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
@@ -63,6 +63,7 @@ FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
 FILE(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+FILE(GLOB native_h "native/*.h")
 FILE(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
@@ -378,7 +379,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 if(INTERN_BUILD_MOBILE)
   set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake

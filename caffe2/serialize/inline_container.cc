@@ -51,20 +51,20 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
 }
 
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
-    : ar_(caffe2::make_unique<mz_zip_archive>()),
-      in_(caffe2::make_unique<FileAdapter>(file_name)) {
+    : ar_(std::make_unique<mz_zip_archive>()),
+      in_(std::make_unique<FileAdapter>(file_name)) {
   init();
 }
 
 PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
-    : ar_(caffe2::make_unique<mz_zip_archive>()),
-      in_(caffe2::make_unique<IStreamAdapter>(in)) {
+    : ar_(std::make_unique<mz_zip_archive>()),
+      in_(std::make_unique<IStreamAdapter>(in)) {
   init();
 }
 
 PyTorchStreamReader::PyTorchStreamReader(
     std::unique_ptr<ReadAdapterInterface> in)
-    : ar_(caffe2::make_unique<mz_zip_archive>()), in_(std::move(in)) {
+    : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
   init();
 }
 
@@ -190,6 +190,17 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
   return result;
 }
 
+std::vector<std::string> PyTorchStreamReader::getAllRecords() {
+  mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
+  std::vector<std::string> out;
+  char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+  for (size_t i = 0; i < num_files; i++) {
+    mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
+    out.push_back(buf);
+  }
+  return out;
+}
+
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
@@ -268,7 +279,7 @@ PyTorchStreamWriter::PyTorchStreamWriter(
 }
 
 void PyTorchStreamWriter::setup(const string& file_name) {
-  ar_ = caffe2::make_unique<mz_zip_archive>();
+  ar_ = std::make_unique<mz_zip_archive>();
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
   archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
 

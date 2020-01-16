@@ -109,6 +109,65 @@ inline Tensor conv3d(
     options.groups());
 }
 
+// ============================================================================
+
+namespace detail {
+inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
+                               const Tensor& bias, IntArrayRef stride,
+                               IntArrayRef padding, IntArrayRef output_padding,
+                               int64_t groups, IntArrayRef dilation) {
+  return torch::conv_transpose1d(
+    input, weight, bias, stride, padding, output_padding, groups, dilation);
+}
+} // namespace detail
+
+inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
+                               const ConvTranspose1dFuncOptions& options = {}) {
+  return detail::conv_transpose1d(
+    input, weight,
+    options.bias(), options.stride(),
+    options.padding(), options.output_padding(),
+    options.groups(), options.dilation());
+}
+
+namespace detail {
+inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
+                               const Tensor& bias, IntArrayRef stride,
+                               IntArrayRef padding, IntArrayRef output_padding,
+                               int64_t groups, IntArrayRef dilation) {
+  return torch::conv_transpose2d(
+    input, weight, bias, stride, padding, output_padding, groups, dilation);
+}
+} // namespace detail
+
+inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
+                               const ConvTranspose2dFuncOptions& options = {}) {
+  return detail::conv_transpose2d(
+    input, weight,
+    options.bias(), options.stride(),
+    options.padding(), options.output_padding(),
+    options.groups(), options.dilation());
+}
+
+namespace detail {
+inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
+                               const Tensor& bias, IntArrayRef stride,
+                               IntArrayRef padding, IntArrayRef output_padding,
+                               int64_t groups, IntArrayRef dilation) {
+  return torch::conv_transpose3d(
+    input, weight, bias, stride, padding, output_padding, groups, dilation);
+}
+} // namespace detail
+
+inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
+                               const ConvTranspose3dFuncOptions& options = {}) {
+  return detail::conv_transpose3d(
+    input, weight,
+    options.bias(), options.stride(),
+    options.padding(), options.output_padding(),
+    options.groups(), options.dilation());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

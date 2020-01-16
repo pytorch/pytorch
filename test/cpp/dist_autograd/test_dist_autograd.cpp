@@ -30,16 +30,17 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   auto in2 = torch::ones({3, 3}, options);
 
   autogradContainer_->newContext();
-  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
+  auto autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
   rpc::worker_id_t worker_id = 1;
   addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
-  auto send_function = autogradContext.sendFunctions()[1];
+      autogradContext, AutogradMetadata(1, 1), tensors);
+  autogradContext->addKnownWorkerId(worker_id);
+  auto send_function = autogradContext->sendFunctions()[1];
 
   // ensure that the worker_ids are recorded
-  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
+  auto knownWorkerIds = autogradContext->getKnownWorkerIds();
   ASSERT_TRUE(knownWorkerIds.find(worker_id) != knownWorkerIds.end());
   ASSERT_EQ(knownWorkerIds.size(), 1);
 
@@ -74,7 +75,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   autogradContainer_->newContext();
-  auto& context = autogradContainer_->currentContext();
+  auto context = autogradContainer_->currentContext();
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
@@ -83,13 +84,13 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   auto t = torch::ones({1}, options);
   auto tensors = std::vector<torch::Tensor>{t};
   addSendRpcBackward(
-      context, AutogradMetadata(context.contextId(), 0), tensors, 0);
+      context, AutogradMetadata(context->contextId(), 0), tensors);
 
-  auto sendFunction = context.retrieveSendFunction(0);
+  auto sendFunction = context->retrieveSendFunction(0);
   sendFunction->setGrads({t});
 
   // Execute engine.
-  engine.executeSendFunction(context, sendFunction);
+  engine.executeSendFunctionAsync(context, sendFunction)->wait();
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

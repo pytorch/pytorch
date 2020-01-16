@@ -524,6 +524,10 @@ if(USE_FBGEMM)
     set(USE_FBGEMM OFF)
   endif()
   if(MSVC)
+    message(WARNING
+      "FBGEMM is currently not supported on windows with MSVC. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
   endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
@@ -798,12 +802,12 @@ if(pybind11_FOUND)
 else()
     message(STATUS "Using third_party/pybind11.")
     set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+    install(DIRECTORY ${pybind11_INCLUDE_DIRS}
+            DESTINATION ${CMAKE_INSTALL_PREFIX}
+            FILES_MATCHING PATTERN "*.h")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
-install(DIRECTORY ${pybind11_INCLUDE_DIRS}
-        DESTINATION ${CMAKE_INSTALL_PREFIX}
-        FILES_MATCHING PATTERN "*.h")
 
 # ---[ MPI
 if(USE_MPI)
@@ -961,6 +965,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+    list(APPEND HIP_CXX_FLAGS -std=c++14)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g)
@@ -1233,7 +1238,7 @@ if (NOT INTERN_BUILD_MOBILE)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
 
   if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    SET(CMAKE_CXX_STANDARD 11)
+    SET(CMAKE_CXX_STANDARD 14)
   endif()
 
   LIST(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})

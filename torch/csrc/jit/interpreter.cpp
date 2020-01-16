@@ -51,6 +51,17 @@ namespace jit {
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
+TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return TensorType::get()->withUndefined();
+  }
+  auto r = TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
+
 namespace {
 
 // insert Drop nodes to kill references for anything unused:
@@ -1010,9 +1021,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = t.defined() ? TensorType::create(t)
-                                      : TensorType::get()->withUndefined();
-            const TypePtr &expected = af.types[inst.X];
+            auto actual = tensorTypeInCurrentExecutionContext(t);
+            const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;
@@ -1044,23 +1054,38 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    for (size_t i = 0; i < frames.size(); ++i) {
+    std::string previous_fn_name = "";
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
       const Frame& frame = frames[frames.size() - 1 - i];
       size_t pc = (i == 0) ? frame.pc
                            : frame.pc -
               1; // make sure we report the call node, not the node after it
       Node* node = frame.function->instructions_source_[pc];
-      if (i > 0) {
-        out << "during call ";
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          p.second.print_with_context(
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          previous_fn_name = p.first->name();
+        }
       }
-      node->sourceRange().highlight(out);
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+      if (node->kind() == prim::CallFunction) {
+        previous_fn_name = node->inputs()
+                               .at(0)
+                               ->type()
+                               ->expect<FunctionType>()
+                               ->function()
+                               ->name();
+      }
     }
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
     ss << msg << "\n";
-    ss << "The above operation failed in interpreter, with the following stack trace:\n";
+    ss << "The above operation failed in interpreter.\n";
+    ss << "Traceback (most recent call last):\n";
     formatStackTrace(ss);
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));

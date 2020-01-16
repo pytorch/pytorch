@@ -203,7 +203,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     max_target_length = targets.size(1);
   }
 
-  Tensor log_beta = at::empty_like(log_alpha, at::MemoryFormat::Contiguous);  // could be optimized to use only 2 rows
+  Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);  // could be optimized to use only 2 rows
   auto lpp  = log_probs.permute({1,0,2});
   auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();

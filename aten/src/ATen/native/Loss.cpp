@@ -41,7 +41,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
-  auto zeros = at::zeros_like(target, at::MemoryFormat::Contiguous);
+  auto zeros = at::zeros_like(cos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
   auto output_pos = at::where(target == 1, pos, zeros);
@@ -51,7 +51,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
 }
 
 Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
-  auto zeros = at::zeros_like(self, at::MemoryFormat::Contiguous);
+  auto zeros = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto margin_clamp = (margin - self).clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
@@ -77,14 +77,14 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 }
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto zeros = at::zeros_like(target, at::MemoryFormat::Contiguous);
   auto output_pos = target * (at::log(target) - input);
+  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto output = at::where(target > 0, output_pos, zeros);
   return apply_loss_reduction(output, reduction);
 }
 
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_expand = grad.expand_as(input);
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
@@ -159,6 +159,46 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     return apply_loss_reduction(loss, reduction);
 }
 
+Tensor& soft_margin_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto z = at::exp(-target * input);
+  // inplace version of: grad_input = -norm * target * z / (1. + z) * grad_output;
+  at::mul_out(grad_input, target, z).mul_(-norm);
+  z.add_(1);
+  grad_input.div_(z).mul_(grad_output);
+  return grad_input;
+}
+
+Tensor soft_margin_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto grad_input = at::empty({0}, input.options());
+  at::soft_margin_loss_backward_out(grad_input, grad_output, input, target, reduction);
+  return grad_input;
+}
+
+Tensor& soft_margin_loss_out(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  if (reduction != Reduction::None) {
+    auto tmp = apply_loss_reduction(output, reduction);
+    output.resize_({});
+    output.copy_(tmp);
+  }
+  return output;
+}
+
+Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    int64_t reduction) {
+  auto output = at::empty({0}, input.options());
+  at::soft_margin_loss_out(output, input, target, reduction);
+  return output;
+}
+
 Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
   Tensor loss;
   auto iter = TensorIterator::binary_op(loss, input, target);
@@ -190,7 +230,7 @@ Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_outpu
 }
 
 Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 
@@ -219,7 +259,7 @@ Tensor& mse_loss_out(Tensor&result, const Tensor& input, const Tensor& target, i
 }
 
 Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 
@@ -257,7 +297,7 @@ Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, in
 }
 
 Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
 }
 

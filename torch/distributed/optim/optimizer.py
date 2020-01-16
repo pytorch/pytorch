@@ -6,20 +6,33 @@ from threading import Lock
 
 
 class _LocalOptimizer:
+    # Ideally we would only need to share a lock for instances of
+    # _LocalOptimizer that deal with the same parameters. We are
+    # making a simplifying assumption here that if there is more
+    # than one instance of _LocalOptimizer per worker, they will
+    # be optimizing the same parameters (e.g. each data parallel
+    # trainer will create its own instance of _LocalOptimizer but
+    # they will all optimize the same parameters on each worker)
+    global_lock = Lock()
+
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         self.optim = optim_cls(
             [rref.local_value() for rref in local_params_rref],
             *args,
             **kwargs)
-        self.lock = Lock()
 
     def step(self, autograd_ctx_id):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
 
-        with self.lock:
+        with _LocalOptimizer.global_lock:
             for param, grad in all_local_grads.items():
                 param.grad = grad
             self.optim.step()
+
+
+def _new_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
+    return rpc.RRef(
+        _LocalOptimizer(optim_cls, local_params_rref, *args, **kwargs))
 
 
 def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
@@ -30,13 +43,16 @@ def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
 def _wait_for_all(rpc_futs):
     # TODO: improve error propagation
     exception = None
+    results = []
     for fut in rpc_futs:
         try:
-            fut.wait()
+            results.append(fut.wait())
         except Exception as e:
+            results.append(e)
             exception = e
     if exception is not None:
         raise exception
+    return results
 
 
 class DistributedOptimizer:
@@ -94,16 +110,17 @@ class DistributedOptimizer:
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        self.remote_optimizers = []
+        remote_optim_futs = []
         for worker, param_rrefs in per_worker_params_rref.items():
-            remote_optim_rref = rpc.remote(
+            remote_optim_rref_fut = rpc.rpc_async(
                 worker,
-                _LocalOptimizer,
-                args=[optimizer_class, param_rrefs] + list(args),
+                _new_local_optimizer,
+                args=(optimizer_class, param_rrefs) + args,
                 kwargs=kwargs,
             )
-            self.remote_optimizers.append(remote_optim_rref)
+            remote_optim_futs.append(remote_optim_rref_fut)
 
+        self.remote_optimizers = _wait_for_all(remote_optim_futs)
 
     def step(self):
         """
