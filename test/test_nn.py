@@ -10461,7 +10461,7 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
         helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
 
-        nan = torch.tensor([float('nan')], device=device).resize_([])
+        nan = torch.tensor(float('nan'), device=device)
         helper([0, 3], "mean", nan)
         helper([0, 3, 5, 7], "mean", nan)
         helper([2, 3, 0, 7], "mean", nan)
