@@ -127,7 +127,7 @@ struct MeanOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return (out_t)(a * factor);
+    return (out_t)(a * ((acc_t)factor));
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -234,7 +234,7 @@ struct NormZeroOps {
 template <typename acc_t, typename data_t, typename out_t>
 struct NormOneOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, data_t data, int64_t /*idx*/) const {
-    return acc + std::abs(data);
+    return acc + acc_t(std::abs(data));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
