@@ -19,9 +19,8 @@ using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
-template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
-  using list_type = std::vector<StorageT>;
+  using list_type = std::vector<IValue>;
 
   explicit ListImpl(list_type list_, TypePtr elementType_)
   : list(std::move(list_))
@@ -39,14 +38,14 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 
 namespace impl {
 
-template<class T, class Iterator, class StorageT> class ListIterator;
+template<class T, class Iterator> class ListIterator;
 
-template<class T, class Iterator, class StorageT> class ListElementReference;
+template<class T, class Iterator> class ListElementReference;
 
-template<class T, class Iterator, class StorageT>
-void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReference<T, Iterator, StorageT>&& rhs);
+template<class T, class Iterator>
+void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
 
-template<class T, class Iterator, class StorageT>
+template<class T, class Iterator>
 class ListElementReference final {
 public:
   operator T() const;
@@ -58,7 +57,7 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
-  friend void swap<T, Iterator, StorageT>(ListElementReference&& lhs, ListElementReference&& rhs);
+  friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:
   ListElementReference(Iterator iter)
@@ -75,14 +74,14 @@ private:
   }
 
   friend class List<T>;
-  friend class ListIterator<T, Iterator, StorageT>;
+  friend class ListIterator<T, Iterator>;
 
   Iterator iterator_;
 };
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator, class StorageT>
+template<class T, class Iterator>
 class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
 public:
   explicit ListIterator() = default;
@@ -137,8 +136,8 @@ public:
     return lhs.iterator_ - rhs.iterator_;
   }
 
-  ListElementReference<T, Iterator, StorageT> operator*() const {
-      return {iterator_};
+  ListElementReference<T, Iterator> operator*() const {
+    return {iterator_};
   }
 
 private:
@@ -170,15 +169,13 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
+  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
 template<class T> List<IValue> toGenericList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
-template<class T> List<T> toList(std::vector<T> list);
-template<class T> const std::vector<T>& toVector(const List<T>& list);
 }
 template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
@@ -201,33 +198,18 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 template<class T>
 class List final {
 private:
-  // List of types that don't use IValue based lists
-  using types_with_direct_list_implementation = guts::typelist::typelist<
-    int64_t,
-    double,
-    bool,
-    at::Tensor
-  >;
-
-  using StorageT = std::conditional_t<
-    guts::typelist::contains<types_with_direct_list_implementation, T>::value,
-    T, // The types listed in types_with_direct_list_implementation store the list as std::vector<T>
-    IValue  // All other types store the list as std::vector<IValue>
-  >;
-
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl<StorageT>> impl_;
+  c10::intrusive_ptr<detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename List<T>::StorageT>::list_type::iterator, typename List<T>::StorageT>;
+  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl::list_type::iterator>;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl<StorageT>::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::reverse_iterator, StorageT>;
-  using internal_value_type_test_only = StorageT;
+  using size_type = typename detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -416,6 +398,9 @@ public:
    */
   friend bool list_is_equal<T>(const List& lhs, const List& rhs);
 
+
+  std::vector<T> vec() const;
+
   /**
    * Returns the number of Lists currently pointing to this same list.
    * If this is the only instance pointing to this list, returns 1.
@@ -429,13 +414,11 @@ public:
   void unsafeSetElementType(TypePtr t);
 
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
   template<class T_> friend List<IValue> impl::toGenericList(List<T_>);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
-  template<class T_> friend List<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend const std::vector<T_>& impl::toVector(const List<T_>& list);
 };
 
 namespace impl {
@@ -446,21 +429,6 @@ using GenericList = List<IValue>;
 
 inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
-}
-
-template<class T>
-const std::vector<T>& toVector(const List<T>& list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-
-  return list.impl_->list;
-}
-
-template<class T>
-List<T> toList(std::vector<T> list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  List<T> result;
-  result.impl_->list = std::move(list);
-  return result;
 }
 
 }

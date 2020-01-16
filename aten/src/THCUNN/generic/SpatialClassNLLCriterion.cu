@@ -132,7 +132,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   }
   if (reduction == at::Reduction::Mean) {
     cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
-      output_data, total_weight_data
+      output_data, total_weight_data, THCTensor_(nElement)(state, input)
     );
     THCudaCheck(cudaGetLastError());
   }

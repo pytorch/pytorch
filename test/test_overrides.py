@@ -5,7 +5,10 @@ import inspect
 import functools
 
 from common_utils import TestCase
-from torch._overrides import torch_function_dispatch
+
+from torch._overrides import handle_torch_function, has_torch_function
+
+Tensor = torch.Tensor
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -14,38 +17,30 @@ from torch._overrides import torch_function_dispatch
 # fake torch function allows us to verify that the dispatch rules work
 # the same for a torch function implemented in C++ or Python.
 
-def foo_dispatcher(a, b, c=None):
-    return (a, b, c)
-
-@torch_function_dispatch(foo_dispatcher)
 def foo(a, b, c=None):
     """A function multiple arguments and an optional argument"""
+    if any(type(t) is not Tensor for t in (a, b, c)) and has_torch_function((a, b, c)):
+        return handle_torch_function(foo, (a, b, c), a, b, c=c)
     if c:
         return a + b + c
     return a + b
 
-def bar_dispatcher(a):
-    return (a,)
-
-@torch_function_dispatch(bar_dispatcher)
 def bar(a):
     """A function with one argument"""
+    if type(a) is not Tensor and has_torch_function((a,)):
+        return handle_torch_function(bar, (a,), a)
     return a
 
-def baz_dispatcher(a, b):
-    return (a, b)
-
-@torch_function_dispatch(baz_dispatcher)
 def baz(a, b):
     """A function with multiple arguments"""
+    if type(a) is not Tensor or type(b) is not Tensor and has_torch_function((a, b)):
+        return handle_torch_function(baz, (a, b), a, b)
     return a + b
 
-def quux_dispatcher(a):
-    return (a,)
-
-@torch_function_dispatch(quux_dispatcher)
 def quux(a):
     """Used to test that errors raised in user implementations get propagated"""
+    if type(a) is not Tensor and has_torch_function((a,)):
+        return handle_torch_function(quux, (a,), a)
     return a
 
 # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that

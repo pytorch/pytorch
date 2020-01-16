@@ -7830,6 +7830,16 @@ class TestNN(NNTestCase):
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2))
 
+    def test_conv_padding_mode(self):
+        with self.assertRaisesRegex(ValueError, "padding_mode must be one of"):
+            nn.Conv2d(3, 3, 3, padding_mode="xyz")
+
+        with self.assertRaisesRegex(ValueError, "padding_mode must be one of"):
+            nn.Conv2d(3, 3, 3, padding_mode=3)
+
+        with self.assertRaisesRegex(ValueError, "Only \"zeros\" "):
+            nn.ConvTranspose2d(3, 3, 3, padding_mode="reflect")
+
     def test_softmin(self):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
@@ -10449,18 +10459,35 @@ class TestNNDeviceType(NNTestCase):
         helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device))
         helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
         helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
+        helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
 
         nan = torch.tensor([float('nan')], device=device).resize_([])
         helper([0, 3], "mean", nan)
         helper([0, 3, 5, 7], "mean", nan)
         helper([2, 3, 0, 7], "mean", nan)
         helper([2, 3, 5, 0], "mean", nan)
+        helper([2, 3, 5, 7, 0], "mean", nan)
 
         zero = torch.tensor([0], device=device).resize_([])
         helper([0, 3], "sum", zero)
         helper([0, 3, 5, 7], "sum", zero)
         helper([2, 3, 0, 7], "sum", zero)
         helper([2, 3, 5, 0], "sum", zero)
+        helper([2, 3, 5, 7, 0], "sum", zero)
+
+    def test_nll_loss_zero_tensor(self, device):
+
+        def helper(input_size):
+            input = torch.ones(input_size, requires_grad=True, device=device)
+            num_channels = input_size[1]
+            target_size = (input_size[0], ) + tuple(input_size[2:])
+            target = torch.zeros(target_size, dtype=torch.long, device=device)
+            weight = torch.zeros([num_channels], device=device)
+            self.assertEqual(F.nll_loss(input, target, weight).item(), 0)
+
+        helper([2, 3])
+        helper([2, 3, 5, 7])
+        helper([2, 3, 5, 7, 9])
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
