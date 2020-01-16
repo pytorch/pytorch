@@ -320,8 +320,9 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
     gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a <= scalar_t(0) ? (static_cast<scalar_t>(std::exp(a * negiptcoef))
-          - scalar_t(1.)) * negcoef : a * poscoef;
+      scalar_t positive_case = a * poscoef;
+      scalar_t negative_case = (static_cast<scalar_t>(std::exp(a * negiptcoef)) - scalar_t(1.)) * negcoef;
+      return a > scalar_t(0) ? positive_case : negative_case;
     });
   });
 }
