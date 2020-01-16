@@ -202,22 +202,22 @@ __device__ inline constexpr typename function_traits<func_t>::result_type array_
   return f();
 }
 
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 1, int> = 0>
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 1), int> = 0>
 __device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
   return f(a[0]);
 }
 
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 2, int> = 0>
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 2), int> = 0>
 __device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
   return f(a[0], a[1]);
 }
 
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 3, int> = 0>
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 3), int> = 0>
 __device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
   return f(a[0], a[1], a[2]);
 }
 
-template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 4, int> = 0>
+template <typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity == 4), int> = 0>
 __device__ inline constexpr typename function_traits<func_t>::result_type array_apply(func_t f, array_t a) {
   return f(a[0], a[1], a[2], a[3]);
 }
