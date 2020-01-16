@@ -103,7 +103,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
     ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7)
     CUDA_VERSION=9.2
@@ -131,6 +130,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
