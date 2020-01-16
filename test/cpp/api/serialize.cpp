@@ -118,10 +118,10 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   torch::save(optim3, optim_tempfile.name);
   torch::load(optim3_2, optim_tempfile.name);
 
-  const auto& optim3_2_param_groups = optim3_2.param_groups();
-  const auto& optim3_param_groups = optim3.param_groups();
-  const auto& optim3_2_state = optim3_2.state();
-  const auto& optim3_state = optim3.state();
+  auto& optim3_2_param_groups = optim3_2.param_groups();
+  auto& optim3_param_groups = optim3.param_groups();
+  auto& optim3_2_state = optim3_2.state();
+  auto& optim3_state = optim3.state();
 
   //optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
@@ -175,16 +175,15 @@ void write_step_buffers(
   write_tensors_to_archive(archive, key, tensors);
 }
 
-#define OLD_SERIALIZATION_LOGIC_WARNING_CHECK(optimizer_name, archive, funcname, filename) \
+#define OLD_SERIALIZATION_LOGIC_WARNING_CHECK(funcname, optimizer, filename) \
 { \
   std::stringstream buffer;\
   CerrRedirect cerr_redirect(buffer.rdbuf());\
-  archive.funcname(filename);\
+  funcname(optimizer, filename);\
   ASSERT_EQ(\
     count_substr_occurrences(\
       buffer.str(),\
-      "Your serialized " + optimizer_name + " optimizer is still using the old serialization format. "\
-      "You should re-save your " + optimizer_name + " optimizer to use the new serialization format."\
+      "old serialization"\
     ),\
   1);\
 }
@@ -492,11 +491,7 @@ TEST(SerializeTest, Optim_Adagrad) {
   write_tensors_to_archive(output_archive, "sum_buffers", sum_buffers);
   write_step_buffers(output_archive, "step_buffers", step_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
-  torch::serialize::InputArchive input_archive;
-  //OLD_SERIALIZATION_LOGIC_WARNING_CHECK("Adagrad", input_archive, load_from, optim_tempfile_old_format.name);
-  input_archive.load_from(optim_tempfile_old_format.name);
-  torch::load(optim1_2, optim_tempfile_old_format.name);
-
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 

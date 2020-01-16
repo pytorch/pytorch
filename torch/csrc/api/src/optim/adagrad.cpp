@@ -73,7 +73,7 @@ void Adagrad::step() {
         grad = grad.add(p.data(), options.weight_decay());
       }
       const auto clr = options.lr() /
-          (1 + (state.step() - 1) * options.lr_decay());
+          (1 + static_cast<double>(state.step() - 1) * options.lr_decay());
 
       if (grad.is_sparse()) {
         grad = grad.coalesce();
