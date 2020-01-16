@@ -9345,6 +9345,7 @@ class TestNNDeviceType(NNTestCase):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
         input_large = torch.randn(4096, 1, 512, 1024, dtype=dtype, device=device)
+        # forward
         ret = conv(input_large)
         maxdiff0 = (ret.narrow(0, 0, 1024) - conv(input_large.narrow(0, 0, 1024))).abs_().max().item()
         maxdiff1 = (ret.narrow(0, 1024, 1024) - conv(input_large.narrow(0, 1024, 1024))).abs_().max().item()
@@ -9355,14 +9356,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff2, 0)
         self.assertEqual(maxdiff3, 0)
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
-        conv1 = nn.Conv2d(2, 2, 8, 8).to(device).to(dtype)
-        input_large = torch.randn(4096, 2, 512, 512, dtype=dtype, device=device)
-        ret = conv1(input_large)
-        self.assertEqual(ret[:2048], conv1(input_large[:2048]))
-        self.assertEqual(ret[2048:], conv1(input_large[2048:]))
+        conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
+        input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
+        # forward
+        ret = conv(input_large)
+        self.assertEqual(ret[:2048], conv(input_large[:2048]))
+        self.assertEqual(ret[2048:4096], conv(input_large[2048:4096]))
+        self.assertEqual(ret[4096:], conv(input_large[4096:]))
+
+        # backward
+        conv.zero_grad()
+        # When computing the backward, we are using the `max(dim=1)`` to create
+        # some sparsity. Without this sparsity, the rounding error would be
+        # too large (as large as 1e-5) to satisfy the creterion (1e-6) of `assertEqual`
+        ret.view(4097, -1).max(dim=1).values.sum().backward()
+        del ret
+        grad1 = conv.weight.grad.detach().clone()
+        conv.zero_grad()
+        conv(input_large[:2048]).view(2048, -1).max(dim=1).values.sum().backward()
+        conv(input_large[2048:4096]).view(2048, -1).max(dim=1).values.sum().backward()
+        conv(input_large[4096:]).view(1, -1).max(dim=1).values.sum().backward()
+        grad2 = conv.weight.grad.detach().clone()
+        # gradients are at the order of hundreds, we need to scale it to
+        # the order of one so that we can compare
+        scale = 1 / grad1.abs().mean()
+        grad1 = grad1 * scale
+        grad2 = grad2 * scale
+        self.assertEqual(grad1, grad2)
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)
