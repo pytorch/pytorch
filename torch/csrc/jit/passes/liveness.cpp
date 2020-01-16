@@ -13,8 +13,59 @@ struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
+  void propagateLoopHeaderLiveness(Block* b) {
+    for (auto n : b->nodes()) {
+      if (n->kind() == prim::Loop) {
+        auto loop_liveness = liveness_sets_[n];
+        loop_liveness -= toSparseBitVector(n->inputs());
+        extendLiveness(n->blocks()[0], loop_liveness);
+        propagateLoopHeaderLiveness(n->blocks()[0]);
+      }
+    }
+  }
+
   std::unordered_map<Node*, std::vector<Value*>> run() {
-    processBlock(graph_->block(), SparseBitVector{});
+    // In a special case, where IR is in a strict SSA form (i.e. all uses
+    // are dominated by a definition)
+    // and the control flow of programs is reducible, liveness can be computed
+    // in two passes.
+    // Our IR meets both criteria by construction.
+    // Namely, there is no way to express irreducible CF with `prim::Loop` and
+    // `prim::If` and every definition dominates their uses
+    //
+    // A variable is considered live at any point in a program after its
+    // definition and before its last use. The sets of live variables before and
+    // after an operation or a basic block are called live-in and live-out A use
+    // of a variable `v` will be live-in at the loop headers of any set of the
+    // loops that don't contain its definition `d` and contain the use.
+    // Alternatively, for a set of loops that contain both the definition
+    // `d` and uses of `v`, `v` will only be live at a point `p`
+    // if there's a path from `p` to the use of `v` not containing the
+    // definition `d`. These are two main cases due to the reducibility of CFGs
+    // and strict SSA form.
+    // Thus, propagating liveness backwards just once excluding back edges,
+    // the accurate liveness will be computed at the loop
+    // headers. Any surviving uses `v` at the loop header should be alive
+    // throughout as a) they defined elsewhere (e.g. in outer loops, outer ifs,
+    // outermost scope) and b) may be used in the next iteration effectively
+    // extending their live ranges to cover the entire loop(s). The second pass
+    // propagates live variables at the loop header to every node within the
+    // loop See https://hal.inria.fr/inria-00558509v2/document for more details
+    //
+    // The first pass, `computePartialLivenessBackwards`, walks a graph backward
+    // and depth-first and compute liveness as usual using the following
+    // formula: LIVE_IN(B) = LIVE_OUT(SUCC(B)) + GEN(B) - KILL(B) Liveness isn't
+    // propagated along back edges and block inputs (phiDefs in the paper) in
+    // loop nodes are excluded from liveness propagation. Maximum and current
+    // trip count uses are added explicitly as `prim::Store`s at the end of
+    // every loop as they are required to build bail out graphs.
+    //
+    // The second pass, `propagateLoopHeaderLiveness`, propagates the liveness
+    // sets of the roots of all the loop forests (i.e. outermost `prim::Loop`s)
+    // to every node within their corresponding loop bodies
+    computePartialLivenessBackwards(graph_->block(), SparseBitVector{});
+    propagateLoopHeaderLiveness(graph_->block());
+
     std::unordered_map<Node*, std::vector<Value*>> result;
 
     for (const auto& e : liveness_sets_) {
@@ -72,7 +123,18 @@ struct LivenessAnalyzer {
     return vec;
   }
 
-  SparseBitVector processBlock(Block* b, SparseBitVector liveness) {
+  void extendLiveness(Block *b, const SparseBitVector &loop_block) {
+    for (Node *lit : b->nodes()) {
+      liveness_sets_.at(lit) |= loop_block;
+      for (Block *ib : lit->blocks()) {
+        extendLiveness(ib, loop_block);
+      }
+    }
+  }
+
+  SparseBitVector computePartialLivenessBackwards(
+      Block* b,
+      SparseBitVector liveness) {
     // block outputs are the uses
     auto block_outputs = toSparseBitVector(b->outputs());
     liveness |= block_outputs;
@@ -95,15 +157,18 @@ struct LivenessAnalyzer {
         graph_->insertNode(ctc);
         auto mtc = graph_->create(prim::Store, {lv.maxTripCount()}, 0);
         graph_->insertNode(mtc);
-        loop_block = processBlock(it->blocks()[0], loop_block);
+        loop_block =
+            computePartialLivenessBackwards(it->blocks()[0], loop_block);
         ctc->destroy();
         mtc->destroy();
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
         liveness |= loop_block;
       } else if (it->kind() == prim::If) {
-        auto true_liveness = processBlock(it->blocks()[0], liveness);
-        auto false_liveness = processBlock(it->blocks()[1], liveness);
+        auto true_liveness =
+            computePartialLivenessBackwards(it->blocks()[0], liveness);
+        auto false_liveness =
+            computePartialLivenessBackwards(it->blocks()[1], liveness);
         liveness |= true_liveness;
         liveness |= false_liveness;
       }
