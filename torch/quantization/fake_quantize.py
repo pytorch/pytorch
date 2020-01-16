@@ -49,8 +49,8 @@ class FakeQuantize(Module):
         self.observer = observer(**observer_kwargs)
         assert torch.iinfo(self.observer.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.observer.dtype).max, 'quant_max out of bound'
-        self.scale = None
-        self.zero_point = None
+        self.scale = torch.tensor([1.0]) # will be overwritten later in forward function
+        self.zero_point = torch.tensor([0]) # will be overwritten later in forward function
         self.dtype = self.observer.dtype
         self.qscheme = self.observer.qscheme
         self.ch_axis = self.observer.ch_axis if hasattr(self.observer, 'ch_axis') else 0
