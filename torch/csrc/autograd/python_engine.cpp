@@ -61,7 +61,7 @@ variable_list PythonEngine::execute(
     bool keep_graph,
     bool create_graph,
     const edge_list& outputs) {
-  TORCH_CHECK(!PyGILState_Check(), "The autograd engine is called while holding the GIL. If you are using the C++ "
+  TORCH_CHECK(!PyGILState_Check(), "The autograd engine was called while holding the GIL. If you are using the C++ "
                                    "API, the autograd engine is an expensive operation that does not require the "
                                    "GIL to be held so you should release it with 'pybind11::gil_scoped_release no_gil;'"
                                    ". If you are not using the C++ API, please report a bug to the pytorch team.")
