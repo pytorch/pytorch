@@ -933,6 +933,8 @@ void testWildcards() {
   graph(%ten_list : Tensor[], %int_list : int[], %opt_ten_list : Tensor[]?):
     %ten : Tensor = prim::Constant()
     %4 : Tensor[] = aten::append(%ten_list, %ten)
+    %ten_ten_list : Tensor[][] = prim::Constant()
+    %int_int_list : int[][] = prim::Constant()
     return ()
     )IR",
         &*graph,
@@ -947,6 +949,13 @@ void testWildcards() {
     AT_ASSERT(!aliasDb.mayContainAlias(int_list, opt_ten_list));
     AT_ASSERT(aliasDb.mayContainAlias(ten_list, opt_ten_list));
     AT_ASSERT(aliasDb.mayAlias(ten_list, opt_ten_list));
+
+    auto list_of_tensor_lists = vmap["ten_ten_list"];
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, list_of_tensor_lists));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, vmap["ten"]));
+
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(vmap["int_int_list"], list_of_tensor_lists));
   }
 
   // test invariant container aliasing
