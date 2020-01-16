@@ -394,7 +394,6 @@ std::vector<Tensor> project(at::ArrayRef<tpair_of<Tensor>> tuples) {
 }
 
 Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) {
-      TORCH_WARN("In 397!");
   return at::cat(hiddens, 0); }
 tpair_of<Tensor> hidden_concat(at::ArrayRef<tpair_of<Tensor>> hiddens) {
   return std::make_tuple(hidden_concat(project<0>(hiddens)), hidden_concat(project<1>(hiddens)));
@@ -547,10 +546,6 @@ private:
     auto rqa = demoting_requantization(qa, out_scale, out_zero_point, qtype);
     auto rqb = demoting_requantization(qb, out_scale, out_zero_point, qtype);
 
-    TORCH_WARN("Sizes: ", rqa.sizes(), " ", rqb.sizes());
-    TORCH_WARN("Types for ", function_name, ": ", rqa.scalar_type(), " ", rqb.scalar_type());
-    TORCH_WARN("Scales for ", function_name, ": ", rqa.q_scale(), " ", rqb.q_scale());
-    TORCH_WARN("ZPs for ", function_name, ": ", rqa.q_zero_point(), " ", rqb.q_zero_point());
     Tensor out = at::_empty_affine_quantized(rqa.sizes(),
       at::device(at::kCPU).dtype(qtype),
                  out_scale.toDouble(),
@@ -699,7 +694,6 @@ struct FullBidirectionalLayer
           layer_(rev_step_inputs, input_hidden.second, params.second, true);
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
-      TORCH_WARN("In 702!");
       return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
               std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
     }
@@ -712,7 +706,6 @@ struct FullBidirectionalLayer
         layer_(rev_step_inputs, input_hidden.second, params.second);
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
-      TORCH_WARN("In 715!");
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
             std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
@@ -779,7 +772,6 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     hiddens.emplace_back(hidden);
     std::reverse(hiddens.begin(), hiddens.end());
 
-    TORCH_WARN("In 782!");
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
             hidden_concat(hiddens)};
   }
@@ -834,7 +826,6 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
-    TORCH_WARN("In 837!");
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
             hidden};
   }
@@ -859,7 +850,6 @@ struct PackedBidirectionalLayer
       const param_type& params) const override {
     auto fw_result = layer_(input, input_hidden.first, params.first);
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
-    TORCH_WARN("In 862!");
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
@@ -901,13 +891,10 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
-  TORCH_WARN(num_layers, " In 904");
   for (int64_t l = 0; l < num_layers; ++l) {
-    TORCH_WARN(l, " In 905!");
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
-    TORCH_WARN(l, " In 909!");
     if (dropout_p != 0 && train && l < num_layers - 1) {
       layer_input = dropout(layer_input, dropout_p);
     }
@@ -992,9 +979,7 @@ std::tuple<io_type, Tensor, Tensor> _qlstm_impl(
   for (int64_t i = 0; i < total_layers; ++i) {
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
-  TORCH_WARN("In 993!");
   auto result = _rnn_impl<qLSTMCell, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
-  TORCH_WARN("In 995!");
   // Now, we need to reverse the transposed we performed above.
   std::vector<Tensor> hy, cy;
   hy.reserve(total_layers);
@@ -1004,7 +989,6 @@ std::tuple<io_type, Tensor, Tensor> _qlstm_impl(
     cy.push_back(std::move(std::get<1>(hidden)));
   }
 
-  TORCH_WARN("In 1004!");
   return std::make_tuple(std::move(result.outputs), at::stack(hy, 0), at::stack(cy, 0));
 }
 
@@ -1264,7 +1248,6 @@ _thnn_differentiable_lstm_cell_backward(
   gig = at::sigmoid_backward(gig, i);
   gfg = at::sigmoid_backward(gfg, f);
   gcg = at::tanh_backward(gcg, c);
-  TORCH_WARN("In 1263!");
   Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
   Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
   return std::make_tuple(grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
@@ -1301,7 +1284,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   Tensor gin = at::tanh_backward(grad_hy * (1 - ig), ng);
   Tensor ghn = gin * rg;
   Tensor grg = at::sigmoid_backward(gin * hn, rg);
-  TORCH_WARN("In 1300!");
   Tensor grad_input_gates = at::cat({grg,gig,gin}, 1);
   Tensor grad_hidden_gates = at::cat({grg,gig,ghn}, 1);
   Tensor grad_input_bias = input_bias.defined() ? grad_input_gates.sum(0, /*keepdim=*/false) : at::Tensor{};

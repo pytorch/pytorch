@@ -112,8 +112,6 @@ class RNNBase(torch.nn.Module):
             wb_hh = _prepack(weight_hh, bias_hh)
             self._flat_weights.append(PackedParameter(wb_ih))
             self._flat_weights.append(PackedParameter(wb_hh))
-        # print(flat_weights)
-        print(self._flat_weights)
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
