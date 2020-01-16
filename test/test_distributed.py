@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from common_utils import TestCase, run_tests, skipIfRocm
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from common_distributed import simple_sparse_reduce_tests
+from common_distributed import simple_sparse_reduce_tests, skip_if_not_multigpu, skip_if_rocm
 
 try:
     import torchvision

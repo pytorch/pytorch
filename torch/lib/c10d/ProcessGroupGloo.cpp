@@ -1200,7 +1200,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
       outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
-      inputs[i].copy_(output, /* non_blocking */ true);
+      inputs[i].copy_(outputs[i]);
       events[i].record(streams[i]);
     }
   }
@@ -1826,6 +1826,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag);
   enqueue(work);
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in Gloo process group");
 }
 
 namespace {
