@@ -36,7 +36,11 @@ class Rprop(Optimizer):
                 state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 state['step_size'] = torch.ones_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, grad, etas=(0.5, 1.2), step_sizes=(1e-4, 5000), **_):
+    def get_update(self, par, etas=(0.5, 1.2), step_sizes=(1e-4, 5000), weight_decay=0, **_):
+        grad = par.grad
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, par)
+
         state = self.state[par]
 
         eta_minus, eta_plus = etas

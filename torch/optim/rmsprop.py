@@ -65,7 +65,11 @@ class RMSprop(Optimizer):
                 if centered:
                     state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, grad, alpha=0.99, eps=1e-8, momentum=0, centered=False, **_):
+    def get_update(self, par, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False, **_):
+        grad = par.grad
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, par)
+
         state = self.state[par]
 
         state['step'] += 1

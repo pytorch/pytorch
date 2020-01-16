@@ -59,11 +59,12 @@ class Adam(Optimizer):
                     # Maintains max of all exp. moving avg. of sq. grad. values
                     state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, grad, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
-        state = self.state[par]
-
+    def get_update(self, par, betas=(.9, .999), eps=1e-8, weight_decay=0, amsgrad=False, **_):
+        grad = par.grad
         if weight_decay > 0:
             grad = grad.add(weight_decay, par)
+
+        state = self.state[par]
 
         beta1, beta2 = betas
         state['step'] += 1
@@ -124,7 +125,11 @@ class Adamax(Optimizer):
                 state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                 state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-    def get_update(self, par, grad, betas=(.9, .999), eps=1e-8, **_):
+    def get_update(self, par, betas=(.9, .999), eps=1e-8, weight_decay=0, **_):
+        grad = par.grad
+        if weight_decay > 0:
+            grad = grad.add(weight_decay, par)
+
         state = self.state[par]
 
         beta1, beta2 = betas
