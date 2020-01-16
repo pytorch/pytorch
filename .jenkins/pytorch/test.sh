@@ -12,13 +12,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+  # TODO move this to docker
+  pip_install unittest-xml-reporting
+
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -32,6 +35,12 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # TODO: Move this to Docker
+  sudo apt-get -qq update
+  sudo apt-get -qq install --no-install-recommends libsndfile1
+fi
+
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
@@ -39,8 +48,9 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-  # TODO: move this to Docker
-  pip_install --user hypothesis
+  # TODO: Please move this to Docker
+  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
@@ -65,22 +75,44 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
+    # Suppress vptr violations arising from multiple copies of pybind11
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-    # We suppress the vptr volation, since we have separate copies of
-    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
-    # the following problem:
-    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
-    #        runtime error: member call on address ... which does not point
-    #        to an object of type 'google::protobuf::MessageLite'
-    #        ...: note: object is of type 'onnx_torch::ModelProto'
-    #
-    # This problem should be solved when libtorch.so and libcaffe2.so are
-    # merged.
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
+    export TORCH_USE_RTLD_GLOBAL=1
+    # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
+    # default behavior.
+    #
+    # The reason for this is that without RTLD_GLOBAL, if we load multiple
+    # libraries that depend on libtorch (as is the case with C++ extensions), we
+    # will get multiple copies of libtorch in our address space.  When UBSAN is
+    # turned on, it will do a bunch of virtual pointer consistency checks which
+    # won't work correctly.  When this happens, you get a violation like:
+    #
+    #    member call on address XXXXXX which does not point to an object of
+    #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
+    #    XXXXXX note: object is of type
+    #    'std::_Sp_counted_ptr<torch::nn::LinearImpl*, (__gnu_cxx::_Lock_policy)2>'
+    #
+    # (NB: the textual types of the objects here are misleading, because
+    # they actually line up; it just so happens that there's two copies
+    # of the type info floating around in the address space, so they
+    # don't pointer compare equal.  See also
+    #   https://github.com/google/sanitizers/issues/1175
+    #
+    # UBSAN is kind of right here: if we relied on RTTI across C++ extension
+    # modules they would indeed do the wrong thing;  but in our codebase, we
+    # don't use RTTI (because it doesn't work in mobile).  To appease
+    # UBSAN, however, it's better if we ensure all the copies agree!
+    #
+    # By the way, an earlier version of this code attempted to load
+    # libtorch_python.so with LD_PRELOAD, which has a similar effect of causing
+    # it to be loaded globally.  This isn't really a good idea though, because
+    # it depends on a ton of dynamic libraries that most programs aren't gonna
+    # have, and it applies to child processes.
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
@@ -103,8 +135,18 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
+test_python_ge_config_simple() {
+  time python test/run_test.py --include jit_simple --verbose
+  assert_git_not_dirty
+}
+
+test_python_ge_config_legacy() {
+  time python test/run_test.py --include jit_legacy jit_fuser_legacy --verbose
+  assert_git_not_dirty
+}
+
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time python test/run_test.py --exclude nn jit_simple jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
   assert_git_not_dirty
 }
 
@@ -134,35 +176,33 @@ test_aten() {
 }
 
 test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@2b73a4846773a670632b29fb2fc2ac57df7bce5d
+  pip_install --user git+https://github.com/pytorch/vision.git@44a5bae933655ed7ff798669a43452b833f9ce01
 }
 
 test_libtorch() {
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
     python test/cpp/jit/tests_setup.py setup
-    CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/build/bin/test_jit
+      build/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
+      build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
     assert_git_not_dirty
   fi
 }
 
 test_custom_script_ops() {
-  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
-    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
@@ -203,8 +243,10 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-(cd test && python -c "import torch; print(torch.__config__.show())")
-(cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  (cd test && python -c "import torch; print(torch.__config__.show())")
+  (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
@@ -212,6 +254,13 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
+  test_python_ge_config_legacy
+elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_simple* || "${JOB_BASE_NAME}" == *ge_config_simple* ]]; then
+  test_python_ge_config_simple
+elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  # TODO: run some C++ tests
+  echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn

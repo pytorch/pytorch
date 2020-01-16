@@ -7,7 +7,6 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstdint> // for size_t
 #include <functional> // for function
@@ -21,13 +20,11 @@ namespace at {
 
 namespace torch { namespace autograd {
 
-struct Variable;
+using Variable = at::Tensor;
 using at::Context;
 using at::Device;
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
-#endif
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;
@@ -45,20 +42,14 @@ using at::Quantizer;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using c10::optional;
 
-struct TORCH_API VariableType final {
-  static std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
-  static std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
+namespace VariableType {
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
-  ${type_derived_method_declarations}
-
-private:
-  // checks that t is actually a Variable
-  static const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
-  static Variable & checked_cast_variable(Tensor & t, const char * name, int pos);
-  static at::Tensor & unpack(Tensor & t, const char * name, int pos);
-  static const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
-  static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
+  at::Tensor & unpack(Tensor & t, const char * name, int pos);
+  const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
+  at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
+  std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 };
 
 }} // namespace torch::autograd

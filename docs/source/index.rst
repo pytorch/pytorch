@@ -16,17 +16,18 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    :caption: Notes
 
    notes/*
+   PyTorch on XLA Devices <http://pytorch.org/xla/>
+   
+.. toctree::
+   :maxdepth: 1
+   :caption: Language Bindings
+
+   C++ API <https://pytorch.org/cppdocs/>
+   packages
 
 .. toctree::
-  :glob:
-  :maxdepth: 1
-  :caption: Community
-
-  community/*
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Package Reference
+   :maxdepth: 1
+   :caption: Python API
 
    torch
    nn
@@ -42,6 +43,8 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn.init
    onnx
    optim
+   quantization
+   rpc
    torch.random <random>
    sparse
    storage
@@ -53,6 +56,8 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
    type_info
+   named_tensor
+   name_inference
    torch.__config__ <__config__>
 
 .. toctree::
@@ -62,9 +67,24 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    torchvision/index
 
-* `torchaudio <https://pytorch.org/audio>`_
+.. toctree::
+   :maxdepth: 1
+   :caption: torchaudio Reference
 
-* `torchtext <https://pytorch.org/text>`_
+   torchaudio <https://pytorch.org/audio>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: torchtext Reference
+
+   torchtext <https://pytorch.org/text>
+
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: Community
+
+   community/*
 
 Indices and tables
 ==================

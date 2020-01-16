@@ -175,7 +175,7 @@ struct SchemaParser {
         } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
-          return static_cast<int64_t>(Reduction::Mean);
+          return static_cast<int64_t>(at::Reduction::Mean);
         } else if ("contiguous_format" == text) {
           return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
@@ -203,11 +203,11 @@ struct SchemaParser {
       std::vector<IValue> vs) {
     switch (kind) {
       case TypeKind::FloatType:
-        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toDouble(); }));
+        return fmap(vs, [](IValue v) { return v.toDouble(); });
       case TypeKind::IntType:
-        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toInt(); }));
+        return fmap(vs, [](IValue v) { return v.toInt(); });
       case TypeKind::BoolType:
-        return c10::impl::toList(fmap(vs, [](IValue v) { return v.toBool(); }));
+        return fmap(vs, [](IValue v) { return v.toBool(); });
       default:
         throw ErrorReport(range)
             << "lists are only supported for float or int types";

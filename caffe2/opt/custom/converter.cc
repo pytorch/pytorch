@@ -214,6 +214,10 @@ class ClipRangesGatherSigridHashConverter : public Converter {
     if (args.HasArgument("max_values")) {
       c->setMaxValues(args.GetRepeatedArgument<int64_t>("max_values"));
     }
+    if (args.HasArgument("hash_into_int32")) {
+      c->setHashIntoInt32(
+          args.GetSingleArgument<bool>("hash_into_int32", false));
+    }
     return nnOp;
   }
 
@@ -230,6 +234,8 @@ class ClipRangesGatherSigridHashConverter : public Converter {
         caffe2::MakeArgument<vector<int64_t>>("salts", fuse->getSalts()));
     op.add_arg()->CopyFrom(caffe2::MakeArgument<vector<int64_t>>(
         "max_values", fuse->getMaxValues()));
+    op.add_arg()->CopyFrom(caffe2::MakeArgument<bool>(
+        "hash_into_int32", fuse->getHashIntoInt32()));
     return op;
   }
 

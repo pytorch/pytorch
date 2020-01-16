@@ -2,6 +2,7 @@ import numpy as np
 
 import torch
 import io
+from copy import deepcopy
 
 from common_utils import TestCase, run_tests
 import tempfile
@@ -68,6 +69,18 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+
+    # legacy constructor/new doesn't support qtensors
+    def test_qtensor_legacy_new_failure(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
+        scale = 0.02
+        zero_point = 2
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
+        self.assertRaises(RuntimeError, lambda: qr.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: qr.new(r.storage()))
+        self.assertRaises(RuntimeError, lambda: qr.new(r))
+        self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
+        self.assertRaises(RuntimeError, lambda: qr.new([6]))
 
     def test_per_channel_qtensor_creation(self):
         numel = 10
@@ -180,6 +193,12 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(qr.q_zero_point(), qlast.q_zero_point())
         self.assertEqual(qlast.dequantize(), qr.dequantize())
 
+        # permuting larger tensors
+        x = torch.randn(64, 64)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, torch.qint32)
+        # should work
+        qx.permute([1, 0])
+
     def test_qtensor_per_channel_permute(self):
         r = torch.rand(20, 10, 2, 2, dtype=torch.float) * 4 - 2
         scales = torch.rand(10) * 0.02 + 0.01
@@ -252,6 +271,19 @@ class TestQuantizedTensor(TestCase):
         q.copy_(q2)
         # check scale and zero_points has been copied
         self.assertEqual(q, q2)
+        # deep copy
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
+        scale, zero_point = 2.0, 3
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+        qc = deepcopy(q)
+        self.assertEqual(qc, q)
+
+        # can't copy from quantized tensor to non-quantized tensor
+        r = torch.empty([numel], dtype=torch.float)
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
+            r.copy_(q)
 
     def test_qtensor_clone(self):
         numel = 10
@@ -263,25 +295,29 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(q, q2)
 
     def test_qtensor_view(self):
-        scale, zero_point, dtype = 1.0, 2, torch.quint8
-        q = torch._empty_affine_quantized(1, 2, 3, scale=scale, zero_point=zero_point, dtype=dtype)
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [1, 2, 3], dtype=dtype)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.view(1, 3, 2)
         self.assertEqual(q.numel(), q2.numel())
         # testing -1
         self.assertEqual(q, q2.view(1, -1, 3))
 
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
-        c = a.view(1, 3, 2, 4)  # does not change tensor layout
+        c = a.view(1, 3, 2, 4)  # does not change tensor layout in memory
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
-        # TODO: fix flaky test
-        # self.assertNotEqual(b.int_repr(), c.int_repr())
-
+        self.assertNotEqual(b.stride(), c.stride())
+        # size is the same but the underlying data is different
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
 
         # a case can't view non-contiguos Tensor
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         err_str = "view size is not compatible with input tensor's size and stride*"
         with self.assertRaisesRegex(RuntimeError, err_str):
@@ -291,31 +327,33 @@ class TestQuantizedTensor(TestCase):
 
 
     def test_qtensor_reshape(self):
-        scale, zero_point, dtype = 1.0, 2, torch.quint8
-        q = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=dtype)
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         q2 = q.reshape([15])
         self.assertEqual(q.numel(), q2.numel())
         self.assertEqual(q2.size(), [15])
         # testing -1
         self.assertEqual(q, q2.reshape([3, -1]))
 
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = a.reshape(1, 3, 2, 4)  # does not change tensor layout
         self.assertEqual(b.size(), c.size())
         self.assertEqual(b.q_scale(), c.q_scale())
         self.assertEqual(b.q_zero_point(), c.q_zero_point())
-        # TODO: fix flaky test
-        # self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertNotEqual(b.stride(), c.stride())
+        self.assertNotEqual(b.int_repr(), c.int_repr())
+        self.assertFalse(torch.equal(b, c))
 
         # we can use reshape for non-contiguous Tensor
-        a = torch._empty_affine_quantized([1, 2, 3, 4], scale=scale, zero_point=zero_point, dtype=dtype)
+        a_int = torch.randint(0, 100, [1, 2, 3, 4], dtype=dtype)
+        a = torch._make_per_tensor_quantized_tensor(a_int, scale=scale, zero_point=zero_point)
         b = a.transpose(1, 2)  # swaps 2nd and 3rd dimension
         c = b.reshape(1, 4, 2, 3)
-        self.assertEqual(b, c.reshape(1, 3, 2, 4))
 
     def test_qscheme_pickle(self):
-
         f = Foo()
         buf = io.BytesIO()
         torch.save(f, buf)
@@ -324,6 +362,7 @@ class TestQuantizedTensor(TestCase):
         f2 = torch.load(buf)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
+
 
 if __name__ == "__main__":
     run_tests()

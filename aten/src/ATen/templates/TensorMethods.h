@@ -7,11 +7,9 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/Variadic.h>
 #include <ATen/core/NamedTensor.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 #ifdef USE_STATIC_DISPATCH
 #include <ATen/TypeDefault.h>
@@ -21,30 +19,6 @@
 #endif
 
 namespace at {
-
-namespace detail {
-
-struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
-  TensorTypeSet ts;
-  void operator()(const at::Tensor& x) {
-    ts = ts | x.type_set();
-  }
-  void operator()(TensorOptions x) {
-    ts = ts | x.type_set();
-  }
-  void operator()(at::ArrayRef<at::Tensor> xs) {
-    for (const auto& x : xs) {
-      ts = ts | x.type_set();
-    }
-  }
-};
-
-template <typename... Args>
-TensorTypeSet multi_dispatch_tensor_type_set(Args&&... args) {
-  return MultiDispatchTensorTypeSet().apply(std::forward<Args>(args)...).ts;
-}
-
-}
 
 struct Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
@@ -77,8 +51,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 inline TensorOptions Tensor::options() const {
   return TensorOptions().dtype(dtype())
                         .device(device())
-                        .layout(layout())
-                        .is_variable(is_variable());
+                        .layout(layout());
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
@@ -110,7 +83,6 @@ inline bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -120,9 +92,13 @@ inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
 }
 
 inline bool Tensor::has_names() const {
+  // If a user is using unnamed tensors, then we can short-circuit right here.
+  // Otherwise, impl::has_names attempts to retrieve names.
+  if (!impl_->has_named_tensor_meta()) {
+    return false;
+  }
   return impl::has_names(unsafeGetTensorImpl());
 }
-#endif
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();
@@ -188,5 +164,25 @@ AT_FORALL_QINT_TYPES(DEFINE_CAST)
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
 #undef DEFINE_ITEM
+
+// Gradient Node and Edges
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
+  // Return the grad argument in case of a hook with void return type to have an
+  // std::function with Tensor return type
+  std::function<void(Tensor)> fn(hook);
+  return _register_hook([fn](const Tensor& grad) {
+    fn(grad);
+    return Tensor();
+  });
+}
+
+template <typename T>
+auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
+  return _register_hook(hook);
+}
+
 
 } //namespace at

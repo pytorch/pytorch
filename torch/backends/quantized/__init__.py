@@ -4,9 +4,9 @@ import torch
 import types
 
 # This function should correspond to the enums present in c10/core/QEngine.h
-def get_qengine_id(qengine):
+def _get_qengine_id(qengine):
     # type: (str) -> int
-    if qengine == 'none':
+    if qengine == 'none' or qengine == '' or qengine is None:
         ret = 0
     elif qengine == 'fbgemm':
         ret = 1
@@ -18,25 +18,25 @@ def get_qengine_id(qengine):
     return ret
 
 # This function should correspond to the enums present in c10/core/QEngine.h
-def get_qengine_str(qengine):
+def _get_qengine_str(qengine):
     # type: (int) -> str
     all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack'}
     return all_engines.get(qengine)
 
-def get_supported_qengines():
-    qengines = torch._C._supported_qengines()
-    return [get_qengine_str(qe) for qe in qengines]
-
-class ContextProp(object):
-    def __init__(self, getter, setter):
-        self.getter = getter
-        self.setter = setter
-
+class _QEngineProp(object):
     def __get__(self, obj, objtype):
-        return get_qengine_str(self.getter())
+        return _get_qengine_str(torch._C._get_qengine())
 
     def __set__(self, obj, val):
-        self.setter(get_qengine_id(val))
+        torch._C._set_qengine(_get_qengine_id(val))
+
+class _SupportedQEnginesProp(object):
+    def __get__(self, obj, objtype):
+        qengines = torch._C._supported_qengines()
+        return [_get_qengine_str(qe) for qe in qengines]
+
+    def __set__(self, obj, val):
+        raise RuntimeError("Assignment not supported")
 
 class QuantizedEngine(types.ModuleType):
     def __init__(self, m, name):
@@ -45,7 +45,9 @@ class QuantizedEngine(types.ModuleType):
 
     def __getattr__(self, attr):
         return self.m.__getattribute__(attr)
-    engine = ContextProp(torch._C._get_qengine, torch._C._set_qengine)
+
+    engine = _QEngineProp()
+    supported_engines = _SupportedQEnginesProp()
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

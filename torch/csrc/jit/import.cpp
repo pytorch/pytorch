@@ -8,9 +8,9 @@
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/unpickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/source_range_serialization.h>
-#include <torch/csrc/jit/source_range_serialization_impl.h>
 
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
@@ -31,21 +31,92 @@ using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
+void postSetStateValidate(const IValue& v) {
+  auto obj = v.toObject();
+  const auto& objType = obj->type();
+  for (size_t i = 0; i < objType->numAttributes(); i++) {
+    const auto& attrType = objType->getAttribute(i);
+    const auto& attrName = objType->getAttributeName(i);
+    const auto& slot = obj->getSlot(i);
+    // const auto attrType = objType->getAttribute(i);
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (attrType->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.isNone(),
+          "The field '",
+          attrName,
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          attrType->python_str(),
+          "'");
+    }
+  }
+}
+
+IValue readArchiveAndTensors(
+    const std::string& archive_name,
+    c10::optional<ClassResolver> class_resolver,
+    c10::optional<ObjLoader> obj_loader,
+    c10::optional<at::Device> device,
+    PyTorchStreamReader& stream_reader) {
+  std::string picklename = archive_name + ".pkl";
+  at::DataPtr pickle_ptr;
+  size_t pickle_size;
+  std::tie(pickle_ptr, pickle_size) = stream_reader.getRecord(picklename);
+
+  size_t bytes_read = 0;
+  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
+  auto reader = [&](char* buffer, size_t len) -> size_t {
+    if (bytes_read >= pickle_size) {
+      return 0;
+    }
+    len = std::min(pickle_size - bytes_read, len);
+    // Copy len bytes into buffer
+    const char* start = data + bytes_read;
+    std::memcpy(buffer, start, len);
+    bytes_read += len;
+    return len;
+  };
+
+  std::string archive_name_plus_slash = archive_name + "/";
+  auto read_record = [&](const std::string& name) {
+    std::string ss = archive_name_plus_slash + name;
+    return std::get<0>(stream_reader.getRecord(ss));
+  };
+
+  Unpickler unpickler(
+      reader,
+      class_resolver ? std::move(*class_resolver) : nullptr,
+      obj_loader ? std::move(*obj_loader) : nullptr,
+      std::move(read_record),
+      device);
+  return unpickler.parse_ivalue();
+}
+
 namespace {
 
-// this is a deserializer class which loads script modules from pt files. the
-// content of the file is written using PyTorchStreamWriter, for details please
-// check caffe2/serialize/inline_container.h. all the records except the last
-// one are tensor data, and the last record is a serialized ModelProto, defined
-// in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
-// model, and it is serialized as json.
+
+// This is a deserializer class which loads script modules from pt files.
+// Content of the file is written using PyTorchStreamWriter, for details please
+// check caffe2/serialize/inline_container.h.
+// The module is saved in pickle. readArchive() is called to parse and construct
+// the constant table and the script module.
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<script::CompilationUnit> cu,
       std::unique_ptr<PyTorchStreamReader> reader)
       : compilation_unit_(cu),
-        reader_(std::move(reader)) {}
+        reader_(std::move(reader)),
+        source_importer_(
+            compilation_unit_,
+            &constants_table_,
+            [this](const std::string& qualifier) {
+              return findSourceInArchiveFromQualifier(
+                  *reader_, export_prefix_, qualifier);
+            },
+            reader_->version()) {}
 
   script::Module deserialize(
       c10::optional<at::Device> device,
@@ -53,49 +124,57 @@ class ScriptModuleDeserializer final {
 
  private:
   IValue readArchive(const std::string& archive_name);
-  void importCallback(const std::string& qualifier);
 
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::Tensor> constants_table_;
-  std::unordered_set<std::string> imported_libs_;
+  script::SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
-  at::DataPtr pickle_ptr;
-  size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
-
-  size_t bytes_read = 0;
-  auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) {
-    if (bytes_read + len > pickle_size) {
-      return false;
-    }
-    // Copy len bytes into buffer
-    const char* start = data + bytes_read;
-    std::memcpy(buffer, start, len);
-    bytes_read += len;
-    return true;
-  };
-
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    importCallback(qn.prefix());
-    return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+    return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
-  auto read_record = [&](const std::string& name) {
-    std::stringstream ss;
-    ss << archive_name << "/" << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
+
+  // Decouple how to get obj from type. In this file it's dependent on
+  // Method.run() and graph executor, etc.
+  // For bytecode import we need to decouple these dependencies.
+  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+    auto cls = type.type_->expect<at::ClassType>();
+    size_t n = cls->numAttributes();
+    if (checkHasValidSetGetState(type.type_)) {
+      auto obj = c10::ivalue::Object::create(type, n);
+      // XXX: Do not optimize __setstate__, so that we don't try to
+      // specialize the class before it is initialized.
+      setGraphExecutorOptimize(false);
+      Function* set_state = type.type_->getMethod("__setstate__");
+      // since we are in the middle of unpickling we might still have lists and
+      // dicts that do not have accurate tags (e.g. they report they are
+      // List[Any]). But we need to run __setstate__ which will check the input
+      // type and may access the tags. Since setstate has a known input type, we
+      // can correctly restore the tags now by apply the input type of set_state
+      // to the state object being passed.
+      restoreAccurateTypeTags(
+          input, set_state->getSchema().arguments().at(1).type());
+      (*set_state)({obj, input});
+      setGraphExecutorOptimize(true);
+      postSetStateValidate(obj);
+      return obj;
+    } else {
+      auto dict = std::move(input).toGenericDict();
+      auto obj = c10::ivalue::Object::create(type, n);
+      for (size_t i = 0; i < n; ++i) {
+        obj->setSlot(i, dict.at(cls->getAttributeName(i)));
+      }
+      return obj;
+    }
   };
-  Unpickler unpickler(
-      reader, std::move(class_resolver), std::move(read_record), device_);
-  return unpickler.parse_ivalue();
+
+  return readArchiveAndTensors(
+      archive_name, class_resolver, obj_loader, device_, *reader_.get());
 }
 
 script::Module ScriptModuleDeserializer::deserialize(
@@ -127,40 +206,6 @@ script::Module ScriptModuleDeserializer::deserialize(
     constants_table_.push_back(constant.toTensor());
   }
   return script::Module(readArchive("data").toObject());
-}
-
-void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
-  if (imported_libs_.count(qualifier)) {
-    return;
-  }
-  imported_libs_.insert(qualifier);
-  std::function<void(const std::string&)> import_callback =
-      [this](const std::string& qualifier) { importCallback(qualifier); };
-  const std::string path =
-      ImportExportHelpers::qualifierToPath(qualifier, export_prefix_);
-  at::DataPtr data;
-  size_t size;
-  std::tie(data, size) = reader_->getRecord(path);
-
-  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
-
-  std::string debug_file = path + ".debug_pkl";
-  if (reader_->hasRecord(debug_file)) {
-    at::DataPtr debug_data;
-    size_t debug_size;
-    std::tie(debug_data, debug_size) = reader_->getRecord(debug_file);
-    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
-        std::move(debug_data), debug_size);
-  }
-
-  auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size),
-      path,
-      1,
-      gen_ranges);
-
-  script::import_libs(
-      compilation_unit_, qualifier, src, constants_table_, import_callback);
 }
 
 } // namespace
@@ -200,7 +245,7 @@ script::Module load(
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai =
-      caffe2::make_unique<IStreamAdapter>(&in);
+      std::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
@@ -209,7 +254,7 @@ script::Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = load(std::move(rai), device, extra_files);
   return module;
 }
@@ -218,8 +263,30 @@ script::Module load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
+  // Verify that we're loading a zip archive and not a torch.save pickle archive
+  // (marked by the 0x80 0x02 bytes at the start)
+  uint8_t first_short[2];
+  rai->read(
+      /*pos=*/0,
+      /*buf=*/&first_short,
+      /*n=*/2,
+      /*what=*/"checking archive");
+  if (first_short[0] == 0x80 && first_short[1] == 0x02) {
+    // NB: zip files by spec can start with any data, so technically they might
+    // start with 0x80 0x02, but in practice zip files start with a file entry
+    // which begins with 0x04034b50. Furthermore, PyTorch will never produce zip
+    // files that do not start with the file entry, so it is relatively safe to
+    // perform this check.
+    TORCH_CHECK(
+        false,
+        "`torch::jit::load()` received a file from `torch.save()`, "
+        "but `torch::jit::load()` can only load files"
+        " produced by `torch.jit.save()`");
+  }
+
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<script::CompilationUnit>();
+
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }

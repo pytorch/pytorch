@@ -12,14 +12,14 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, c10::optional<KernelFunction> kernel)
+  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
       if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.opHandle(), *dispatch_key, std::move(*kernel));
+        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, *dispatch_key, std::move(*kernel));
       } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.opHandle(), std::move(*kernel));
+        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.second, std::move(*kernel));
       }
     }
   }
@@ -32,27 +32,16 @@ public:
   OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
 
 private:
-  c10::SchemaRegistrationHandleRAII op_;
+  std::pair<RegistrationHandleRAII, OperatorHandle> op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
-  if (options.legacyATenSchema_.has_value()) {
-    // Ignore legacy aten operators, don't add them to c10
-    return;
-  }
-
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
   if (options.schemaOrName_->is_right()) {
     // schema was explicitly specified. Check it matches the inferred one and register the op.
 
     const FunctionSchema& schema = options.schemaOrName_->right();
-    TORCH_CHECK(
-        options.aliasAnalysisKind_ == AliasAnalysisKind::FROM_SCHEMA ||
-            !schema.hasAnyAliasInfo(),
-        "In operator registration: Tried to register operator ",
-        options.schemaOrName_->right(),
-        " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
 
     for (auto& kernel : options.kernels) {
       if (nullptr != kernel.inferred_function_schema.get()) {
@@ -122,7 +111,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorNam
 }
 
 void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
-  std::unordered_set<TensorTypeId> dispatch_keys;
+  std::unordered_set<DispatchKey> dispatch_keys;
   bool has_catchall_kernel = false;
 
   for (const auto& kernel : options.kernels) {

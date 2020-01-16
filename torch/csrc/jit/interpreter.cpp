@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -50,6 +50,17 @@ namespace jit {
 // * move_flags[n] - a list of booleans, one for each input,
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
+
+TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return TensorType::get()->withUndefined();
+  }
+  auto r = TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
 
 namespace {
 
@@ -231,8 +242,16 @@ struct CanEmitInline {
     scanBlock(graph->block());
   }
   bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
-        v->node()->outputs().size() == 1;
+    return v->node()->kind() != prim::Param &&
+           // without this a BailOut may float downstream past some later
+           // BailOut
+           // and receive a higher jf_index. Then a GUARD instruction
+           // we generated for the floated BailOut will get popped up from the
+           // instruction stack
+           // by the later BailOut in createBailoutBlock and its jf_index
+           // will become invalid.
+           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+           v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {
@@ -380,6 +399,18 @@ struct CodeImpl {
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+  }
+
+  const std::vector<c10::IValue>& constant_table() const {
+    return constant_table_;
+  }
+
+  const std::vector<Instruction>& instructions() const {
+    return instructions_;
+  }
+
+  const std::vector<Node*>& instructions_source() const {
+    return instructions_source_;
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
@@ -581,7 +612,8 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function& func) {
+                                unoptimized_graph](Function &func) {
+
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -597,7 +629,7 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     const auto type = node->input()->type()->expect<ClassType>();
     const auto& field = node->s(attr::name);
-    uint64_t slot = type->getAttributeSlot(field);
+    const auto slot = type->getAttributeSlot(field);
     insertInstruction(GET_ATTR, slot);
   }
 
@@ -824,13 +856,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
             af.operators[inst.X](stack);
             ++af.pc;
+            break;
+          case OPN:
+            AT_ERROR("OPN is currently supported in mobile mode only.");
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
@@ -985,14 +1020,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = TensorType::create(stack.back().toTensor());
+            auto t = stack.back().toTensor();
+            auto actual = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code& code =
+            const Code &code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
@@ -1018,23 +1054,38 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    for (size_t i = 0; i < frames.size(); ++i) {
+    std::string previous_fn_name = "";
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
       const Frame& frame = frames[frames.size() - 1 - i];
       size_t pc = (i == 0) ? frame.pc
                            : frame.pc -
               1; // make sure we report the call node, not the node after it
       Node* node = frame.function->instructions_source_[pc];
-      if (i > 0) {
-        out << "during call ";
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          p.second.print_with_context(
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          previous_fn_name = p.first->name();
+        }
       }
-      node->sourceRange().highlight(out);
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+      if (node->kind() == prim::CallFunction) {
+        previous_fn_name = node->inputs()
+                               .at(0)
+                               ->type()
+                               ->expect<FunctionType>()
+                               ->function()
+                               ->name();
+      }
     }
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
     ss << msg << "\n";
-    ss << "The above operation failed in interpreter, with the following stack trace:\n";
+    ss << "The above operation failed in interpreter.\n";
+    ss << "Traceback (most recent call last):\n";
     formatStackTrace(ss);
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));
@@ -1096,6 +1147,22 @@ size_t Code::num_inputs() const {
 
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
+}
+
+const std::vector<c10::IValue>& Code::constant_table() const {
+  return pImpl->constant_table();
+}
+
+const std::vector<Instruction>& Code::instructions() const {
+  return pImpl->instructions();
+}
+
+const std::vector<Node*>& Code::instructions_source() const {
+  return pImpl->instructions_source();
+}
+
+size_t Code::register_size() const {
+  return pImpl->register_size_;
 }
 
 InterpreterState::InterpreterState(const Code& code)

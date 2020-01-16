@@ -19,6 +19,7 @@ android {
     buildTypes {
         debug {
             minifyEnabled false
+            debuggable true
         }
         release {
             minifyEnabled false
@@ -26,7 +27,16 @@ android {
     }
     sourceSets {
         main {
+            java {
+                exclude 'org/pytorch/LiteModuleLoader.java'
+                exclude 'org/pytorch/LiteNativePeer.java'
+            }
             jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+        androidTest {
+            java {
+                exclude 'org/pytorch/PytorchHostTests.java'
+            }
         }
     }
     externalNativeBuild {
@@ -36,7 +46,10 @@ android {
     }
 
     packagingOptions {
-        exclude '**/libfbjni.so'
+        if (nativeLibsDoNotStrip.toBoolean()) {
+            doNotStrip "**/*.so"
+            logger.warn('WARNING: nativeLibsDoNotStrip==true; debug symbols included')
+        }
     }
 
     useLibrary 'android.test.runner'
@@ -45,9 +58,9 @@ android {
 }
 
 dependencies {
-    api project(':fbjni')
-
-    implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.fbjni:fbjni-java-only:' + rootProject.fbjniJavaOnlyVersion
+    implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
+    implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 
     testImplementation 'junit:junit:' + rootProject.junitVersion
     testImplementation 'androidx.test:core:' + rootProject.coreVersion
@@ -67,4 +80,3 @@ task sourcesJar(type: Jar) {
 }
 
 artifacts.add('archives', sourcesJar)
-

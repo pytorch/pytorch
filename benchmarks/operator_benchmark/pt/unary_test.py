@@ -13,25 +13,26 @@ import torch
 
 # Configs for pointwise unary ops
 unary_ops_configs_short = op_bench.config_list(
+    attr_names=['M', 'N'],
     attrs=[
         [512, 512],
     ],
-    attr_names=['M', 'N'],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
     tags=['short']
 )
 
-unary_ops_configs_long = op_bench.config_list(
-    attrs=[
-        [256, 256],
-        [1024, 1024],
-    ],
-    attr_names=['M', 'N'],
+unary_ops_configs_long = op_bench.cross_product_configs(
+    M=[256, 1024],
+    N=[256, 1024],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, op_func):
-        self.input_one = torch.rand(M, N)
+    def init(self, M, N, device, op_func):
+        self.input_one = torch.rand(M, N, device=device)
         self.op_func = op_func
 
     def forward(self):
@@ -98,6 +99,8 @@ unary_ops_list = op_bench.op_list(
         ['sinh', torch.sinh],
         ['sqrt', torch.sqrt],
         ['sqrt_', torch.sqrt_],
+        ['square', torch.square],
+        ['square_', torch.square_],
         ['tan', torch.tan],
         ['tan_', torch.tan_],
         ['tanh', torch.tanh],

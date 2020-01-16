@@ -89,6 +89,10 @@ show docstring and examples through ``torch.hub.help()`` and load the pre-traine
 
 .. autofunction:: load
 
+.. autofunction:: download_url_to_file
+
+.. autofunction:: load_state_dict_from_url
+
 Running a loaded model:
 ^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -99,7 +103,7 @@ A suggested workflow is
 - ``dir(model)`` to see all avaialble methods of the model.
 - ``help(model.foo)`` to check what arguments ``model.foo`` takes to run
 
-To help users explore without refering to documentation back and forth, we strongly
+To help users explore without referring to documentation back and forth, we strongly
 recommend repo owners make function help messages clear and succinct. It's also helpful
 to include a minimal working example.
 

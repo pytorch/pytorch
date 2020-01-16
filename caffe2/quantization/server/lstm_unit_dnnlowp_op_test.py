@@ -15,7 +15,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
     @given(
-        N=st.integers(4, 64),
+        N=st.integers(0, 64),
         D=st.integers(4, 64),
         forget_bias=st.integers(0, 4),
         **hu.gcs_cpu_only

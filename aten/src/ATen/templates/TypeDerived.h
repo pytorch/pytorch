@@ -10,7 +10,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/Dimname.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 $extra_cuda_headers
 
@@ -32,8 +31,10 @@ struct Quantizer;
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
-struct TORCH_API ${Type} final {
+#ifdef USE_STATIC_DISPATCH
+namespace ${Type} {
   ${type_derived_method_declarations}
-};
+}
+#endif
 
 } // namespace at

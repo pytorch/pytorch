@@ -1,4 +1,4 @@
-r""""Contains definitions of the methods used by the _DataLoaderIter workers to
+r""""Contains definitions of the methods used by the _BaseDataLoaderIter workers to
 collate samples fetched from dataset into Tensor(s).
 
 These **needs** to be in global scope since Py2 doesn't support serializing

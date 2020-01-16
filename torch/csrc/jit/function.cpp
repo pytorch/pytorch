@@ -14,7 +14,7 @@ FunctionSchema defaultSchemaFor(const Function& function) {
   for (size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasDebugName() ? v->debugNameBase()
-                                         : ("argument_" + std::to_string(i));
+                                         : ("argument_" + c10::to_string(i));
     args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
   }
   for (size_t i = 0; i < g.outputs().size(); ++i) {
@@ -27,6 +27,22 @@ FunctionSchema defaultSchemaFor(const Function& function) {
 struct RecursiveMethodCallError : public std::exception {};
 void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
+}
+
+void Function::run(Stack& stack) {
+  get_executor().run(stack);
+}
+
+void Function::run(Stack&& stack) {
+  run(stack);
+}
+
+IValue Function::operator()(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs) {
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
+  run(stack);
+  return stack.front();
 }
 
 void Function::ensure_defined() {

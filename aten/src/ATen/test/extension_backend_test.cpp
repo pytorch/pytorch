@@ -4,6 +4,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
+#include <torch/csrc/jit/operator.h>
+
 using namespace at;
 
 static int test_int;
@@ -13,7 +15,7 @@ Tensor empty_override(IntArrayRef size, const TensorOptions & options, c10::opti
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(
           caffe2::TypeMeta::Make<float>(), 0, at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)), nullptr, false),
-      TensorTypeId::MSNPUTensorId);
+      DispatchKey::MSNPUTensorId);
   return Tensor(std::move(tensor_impl));
 }
 
@@ -27,7 +29,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry1 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
+      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
@@ -44,7 +46,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry2 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(TensorTypeId::MSNPUTensorId)
+      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(DispatchKey::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   add(a, b);
   ASSERT_EQ(test_int, 2);
@@ -52,13 +54,4 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   // Ensure that non-MSNPU operator still works
   Tensor d = empty({5, 5}, at::kCPU);
   ASSERT_EQ(d.device().type(), at::kCPU);
-
-  // Attempt to register on a schema that has already has a function
-  EXPECT_ANY_THROW(
-    torch::RegisterOperators()
-      .op(torch::RegisterOperators::options()
-        .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-        .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
-        .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  );
 }

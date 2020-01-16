@@ -1,10 +1,12 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, List, Optional, Any, Dict
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
+import jit_utils
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -30,6 +32,25 @@ class TestScriptPy3(JitTestCase):
 
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    def test_kwarg_support(self):
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
+            class M(torch.nn.Module):
+                def forward(self, *, n_tokens: int, device_name: str = 2):
+                    pass
+            torch.jit.script(M())
+
+        class M(torch.nn.Module):
+            def forward(self, *, n_tokens: int, device_name: str):
+                return n_tokens, device_name
+
+        sm = torch.jit.script(M())
+
+        with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
+            sm()
+
+        input = (3, 'hello')
+        self.assertEqual(sm(*input), input)
 
     def test_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -63,6 +84,13 @@ class TestScriptPy3(JitTestCase):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
+
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
             float_features: float
@@ -79,6 +107,53 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.float_features, 3.0)
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
+
+    def test_ignore_with_types(self):
+        @torch.jit.ignore
+        def fn(x: Dict[str, Optional[torch.Tensor]]):
+            return x + 10
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
+                self.dropout_modality(in_batch)
+                fn(in_batch)
+                return torch.tensor(1)
+
+            @torch.jit.ignore
+            def dropout_modality(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> Dict[str, Optional[torch.Tensor]]:
+                return in_batch
+
+        sm = torch.jit.script(M())
+        FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
+
+    def test_python_callable(self):
+        class MyPythonClass(object):
+            @torch.jit.ignore
+            def __call__(self, *args) -> str:
+                return str(type(args[0]))
+
+        the_class = MyPythonClass()
+        @torch.jit.script
+        def fn(x):
+            return the_class(x)
+
+        # This doesn't involve the string frontend, so don't use checkScript
+        x = torch.ones(2)
+        self.assertEqual(fn(x), the_class(x))
+
+    def test_bad_types(self):
+        @torch.jit.ignore
+        def fn(my_arg):
+            return my_arg + 10
+
+        with self.assertRaisesRegex(RuntimeError, "argument 'my_arg'"):
+            @torch.jit.script
+            def other_fn(x):
+                return fn('2')
+
 
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
@@ -110,6 +185,8 @@ class TestScriptPy3(JitTestCase):
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
     def test_named_tuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -177,7 +254,7 @@ class TestScriptPy3(JitTestCase):
 
         mm = MyMod()
         mm.save('foo.zip')
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
         loaded = torch.jit.load('foo.zip')
 
         out = mm()
@@ -226,6 +303,16 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
+    def test_any_in_class_fails(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : Any
+            b : float
+            c : List[int]
+        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
+            @torch.jit.script
+            def foo():
+                return MyCoolNamedTuple(4, 5.5, [3])
+            print(foo.graph)
 
 if __name__ == '__main__':
     run_tests()
