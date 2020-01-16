@@ -881,10 +881,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
         self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), prec=1e-4)
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Bernoulli._from_natural_params(*Bernoulli(p)._natural_params)
         self.assertEqual(Bernoulli(p).probs, dist_np.probs)
-        self.assertEqual(Bernoulli(p).product_along_axis(keepdim=False).sample().size(), ())
+        self.assertEqual(Bernoulli(p).normalized_product(keepdim=False).sample().size(), ())
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -1183,11 +1183,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Poisson(rate_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Poisson._from_natural_params(*Poisson(rate)._natural_params)
         self.assertEqual(Poisson(rate).mean, dist_np.mean)
-        self.assertEqual(Poisson(rate).product_along_axis(keepdim=False).sample().size(), (2,))
-        self.assertEqual(Poisson(rate).product_along_axis(keepdim=False).rate, rate.prod(dim=-1))
+        self.assertEqual(Poisson(rate).normalized_product(keepdim=False).sample().size(), (2,))
+        self.assertEqual(Poisson(rate).normalized_product(keepdim=False).rate, rate.prod(dim=-1))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_log_prob(self):
@@ -1614,11 +1614,11 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Normal._from_natural_params(*Normal(loc, scale)._natural_params)
         self.assertEqual(Normal(loc, scale).mean, dist_np.mean)
         self.assertEqual(Normal(loc, scale).variance, dist_np.variance)
-        self.assertEqual(Normal(loc, scale).product_along_axis(keepdim=False).sample().size(), (5,))
+        self.assertEqual(Normal(loc, scale).normalized_product(keepdim=False).sample().size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
@@ -1914,11 +1914,11 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Exponential._from_natural_params(*Exponential(rate)._natural_params)
         self.assertEqual(Exponential(rate).mean, dist_np.mean)
         self.assertEqual(Exponential(rate).variance, dist_np.variance)
-        self.assertEqual(Exponential(rate).product_along_axis(keepdim=False).sample().size(), (5,))
+        self.assertEqual(Exponential(rate).normalized_product(keepdim=False).sample().size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
@@ -2000,11 +2000,11 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Gamma._from_natural_params(*Gamma(alpha, beta)._natural_params)
         self.assertEqual(Gamma(alpha, beta).mean, dist_np.mean)
         self.assertEqual(Gamma(alpha, beta).variance, dist_np.variance)
-        self.assertEqual(Gamma(alpha, beta).product_along_axis(keepdim=False).sample().size(), (2,))
+        self.assertEqual(Gamma(alpha, beta).normalized_product(keepdim=False).sample().size(), (2,))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -2215,11 +2215,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Dirichlet._from_natural_params(*Dirichlet(alpha)._natural_params)
         self.assertEqual(Dirichlet(alpha).mean, dist_np.mean)
         self.assertEqual(Dirichlet(alpha).variance, dist_np.variance)
-        self.assertEqual(Dirichlet(alpha).product_along_axis(keepdim=False).sample().size(), (3,))
+        self.assertEqual(Dirichlet(alpha).normalized_product(keepdim=False).sample().size(), (3,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_log_prob(self):
@@ -2253,11 +2253,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(0.1, 0.3).sample().size(), ())
         self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
 
-        # check _from_natural_params and product_along_axis
+        # check _from_natural_params and normalized_product
         dist_np = Beta._from_natural_params(*Beta(con1, con0)._natural_params)
         self.assertEqual(Beta(con1, con0).mean, dist_np.mean)
         self.assertEqual(Beta(con1, con0).variance, dist_np.variance)
-        self.assertEqual(Beta(con1, con0).product_along_axis(keepdim=False).sample().size(), (2,))
+        self.assertEqual(Beta(con1, con0).normalized_product(keepdim=False).sample().size(), (2,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_log_prob(self):

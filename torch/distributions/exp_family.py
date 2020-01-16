@@ -63,9 +63,36 @@ class ExponentialFamily(Distribution):
     def _from_natural_params(*params):
         raise NotImplementedError
 
-    def product_along_axis(self, dim=-1, keepdim=True):
+    def normalized_product(self, dim=-1, keepdim=True):
+        """
+        Returns a new distribution object whose probability mass/density function is the normalized product 
+        of the probability mass/density functions along given axis. The product of exponential family 
+        distributions results in a distribution in the same family, but with new natural parameters :math:`\sum(\theta)` 
+
+        .. math::
+
+            \frac{1}{c} \prod_i p_{F}(x; \theta_i) = \exp(\langle t(x), \sum_i\theta_i\rangle - F(\sum_i\theta_i) + k(x))
+
+        where c is the normalization constant and i is the index along given dimension.
+
+        For a batched distribution d and a single observation x::
+
+        d.prod(dim).log_prob(x) = d.log_prob(x).sum(dim) + c
+
+        This might be useful for models such as Product-of-Experts (Hinton, 1999):
+
+        .. math::
+
+            p(\textbf{d}; \theta_1...\theta_n) = \frac{\prod_m p_m(\textbf{d}|\theta_m)}{\sum_i\prod_m p_m(\textbf{c}_i|\theta_m)}
+
+        where d is a data vector in a discrete space, m is all the parameters of individual model m, 
+        :math:`p_m(\textbf{d}|\theta_m)` is the probability of d under model m, and i is an index over all possible vectors in the data space.
+
+        """
         if dim >= 0:
             dim = dim - len(self.batch_shape) - 1
         dim = dim - len(self.event_shape)
+
+        # This assumes all parameters are univariate, and will need to be fixed to support multivariate parameters. TODO
         params = [p.sum(dim, keepdim=keepdim) for p in self._natural_params]
         return self._from_natural_params(*params)
