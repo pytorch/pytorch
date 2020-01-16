@@ -458,6 +458,7 @@ struct CAFFE2_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
+  bool isCompatibleWith(at::Tensor& t, bool print) const;
 
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != kind()) {

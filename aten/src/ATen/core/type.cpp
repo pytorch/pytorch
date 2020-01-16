@@ -4,6 +4,7 @@
 #include <iostream>
 #include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/autograd/grad_mode.h>
 
 namespace c10 {
 
@@ -68,6 +69,62 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 AnyTypePtr AnyType::get() {
   static auto value = AnyType::create();
   return value;
+}
+
+
+template <typename T>
+static bool test_primitive(c10::optional<T> e, T a) {
+  return !e.has_value() || e.value() == a;
+}
+
+static bool test_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+
+  if (!e.size().has_value()) {
+    return true;
+  }
+
+  if (e.size().value() != a.size()) {
+    return false;
+  }
+
+  auto ndim = a.size();
+  for (size_t i = 0; i < ndim; i++) {
+    if (!test_primitive(e[i], a[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorType::isCompatibleWith(at::Tensor& t, bool print) const {
+
+  if (!t.defined()) {
+    return test_primitive(undefined(), !t.defined());
+  }
+
+bool result =
+  test_varying_shape(sizes(), t.sizes()) &&
+    (t.is_sparse() || t.is_mkldnn() || test_varying_shape(strides(), t.strides())) &&
+    test_primitive(requiresGrad(),t.requires_grad() && at::GradMode::is_enabled()) &&
+    test_primitive(scalarType(), t.scalar_type()) &&
+    test_primitive(device(), t.device());
+
+    if (print) {
+      std::cout << "isCompatibleWith = " << result << std::endl;
+      std::cout << "t = " << t.toString() << std::endl;
+      std::cout << "expected = " << *this << std::endl;
+      std::cout << "requires_grad " << (requiresGrad().has_value() ? (int)*requiresGrad() : -1) << std::endl;
+      std::cout << "unknown " << (undefined().has_value() ? (int)*undefined() : -1) << std::endl;
+      std::cout << "unknown = " << test_primitive(undefined(), !t.defined()) << std::endl;
+      std::cout << "sizes = " << test_varying_shape(sizes(), t.sizes()) << std::endl;
+      std::cout << "strides = " << test_varying_shape(strides(), t.strides()) << std::endl;
+      std::cout << "requiresGrad = " << test_primitive(requiresGrad(),t.requires_grad() && at::GradMode::is_enabled()) << std::endl;
+      std::cout << "scalarType = " << test_primitive(scalarType(), t.scalar_type()) << std::endl;
+      std::cout << "device = " << test_primitive(device(), t.device()) << std::endl;
+    }
+
+
+  return result;
 }
 
 TensorTypePtr TensorType::get() {
