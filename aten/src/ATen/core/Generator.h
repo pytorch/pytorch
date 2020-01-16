@@ -11,6 +11,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKeySet.h>
 
 /**
  * Note [Generator]
@@ -73,6 +74,8 @@ struct CAFFE2_API Generator {
 
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
+
+  virtual DispatchKeySet key_set() const = 0;
 
   private:
     Device device_;

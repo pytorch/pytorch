@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 // TODO: this file should be in ATen/cuda, not top level
 
@@ -20,6 +22,7 @@ struct TORCH_CUDA_API CUDAGenerator : public Generator {
   uint64_t philox_offset_per_thread();
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static DeviceType device_type();
+  DispatchKeySet key_set() const override { return DispatchKeySet(c10::DispatchKey::CUDATensorId); }
 
 private:
   CUDAGenerator* clone_impl() const override;

@@ -2,8 +2,9 @@
 
 #include <ATen/core/Generator.h>
 #include <ATen/core/MT19937RNGEngine.h>
-#include <ATen/core/PhiloxRNGEngine.h>
 #include <c10/util/Optional.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 namespace at {
 
@@ -26,6 +27,7 @@ struct CAFFE2_API CPUGenerator : public Generator {
   void set_next_double_normal_sample(c10::optional<double> randn);
   at::mt19937 engine();
   void set_engine(at::mt19937 engine);
+  DispatchKeySet key_set() const override { return DispatchKeySet(c10::DispatchKey::CPUTensorId); }
 
 private:
   CPUGenerator* clone_impl() const override;

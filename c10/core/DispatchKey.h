@@ -47,6 +47,9 @@ enum class DispatchKey : uint8_t {
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
 
+  // Custom pseudorandom number generator
+  CustomRNGKeyId,
+
   // WARNING! If you add more "wrapper" style tensor ids (tensor
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust
