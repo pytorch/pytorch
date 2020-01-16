@@ -546,8 +546,9 @@ inline IValue toIValue(
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
-    case TypeKind::CapsuleType:
-      AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::CapsuleType: {
+      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
+    } break;
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
   }
@@ -698,6 +699,8 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isCapsule()) {
+    return py::cast(ivalue.toCapsule());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
