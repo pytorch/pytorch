@@ -261,7 +261,6 @@ struct TORCH_API Module : public Object {
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
-
 };
 
 namespace detail {
