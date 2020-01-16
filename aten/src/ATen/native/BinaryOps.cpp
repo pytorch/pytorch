@@ -346,6 +346,7 @@ Tensor& __ior__(Tensor& self, const Tensor& other) {
 
 Tensor& __ior__(Tensor& self, Scalar other) {
   return self.bitwise_or_(other);
+}
 
 Tensor rsub(Scalar other, const Tensor& self, Scalar alpha) {
   return native::rsub(wrapped_scalar_tensor(other), self, alpha);
