@@ -99,8 +99,8 @@ static void norm_kernel_tensor_iterator_impl(
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
-        NormTwoOps<scalar_t>(),
-        scalar_t(0)
+        NormTwoOps<acc_type<scalar_t, false>, scalar_t, scalar_t>(),
+        acc_type<scalar_t, false>(0)
       );
     });
   } else if (val == INFINITY) {
