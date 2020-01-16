@@ -505,6 +505,25 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlde
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
+TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnboxedWithCPUTensorIdDispatchKey) {
+  bool called_kernel_cpu = false;
+  auto registrar= c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .kernel<MockKernel>(c10::DispatchKey::CPUTensorId, &called_kernel_cpu));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+
+  called_kernel_cpu = false;
+  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPUTensorId, dummyTensor(c10::DispatchKey::CPUTensorId));
+  EXPECT_TRUE(called_kernel_cpu);
+
+  called_kernel_cpu = false;
+  expectThrows<c10::Error>([&] {
+    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDATensorId, dummyTensor(c10::DispatchKey::CUDATensorId));
+  }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [");
+}
+
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
   bool called_kernel1 = false;
   bool called_kernel2 = false;
