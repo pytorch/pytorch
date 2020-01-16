@@ -152,8 +152,8 @@ public:
       if (*id_for_float != get_type_index<float>()) {
         TORCH_INTERNAL_ASSERT(false,
           "PyTorch was compiled using multiple different and incompatible compilers. ",
-          "One compiler assigned float the typeid ", *id_for_float,
-          " while the other compiler assigned it the typeid ", get_type_index<float>());
+          "A compiler whose code got loaded previously had assigned float the typeid ", *id_for_float,
+          " but the current one assigns it the typeid ", get_type_index<float>());
       }
     } else {
       id_for_float = get_type_index<float>();

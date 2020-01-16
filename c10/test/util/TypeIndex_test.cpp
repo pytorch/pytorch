@@ -8,6 +8,8 @@ using c10::util::get_type_index;
 
 namespace {
 
+namespace test_simple_types {
+#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(get_type_index<int>() == get_type_index<int>(), "");
 static_assert(get_type_index<float>() == get_type_index<float>(), "");
 static_assert(get_type_index<int>() != get_type_index<float>(), "");
@@ -30,7 +32,31 @@ static_assert(
     get_type_index<std::function<int(double, double)>>() !=
         get_type_index<std::function<int(double)>>(),
     "");
+#endif
+TEST(TypeIndex, SimpleTypes) {
+    EXPECT_EQ(get_type_index<int>(), get_type_index<int>());
+    EXPECT_EQ(get_type_index<float>(), get_type_index<float>());
+    EXPECT_NE(get_type_index<int>(), get_type_index<float>());
+    EXPECT_EQ(
+        get_type_index<int(double, double)>(),
+        get_type_index<int(double, double)>());
+    EXPECT_NE(
+        get_type_index<int(double, double)>(),
+        get_type_index<int(double)>());
+    EXPECT_EQ(
+        get_type_index<int(double, double)>(),
+        get_type_index<int (*)(double, double)>());
+    EXPECT_EQ(
+        get_type_index<std::function<int(double, double)>>(),
+        get_type_index<std::function<int(double, double)>>());
+    EXPECT_NE(
+        get_type_index<std::function<int(double, double)>>(),
+        get_type_index<std::function<int(double)>>());
+}
+}
 
+namespace test_references_and_pointers {
+#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(get_type_index<int>() == get_type_index<int&>(), "");
 static_assert(get_type_index<int>() == get_type_index<int&&>(), "");
 static_assert(get_type_index<int>() == get_type_index<const int&>(), "");
@@ -42,16 +68,40 @@ static_assert(
     get_type_index<int(double&, double)>() !=
         get_type_index<int(double, double)>(),
     "");
+#endif
+TEST(TypeIndex, ReferencesAndPointers) {
+    EXPECT_EQ(get_type_index<int>(), get_type_index<int&>());
+    EXPECT_EQ(get_type_index<int>(), get_type_index<int&&>());
+    EXPECT_EQ(get_type_index<int>(), get_type_index<const int&>());
+    EXPECT_EQ(get_type_index<int>(), get_type_index<const int>());
+    EXPECT_EQ(get_type_index<const int>(), get_type_index<int&>());
+    EXPECT_NE(get_type_index<int>(), get_type_index<int*>());
+    EXPECT_NE(get_type_index<int*>(), get_type_index<int**>());
+    EXPECT_NE(
+        get_type_index<int(double&, double)>(),
+        get_type_index<int(double, double)>());
+}
+}
 
+namespace test_function_traits {
 struct Dummy final {};
 struct Functor final {
   int64_t operator()(uint32_t, Dummy&&, const Dummy&) const;
 };
+#if C10_TYPENAME_SUPPORTS_CONSTEXPR
 static_assert(
     get_type_index<int64_t(uint32_t, Dummy&&, const Dummy&)>() ==
         get_type_index<
             c10::guts::infer_function_traits_t<Functor>::func_type>(),
     "");
+#endif
+TEST(TypeIndex, FunctionTraits) {
+    EXPECT_EQ(
+        get_type_index<int64_t(uint32_t, Dummy&&, const Dummy&)>(),
+        get_type_index<
+            c10::guts::infer_function_traits_t<Functor>::func_type>());
+}
+}
 
 namespace test_top_level_name {
 #if C10_TYPENAME_SUPPORTS_CONSTEXPR
