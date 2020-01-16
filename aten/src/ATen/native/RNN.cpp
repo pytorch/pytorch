@@ -393,8 +393,7 @@ std::vector<Tensor> project(at::ArrayRef<tpair_of<Tensor>> tuples) {
   return result;
 }
 
-Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) {
-  return at::cat(hiddens, 0); }
+Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) { return at::cat(hiddens, 0); }
 tpair_of<Tensor> hidden_concat(at::ArrayRef<tpair_of<Tensor>> hiddens) {
   return std::make_tuple(hidden_concat(project<0>(hiddens)), hidden_concat(project<1>(hiddens)));
 }
@@ -514,15 +513,15 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
                                               kQZeroPoint);  // qint8
 
     auto chunked_gates = gates.chunk(4, 1);
-    auto ingate = at::sigmoid(chunked_gates[0]);  // quint8, z = 0
-    auto forgetgate = at::sigmoid(chunked_gates[1]);  // quint8, z = 0
-    auto cellgate = at::tanh(chunked_gates[2]);  // quint8, z = 128
-    auto outgate = at::sigmoid(chunked_gates[3]);  // quint8, z = 0
+    auto ingate = at::sigmoid(chunked_gates[0]);
+    auto forgetgate = at::sigmoid(chunked_gates[1]);
+    auto cellgate = at::tanh(chunked_gates[2]);
+    auto outgate = at::sigmoid(chunked_gates[3]);
 
     auto in_cell = elementwise_arithmetic("quantized::mul_out",
                                           ingate, cellgate,
                                           kQ8BitScaleWithRange2,
-                                          kQZeroPoint);  // qint8
+                                          kQZeroPoint);
     auto d_in_cell = in_cell.dequantize();
     auto d_forgetgate = forgetgate.dequantize();
     auto d_cx = cx.dequantize();
@@ -530,7 +529,7 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     auto f_cy = (d_forgetgate * d_cx) + d_in_cell;
     auto cy = at::quantize_per_tensor(f_cy, kQ32BitScaleWithRange256,
                                       kQZeroPoint,
-                                        at::kQInt32);  // make it 8 bit
+                                      at::kQInt32);
     auto hy = elementwise_arithmetic("quantized::mul_out",
                                      outgate, at::tanh(cy),
                                      kQ8BitScaleWithRange2,
@@ -581,9 +580,18 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
+   if (input.is_cuda()) {
+      TORCH_CHECK(!pre_compute_input);
+      auto igates = params.matmul_ih(input);
+      auto hgates = params.matmul_hh(hidden);
+      auto result = at::_thnn_fused_gru_cell(
+          igates, hgates, hidden, params.b_ih, params.b_hh);
+      // Slice off the workspace argument (it's needed only for AD).
+      return std::move(std::get<0>(result));
+    }
     const auto chunked_igates = pre_compute_input
-                                ? input.chunk(3, 1)
-                                : params.linear_ih(input).chunk(3, 1);
+        ? input.chunk(3, 1)
+        : params.linear_ih(input).chunk(3, 1);
     auto chunked_hgates = params.linear_hh(hidden).chunk(3, 1);
     const auto reset_gate =
         chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
@@ -883,9 +891,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
                   int64_t num_layers, double dropout_p, bool train) {
   TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
-  TORCH_CHECK(num_layers == (int64_t)weights.size(),
-              "Expected more weights in stacked_rnn. ",
-              "Expected ", num_layers, " got ", (int64_t)weights.size());
+  TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();
