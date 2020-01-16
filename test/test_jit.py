@@ -3097,7 +3097,8 @@ graph(%Ra, %Rb):
         FileCheck().check("prim::unchecked_cast").run(graph)
 
     def test_unchecked_cast(self):
-        def test(cond: bool):
+        def test(cond):
+            # type: (bool)
             a = torch.tensor([10])
             if cond:
                 b = None
