@@ -349,8 +349,8 @@ TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
   // Fork() and TSAN don't play well together, so skip the test if we're testing
   // with TSAN.
-  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
-  if (s && strcmp(s, "1") == 0) {
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
     return;
   }
 
@@ -364,8 +364,8 @@ TEST(ProcessGroupGlooTest, testSIGKILLException) {
   // test SIGKILL
   // Fork() and TSAN don't play well together, so skip the test if we're testing
   // with TSAN.
-  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
-  if (s && strcmp(s, "1") == 0) {
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
     return;
   }
 
