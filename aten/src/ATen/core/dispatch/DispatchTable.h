@@ -62,7 +62,7 @@ public:
     return kernels_[static_cast<uint8_t>(dispatchKey)];
   }
 
-  KernelFunction& operator[](TensorTypeId dispatchKey) {
+  KernelFunction& operator[](DispatchKey dispatchKey) {
     return kernels_[static_cast<uint8_t>(dispatchKey)];
   }
 
@@ -201,8 +201,8 @@ class DispatchTable final {
     TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_.has_value(), "Cannot set multiple manually boxed kernels for the same operator ", operatorName_);
 
     // make sure that all previously registered kernels get this manually boxed kernel
-    for (uint8_t iter = 0; iter != static_cast<uint8_t>(TensorTypeId::NumTensorIds); ++iter) {
-      auto& kernel = kernels_[static_cast<TensorTypeId>(iter)];
+    for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+      auto& kernel = kernels_[static_cast<DispatchKey>(iter)];
       if (kernel.isValid()) {
         kernel.setManuallyBoxedKernel_(func);
       }
