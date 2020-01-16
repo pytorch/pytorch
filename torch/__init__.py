@@ -39,7 +39,8 @@ if platform.system() == 'Windows':
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
-    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')):
+    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
+        not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
     else:
