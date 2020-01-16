@@ -6028,6 +6028,7 @@ def add_neg_dim_tests():
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -6256,9 +6257,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
-        # cumsum / cumprod
+        # cumsum, cumprod, cummax
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
+        self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
 
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
@@ -7861,7 +7863,8 @@ class TestTorchDeviceType(TestCase):
             "map", "map2", "copy"
         }
         # functions with three tensor arguments
-        fns_3_args = {"addcdiv", "addcmul", "map2"}
+        fns_3_args = {"map2"}
+        fns_value_kwarg = {"addcdiv", "addcmul"}
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
@@ -7872,7 +7875,7 @@ class TestTorchDeviceType(TestCase):
             large_expanded = large.expand(*dims_full)
             small2 = None
             small2_expanded = None
-            if fn in fns_3_args:
+            if fn in fns_3_args or fn in fns_value_kwarg:
                 # create another smaller tensor
                 (dims_small2, _, _) = self._select_broadcastable_dims(dims_full)
                 small2 = torch.randn(*dims_small2, device=device).float()
@@ -7898,6 +7901,8 @@ class TestTorchDeviceType(TestCase):
                         return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
+                    elif fn in fns_value_kwarg:
+                        return myfn(t1, t2, value=1)
                     else:
                         return myfn(t1)
 
@@ -7928,6 +7933,8 @@ class TestTorchDeviceType(TestCase):
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return fntorch(t1, 1.0, t2, t3)
+                    elif fn in fns_value_kwarg:
+                        return fntorch(t1, t2, t3, value=1.0)
                     else:
                         return fntorch(t1, t2)
 
@@ -7963,6 +7970,8 @@ class TestTorchDeviceType(TestCase):
                     return t0_fn(t1, t2, lambda x, y, z: x + y + z)
                 elif fn in fns_3_args:
                     return t0_fn(1.0, t1, t2)
+                elif fn in fns_value_kwarg:
+                    return t0_fn(t1, t2, value=1.0)
                 else:
                     return t0_fn(t1)
             # in-place pointwise operations don't actually work if the in-place
@@ -7989,7 +7998,7 @@ class TestTorchDeviceType(TestCase):
                 else:
                     tensorfn_inplace(t0, t1, t2)
 
-            if fn not in fns_3_args:
+            if fn not in fns_3_args and fn not in fns_value_kwarg:
                 _test_in_place_broadcastable(small, large_expanded)
                 _test_in_place_broadcastable(small, large)
             else:
@@ -10563,6 +10572,58 @@ class TestTorchDeviceType(TestCase):
         # Check that output maintained correct shape
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
+    def test_cummax(self, device):
+        x = torch.rand(100, 100, device=device)
+        out1 = torch.cummax(x, 1)
+        res2 = torch.Tensor().to(device)
+        indices2 = torch.LongTensor().to(device)
+        torch.cummax(x, 1, out=(res2, indices2))
+        self.assertEqual(out1[0], res2)
+        self.assertEqual(out1[1], indices2)
+
+        a = torch.tensor([[True, False, True],
+                         [False, False, False],
+                         [True, True, True]], dtype=torch.bool, device=device)
+        b = a.byte()
+        aRes = torch.cummax(a, 0)
+        bRes = torch.cummax(b, 0)
+        self.assertEqual(aRes[0], bRes[0])
+        self.assertEqual(aRes[0], torch.tensor([[1, 0, 1],
+                                                [1, 0, 1],
+                                                [1, 1, 1]]))
+
+        # cummax doesn't support values, indices with a dtype, device type or layout
+        # different from that of input tensor
+        t = torch.randn(10)
+        values = torch.ShortTensor()
+        indices = torch.LongTensor()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'expected scalar_type Float but found Short'):
+            torch.cummax(t, 0, out=(values, indices))
+
+        # Check that cummulative max over a zero length dimension doesn't crash on backprop.
+        # Also check that cummax over other dimensions in a tensor with a zero-length
+        # dimensiuon also works
+        # Also include a basic suite of similar tests for other bases cases.
+        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+        for shape in shapes:
+            for dim in range(len(shape)):
+                raw_tensor = torch.zeros(*shape, requires_grad=True)
+                integrated = raw_tensor.cummax(dim=dim)
+                # Check that backward does not crash
+                integrated[0].sum().backward()
+                # Check that output maintained correct shape
+                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        # Check a scalar example
+        raw_tensor = torch.tensor(3., requires_grad=True)
+        integrated = raw_tensor.cummax(dim=-1)
+        # Check that backward does not crash
+        integrated[0].sum().backward()
+        # Check that output maintained correct shape
+        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -10912,9 +10973,13 @@ class TestTorchDeviceType(TestCase):
                 alpha = 0.1
             else:
                 alpha = 3
-            actual = torch.addcmul(a, alpha, b, c)
+            actual = torch.addcmul(a, b, c, value=alpha)
             expected = a + alpha * b * c
             self.assertTrue(torch.allclose(expected, actual))
+
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addcmul is deprecated"):
+                self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
     def test_empty_tensor_props(self, device):
         sizes = [(0,), (0, 3), (5, 0), (5, 0, 3, 0, 2), (0, 3, 0, 2), (0, 5, 0, 2, 0)]
@@ -11268,11 +11333,13 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
-        # cumsum, cumprod
+        # cumsum, cumprod, cummax
         self.assertEqual(shape, torch.cumsum(x, 0).shape)
         self.assertEqual(shape, torch.cumsum(x, 2).shape)
         self.assertEqual(shape, torch.cumprod(x, 0).shape)
         self.assertEqual(shape, torch.cumprod(x, 2).shape)
+        self.assertEqual(shape, torch.cummax(x, 0)[0].shape)
+        self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -11627,12 +11694,16 @@ class TestTorchDeviceType(TestCase):
 
     def test_addcdiv(self, device):
         def _test_addcdiv(a, alpha, b, c):
-            actual = torch.addcdiv(a, alpha, b, c)
+            actual = torch.addcdiv(a, b, c, value=alpha)
             # implementation of addcdiv downcasts alpha. arithmetic ops don't.
             if not actual.dtype.is_floating_point:
                 alpha = int(alpha)
             expected = a + (alpha * b) / c
             self.assertTrue(torch.allclose(expected, actual, equal_nan=True))
+
+            with self.maybeWarnsRegex(
+                    UserWarning, "This overload of addcdiv is deprecated"):
+                self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 
         def non_zero_rand(size, dtype, device):
             if dtype.is_floating_point:
@@ -12611,10 +12682,10 @@ class TestTorchDeviceType(TestCase):
             # lambda x, y: x.abs(), # https://github.com/pytorch/pytorch/issues/24531
             # lambda x, y: x.acos(), # https://github.com/pytorch/pytorch/issues/24532
             lambda x, y: x.add(y, alpha=3),
-            lambda x, y: x.addcdiv(2, y, y),
-            lambda x, y: y.addcdiv(2, x, y),
-            lambda x, y: x.addcmul(2, y, y),
-            lambda x, y: y.addcmul(2, x, y),
+            lambda x, y: x.addcdiv(y, y, value=2),
+            lambda x, y: y.addcdiv(x, y, value=2),
+            lambda x, y: x.addcmul(y, y, value=2),
+            lambda x, y: y.addcmul(x, y, value=2),
             lambda x, y: x.asin(),
             # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
             lambda x, y: x.atan2(y),
@@ -13702,7 +13773,7 @@ class TestTorchDeviceType(TestCase):
         a = torch.randn(100, 90, dtype=dtype, device=device)
         b = a.clone().normal_()
 
-        res_add = torch.add(a, -1, b)
+        res_add = torch.add(a, b, alpha=-1)
         res_csub = a.clone()
         res_csub.sub_(b)
         self.assertEqual(res_add, res_csub)
@@ -13936,27 +14007,38 @@ class TestTorchDeviceType(TestCase):
         b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
         res = torch.bmm(b1, b2)
         res2 = torch.tensor((), dtype=dtype, device=device).resize_as_(res[0]).zero_()
+        res3 = torch.tensor((), dtype=dtype, device=device).resize_as_(res[0]).zero_()
 
         res2.addbmm_(b1, b2)
         self.assertEqual(res2, res.sum(0, False))
+        res3.copy_(res2)
 
-        res2.addbmm_(1, b1, b2)
-        self.assertEqual(res2, res.sum(0, False) * 2)
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm_ is deprecated"):
+            res2.addbmm_(1, b1, b2)
+        self.assertEqual(res2, res.sum(0, False) * 2),
+        res3.addbmm_(b1, b2, beta=1)
+        self.assertEqual(res2, res3)
 
-        res2.addbmm_(1., .5, b1, b2)
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm_ is deprecated"):
+            res2.addbmm_(1., .5, b1, b2)
         self.assertEqual(res2, res.sum(0, False) * 2.5)
+        res3.addbmm_(b1, b2, beta=1., alpha=.5)
+        self.assertEqual(res2, res3)
 
-        res3 = torch.addbmm(1, res2, 0, b1, b2)
-        self.assertEqual(res3, res2)
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm is deprecated"):
+            self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
 
-        res4 = torch.addbmm(1, res2, .5, b1, b2)
-        self.assertEqual(res4, res.sum(0, False) * 3)
+        res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
+        self.assertEqual(res4, res.sum(0, False) * 3),
 
-        res5 = torch.addbmm(0, res2, 1, b1, b2)
+        res5 = torch.addbmm(res2, b1, b2, beta=0, alpha=1)
         self.assertEqual(res5, res.sum(0, False))
 
-        res6 = torch.addbmm(.1, res2, .5, b1, b2)
-        self.assertEqual(res6, res2 * .1 + (res.sum(0) * .5))
+        res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
+        self.assertEqual(res6, res2 * .1 + .5 * res.sum(0)),
 
     @onlyCPU
     @dtypes(torch.float)
@@ -13967,26 +14049,38 @@ class TestTorchDeviceType(TestCase):
         b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
         res = torch.bmm(b1, b2)
         res2 = torch.tensor((), dtype=dtype, device=device).resize_as_(res).zero_()
+        res3 = torch.tensor((), dtype=dtype, device=device).resize_as_(res).zero_()
 
         res2.baddbmm_(b1, b2)
         self.assertEqual(res2, res)
+        res3.copy_(res2)
 
-        res2.baddbmm_(1, b1, b2)
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of baddbmm_ is deprecated"):
+            res2.baddbmm_(1, b1, b2)
         self.assertEqual(res2, res * 2)
-
-        res2.baddbmm_(1, .5, b1, b2)
-        self.assertEqual(res2, res * 2.5)
-
-        res3 = torch.baddbmm(1, res2, 0, b1, b2)
+        res3.baddbmm_(b1, b2, beta=1)
         self.assertEqual(res3, res2)
 
-        res4 = torch.baddbmm(1, res2, .5, b1, b2)
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of baddbmm_ is deprecated"):
+            res2.baddbmm_(1, .5, b1, b2)
+        self.assertEqual(res2, res * 2.5)
+        res3.baddbmm_(b1, b2, beta=1, alpha=.5)
+        self.assertEqual(res3, res2)
+
+
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of baddbmm is deprecated"):
+            self.assertEqual(torch.baddbmm(1, res2, 0, b1, b2), res2)
+
+        res4 = torch.baddbmm(res2, b1, b2, beta=1, alpha=.5)
         self.assertEqual(res4, res * 3)
 
-        res5 = torch.baddbmm(0, res2, 1, b1, b2)
+        res5 = torch.baddbmm(res2, b1, b2, beta=0, alpha=1)
         self.assertEqual(res5, res)
 
-        res6 = torch.baddbmm(.1, res2, .5, b1, b2)
+        res6 = torch.baddbmm(res2, b1, b2, beta=.1, alpha=.5)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
     def _test_cop(self, torchfn, mathfn, dtype, device):
@@ -14645,6 +14739,15 @@ def _new_t(shape):
         return _make_tensor(shape, dtype, device)
     return tmp
 
+def _wrap_maybe_warns(regex):
+    def decorator(fn):
+        def inner(self, device, dtype):
+            with self.maybeWarnsRegex(UserWarning, regex):
+                fn(self, device, dtype)
+        return inner
+    return decorator
+
+
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
 # Each tests is defined in tensor_op_tests as a tuple of:
@@ -14681,15 +14784,19 @@ tensor_op_tests = [
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, False),
     ('addcdiv', '', _small_2d,
@@ -14697,34 +14804,44 @@ tensor_op_tests = [
                       _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3),
     ('addcdiv', 'scalar', _small_2d,
         lambda t, d: [_number(2.8, 1, t), _small_2d(t, d),
-                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3),
+                      _small_2d(t, d, has_zeros=False)], 1, 1e-5, 1e-3,
+        _types, True,
+        [_wrap_maybe_warns("This overload of addcdiv_? is deprecated")]),
     ('addcmul', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)], 1e-2, 2e-5, 1e-3),
     ('addcmul', 'scalar', _small_3d,
-        lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2),
+        lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
+        1e-5, 1e-5, _types, True,
+        [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-1, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('addr', '', _medium_2d, lambda t, d: [_medium_1d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
     ('addr', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
     ('addr', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_1d(t, d), _medium_1d(t, d)],
-        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16),
+        1e-2, 1e-1, 1e-4, _float_types_with_bfloat16, True,
+        [_wrap_maybe_warns("This overload of addr_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _float_types),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
@@ -14737,6 +14854,8 @@ tensor_op_tests = [
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
         1e-2, 1e-5, 1e-5, _types, False),
+    ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types, False),
     ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types, False),
     ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
