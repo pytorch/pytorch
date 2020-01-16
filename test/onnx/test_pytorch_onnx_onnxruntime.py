@@ -2460,6 +2460,7 @@ class TestONNXRuntime(unittest.TestCase):
         class Model(torch.nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
+
             def forward(self, x):
                 return 2 * x
         x = torch.randn(1, 2, 3, requires_grad=True)
@@ -2469,6 +2470,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Set the IR version to 0 to force an ONNX check error
         data[1] = 0
         data = bytes(data)
+
         def check_proto():
             torch._C._check_onnx_proto(data)
         self.assertRaises(RuntimeError, check_proto)
