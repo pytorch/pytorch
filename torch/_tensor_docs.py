@@ -3441,7 +3441,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_`
 
 add_docstr_all('scatter_add',
                r"""
-scatter_add(dim, index, source) -> Tensor
+scatter_add(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
