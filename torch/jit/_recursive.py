@@ -60,6 +60,12 @@ def _get_valid_constant(attr, v):
         3. a list or tuple of (2)
         """.format(type(v).__name__, attr, constants)))
 
+
+class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+
+
 def infer_concrete_type_builder(nn_module):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
@@ -77,9 +83,9 @@ def infer_concrete_type_builder(nn_module):
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
         if name in class_annotations:
-            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name], _jit_internal.fake_range())
         elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type)
+            attr_type = torch.jit.annotations.ann_to_type(item.type, _jit_internal.fake_range())
         else:
             attr_type = torch._C._jit_try_infer_type(item)
         return attr_type

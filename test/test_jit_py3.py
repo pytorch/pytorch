@@ -1,7 +1,9 @@
+from collections import namedtuple
+
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any, Dict
+from typing import NamedTuple, List, Optional, Any, Dict, Tuple
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
@@ -113,6 +115,37 @@ class TestScriptPy3(JitTestCase):
             return m.device
 
         self.checkScript(fn, [torch.randn(2, 2)])
+
+        GG = namedtuple('GG', ['f', 'g'])
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.ignore
+            def foo(self, x, z):
+                # type: (Tensor, Tensor) -> Tuple[GG, GG]
+                return GG(x, z), GG(x, z)
+
+            def forward(self, x, z):
+                return self.foo(x, z)
+
+        foo = torch.jit.script(Foo())
+        y = foo(torch.randn(2, 2), torch.randn(2, 2))
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.ignore
+            def foo(self, x, z) -> Tuple[GG, GG]:
+                return GG(x, z)
+
+            def forward(self, x, z):
+                return self.foo(x, z)
+
+        foo = torch.jit.script(Foo())
+        y = foo(torch.randn(2, 2), torch.randn(2, 2))
+
 
     def test_ignore_with_types(self):
         @torch.jit.ignore
