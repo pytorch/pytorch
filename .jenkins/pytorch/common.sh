@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+  export SCCACHE_RECACHE=1
+fi
+
 # Common setup for all Jenkins scripts
 
 # NB: define this function before set -x, so that we don't
