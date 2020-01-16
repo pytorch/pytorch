@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+  export SCCACHE_RECACHE=1
+fi
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
