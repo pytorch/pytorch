@@ -36,6 +36,7 @@ __all__ = [
 ################################################################################
 
 if platform.system() == 'Windows':
+    is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
@@ -44,7 +45,7 @@ if platform.system() == 'Windows':
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
     else:
-        nvtoolsext_dll_path = None
+        nvtoolsext_dll_path = ''
 
     from .version import cuda as cuda_version
     import glob
@@ -55,15 +56,15 @@ if platform.system() == 'Windows':
         default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
         cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
     else:
-        cuda_path = None
+        cuda_path = ''
 
-    if sys.version_info >= (3, 8):
-        dll_paths = list(filter(None, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
+    if not is_conda and sys.version_info >= (3, 8):
+        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
     else:
-        dll_paths = list(filter(None, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path, os.environ['PATH']]))
+        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path, os.environ['PATH']]))
 
         os.environ['PATH'] = ';'.join(dll_paths)
 
