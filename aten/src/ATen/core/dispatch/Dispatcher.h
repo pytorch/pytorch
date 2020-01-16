@@ -102,6 +102,9 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const;
+
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   /**
@@ -154,6 +157,11 @@ public:
     return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(c10::optional<DispatchKey> dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxedWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  }
+
   void callBoxed(Stack* stack) const {
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
@@ -171,12 +179,19 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+}
+
+template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+  return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
