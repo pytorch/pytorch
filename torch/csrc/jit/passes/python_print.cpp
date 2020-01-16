@@ -446,25 +446,6 @@ struct PythonPrintImpl {
     stmt << end;
   }
 
-  void printIValueList(
-      std::stringstream& stmt,
-      at::ArrayRef<IValue> list,
-      const char* begin = "",
-      const char* end = "") {
-    stmt << begin;
-    auto delimiter = "";
-    for (const auto& value : list) {
-      stmt << delimiter;
-      printConstant(stmt, value);
-      delimiter = ", ";
-    }
-    stmt << end;
-  }
-
-  std::string tuplePrintEndChar(size_t tuple_len) {
-    return tuple_len == 1 ? ",)" : ")";
-  }
-
   void printValueIndex(TaggedStringStream& stmt, at::ArrayRef<Value*> inputs) {
     const std::string val_name = useOf(inputs[0])->str();
     if (isValidIdentifier(val_name)) {
@@ -796,74 +777,17 @@ struct PythonPrintImpl {
     }
   }
 
-  void printAnnotatedConstantList(std::ostream& stmt, const char* the_type) {
-    stmt << "annotate(List[" << the_type << "], [])";
-  }
+  void printConstant(TaggedStringStream& stmt, const IValue& v) {
+    const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isTensor()) {
+        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+        return true;
+      }
+      return false;
+    };
 
-  void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
-      const IValue& the_list) {
-    if (list_size == 0) {
-      printAnnotatedConstantList(stmt, the_type);
-    } else {
-      stmt << the_list;
-    }
-  }
-
-  template <typename T>
-  void printConstant(T& stmt, const IValue& v) {
     std::stringstream ss;
-    if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if (v.isString()) {
-      c10::printQuotedString(ss, v.toStringRef());
-    } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      c10::printQuotedString(ss, device_stream.str());
-      ss << ")";
-    } else if (v.isTensorList()) {
-      ss << "[";
-      const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-        delim = ", ";
-      }
-      ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
-    } else if (v.type()->isSubtypeOf(ListType::ofStrings())) {
-      const char* delim = "";
-      const auto& list = v.toGenericListRef();
-      if (list.size() == 0) {
-        printAnnotatedConstantList(ss, "str");
-      } else {
-        ss << "[";
-        for (const IValue& str : list) {
-          ss << delim;
-          c10::printQuotedString(ss, str.toStringRef());
-          delim = ", ";
-        }
-        ss << "]";
-      }
-    } else if (v.isTuple()) {
-      auto elems = v.toTuple()->elements();
-      printIValueList(
-          ss,
-          v.toTuple()->elements(),
-          "(",
-          tuplePrintEndChar(elems.size()).c_str());
-    } else {
-      ss << v;
-    }
+    v.repr(ss, customFormatter);
     stmt << ss.str();
   }
 
@@ -969,10 +893,7 @@ struct PythonPrintImpl {
           stmt << qualname->qualifiedName();
         }
         printValueList(
-            stmt,
-            node->inputs(),
-            "(",
-            tuplePrintEndChar(node->inputs().size()).c_str());
+            stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
         stmt << "(" << useOf(node->inputs().at(0)) << ")["
@@ -1281,7 +1202,7 @@ struct PythonPrintImpl {
 
     for (size_t i = 0; i < numAttrs; i++) {
       const auto& name = moduleType->getAttributeName(i);
-      const auto& type = moduleType->getAttribute(name);
+      const auto& type = moduleType->getAttribute(i);
       registerClassDependencies(type);
 
       indent();
