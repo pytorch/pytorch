@@ -150,9 +150,11 @@ Operator createOperatorFromC10_withTracingNotHandledHere(const c10::OperatorHand
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    if(at::is_aten_op(op.schema().operator_name())) {
-      // ATen ops do tracing/autograd in VariableType, no need to handle it here
+    if(at::is_aten_op_and_unboxing_is_already_handled_by_c10(op.schema().operator_name())) {
+      // Those ops do tracing/autograd in VariableType, no need to handle it here
       torch::jit::registerOperator(createOperatorFromC10_withTracingNotHandledHere(op));
+    } else if (at::is_aten_op_and_unboxing_is_not_handled_by_c10_yet(op.schema().operator_name())) {
+      // register_aten_ops.cpp registers the jit unboxing wrapper for this op, no need to do anything here.
     } else {
       // custom ops don't do tracing/autograd in VariableType yet, we need to handle tracing here.
       torch::jit::registerOperator(createOperatorFromC10_withTracingHandledHere(op));

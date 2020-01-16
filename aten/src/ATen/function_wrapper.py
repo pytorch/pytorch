@@ -431,7 +431,8 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
-    'list_of_aten_ops': List[str],
+    'list_of_aten_ops_with_unboxing_already_handled_by_c10': List[str],
+    'list_of_aten_ops_with_unboxing_not_handled_by_c10_yet': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -1214,7 +1215,12 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['list_of_aten_ops'].append(OPERATOR_NAME.substitute(option))
+        if option['use_c10_dispatcher'] == 'unboxed_only':
+            top_env['list_of_aten_ops_with_unboxing_not_handled_by_c10_yet'].append(OPERATOR_NAME.substitute(option))
+        else:
+            assert option['use_c10_dispatcher'] in ['with_codegenerated_boxing_wrapper', 'full']
+            top_env['list_of_aten_ops_with_unboxing_already_handled_by_c10'].append(OPERATOR_NAME.substitute(option))
+
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]

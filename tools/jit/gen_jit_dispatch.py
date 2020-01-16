@@ -360,11 +360,11 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                                                          lvalues=lvalues)
         elif decl['use_c10_dispatcher'] == 'with_codegenerated_boxing_wrapper':
             constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                        call=call,
-                                        kw_assignments=kw_assignments,
-                                        num_inputs=num_inputs,
-                                        op_capture=op_capture,
-                                        lvalues=lvalues)
+                                                 call=call,
+                                                 kw_assignments=kw_assignments,
+                                                 num_inputs=num_inputs,
+                                                 op_capture=op_capture,
+                                                 lvalues=lvalues)
         else:
             assert decl['use_c10_dispatcher'] == 'full'
 
