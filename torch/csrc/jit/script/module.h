@@ -241,6 +241,10 @@ struct TORCH_API Module : public Object {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
+  inline bool operator==(const Module& y) const noexcept {
+    return _ivalue() == y._ivalue();
+  }
+
  private:
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
 
@@ -257,6 +261,7 @@ struct TORCH_API Module : public Object {
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
+
 };
 
 namespace detail {

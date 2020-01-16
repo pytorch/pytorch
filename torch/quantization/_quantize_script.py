@@ -106,11 +106,5 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     # torch._C._jit_pass_fold_convbn(model._c)
     model = prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    # When we mutating graph we didn't create a new ClassType
-    # and the graph executor will run an out dated version
-    # of the graph if we do inplace graph mutation, therefore
-    # we copy the model here
-    # [TODO] This will be fixed later when we figure out
-    # how to properly mutate types
     model = convert_script(model, True)
     return model

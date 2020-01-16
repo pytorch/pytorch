@@ -7,6 +7,7 @@
 #include <fbjni/fbjni.h>
 
 #include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/script.h>
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -15,6 +16,7 @@
 #ifdef __ANDROID__
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
+#include <android/log.h>
 #endif
 
 namespace pytorch_jni {
@@ -87,7 +89,21 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
   }
 #endif
 
+  static void preModuleLoadSetupOnce() {
+#ifdef __ANDROID__
+    torch::jit::setPrintHandler([](const std::string& s) {
+      __android_log_print(ANDROID_LOG_DEBUG, "pytorch-print", "%s", s.c_str());
+    });
+#endif
+  }
+
   void preModuleLoadSetup() {
+    static const int once = []() {
+      preModuleLoadSetupOnce();
+      return 0;
+    }();
+    ((void)once);
+
     auto qengines = at::globalContext().supportedQEngines();
     if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
         qengines.end()) {
