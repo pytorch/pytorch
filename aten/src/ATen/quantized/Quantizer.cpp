@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
-#include <c10/core/CPUAllocator.h
+#include <c10/core/CPUAllocator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
