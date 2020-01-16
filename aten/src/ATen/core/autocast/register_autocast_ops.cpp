@@ -37,11 +37,12 @@ void clear_cache() {
 }
 
 enum class CastPolicy : uint8_t {
-  fp16 = 0,
-  fp32,
+  fp16 = 0, // Cast all inputs to fp16 before running the op.
+  fp32, // Cast all inputs to fp32 before running the op.
+  fp32_dtype_flag, // Handles functions that should run + output in fp32 and support an output dtype flag.
+                   // The policy is:  If the user has explicity specified a dtype, respect it.
+                   // Otherwise, cast to the autocast type.
   promote, // Run in the widest dtype among several args.
-  firstarg, // Run in the dtype of the first argument.
-  passthrough // Run without casting any args (workaround for some ops the boxed fallback can't handle)
 };
 
 enum class Behavior : uint8_t {
@@ -133,6 +134,27 @@ T cached_cast(at::ScalarType to_type, T arg) {
   return arg;
 }
 
+/*******************************************************
+Logic to flip an output dtype flag.
+Keep it simple for now by assuming only one such flag is
+present in the argument list.  If I ever need a function
+with more than flag I'll figure out something else.
+The policy is:
+If the user has explicity specified a dtype, respect it.
+Otherwise, cast to the autocast type.
+********************************************************/
+
+// Overload to catch dtype flags
+c10::optional<ScalarType> flip_dtype_flag(at::ScalarType to_type, const c10::optional<ScalarType> & dtype) {
+  return dtype.has_value() ? dtype : to_type;
+}
+
+// Template to catch other args
+template<typename T>
+T flip_dtype_flag(at::ScalarType to_type, T arg) {
+  return arg;
+}
+
 /*************************************************************************************************************************
 Templates to provide wrapper functions
 
@@ -156,10 +178,6 @@ Well-behaved means
 - if the op requires casting or promotion, all Tensor arguments are
   received as "const Tensor &", which means the op does not modify
   any Tensor arguments in-place.
-
-CastPolicy::passthrough ops (which don't cast or promote) may
-receive non-const Tensor & arguments and remain well-behaved as
-long as they have an at:: exposure.
 ******************************************************************/
 
 // Separate struct specializations for the four CastPolicies so the wrapper instantiation for each op
@@ -186,6 +204,16 @@ struct WrapFunction_<CastPolicy::fp32, Behavior::wellbehaved, FuncType, F, Ret, 
   }
 };
 
+// CastPolicy::fp32_dtype_flag
+template<class FuncType, FuncType* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32_dtype_flag, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
+  static Ret call(Args... args) {
+    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    auto to_type = at::kFloat;
+    return (*F)(flip_dtype_flag(to_type, args)...);
+  }
+};
+
 // CastPolicy::promote
 template<class FuncType, FuncType* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
@@ -193,19 +221,6 @@ struct WrapFunction_<CastPolicy::promote, Behavior::wellbehaved, FuncType, F, Re
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
-  }
-};
-
-// The passthrough specialization supplies explicitly-registerable unboxed kernels
-// to serve ops that meet all of the following:
-// - don't require casting, so in principle they should use the boxed fallback
-// - don't play well with the boxed fallback, unfortunately
-// - are well-behaved
-template<class FuncType, FuncType* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::passthrough, Behavior::wellbehaved, FuncType, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
-    return (*F)(args...);
   }
 };
 
@@ -257,7 +272,7 @@ void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) 
   // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
   callBoxedWorkaround(op, stack);
   // Alternative:  Have the fallback go straight for the forward-compatible call, and if anything breaks,
-  // manually register a Patch<CastPolicy::passthrough, etc>::call for it.
+  // manually register something for it.
   // op.callBoxed(stack);
 }
 // TODO:  Once fallthrough is implemented (https://github.com/pytorch/pytorch/issues/29548),
@@ -299,8 +314,6 @@ Explicit registration
 // Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 
 // Macros to reduce boilerplate somewhat
-#define PATCH(FUNC, POLICY, BEHAVIOR) &WrapFunction<CastPolicy::POLICY, Behavior::BEHAVIOR, decltype( FUNC ), FUNC>::type::call
-
 #define KERNEL(FUNC, SCHEMA, SIGNATURE, POLICY, BEHAVIOR) \
   .op(torch::RegisterOperators::options() \
     .schema(SCHEMA) \
@@ -364,6 +377,22 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::pow, "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor", Tensor (const Tensor &, Scalar), fp32, wellbehaved)
   KERNEL(at::pow, "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor", Tensor (const Tensor &, const Tensor &), fp32, wellbehaved)
   KERNEL(at::pow, "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor", Tensor (Scalar, const Tensor &), fp32, wellbehaved)
+  KERNEL(at::softplus, "aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor", Tensor (const Tensor &, Scalar, Scalar), fp32, wellbehaved)
+  KERNEL(at::gelu, "aten::gelu(Tensor self) -> Tensor", Tensor (const Tensor &), fp32, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::layer_norm, "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor", Tensor (const Tensor &, IntArrayRef, const Tensor &, const Tensor &, double, bool), fp32, wellbehaved)
+  // The macro doesn't like this one so I had to write it out manually.
+  .op(torch::RegisterOperators::options()
+    .schema("aten::native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)")
+    .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double),
+    &WrapFunction<CastPolicy::fp32, Behavior::wellbehaved, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), at::native_layer_norm>::type::call
+    >(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  KERNEL_UNBOXED_ONLY(at::group_norm, "aten::group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32, wellbehaved)
+  // fp32_dtype_flag
+  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_dtype_flag, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_dtype_flag, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_dtype_flag, wellbehaved)
+  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_dtype_flag, wellbehaved)
   // promote
   KERNEL(at::addcdiv, "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote, wellbehaved)
   KERNEL(at::addcmul, "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar), promote, wellbehaved)
@@ -373,7 +402,6 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::tensordot, "aten::tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote, wellbehaved)
   KERNEL_UNBOXED_ONLY(at::dot, "aten::dot(Tensor self, Tensor tensor) -> Tensor", Tensor (const Tensor &, const Tensor &), promote, wellbehaved)
   KERNEL(at::equal, "aten::equal(Tensor self, Tensor other) -> bool", bool (const Tensor &, const Tensor &), promote, wellbehaved)
-  // passthrough
   ;
 }
 #endif

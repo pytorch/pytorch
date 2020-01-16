@@ -2175,6 +2175,12 @@ t2.start()
         for op, args in self.amp_lists.nn_fp16:
             self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_nn_fp32(self):
+        for op, args in self.amp_lists.nn_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
 
 if __name__ == '__main__':
     run_tests()

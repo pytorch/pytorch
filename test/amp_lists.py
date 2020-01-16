@@ -87,6 +87,10 @@ class AmpLists(object):
             ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_fp16),
             ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
             # ("pow", (1.7,) + pointwise0_fp16), # This variant has a backend, but is not documented in the API.
+            ("softmax", pointwise0_fp16 + (0,)),
+            ("log_softmax", pointwise0_fp16 + (0,)),
+            ("layer_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
+            ("group_norm", mat0_fp16 + (1,)),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
@@ -133,7 +137,10 @@ class AmpLists(object):
         ]
         # self.nn_fp16_inplace = []
         # self.nn_fp16_user_supplied_out = []
-        # self.nn_fp32 = []
+        self.nn_fp32 = [
+            ("softplus", pointwise0_fp16),
+            ("gelu", pointwise0_fp16),
+        ]
         # self.nn_fp32_inplace = []
         # self.nn_fp32_user_supplied_out = []
         # self.nn_fp32 = []
