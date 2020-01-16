@@ -3,71 +3,80 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import random
-
 import torch
-import torch.quantization as tq
 import torch.nn.quantized as nnq
 
 import operator_benchmark as op_bench
 
 r"""Microbenchmarks for the quantized activations."""
 
-qrelu_configs = op_bench.cross_product_configs(
+qactivation_long_configs = op_bench.cross_product_configs(
     dims=(
-        (1,), (1, 1), (1, 1, 1),     # Single element
-        (2, 1), (1, 2),              # Rank=2 row-/col-major
-        (3, 4, 5),                   # Rank=3
-        (1, 3, 4, 5), (2, 3, 4, 5),  # Rank=4, batch=1, batch>1
-        (4, 1, 1, 1),                # Rank=4, all other single dimensions
+        # VGG-16 relu's with original shape: (-1, 3, 224, 224)
+        ( 64, 224, 224),  # ReLU-1   # noqa
+        (128, 112, 112),  # ReLU-6   # noqa
+        (256,  56,  56),  # ReLU-11  # noqa
+        (512,  28,  28),  # ReLU-18  # noqa
+        (512,  14,  14),  # ReLU-25  # noqa
+        # Batch = 16
+        (16,  64, 224, 224),  # ReLU-1   # noqa
+        (16, 128, 112, 112),  # ReLU-6   # noqa
+        (16, 256,  56,  56),  # ReLU-11  # noqa
+        (16, 512,  28,  28),  # ReLU-18  # noqa
+        (16, 512,  14,  14),  # ReLU-25  # noqa
     ),
-    permute_dims=(False, True),
+    contig=(False, True),
     inplace=(False, True),
+    dtype=(torch.quint8,),
+    tags=('long',)
+)
+
+qactivation_short_configs = op_bench.cross_product_configs(
+    dims=((3, 4, 5),      # Rank=3
+          (2, 3, 4, 5)),  # Rank=4,
+    contig=(False,),
+    inplace=(False,),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
     tags=('short',)
 )
 
+qactivation_ops = op_bench.op_list(
+    attrs=(
+        ('relu', nnq.ReLU),
+        ('relu6', nnq.ReLU6),
+    ),
+    attr_names=('op_name', 'op_func'),
+)
 
-class QReLUBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims, permute_dims, inplace, dtype):
-        self.qop = nnq.ReLU(inplace=inplace)
 
-        # Input dimensions
-        f_input = (torch.rand(*dims) - 0.5) * 1e6
-
-        # Get quantization paramerters and quantize
-        if dtype in (torch.qint8, torch.quint8):
-            observer = tq.MinMaxObserver(dtype=dtype,
-                                         qscheme=torch.per_tensor_affine,
-                                         reduce_range=False)
-            observer.forward(f_input)
-            scale, zero_point = observer.calculate_qparams()
-            scale, zero_point = scale.item(), zero_point.item()
-        else:
-            zero_point = 0
-            qinfo = torch.iinfo(dtype)
-            fmin, fmax = f_input.min().item(), f_input.max().item()
-            if fmax == fmin:
-                scale = 1.0
-            else:
-                scale = (fmax - fmin) / (qinfo.max - qinfo.min)
+class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
+    r"""Base class for all the activations."""
+    def _setup(self, dims, contig, dtype):
+        # Input
+        f_input = (torch.rand(*dims) - 0.5) * 256
+        scale = 1.0
+        zero_point = 0
 
         # Quantize the tensor
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
                                                  dtype=dtype)
-        if permute_dims:
+        if not contig:
             # Make non-contiguous
-            new_shape = list(range(len(self.q_input.shape)))
-            random.shuffle(new_shape)
+            new_shape = list(range(self.q_input.ndim))[::-1]
             self.q_input = self.q_input.permute(new_shape)
 
-        self.set_module_name("QReLU")
+    def init(self, dims, contig, inplace, dtype, op_func):
+        self._setup(dims, contig, dtype)
+        self.qop = op_func
 
     def forward(self):
         return self.qop(self.q_input)
 
-op_bench.generate_pt_test(qrelu_configs, QReLUBenchmark)
+
+op_bench.generate_pt_tests_from_op_list(qactivation_ops,
+                                        qactivation_short_configs + qactivation_long_configs,
+                                        QActivationBenchmarkBase)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

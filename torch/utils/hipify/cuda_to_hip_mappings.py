@@ -7966,6 +7966,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("/hip/", ("/hip/", API_CAFFE2)),
         ("/context_gpu", ("/hip/context_gpu", API_CAFFE2)),
         ("/common_gpu", ("/hip/common_gpu", API_CAFFE2)),
+        ("/cuda_nccl_gpu", ("/hip/hip_nccl_gpu", API_CAFFE2)),
         ("/mixed_utils", ("/hip/mixed_utils", API_CAFFE2)),
         ("/operator_fallback_gpu", ("/hip/operator_fallback_gpu", API_CAFFE2)),
         (

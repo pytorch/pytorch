@@ -439,6 +439,7 @@ struct Environment {
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"hasattr", SpecialFormValue::create(prim::HasAttr)},
           {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
@@ -564,6 +565,23 @@ struct DefContext {
   TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
 };
 
+enum class LoopStatus { NOT_IN_LOOP, IN_LOOP, IN_UNROLLED_LOOP };
+
+struct WithLoopStatus {
+  WithLoopStatus(LoopStatus* prev, LoopStatus new_status) {
+    prev_value_ = *prev;
+    prev_ptr_ = prev;
+    *prev = new_status;
+  }
+  ~WithLoopStatus() {
+    *prev_ptr_ = prev_value_;
+  }
+
+ private:
+  LoopStatus* prev_ptr_;
+  LoopStatus prev_value_;
+};
+
 struct to_ir {
   to_ir(
       const Def& def,
@@ -609,6 +627,7 @@ struct to_ir {
   std::unordered_map<double, Value*> fp_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
+  LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -817,6 +836,7 @@ struct to_ir {
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
@@ -827,7 +847,7 @@ struct to_ir {
   }
 
   void emitClosure(const Def& def) {
-    // invoked once the closure block is set as the enviroment
+    // invoked once the closure block is set as the environment
     auto emit_body = [&](Block* closure_block) {
       emitDef(
           def,
@@ -843,16 +863,54 @@ struct to_ir {
         /*annotated_type=*/nullptr);
   }
 
+  void checkBreakContinue(
+      const SourceRange& loc,
+      const std::string& stmt_name) {
+    if (loop_status_ == LoopStatus::NOT_IN_LOOP) {
+      throw ErrorReport(loc) << "SyntaxError: '" << stmt_name << "'"
+                             << " outside loop";
+    } else if (loop_status_ == LoopStatus::IN_UNROLLED_LOOP) {
+      throw ErrorReport(loc)
+          << "Because we emit iteration over modulelists or tuples as "
+             "unrolled loops, we do not support break or continue inside the body of these loops";
+    }
+  }
+
   void emitBreak(const Break& stmt) {
+    checkBreakContinue(stmt.range(), "break");
     auto break_node =
         graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(break_node);
   }
 
   void emitContinue(const Continue& stmt) {
+    checkBreakContinue(stmt.range(), "continue");
     auto continue_node =
         graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(continue_node);
+  }
+
+  void emitDelete(const Delete& stmt) {
+    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+      throw ErrorReport(stmt.range())
+          << "del statements are only supported for list"
+             " and dict item deletion";
+    }
+    Subscript subscript(stmt.expr());
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      throw ErrorReport(stmt.range())
+          << "del statements only support deletion at a single index, "
+             "slicing is not supported"
+             " (see https://github.com/pytorch/pytorch/issues/31430)";
+    }
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const SourceRange& val_range = subscript.value().range();
+    Value* idx = emitExpr(subscript_exprs[0]);
+    Value* val = sv->asValue(val_range, method);
+    auto node = graph->create(aten::Delete, {val, idx}, 0)
+                    ->setSourceRange(stmt.range());
+    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -946,6 +1004,9 @@ struct to_ir {
           break;
         case TK_DEF:
           emitClosure(Def(stmt));
+          break;
+        case TK_DELETE:
+          emitDelete(Delete(stmt));
           break;
         default:
           throw ErrorReport(stmt)
@@ -1050,10 +1111,15 @@ struct to_ir {
         if (expr.kind() == TK_APPLY) {
           auto apply = Apply(expr);
           auto callee = Apply(expr).callee();
-          if (callee.kind() == TK_VAR &&
-              Var(callee).name().name() == "isinstance") {
-            checkApplyNumInputs(apply, 2);
-            return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+          if (callee.kind() == TK_VAR) {
+            if (Var(callee).name().name() == "isinstance") {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+            if (Var(callee).name().name() == "hasattr") {
+              checkApplyNumInputs(apply, 2);
+              return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+            }
           }
         }
         return CondValue(
@@ -1401,7 +1467,26 @@ struct to_ir {
     }
   }
 
-  CondValue emitIsInstance(Expr obj, Expr classinfo) {
+  CondValue emitHasAttr(const Expr& objExpr, const Expr& attrExpr) {
+    auto obj = emitExpr(objExpr);
+    const auto& type = obj->type();
+    if (attrExpr.kind() != TK_STRINGLITERAL) {
+      throw ErrorReport(attrExpr)
+          << "hasattr's second argument must be a string literal";
+    }
+    auto cls = type->cast<ClassType>();
+    if (!cls) {
+      throw ErrorReport(objExpr)
+          << "hasattr's first argument must be an object, got "
+          << type->python_str() << " instead";
+    }
+
+    const std::string& name = StringLiteral(attrExpr).text();
+    const bool hasAttr = cls->hasAttribute(name);
+    return CondValue(*graph, objExpr.range(), hasAttr, {});
+  }
+
+  CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
     // turn (float, (int, tuple)) into a flat list of types and type kind
     // category checks: tuple_check = true, types = {float, int}
     struct GatheredTypes {
@@ -1551,6 +1636,7 @@ struct to_ir {
     }
     n->addInput(max_trip_count_val);
 
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_LOOP);
     Value* trip_count =
         body_block->addInput()->setType(IntType::get()); // Iteration num
     {
@@ -1587,7 +1673,7 @@ struct to_ir {
     TORCH_INTERNAL_ASSERT(
         static_len, "Unrolled loop iter should have static length");
     int64_t len = *static_len;
-
+    WithLoopStatus loop_guard(&loop_status_, LoopStatus::IN_UNROLLED_LOOP);
     // In order to support ModuleLists which return different types,
     // as with an nn.Sequential which has a module that returns a Dict and then
     // a module which returns a Tensor,
@@ -2401,6 +2487,11 @@ struct to_ir {
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
       }
+      case prim::HasAttr: {
+        checkApplyNumInputs(apply, 2);
+        const auto result = emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      } break;
       // This represents the "__new__" method on classes
       // because it takes a ClassValue as input.
       // So if we see:
@@ -2699,20 +2790,26 @@ struct to_ir {
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
         TypePtr elem_type = TensorType::get();
-        if (type_hint && type_hint->kind() == TypeKind::ListType) {
-          elem_type = type_hint->expect<ListType>()->getElementType();
+        if (type_hint) {
+          if (type_hint->kind() == TypeKind::ListType) {
+            elem_type = type_hint->expect<ListType>()->getElementType();
+          } else {
+            // If the type hint was not a List[T] throw an error
+            throw ErrorReport(tree)
+                << "Expected a List type hint but instead got "
+                << type_hint->python_str();
+          }
         } else if (!values.empty()) {
-          elem_type = values.at(0)->type();
+          std::stringstream ss;
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+          auto maybe_elem_type = unifyTypeList(types, ss);
+          if (!maybe_elem_type) {
+            throw ErrorReport(tree) << "Lists must contain only a single type\n"
+                                    << ss.str();
+          }
+          elem_type = maybe_elem_type.value();
         }
 
-        // Tensors are special because they have dymnamic properties. So any
-        // list containing tensors should be typed with the unified typeof all
-        // the elements.
-        if (elem_type->isSubtypeOf(TensorType::get())) {
-          for (const auto& value : values) {
-            elem_type = unifyTypes(elem_type, value->type()).value();
-          }
-        }
         for (auto v : values) {
           std::stringstream ss;
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
@@ -2738,6 +2835,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
+
         for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
@@ -2750,14 +2848,33 @@ struct to_ir {
           auto dict_type = type_hint->expect<DictType>();
           key_type = dict_type->getKeyType();
           value_type = dict_type->getValueType();
-        } else if (!keys.empty()) {
-          key_type = keys.at(0)->type();
-          value_type = values.at(0)->type();
-        } else {
+        } else if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
+        } else {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        auto checkTypeOfValues = [](const TypePtr& type,
+                                    const char* what,
+                                    const std::vector<Value*>& values,
+                                    TreeList trees) {
+          for (size_t i = 0, N = values.size(); i < N; ++i) {
+            std::stringstream ss;
+            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+              throw ErrorReport(trees[i])
+                  << "Dict " << what
+                  << " must contain only a single type, expected: "
+                  << type->python_str() << " but found "
+                  << values[i]->type()->python_str() << " instead.\n"
+                  << ss.str();
+            }
+          }
+        };
+        checkTypeOfValues(key_type, "keys", keys, key_trees);
+        checkTypeOfValues(value_type, "values", values, value_trees);
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
@@ -3209,13 +3326,21 @@ c10::QualifiedName CompilationUnit::mangle(
   for (auto& atom : atoms) {
     auto pos = atom.find(manglePrefix);
     if (pos != std::string::npos) {
-      std::string newAtom;
-      newAtom.reserve(atom.size());
+      auto num = atom.substr(pos + manglePrefix.size());
+      // current mangle index in the name
+      size_t num_i = c10::stoi(num);
+      // bump the mangleIndex_ to num_i + 1
+      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
+      std::string newAtomPrefix;
+      newAtomPrefix.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
-      newAtom.append(atom, 0, pos);
-      newAtom.append(manglePrefix);
-      newAtom.append(c10::to_string(mangleIndex_++));
-      atom = newAtom;
+      newAtomPrefix.append(atom, 0, pos);
+      newAtomPrefix.append(manglePrefix);
+      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      // increment mangleIndex_ until the type is not defined
+      while (get_type(QualifiedName(atoms))) {
+        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      }
       return QualifiedName(atoms);
     }
   }
@@ -3337,6 +3462,14 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
   ConstantPooling(to_clean);
+  // full constant propagation runs ops with mutable inputs if it can
+  // prove that the inputs are not mutated anywhere in the graph.
+  // if a mutating node is removed in the graph (e.g. constant prop inlined a
+  // a constant if) then the next time constant prop is run it might be able
+  // to run nodes it was not able to previously, and the graph may change
+  // (jitter) So we run only constant prop w immutable types here bc
+  // successive runs of immutable constant prop does not change the graph
+  ConstantPropagationImmutableTypes(to_clean);
   // For jitter
   CanonicalizeOutputs(to_clean);
 }
@@ -3356,29 +3489,6 @@ bool meaningfulName(const std::string& name) {
       return true;
   }
   return false;
-}
-
-void lambdaLiftFork(Node* fork_node) {
-  // Fork a new graph from its orignal owning graph
-  auto forked_graph = std::make_shared<Graph>();
-  auto body_block = fork_node->blocks()[0];
-
-  // Make sure we capture everything in the new graph.
-  // The uncaptured values will be added to the fork signature.
-  std::unordered_map<Value*, Value*> uncaptures_map;
-  auto env = [&](Value* v) -> Value* {
-    if (!uncaptures_map.count(v)) {
-      // Capture values for both graphs
-      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
-      fork_node->addInput(v);
-    }
-    return uncaptures_map[v];
-  };
-  forked_graph->block()->cloneFrom(body_block, env);
-
-  // Separate the subgraph and clean up the orignal one
-  fork_node->g_(attr::Subgraph, forked_graph);
-  fork_node->eraseBlock(0);
 }
 
 void CompilationUnit::define_interface(

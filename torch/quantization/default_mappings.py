@@ -16,12 +16,14 @@ DEFAULT_MODULE_MAPPING = {
     nn.ReLU: nnq.ReLU,
     nn.ReLU6: nnq.ReLU6,
     nn.Conv2d: nnq.Conv2d,
+    nn.Conv3d: nnq.Conv3d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
     nni.ConvReLU2d: nniq.ConvReLU2d,
+    nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
@@ -58,9 +60,9 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 }
 
 DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
-    set(DEFAULT_MODULE_MAPPING.keys()) |
-    set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
-    set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
-    _INCLUDE_QCONFIG_PROPAGATE_LIST -
+    (set(DEFAULT_MODULE_MAPPING.keys()) |
+     set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
+     set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
+     _INCLUDE_QCONFIG_PROPAGATE_LIST) -
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )

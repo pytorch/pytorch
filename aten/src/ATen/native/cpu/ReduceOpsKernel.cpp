@@ -95,6 +95,14 @@ static void norm_kernel_tensor_iterator_impl(
         acc_type<scalar_t, false>(0)
       );
     });
+  } else if (val == 2) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
+      binary_kernel_reduce(
+        iter,
+        NormTwoOps<scalar_t>(),
+        scalar_t(0)
+      );
+    });
   } else if (val == INFINITY) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::BFloat16, iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(

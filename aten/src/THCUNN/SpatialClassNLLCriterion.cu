@@ -101,7 +101,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
        i += step) {
     t = target[toffset + i];
     if (t != ignore_index) {
-      assert(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weights ? weights[t] : ScalarConvert<int, T>::to(1);
       input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
       acc_weight += cur_weight;
@@ -113,8 +113,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
-    atomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
-    atomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
+    gpuAtomicAdd(total_weight, ScalarConvert<AccumT, T>::to(acc_weight));
+    gpuAtomicAdd(output, ScalarConvert<AccumT, T>::to(input_sum));
   }
 }
 
@@ -156,7 +156,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
        i += step) {
     t = (int)target[toffset + i];
     if (t != ignore_index) {
-      assert(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
     }
   }

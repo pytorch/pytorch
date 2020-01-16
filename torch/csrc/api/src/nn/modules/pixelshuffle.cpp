@@ -18,7 +18,7 @@ void PixelShuffleImpl::reset() {}
 
 Tensor PixelShuffleImpl::forward(
     const Tensor& input) {
-  return F::pixel_shuffle(input, options);
+  return F::detail::pixel_shuffle(input, options.upscale_factor());
 }
 
 } // namespace nn

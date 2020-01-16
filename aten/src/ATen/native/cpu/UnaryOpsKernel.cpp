@@ -18,7 +18,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/Math.h>
-
+#include <ATen/core/DistributionsHelper.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -252,6 +252,17 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
   });
 }
 
+static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [median, sigma, generator]() -> scalar_t {
+      at::cauchy_distribution<double> cauchy(median, sigma);
+      return (scalar_t)cauchy(generator);
+    });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -310,6 +321,17 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   });
 }
 #endif
+
+static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
+      at::geometric_distribution<double> geometric(p);
+      return (scalar_t)geometric(generator);
+    });
+  });
+}
 
 static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
@@ -391,6 +413,8 @@ static void rsqrt_kernel(TensorIterator& iter) {
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
