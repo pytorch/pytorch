@@ -4638,10 +4638,6 @@ def foo(x):
             stackstring.push("lel")
             return stackstring
 
-        # py_input = torch.classes._TorchScriptTesting_StackString([])
-        # py_output = foo(py_input)
-        # self.assertEqual(py_output.pop(), "lel")
-
         script_input = torch.classes._TorchScriptTesting_StackString([])
         scripted = torch.jit.script(foo)
         script_output = scripted(script_input)
@@ -4669,6 +4665,18 @@ def foo(x):
         self.assertEqual(out[0].pop(), "hi")
         self.assertEqual(out[1].pop(), "mom")
         self.assertEqual(out[1].pop(), "hi")
+
+    def test_torchbind_take_instance_as_method_arg(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss.merge(ss2)
+            return ss
+
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        self.assertEqual(out.pop(), "hi")
+        self.assertEqual(out.pop(), "mom")
 
     def test_jitter_bug(self):
         @torch.jit.script
