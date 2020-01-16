@@ -1,7 +1,8 @@
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/lower_tuples.h>
 
 namespace torch {
 namespace jit {
@@ -76,12 +77,40 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
 
 static void LowerAllTuples(Block* block);
 
+static void removeTupleConstant(Node* n) {
+  auto g = n->owningGraph();
+  auto tuple_elements = toIValue(n->output()).value().toTuple()->elements();
+  WithInsertPoint insert(n);
+  std::vector<Value*> elements;
+  for (const auto& elem : tuple_elements) {
+    auto constant = insertConstant(*n->owningGraph(), elem);
+    elements.push_back(constant);
+  }
+  auto tuple_type = n->output()->type()->expect<TupleType>();
+  auto tuple_construct = g->insertNode(n->owningGraph()->createTuple(
+      elements, tuple_type->schema() ? tuple_type : nullptr));
+
+  // insert the tuple first before recursing on its elements, so that its
+  // elements will have a use
+  for (Value* elem : elements) {
+    if (elem->type()->cast<TupleType>()) {
+      removeTupleConstant(elem->node());
+    }
+  }
+
+  n->replaceAllUsesWith(tuple_construct);
+}
+
 static void VisitNode(Node* n, Node* insert_point) {
   auto& graph = *n->owningGraph();
 
   // tuple construction operators will become dead when the unpacks are replaced
   if (n->kind() == prim::TupleConstruct) {
     return;
+  }
+
+  if (n->kind() == prim::Constant && n->output()->type()->cast<TupleType>()) {
+    return removeTupleConstant(n);
   }
 
   // note: changing the second argument to false changes this pass from a

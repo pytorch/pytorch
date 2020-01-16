@@ -13439,6 +13439,16 @@ a")
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
 
+    def test_lower_nested_tuples(self):
+        @torch.jit.script
+        def test():
+            return ((1, 2), 3)
+
+        self.run_pass('constant_propagation', test.graph)
+        FileCheck().check("prim::Constant").check_not("TupleConstruct").run(test.graph)
+        # fails if a tuple can't be lowered
+        self.run_pass('lower_all_tuples', test.graph)
+
     def test_unwrap_optional_builtin(self):
         def test(x):
             # type: (Optional[int]) -> int

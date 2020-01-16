@@ -109,7 +109,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
-      .def("_jit_pass_onnx_remove_tuple_constants", RemoveTupleConstants)
       .def("_jit_pass_onnx_remove_print", RemovePrintOps)
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
