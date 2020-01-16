@@ -77,6 +77,7 @@ add_library(test_lib
   tests/padded_buffer.cc
   )
 target_include_directories(test_lib PUBLIC "../../../../")
+target_include_directories(test_lib PUBLIC "../../../../third_party/googletest/googletest/include")
 
 foreach(test_path ${TEST_SRCS})
   get_filename_component(filename ${test_path} NAME)
