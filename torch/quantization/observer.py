@@ -335,8 +335,9 @@ class MinMaxObserver(_ObserverBase):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_val'] = self.min_val
-        destination[prefix + 'max_val'] = self.max_val
+        if self.min_val is not None and self.max_val is not None:
+            destination[prefix + 'min_val'] = self.min_val
+            destination[prefix + 'max_val'] = self.max_val
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -500,8 +501,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_vals'] = self.min_vals
-        destination[prefix + 'max_vals'] = self.max_vals
+        if self.min_vals is not None and self.max_vals is not None:
+            destination[prefix + 'min_vals'] = self.min_vals
+            destination[prefix + 'max_vals'] = self.max_vals
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -841,8 +843,9 @@ class HistogramObserver(_ObserverBase):
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'min_val'] = self.min_val
-        destination[prefix + 'max_val'] = self.max_val
+        if self.min_val is not None and self.max_val is not None:
+            destination[prefix + 'min_val'] = self.min_val
+            destination[prefix + 'max_val'] = self.max_val
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
