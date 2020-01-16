@@ -358,7 +358,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                                                          num_inputs=num_inputs,
                                                          op_capture=op_capture,
                                                          lvalues=lvalues)
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_boxing_wrapper':
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             constructor = CONSTRUCTOR.substitute(name=decl['name'],
                                                  call=call,
                                                  kw_assignments=kw_assignments,
@@ -491,7 +491,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             if decl['use_c10_dispatcher'] == 'unboxed_only':
                 shards[x].append(OPERATOR_JITONLY.substitute(signature=signature(decl, decl['should_match_schema']),
                                                              op=emit_decl_variant(decl)))
-            elif decl['use_c10_dispatcher'] == 'with_codegenerated_boxing_wrapper':
+            elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
                 shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
                                                      op=emit_decl_variant(decl)))
             else:
