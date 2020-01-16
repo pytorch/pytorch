@@ -118,7 +118,7 @@ struct TORCH_API Operator {
 
   Operator(
       const std::string& schema,
-      int(*op)(Stack&),
+      Operation op,
       c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
         op_(std::make_shared<Operation>(std::move(op))),

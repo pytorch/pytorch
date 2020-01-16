@@ -172,8 +172,23 @@ CONSTRUCTOR = CodeTemplate("""\
 }
 """)
 
+CONSTRUCTOR_JITONLY = CodeTemplate("""\
+[](Stack* stack) {
+    ${lvalues}
+    ${call}
+    drop(*stack, ${num_inputs});
+    pack(*stack, std::move(result_));
+    return 0;
+}
+""")
+
 OPERATOR = CodeTemplate("""\
   .op("${signature}",
+    ${op})
+""")
+
+OPERATOR_JITONLY = CodeTemplate("""\
+  .jitOnlyOp("${signature}",
     ${op})
 """)
 
@@ -336,12 +351,23 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         returns = decl['returns']
 
-        constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=call,
-                                             kw_assignments=kw_assignments,
-                                             num_inputs=num_inputs,
-                                             op_capture=op_capture,
-                                             lvalues=lvalues)
+        if decl['use_c10_dispatcher'] == 'unboxed_only':
+            constructor = CONSTRUCTOR_JITONLY.substitute(name=decl['name'],
+                                                         call=call,
+                                                         kw_assignments=kw_assignments,
+                                                         num_inputs=num_inputs,
+                                                         op_capture=op_capture,
+                                                         lvalues=lvalues)
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_boxing_wrapper':
+            constructor = CONSTRUCTOR.substitute(name=decl['name'],
+                                                 call=call,
+                                                 kw_assignments=kw_assignments,
+                                                 num_inputs=num_inputs,
+                                                 op_capture=op_capture,
+                                                 lvalues=lvalues)
+        else:
+            assert decl['use_c10_dispatcher'] == 'full'
+
         return constructor
 
     def filter_decls(jit_decls, disable_autograd, selected_op_list):
@@ -462,10 +488,14 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if decl['use_c10_dispatcher'] == 'unboxed_only':
+                shards[x].append(OPERATOR_JITONLY.substitute(signature=signature(decl, decl['should_match_schema']),
+                                                             op=emit_decl_variant(decl)))
+            elif decl['use_c10_dispatcher'] == 'with_codegenerated_boxing_wrapper':
                 shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
                                                      op=emit_decl_variant(decl)))
+            else:
+                assert decl['use_c10_dispatcher'] == 'full'
 
     for i, shard in enumerate(shards):
         env = {

@@ -121,7 +121,7 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(TensorTypeId dispatchKey, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dispatchKey, KernelFunction kernel) {
   auto inserted = backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
   TORCH_CHECK(inserted == impl::KernelFunctionTable::SetKernelResult::ADDED_NEW_KERNEL, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
 
@@ -130,12 +130,12 @@ RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(TensorTypeId di
   });
 }
 
-void Dispatcher::deregisterBackendFallbackKernel_(TensorTypeId dispatchKey) {
+void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
   auto result = backendFallbackKernels_.removeKernelIfExists(dispatchKey);
   TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), std::move(kernel));
 }

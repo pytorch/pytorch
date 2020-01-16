@@ -32,7 +32,7 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
     } else {
       if (!statically_inited_) {
 
-        if (HasArgument("dim")) {
+        if (HasArgument("dim") && HasArgument("start_idx") && HasArgument("end_idx")) {
           auto dim = this->template GetSingleArgument<int>("dim", 0);
           auto start = this->template GetSingleArgument<int64_t>("start_idx", 0);
           auto end = this->template GetSingleArgument<int64_t>("end_idx", -1);

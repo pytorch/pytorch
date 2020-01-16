@@ -107,6 +107,19 @@ public:
     return std::move(*this);
   }
 
+  Registerer&& jitOnlyOp(const std::string& schema, std::function<int (Stack*)> boxed_kernel_wrapper) && {
+    torch::jit::registerOperator(
+      torch::jit::Operator(
+        schema,
+        Operation([boxed_kernel_wrapper = std::move(boxed_kernel_wrapper)] (Stack& stack) -> int {
+          return boxed_kernel_wrapper(&stack);
+        }),
+        atenOperatorOptions()
+      )
+    );
+    return std::move(*this);
+  }
+
   Registerer() = default;
   Registerer(const Registerer&) = delete;
   Registerer& operator=(const Registerer&) = delete;
