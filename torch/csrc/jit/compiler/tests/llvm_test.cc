@@ -102,9 +102,9 @@ TEST(LLVMTest, BlockTest) {
   std::vector<void*> args({v.data()});
 
   auto block = Block::make({
-    Store::make(a, IntImm::make(0), IntImm::make(3), IntImm::make(1)),
-    Store::make(a, IntImm::make(1), IntImm::make(4), IntImm::make(1)),
-    Store::make(a, IntImm::make(0), IntImm::make(4), IntImm::make(1)),
+      Store::make(a, IntImm::make(0), IntImm::make(3), IntImm::make(1)),
+      Store::make(a, IntImm::make(1), IntImm::make(4), IntImm::make(1)),
+      Store::make(a, IntImm::make(0), IntImm::make(4), IntImm::make(1)),
   });
 
   block.accept(&cg);
@@ -140,7 +140,8 @@ TEST(LLVMTest, VecLoadStoreTest) {
 
   LLVMCodeGen cg({&a, &b});
   auto store = Store::make(
-      b, Ramp::make(0, 1, 4),
+      b,
+      Ramp::make(0, 1, 4),
       Load::make(a, Ramp::make(0, 1, 4), Broadcast::make(IntImm::make(1), 4)),
       Broadcast::make(IntImm::make(1), 4));
   store.accept(&cg);

@@ -205,14 +205,12 @@ void LLVMCodeGen::visit(const Cast* v) {
   }
 
   // Scalar casts
-  if (v->dtype() == kInt32 &&
-      v->src_value().dtype() == kFloat32) {
+  if (v->dtype() == kInt32 && v->src_value().dtype() == kFloat32) {
     value_ = irb_.CreateFPToSI(value_, dstType);
     return;
   }
 
-  if (v->dtype() == kFloat32 &&
-      v->src_value().dtype() == kInt32) {
+  if (v->dtype() == kFloat32 && v->src_value().dtype() == kInt32) {
     value_ = irb_.CreateSIToFP(value_, dstType);
     return;
   }
@@ -253,11 +251,16 @@ void LLVMCodeGen::visit(const Ramp* v) {
   }
 }
 
-llvm::Value* LLVMCodeGen::emitMaskedLoad(llvm::Value* base, llvm::Value* idx, llvm::Value* mask) {
+llvm::Value* LLVMCodeGen::emitMaskedLoad(
+    llvm::Value* base,
+    llvm::Value* idx,
+    llvm::Value* mask) {
   // Create block structure for the masked load.
   auto preheader = irb_.GetInsertBlock();
-  auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
-  auto tailblock = llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
+  auto condblock =
+      llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
+  auto tailblock =
+      llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
 
   // Test the mask
   auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::getTrue(int32Ty_));
@@ -277,7 +280,6 @@ llvm::Value* LLVMCodeGen::emitMaskedLoad(llvm::Value* base, llvm::Value* idx, ll
 
   return phi;
 }
-
 
 void LLVMCodeGen::visit(const Load* v) {
   v->base_handle().accept(this);
@@ -307,7 +309,7 @@ void LLVMCodeGen::visit(const Load* v) {
     load = irb_.CreateInsertElement(load, sub_load, i);
   }
 
-  value_= load;
+  value_ = load;
 }
 
 void LLVMCodeGen::visit(const For* v) {
@@ -350,11 +352,17 @@ void LLVMCodeGen::visit(const Block* v) {
   }
 }
 
-void LLVMCodeGen::emitMaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* mask, llvm::Value* val) {
+void LLVMCodeGen::emitMaskedStore(
+    llvm::Value* base,
+    llvm::Value* idx,
+    llvm::Value* mask,
+    llvm::Value* val) {
   // Create block structure for the masked store.
   auto preheader = irb_.GetInsertBlock();
-  auto condblock = llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
-  auto tailblock = llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
+  auto condblock =
+      llvm::BasicBlock::Create(*context_.getContext(), "cond", fn_);
+  auto tailblock =
+      llvm::BasicBlock::Create(*context_.getContext(), "tail", fn_);
 
   // Test the mask
   auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::getTrue(int32Ty_));
