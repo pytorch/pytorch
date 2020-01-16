@@ -229,9 +229,9 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using arg_t = detail::arg_type::type<func_t>;
   constexpr int arity = traits::arity;
 
-  // we need to create array to hold all the arguments, for nullary `f`, this means array of size 0
-  // Unfortunately we are not allowed to create array of 0 size, so for this case, we create an array
-  // of size 1 and just don't use it.
+  // We need to create array to hold all the arguments, for nullary `f`, this means array of size 0.
+  // Unfortunately the compiler don't allow us to create array of 0 size, so for this case, we create
+  // an array of size 1 and just don't use it.
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
