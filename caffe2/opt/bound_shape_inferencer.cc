@@ -65,7 +65,9 @@ void BoundShapeInferencer::InferOps(
   if (op.type() == "SparseLengthsSum" ||
       op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSum" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsSumFused4BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
     InferSparseLengthsSum(op);
   } else if (
       op.type() == "FC" || op.type() == "FCTransposed" ||
@@ -258,9 +260,13 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       "needs to be 2D");
 
   int weight = (op.type() == "SparseLengthsWeightedSum" ||
-                op.type() == "SparseLengthsWeightedSumFused8BitRowwise")
+                op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+                op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
       ? 1
       : 0;
+
+  const bool is4bit = op.type() == "SparseLengthsSumFused4BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSumFused4BitRowwise";
 
   if (weight) {
     CAFFE_ENFORCE_EQ(
@@ -292,11 +298,19 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   current_dim_type_ = TensorBoundShape_DimType_BATCH;
   current_max_batch_size_ = spec_.max_batch_size;
   auto output_dim1 = it->second.shape.dims(1);
-  // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 for
-  // scale and 4 byte for bias (https://fburl.com/t6dp9tsc)
+  // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 bytes
+  // for fp32 scale and 4 bytes for fp32 bias (https://fburl.com/t6dp9tsc)
   if (op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
     output_dim1 -= 8;
+  }
+  // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
+  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we pack
+  // 2 entries into 1 uint8 element of the embedding table.
+  // (https://fburl.com/diffusion/stmsyz74)
+  else if (is4bit) {
+    output_dim1 -= 4;
+    output_dim1 *= 2;
   }
   CAFFE_ENFORCE_GE(
       it->second.getDimType().size(), 2, "input(0): ", op.input(0));
