@@ -124,8 +124,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
 
   jclass c =
       env->FindClass("org/pytorch/torchvision/TensorImageUtils$NativePeer");
-  if (c == nullptr)
+  if (c == nullptr) {
     return JNI_ERR;
+  }
 
   static const JNINativeMethod methods[] = {
       {"imageYUV420CenterCropToFloatBuffer",
@@ -135,8 +136,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
   int rc = env->RegisterNatives(
       c, methods, sizeof(methods) / sizeof(JNINativeMethod));
 
-  if (rc != JNI_OK)
+  if (rc != JNI_OK) {
     return rc;
+  }
 
   return JNI_VERSION_1_6;
 }
