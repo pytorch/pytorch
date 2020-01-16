@@ -174,8 +174,9 @@ class RRefContext {
   //     in this map. A message of type RREF_USER_ACCEPT will move the
   //     corresponding RRef from pendingUsers_ map to confirmedUsers_ map.
   std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
-  //     confirmedUsers_ map is useful for proactively delete UserRRefs
-  //     on shutting down RPC stack, avoiding OwnerRRef leaks.
+  //     UserRRefs are added into this map when it is confirmed by the owner.
+  //     When destroying RRefContext this map helps to find local UserRRefs
+  //     and send delete messages if they are still alive.
   std::unordered_map<ForkId, std::weak_ptr<RRef>, ForkId::Hash> confirmedUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by

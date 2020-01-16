@@ -187,10 +187,11 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
 
 
 def nested_rref(dst):
-    return (
-        rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1)),
-        rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 2)),
-    )
+    rref_a = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+    rref_b = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 2))
+    rref_a.to_here()
+    rref_b.to_here()
+    return rref_a, rref_b
 
 
 def nested_remote(dst):

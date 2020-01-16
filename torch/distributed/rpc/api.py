@@ -206,9 +206,13 @@ def shutdown(graceful=True):
     """
     global _agent
 
+    self_worker_name = _agent.get_worker_info().name
     if graceful:
+        print(self_worker_name, "wait_all_workers")
         _wait_all_workers()
+        print(self_worker_name, "_delete_all_user_rrefs")
         _delete_all_user_rrefs()
+        print(self_worker_name, "_agent.join()")
         _agent.join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
