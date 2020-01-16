@@ -28,6 +28,8 @@
 // See BinaryOpsKernel.cu for the complete implementation
 //
 
+#include <type_traits>
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
@@ -189,9 +191,33 @@ __device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
   return apply_impl(f, a, std::make_index_sequence<arity>{});
 }
 
+namespace arg_type {
+
+// We need a way to compute the argument type of a function. But
+// for nullary function, it does not really have an argument type
+// in this case, we still need to return a valid type, but we don't
+// really care what type this is.
+
+struct dont_care {};
+
+template <typename func_t, std::size_t arity>
+struct arg_type_helper {
+  using type = typename function_traits<func_t>::template arg<0>::type;
+};
+
+template <typename func_t>
+struct arg_type_helper<func_t, 0> {
+  using type = dont_care;
+};
+
+template <typename func_t>
+using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::type;
+
+}  // namespace arg_type
+
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
+template<int nt, int vt, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
@@ -200,8 +226,13 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
-  using arg_t = typename traits::template arg<0>::type;
+  using arg_t = detail::arg_type::type<func_t>;
   constexpr int arity = traits::arity;
+
+  // We need to create array to hold all the arguments, for nullary `f`, this means array of size 0.
+  // Unfortunately the compiler don't allow us to create array of 0 size, so for this case, we create
+  // an array of size 1 and just don't use it.
+  constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
   int nv = nt * vt;
@@ -209,7 +240,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  arg_t *args_base[arity];
+  arg_t *args_base[nargs];
   #pragma unroll
   for (int i = 0; i < arity; i++) {
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
@@ -217,7 +248,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   // fetch data
   return_t results[vt];
-  arg_t args[vt][arity];
+  arg_t args[vt][nargs];
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
@@ -232,42 +263,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
-      results[i] = detail::array_apply<func_t, arg_t[arity]>(f, args[i]);
-    }
-  }
-
-  // store data
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
-    }
-  }
-}
-
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
-C10_LAUNCH_BOUNDS_1(nt)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
-  // Assumption:
-  // all arguments have the same type, which could be different from the return type
-  // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
-
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
-
-  // compute base pointers
-  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  return_t results[vt];
-
-  // compute
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      results[i] = f();
+      results[i] = detail::array_apply<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
@@ -290,7 +286,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f, data);
+  elementwise_kernel<nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 

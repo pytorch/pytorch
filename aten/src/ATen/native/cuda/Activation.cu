@@ -325,7 +325,7 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
       // The code below does not look like a great implementation because both positive
       // and negative case are computed regardless of the condition, and you might want
       // to optimize this. But this implementation is due to a compiler bug in handling
-      // branche. If we implement it in a correct way, the generated code will produce
+      // branch. If we implement it in a correct way, the generated code will produce
       // wrong result. This bug should be fixed in future CUDA, but we will need this
       // workaround for maybe years until all the current CUDAs become obsolete.
       //
