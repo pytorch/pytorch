@@ -9,7 +9,7 @@ import sys
 # the set of jobs to run via the Workflows filters in CircleCI config.
 
 default_set = set([
-    'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    'pytorch-linux-xenial-cuda9-cudnn7-py3-build',
 ])
 
 # Collection of jobs that are *temporarily* excluded from running on PRs.
