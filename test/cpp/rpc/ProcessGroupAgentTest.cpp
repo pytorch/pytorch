@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
 
-// No folly dependencies in this file.
-#include <torch/csrc/distributed/rpc/process_group_agent.h> // @manual
-#include <torch/csrc/distributed/autograd/context/container.h> // @manual
-#include <torch/lib/c10d/HashStore.hpp> // @manual
-#include <torch/lib/c10d/ProcessGroupGloo.hpp> // @manual
-#include <torch/torch.h> // @manual
+#include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/lib/c10d/HashStore.hpp>
+#include <torch/lib/c10d/ProcessGroupGloo.hpp>
+#include <torch/torch.h> /
 
 #include <memory>
 #include <string>
