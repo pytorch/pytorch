@@ -11,8 +11,8 @@ from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 import numbers
 
-from torch.nn.rnn import apply_permutation
-from torch.nn.quantized.dynamic.modules import PackedParameter  # noqa
+from torch.nn.modules.rnn import apply_permutation
+from torch.nn.quantized.dynamic.modules.rnn import PackedParameter  # noqa
 
 def _prepack(weight, bias=None):
     return torch.ops.quantized.linear_prepack(weight, bias)
@@ -73,22 +73,47 @@ class RNNBase(torch.nn.Module):
 
         # Assume the weights are coming from the torch.nn.RNNBase.
         # The naming for variables there is `weight_` and `bias_`.
-        step = bias + 1
-        self._flat_weights_names = flat_weight_names
-        self._all_weights_names = _reshape_list(self._flat_weights_names,
-                                                (num_layers, 2 * step))
+        assert(flat_weights_names is not None), "I need `flat_weights_names`"
+        assert(flat_weights is not None), "I need `flat_weights`"
+
+        step = int(self.bias) + 1
+        self._flat_weights_names = flat_weights_names
+        self._all_weights = _reshape_list(self._flat_weights_names,
+                                          (num_layers, 2 * step))
         self._flat_weights = []
-        for idx in range(0, self._flat_weights_names, step):
-            weight = self._all_weights[idx]
-            bias = self._all_weights[idx + 1] if self.bias else None
+        for idx in range(0, len(self._flat_weights_names), step * 2):
+            weight_ih = flat_weights[idx].clone().detach().requires_grad_(False)
+            weight_hh = flat_weights[idx + 1].clone().detach().requires_grad_(False)
+            bias_ih = None
+            bias_hh = None
+            if self.bias:
+                bias_ih = flat_weights[idx + 2].clone().detach().requires_grad_(False)
+                bias_hh = flat_weights[idx + 3].clone().detach().requires_grad_(False)
+
             if weights_scale is None:
                 # Compute the weights here
-                min = weight.min().item()
-                max = weight.max().item()
+                min = weight_ih.min().item()
+                max = weight_ih.max().item()
                 weights_scale = (max - min) / 256
                 weights_zero_point = 0
-            wb = _prepack(weight, bias)
-            self._flat_weights.append(PackedParameter(wb))
+            weight_ih = torch.quantize_per_tensor(weight_ih, scale=weights_scale,
+                                                  zero_point=weights_zero_point,
+                                                  dtype=torch.qint8)
+            if weights_scale is None:
+                # Compute the weights here
+                min = weight_hh.min().item()
+                max = weight_hh.max().item()
+                weights_scale = (max - min) / 256
+                weights_zero_point = 0
+            weight_hh = torch.quantize_per_tensor(weight_hh, scale=weights_scale,
+                                                  zero_point=weights_zero_point,
+                                                  dtype=torch.qint8)
+            wb_ih = _prepack(weight_ih, bias_ih)
+            wb_hh = _prepack(weight_hh, bias_hh)
+            self._flat_weights.append(PackedParameter(wb_ih))
+            self._flat_weights.append(PackedParameter(wb_hh))
+        # print(flat_weights)
+        print(self._flat_weights)
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
@@ -166,15 +191,18 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
 
+        weight_values = []
+        for mod in self._flat_weights:
+            weight_values.append(mod.param)
 
         if batch_sizes is None:
-            result = _VF.quantized_lstm(input, hx, self.flat_weights, self.bias, self.num_layers,
+            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
                                         float(self.dropout), self.training, self.bidirectional,
-                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
+                                        self.batch_first, dtype=torch.qint8, use_dynamic=False)
         else:
-            result = _VF.quantized_lstm(input, batch_sizes, hx, self.flat_weights, self.bias,
+            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
                                         self.num_layers, float(self.dropout), self.training,
-                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
+                                        self.bidirectional, dtype=torch.qint8, use_dynamic=False)
         output = result[0]
         hidden = result[1:]
 

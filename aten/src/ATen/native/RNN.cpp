@@ -349,13 +349,12 @@ static std::vector<QuantizedCellParamsStatic> gather_quantized_params_static(
     TensorList params) {
   static at::Tensor undefined;
   std::vector<QuantizedCellParamsStatic> result;
-  TORCH_CHECK(params.size() % 6 == 0,
+  TORCH_CHECK(params.size() % 2 == 0,
               "Got an incorrect number of quantized RNN parameters. ",
-              "Expecting 6 (w, out_scale, out_zp)*2, but got ",
-              params.size());
-  for (size_t i = 0; i < params.size(); ++i) {
-    result.emplace_back(params[i],       // packed weight + bias ih
-                        params[i + 1]);  // packed weight + bias hh
+              "Expecting multiple of 2, got ", params.size());
+  for (size_t i = 0; i < params.size(); i += 2) {
+    // packed wb_ih and wb_hh
+    result.emplace_back(params[i], params[i + 1]);
   }
   return result;
 }
@@ -394,7 +393,9 @@ std::vector<Tensor> project(at::ArrayRef<tpair_of<Tensor>> tuples) {
   return result;
 }
 
-Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) { return at::cat(hiddens, 0); }
+Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) {
+      TORCH_WARN("In 397!");
+  return at::cat(hiddens, 0); }
 tpair_of<Tensor> hidden_concat(at::ArrayRef<tpair_of<Tensor>> hiddens) {
   return std::make_tuple(hidden_concat(project<0>(hiddens)), hidden_concat(project<1>(hiddens)));
 }
@@ -507,12 +508,11 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     // Note: we don't want to use `repeat`, to avoid the copy
     const auto _input = pre_compute_input ? input : params.linear_ih(input);
     const auto h_w_hh = params.linear_hh(hx);  // qint8
-    const auto i_w_ih = _input.expand({hx.size(0), -1, -1});  // qint8
+    const auto i_w_ih = _input.expand({hx.size(0), -1});  // qint8
     const auto gates = elementwise_arithmetic("quantized::add_out",
                                               i_w_ih, h_w_hh,
                                               kQ8BitScaleWithRange16,
-                                              kQZeroPoint,
-                                              at::kQInt8);  // qint8
+                                              kQZeroPoint);  // qint8
 
     auto chunked_gates = gates.chunk(4, 1);
     auto ingate = at::sigmoid(chunked_gates[0]);  // quint8, z = 0
@@ -523,8 +523,7 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     auto in_cell = elementwise_arithmetic("quantized::mul_out",
                                           ingate, cellgate,
                                           kQ8BitScaleWithRange2,
-                                          kQZeroPoint,
-                                          at::kQInt8);  // qint8
+                                          kQZeroPoint);  // qint8
     auto d_in_cell = in_cell.dequantize();
     auto d_forgetgate = forgetgate.dequantize();
     auto d_cx = cx.dequantize();
@@ -532,26 +531,49 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     auto f_cy = (d_forgetgate * d_cx) + d_in_cell;
     auto cy = at::quantize_per_tensor(f_cy, kQ32BitScaleWithRange256,
                                       kQZeroPoint,
-                                      at::kQInt32);
+                                        at::kQInt32);  // make it 8 bit
     auto hy = elementwise_arithmetic("quantized::mul_out",
                                      outgate, at::tanh(cy),
                                      kQ8BitScaleWithRange2,
-                                     kQZeroPoint,
-                                     at::kQInt8);
+                                     kQZeroPoint);
     return std::make_tuple(std::move(hy), std::move(cy));
   }
 
 private:
   Tensor elementwise_arithmetic(const char* function_name,
                                 Tensor qa, Tensor qb,
-                                Scalar out_scale, Scalar out_zero_point,
-                                ScalarType qtype) const {
-    Tensor out = at::_empty_affine_quantized(qa.sizes(),
+                                Scalar out_scale, Scalar out_zero_point) const {
+    static constexpr ScalarType qtype = at::kQInt8;
+    auto rqa = demoting_requantization(qa, out_scale, out_zero_point, qtype);
+    auto rqb = demoting_requantization(qb, out_scale, out_zero_point, qtype);
+
+    TORCH_WARN("Sizes: ", rqa.sizes(), " ", rqb.sizes());
+    TORCH_WARN("Types for ", function_name, ": ", rqa.scalar_type(), " ", rqb.scalar_type());
+    TORCH_WARN("Scales for ", function_name, ": ", rqa.q_scale(), " ", rqb.q_scale());
+    TORCH_WARN("ZPs for ", function_name, ": ", rqa.q_zero_point(), " ", rqb.q_zero_point());
+    Tensor out = at::_empty_affine_quantized(rqa.sizes(),
       at::device(at::kCPU).dtype(qtype),
                  out_scale.toDouble(),
                  out_zero_point.toLong());
-    callOp(function_name, "", qa, qb, out);
+    callOp(function_name, "", rqa, rqb, out);
     return out;
+  }
+
+  // Demotes from qint32 to qint8
+  Tensor demoting_requantization(Tensor qa, Scalar out_scale,
+                                 Scalar out_zero_point, ScalarType qtype) const {
+    // TODO: Need to optimize this part.
+    if (qa.scalar_type() == at::kQUInt8) {
+      auto dqa = qa.dequantize();
+      auto qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(), out_zero_point.toLong(), qtype);
+      return qqa;
+    }
+    if (qa.scalar_type() != at::kQInt32) {
+      return qa;
+    }
+    auto dqa = qa.dequantize();
+    auto qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(), out_zero_point.toLong(), qtype);
+    return qqa;
   }
 };
 
@@ -677,6 +699,7 @@ struct FullBidirectionalLayer
           layer_(rev_step_inputs, input_hidden.second, params.second, true);
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
+      TORCH_WARN("In 702!");
       return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
               std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
     }
@@ -689,6 +712,7 @@ struct FullBidirectionalLayer
         layer_(rev_step_inputs, input_hidden.second, params.second);
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
+      TORCH_WARN("In 715!");
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
             std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
@@ -755,6 +779,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     hiddens.emplace_back(hidden);
     std::reverse(hiddens.begin(), hiddens.end());
 
+    TORCH_WARN("In 782!");
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
             hidden_concat(hiddens)};
   }
@@ -809,6 +834,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
+    TORCH_WARN("In 837!");
     return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
             hidden};
   }
@@ -833,6 +859,7 @@ struct PackedBidirectionalLayer
       const param_type& params) const override {
     auto fw_result = layer_(input, input_hidden.first, params.first);
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
+    TORCH_WARN("In 862!");
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
@@ -866,17 +893,21 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
                   int64_t num_layers, double dropout_p, bool train) {
   TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
-  TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
+  TORCH_CHECK(num_layers == (int64_t)weights.size(),
+              "Expected more weights in stacked_rnn. ",
+              "Expected ", num_layers, " got ", (int64_t)weights.size());
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
+  TORCH_WARN(num_layers, " In 904");
   for (int64_t l = 0; l < num_layers; ++l) {
+    TORCH_WARN(l, " In 905!");
     auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
-
+    TORCH_WARN(l, " In 909!");
     if (dropout_p != 0 && train && l < num_layers - 1) {
       layer_input = dropout(layer_input, dropout_p);
     }
@@ -961,17 +992,19 @@ std::tuple<io_type, Tensor, Tensor> _qlstm_impl(
   for (int64_t i = 0; i < total_layers; ++i) {
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
-
+  TORCH_WARN("In 993!");
   auto result = _rnn_impl<qLSTMCell, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
-
+  TORCH_WARN("In 995!");
   // Now, we need to reverse the transposed we performed above.
   std::vector<Tensor> hy, cy;
-  hy.reserve(total_layers); cy.reserve(total_layers);
+  hy.reserve(total_layers);
+  cy.reserve(total_layers);
   for (auto & hidden : result.final_hidden) {
     hy.push_back(std::move(std::get<0>(hidden)));
     cy.push_back(std::move(std::get<1>(hidden)));
   }
 
+  TORCH_WARN("In 1004!");
   return std::make_tuple(std::move(result.outputs), at::stack(hy, 0), at::stack(cy, 0));
 }
 
@@ -1231,6 +1264,7 @@ _thnn_differentiable_lstm_cell_backward(
   gig = at::sigmoid_backward(gig, i);
   gfg = at::sigmoid_backward(gfg, f);
   gcg = at::tanh_backward(gcg, c);
+  TORCH_WARN("In 1263!");
   Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
   Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
   return std::make_tuple(grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
@@ -1267,6 +1301,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   Tensor gin = at::tanh_backward(grad_hy * (1 - ig), ng);
   Tensor ghn = gin * rg;
   Tensor grg = at::sigmoid_backward(gin * hn, rg);
+  TORCH_WARN("In 1300!");
   Tensor grad_input_gates = at::cat({grg,gig,gin}, 1);
   Tensor grad_hidden_gates = at::cat({grg,gig,ghn}, 1);
   Tensor grad_input_bias = input_bias.defined() ? grad_input_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
