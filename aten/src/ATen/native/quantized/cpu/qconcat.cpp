@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/native/c10_utils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <vector>
@@ -35,7 +37,7 @@ bool is_valid_quantization_scheme(const Tensor& t) {
  * Note: This function uses a dequantization.
  */
 template <bool ReLUFused>
-Tensor quantized_cat(
+Tensor quantized_cat_impl(
     const c10::List<Tensor>& qxs,
     int64_t dim,
     double scale,
@@ -87,7 +89,7 @@ class QCat final : public torch::OperatorKernel {
     double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();
     int64_t _zero_point =
         zero_point.has_value() ? zero_point.value() : qxs.get(0).q_zero_point();
-    return quantized_cat<ReLUFused>(qxs, dim, _scale, _zero_point);
+    return quantized_cat_impl<ReLUFused>(qxs, dim, _scale, _zero_point);
   }
 };
 
@@ -96,7 +98,7 @@ class QCatOut final : public torch::OperatorKernel {
  public:
   Tensor operator()(const c10::List<Tensor>& qxs, int64_t dim, Tensor out) {
     auto out_ =
-        quantized_cat<ReLUFused>(qxs, dim, out.q_scale(), out.q_zero_point());
+        quantized_cat_impl<ReLUFused>(qxs, dim, out.q_scale(), out.q_zero_point());
     at::native::copy_(out, out_, /*non_blocking=*/false);
     return out;
   }
@@ -122,5 +124,19 @@ static auto registry =
                 TensorTypeId::QuantizedCPUTensorId));
 
 } // namespace
-} // namespace native
-} // namespace at
+
+Tensor quantized_cat(TensorList qxs, int64_t dim) {
+  double _scale = qxs[0].q_scale();
+  int64_t _zero_point = qxs[0].q_zero_point();
+  return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
+}
+
+Tensor& quantized_cat_out(Tensor& out, TensorList qxs, int64_t dim) {
+  auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
+                                        out.q_zero_point());
+  at::native::copy_(out, out_, /*non_blocking=*/false);
+  return out;
+}
+
+}  // namespace native
+}  // namespace at

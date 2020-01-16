@@ -5227,11 +5227,13 @@
   dispatch:
     CPU: legacy::cpu::_th_cat
     CUDA: legacy::cuda::_th_cat
+    QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_cat_out
     CUDA: legacy::cuda::_th_cat_out
+    QuantizedCPU: quantized_cat_out
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
