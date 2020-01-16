@@ -117,7 +117,10 @@ struct LivenessAnalyzer {
         liveness |= false_liveness;
       }
       liveness |= toSparseBitVector(it->inputs());
-      changed_ = changed_ | (liveness_sets_[it] |= liveness);
+      // `|=` returns true if new bits were set in LHS
+      // after or/union with `liveness`
+      auto changed = liveness_sets_[it] |= liveness;
+      changed_ = changed_ | changed;
     }
     return liveness;
   }
