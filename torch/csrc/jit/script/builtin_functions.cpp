@@ -37,6 +37,12 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
+auto floordiv = CodeTemplate(
+    R"SCRIPT(
+def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
+  return torch.floor_divide(self, other)
+)SCRIPT");
+
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(
       Symbol name) {
@@ -95,6 +101,11 @@ struct BuiltinFunctionRegistry {
         env.s("Length", pair.second);
         loadSource(_ntuple_ops.format(env));
       }
+    }
+    for (auto rhs : {"number", "Tensor"}) {
+      TemplateEnv env;
+      env.s("Rhs_Type", rhs);
+      loadSource(floordiv.format(env));
     }
   }
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;

@@ -22,6 +22,7 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
         weight_init=None,
         weight_optim=None,
         name='fc_without_bias',
+        uniform_weight_init_scale_numerator=1.0,
         **kwargs
     ):
         super(FCWithoutBias, self).__init__(model, name, input_record, **kwargs)
@@ -40,7 +41,7 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
             self.get_next_blob_reference('output')
         )
 
-        scale = math.sqrt(1.0 / input_dims)
+        scale = math.sqrt(uniform_weight_init_scale_numerator / input_dims)
         weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale,
                             'max': scale}

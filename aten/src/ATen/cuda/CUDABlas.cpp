@@ -157,7 +157,6 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(cublasDgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
@@ -169,7 +168,6 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(cublasSgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
@@ -183,7 +181,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 #ifdef __HIP_PLATFORM_HCC__
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,
@@ -263,6 +260,45 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #endif
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+template <>
+void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  cublasOperation_t opa = _cublasOpFromChar(transa);
+  cublasOperation_t opb = _cublasOpFromChar(transb);
+  float falpha = alpha;
+  float fbeta = beta;
+  _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  GEMM_CHECK_ARGVALUES(at::BFloat16);
+  TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &falpha,
+      a,
+      rocblas_datatype_bf16_r,
+      lda,
+      b,
+      rocblas_datatype_bf16_r,
+      ldb,
+      &fbeta,
+      c,
+      rocblas_datatype_bf16_r,
+      ldc,
+      c,
+      rocblas_datatype_bf16_r,
+      ldc,
+      rocblas_datatype_f32_r,
+      rocblas_gemm_algo_standard,
+      0,
+      0));
+}
+#endif
+
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define GEMV_CHECK_ARGVALUES(Dtype)           \
@@ -280,7 +316,6 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
       cublasDgemv(handle, op, m, n, &alpha, a, lda, x, incx, &beta, y, incy));
 }
@@ -291,7 +326,6 @@ void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
       cublasSgemv(handle, op, m, n, &alpha, a, lda, x, incx, &beta, y, incy));
 }
@@ -305,8 +339,22 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       incy == 1,
       "at::cuda::blas::gemv<Half>: support for incy != 1 not implemented");
   gemm<at::Half>(
-      stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
+
+#ifdef __HIP_PLATFORM_HCC__
+template <>
+void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
+  TORCH_CHECK(
+      incx == 1,
+      "at::cuda::blas::gemv<at::BFloat16>: support for incx != 1 not implemented");
+  TORCH_CHECK(
+      incy == 1,
+      "at::cuda::blas::gemv<at::BFloat16>: support for incy != 1 not implemented");
+  gemm<at::BFloat16>(
+      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+}
+#endif
 
 } // namespace blas
 } // namespace cuda

@@ -397,6 +397,72 @@ class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
 /// module storage semantics.
 TORCH_MODULE(MaxUnpool3d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FractionalMaxPool2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies fractional maxpool over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.FractionalMaxPool2d to learn
+/// about the exact behavior of this module.
+class TORCH_API FractionalMaxPool2dImpl : public torch::nn::Cloneable<FractionalMaxPool2dImpl> {
+ public:
+  FractionalMaxPool2dImpl(ExpandingArray<2> kernel_size)
+      : FractionalMaxPool2dImpl(FractionalMaxPool2dOptions(kernel_size)) {}
+  explicit FractionalMaxPool2dImpl(const FractionalMaxPool2dOptions& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `FractionalMaxPool2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool2d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+
+  /// The options with which this `Module` was constructed.
+  FractionalMaxPool2dOptions options;
+
+  Tensor _random_samples;
+};
+
+/// A `ModuleHolder` subclass for `FractionalMaxPool2dImpl`.
+/// See the documentation for `FractionalMaxPool2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(FractionalMaxPool2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FractionalMaxPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies fractional maxpool over a 3-D input.
+class TORCH_API FractionalMaxPool3dImpl : public torch::nn::Cloneable<FractionalMaxPool3dImpl> {
+ public:
+  FractionalMaxPool3dImpl(ExpandingArray<3> kernel_size)
+      : FractionalMaxPool3dImpl(FractionalMaxPool3dOptions(kernel_size)) {}
+  explicit FractionalMaxPool3dImpl(const FractionalMaxPool3dOptions& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `FractionalMaxPool3d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  /// Returns the outputs and the indices of the max values.
+  /// Useful for `torch::nn::MaxUnpool3d` later.
+  std::tuple<Tensor, Tensor> forward_with_indices(const Tensor& input);
+
+  /// The options with which this `Module` was constructed.
+  FractionalMaxPool3dOptions options;
+
+  Tensor _random_samples;
+};
+
+/// A `ModuleHolder` subclass for `FractionalMaxPool3dImpl`.
+/// See the documentation for `FractionalMaxPool3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(FractionalMaxPool3d);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Base class for all (dimension-specialized) lppool modules.

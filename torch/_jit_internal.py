@@ -105,7 +105,7 @@ def get_closure(fn):
 # because it is used as a variable inside the body of the function, and we
 # can resolve it using the captures returned from `get_closure`. However,
 # the type annotations are not captured by the closure. In Python
-# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be available as
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
@@ -311,8 +311,9 @@ def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
-    your model that is not yet TorchScript compatible. Models with ignored
-    functions cannot be exported; use torch.jit.unused instead.
+    your model that is not yet TorchScript compatible. If called from TorchScript,
+    ignored functions will dispatch the call to the Python interpreter. Models with ignored
+    functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 

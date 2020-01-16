@@ -197,7 +197,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ bool ne(at::Half a, at::Half b) { return a != b; }
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
-  static inline __host__ __device__ at::Half exp10(at::Half a) { return ::exp10(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
   static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
@@ -206,7 +205,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half tanh(at::Half a) { return ::tanh(a); }
   static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
-  static inline __host__ __device__ at::Half cinv(at::Half a) { return 1.0f / a; }
   static inline __host__ __device__ at::Half add(at::Half a, at::Half b) { return a + b; }
   static inline __host__ __device__ at::Half div(at::Half a, at::Half b) { return a / b; }
   static inline __host__ __device__ at::Half mul(at::Half a, at::Half b) { return a * b; }
@@ -236,8 +234,6 @@ struct THCNumerics<at::Half> {
 };
 
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10,erfinv and cinv
-//             are not in the std namespace
 template <>
 struct THCNumerics<float> {
   static inline __host__ __device__ float min() { return at::numeric_limits<float>::lowest(); }
@@ -254,7 +250,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
-  static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
@@ -263,7 +258,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
-  static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
   static inline __host__ __device__  float div  (float a, float b) { return a / b; }
   static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
@@ -273,9 +267,58 @@ struct THCNumerics<float> {
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };
 
+template <>
+struct THCNumerics<at::BFloat16> {
+  static inline __host__ __device__ at::BFloat16 min() { return at::numeric_limits<at::BFloat16>::lowest(); }
+  static inline __host__ __device__ at::BFloat16 max() { return at::numeric_limits<at::BFloat16>::max(); }
+  static inline __host__ __device__ at::BFloat16 lower_bound() { return at::numeric_limits<at::BFloat16>::lower_bound(); }
+  static inline __host__ __device__ at::BFloat16 upper_bound() { return at::numeric_limits<at::BFloat16>::upper_bound(); }
+
+  static inline __host__ __device__ bool lt(at::BFloat16 a, at::BFloat16 b) { return a < b; }
+  static inline __host__ __device__ bool le(at::BFloat16 a, at::BFloat16 b) { return a <= b; }
+  static inline __host__ __device__ bool gt(at::BFloat16 a, at::BFloat16 b) { return a > b; }
+  static inline __host__ __device__ bool ge(at::BFloat16 a, at::BFloat16 b) { return a >= b; }
+  static inline __host__ __device__ bool eq(at::BFloat16 a, at::BFloat16 b) { return a == b; }
+  static inline __host__ __device__ bool ne(at::BFloat16 a, at::BFloat16 b) { return a != b; }
+
+  static inline __host__ __device__  at::BFloat16 exp  (at::BFloat16 a) { return   expf(a); }
+  static inline __host__ __device__  at::BFloat16 cos  (at::BFloat16 a) { return   cosf(a); }
+  static inline __host__ __device__  at::BFloat16 sqrt (at::BFloat16 a) { return  sqrtf(a); }
+  static inline __host__ __device__  at::BFloat16 cosh (at::BFloat16 a) { return  coshf(a); }
+  static inline __host__ __device__  at::BFloat16 tan  (at::BFloat16 a) { return   tanf(a); }
+  static inline __host__ __device__  at::BFloat16 atan (at::BFloat16 a) { return  atanf(a); }
+  static inline __host__ __device__  at::BFloat16 tanh (at::BFloat16 a) { return  tanhf(a); }
+  static inline __host__ __device__  at::BFloat16 erf  (at::BFloat16 a) { return   erff(a); }
+  static inline __host__ __device__  at::BFloat16 erfc (at::BFloat16 a) { return  erfcf(a); }
+  static inline __host__ __device__  at::BFloat16 add  (at::BFloat16 a, at::BFloat16 b) { return a + b; }
+  static inline __host__ __device__  at::BFloat16 div  (at::BFloat16 a, at::BFloat16 b) { return a / b; }
+  static inline __host__ __device__  at::BFloat16 mul  (at::BFloat16 a, at::BFloat16 b) { return a * b; }
+  static inline __host__ __device__  at::BFloat16 sub  (at::BFloat16 a, at::BFloat16 b) { return a - b; }
+  static inline __host__ __device__  at::BFloat16 pow  (at::BFloat16 a, at::BFloat16 b) { return powf(a, b); }
+  static inline __host__ __device__  at::BFloat16 atan2(at::BFloat16 a, at::BFloat16 b) { return atan2f(a, b); }
+
+  static inline __host__ __device__ bool isnan(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isnan((float) a);
+    #else
+      return ::isnan(a);
+    #endif
+  }
+
+  static inline __host__ __device__ bool isinf(at::BFloat16 a) {
+    #ifdef _MSC_VER
+      // Windows requires this explicit conversion. The reason is unclear
+      // related issue with clang: https://reviews.llvm.org/D37906
+      return ::isinf((float) a);
+    #else
+      return ::isinf(a);
+    #endif
+  }
+};
+
 // DEPRECATED: use math functions from std and cuda math API (if needed)
-//             note that the functions exp10,erfinv and cinv
-//             are not in the std namespace
 template <>
 struct THCNumerics<double> {
   static inline __host__ __device__ double min() { return at::numeric_limits<double>::lowest(); }
@@ -292,7 +335,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
-  static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
@@ -301,7 +343,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
-  static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
   static inline __host__ __device__  double div  (double a, double b) { return a / b; }
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }

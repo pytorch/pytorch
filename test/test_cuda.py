@@ -47,7 +47,8 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
-    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
+    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
+                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_MAGMA = torch.cuda.has_magma
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
@@ -493,7 +494,7 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @unittest.skip("was disabled due to not enough memory, but actually it always fail")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
 
@@ -803,6 +804,27 @@ class TestCuda(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             _ = torch.load(buf)
 
+    def test_specify_improper_device_name(self):
+        import os
+        fname = "tempfile.pt"
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+                torch.save([torch.nn.Parameter(torch.randn(10, 10))], fname,
+                           _use_new_zipfile_serialization=True)
+                torch.load(fname, 'cuda0')
+        finally:
+            if os.path.exists(fname):
+                os.remove(fname)
+
+    def test_get_device_index(self):
+        from torch.cuda._utils import _get_device_index
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            _get_device_index('cuda0', optional=True)
+
+        with self.assertRaisesRegex(ValueError, "Expected a cuda device"):
+            cpu_device = torch.device('cpu')
+            _get_device_index(cpu_device, optional=True)
+
     def test_serialization_array_with_empty(self):
         x = [torch.randn(4, 4).cuda(), torch.cuda.FloatTensor()]
         with tempfile.NamedTemporaryFile() as f:
@@ -960,9 +982,9 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # copy 10 MB tensor from CPU-GPU which should take some time
+        # Operate on 10 MB tensor which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(non_blocking=True)
+        tensor2 = tensor1.cuda(non_blocking=True) + 1
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1822,8 +1844,6 @@ class TestCuda(TestCase):
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
-    # See https://github.com/pytorch/pytorch/issues/26838
-    @unittest.expectedFailure
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -2076,7 +2096,6 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
-
 
 if __name__ == '__main__':
     run_tests()
