@@ -191,9 +191,12 @@ __device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
 
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
+template <typename func_t>
+using ptr_array_t = at::detail::Array<char*, function_traits<func_t>::arity + 1>;
+
+template<int nt, int vt, typename func_t, std::enable_if_t<(function_traits<func_t>::arity > 0), int> = 0>
 C10_LAUNCH_BOUNDS_1(nt)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+__global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
@@ -245,9 +248,9 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 }
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
+template<int nt, int vt, typename func_t, std::enable_if_t<function_traits<func_t>::arity == 0, int> = 0>
 C10_LAUNCH_BOUNDS_1(nt)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+__global__ void elementwise_kernel(int N, func_t f, ptr_array_t<func_t> data) {
   // Assumption:
   // all arguments have the same type, which could be different from the return type
   // the all tensors are contiguous, that is: stride == sizeof(type) for all tensors
@@ -281,8 +284,8 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t>
-static void launch_kernel(int64_t N, const func_t& f, array_t data) {
+template<int nt, int vt, typename func_t>
+static void launch_kernel(int64_t N, const func_t& f, ptr_array_t<func_t> data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
