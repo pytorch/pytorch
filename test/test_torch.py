@@ -4432,6 +4432,7 @@ class _TestTorchMixin(object):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = torch.load(buf)
 
+    @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
@@ -4483,7 +4484,6 @@ class _TestTorchMixin(object):
         self._test_serialization_filelike(a, lambda x: FilelikeMock(x, has_readinto=True),
                                           'readinto() stress test')
 
-    @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: Fix the test case')
     def test_serialization_filelike_uses_readinto(self):
         # For maximum effiency, when reading a file-like object,
         # ensure the C API calls readinto instead of read.

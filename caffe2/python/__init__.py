@@ -20,7 +20,8 @@ if platform.system() == 'Windows':
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
     th_dll_path = os.path.join(th_root, 'lib')
 
-    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')):
+    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
+            not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
     else:
@@ -31,7 +32,8 @@ if platform.system() == 'Windows':
     spec = importlib.util.spec_from_file_location('torch_version', os.path.join(th_root, 'version.py'))
     torch_version = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(torch_version)
-    if torch_version.cuda and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0:
+    if torch_version.cuda and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0 and \
+            len(glob.glob(os.path.join(py_dll_path, 'cudart64*.dll'))) == 0:
         cuda_version = torch_version.cuda
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
