@@ -695,8 +695,14 @@ def to_return_type(arg, option):
     }
 
 
+def append_op_registration(op_registrations, option, registration):
+    # type: (List[Tuple[str, str]], FunctionOption, str) -> None
+    opname = option['schema_string'].split('.')[0].split('(')[0]
+    op_registrations.append((opname, registration))
+
+
 def create_generic(top_env, declarations):
-    # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
+    # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[Tuple[str, str]]]
     # translates defaults from cwrap types to C++ values
     def translate_default(argument, type_str, default):
         # type: (THFormal, str, Any) -> Any
@@ -1234,13 +1240,16 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if option['manual_kernel_registration']:
-                top_env['function_registrations'].append(DEFAULT_SCHEMA_REGISTRATION.substitute(option))
+                append_op_registration(
+                    op_registrations, option, DEFAULT_SCHEMA_REGISTRATION.substitute(option))
             else:
                 if option['use_c10_dispatcher'] == 'full':
-                    top_env['function_registrations'].append(DEFAULT_FUNCTION_REGISTRATION.substitute(option))
+                    append_op_registration(
+                        op_registrations, option, DEFAULT_FUNCTION_REGISTRATION.substitute(option))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
-                    top_env['function_registrations'].append(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
+                    append_op_registration(
+                        op_registrations, option, DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1297,6 +1306,7 @@ def create_generic(top_env, declarations):
         )
 
     output_declarations = []  # type: List[OutputDeclaration]
+    op_registrations = []  # type: List[Tuple[str, str]]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
@@ -1314,14 +1324,14 @@ def create_generic(top_env, declarations):
                 option['skip'] = True
         output_declarations.extend(output_options)
 
-    return output_declarations
+    return output_declarations, op_registrations
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[Tuple[str, str]], List[str], List[str]]
     type_object_declarations = []  # type: List[str]
     type_object_definitions = []  # type: List[str]
-    function_registrations = []  # type: List[str]
+    op_registrations = []  # type: List[Tuple[str, str]]
     legacy_th_declarations = []  # type: List[str]
     legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
@@ -1627,11 +1637,13 @@ def create_derived(backend_type_env, declarations):
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
-                        function_registrations.append(
+                        append_op_registration(
+                            op_registrations, option,
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     else:
                         assert option['use_c10_dispatcher'] == 'unboxed_only'
-                        function_registrations.append(
+                        append_op_registration(
+                            op_registrations, option,
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
@@ -1646,5 +1658,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations,
+    return (type_object_declarations, type_object_definitions, op_registrations,
             legacy_th_declarations, legacy_th_definitions)
