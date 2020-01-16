@@ -78,6 +78,11 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
 static void LowerAllTuples(Block* block);
 
 static void removeTupleConstant(Node * n) {
+  if (!(n->kind() == prim::Constant &&
+        n->output()->type()->cast<TupleType>())) {
+    return;
+  }
+
   auto g = n->owningGraph();
   auto tuple_elements = toIValue(n->output()).value().toTuple()->elements();
   WithInsertPoint insert(n);
@@ -93,9 +98,7 @@ static void removeTupleConstant(Node * n) {
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
   for (Value * elem: elements) {
-    if (elem->type()->cast<TupleType>()) {
-      removeTupleConstant(elem->node());
-    }
+    removeTupleConstant(elem->node());
   }
 
   n->replaceAllUsesWith(tuple_construct);
