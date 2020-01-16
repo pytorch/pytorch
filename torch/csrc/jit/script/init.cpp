@@ -103,8 +103,7 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     if (name.find("torch.classes") == 0) {
-      if (auto custom_class_ptr =
-              getCustomClass(std::string("__torch__.") + name)) {
+      if (auto custom_class_ptr = getCustomClass(name)) {
         return custom_class_ptr;
       }
     }
