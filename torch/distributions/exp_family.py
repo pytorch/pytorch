@@ -64,7 +64,7 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     def normalized_product(self, dim=-1, keepdim=True):
-        """
+        r"""
         Returns a new distribution object whose probability mass/density function is the normalized product 
         of the probability mass/density functions along given axis. The product of exponential family 
         distributions results in a distribution in the same family, but with new natural parameters :math:`\sum(\theta)` 
@@ -86,9 +86,10 @@ class ExponentialFamily(Distribution):
             p(\textbf{d}; \theta_1...\theta_n) = \frac{\prod_m p_m(\textbf{d}|\theta_m)}{\sum_i\prod_m p_m(\textbf{c}_i|\theta_m)}
 
         where d is a data vector in a discrete space, m is all the parameters of individual model m, 
-        :math:`p_m(\textbf{d}|\theta_m)` is the probability of d under model m, and i is an index over all possible vectors in the data space.
-
+        :math:`p_m(\textbf{d}|\theta_m)` is the probability of d under model m, and i is an index over all possible 
+        vectors in the data space.
         """
+
         if dim >= 0:
             dim = dim - len(self.batch_shape) - 1
         dim = dim - len(self.event_shape)
