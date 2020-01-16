@@ -1605,24 +1605,24 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal_shape_gpu(self):
-        tensor23 = torch.rand(2,3,device='cuda')
-        tensor21 = torch.rand(2,1,device='cuda')
-        tensor6 = torch.rand(6,device='cuda')
-        tensor4 = torch.rand(4,device='cuda')
-        tensor3 = torch.rand(3,device='cuda')
-        tensor1 = torch.rand(1,device='cuda')
-        #normal case
-        self.assertEqual(torch.normal(tensor23, tensor23).size(), (2,3))
-        #expandable case (including scalar case)
-        self.assertEqual(torch.normal(tensor23, tensor21).size(), (2,3))
-        self.assertEqual(torch.normal(tensor23, tensor3).size(), (2,3))
-        self.assertEqual(torch.normal(tensor23, tensor1).size(), (2,3))
-        self.assertEqual(torch.normal(tensor23, 2).size(), (2,3))
-        self.assertEqual(torch.normal(2, tensor23).size(), (2,3))
-        #non expandable but std and mean have same elements case
-        self.assertEqual(torch.normal(tensor23, tensor6).size(), (2,3))
+        tensor23 = torch.rand(2, 3, device='cuda')
+        tensor21 = torch.rand(2, 1, device='cuda')
+        tensor6 = torch.rand(6, device='cuda')
+        tensor4 = torch.rand(4, device='cuda')
+        tensor3 = torch.rand(3, device='cuda')
+        tensor1 = torch.rand(1, device='cuda')
+        # normal case
+        self.assertEqual(torch.normal(tensor23, tensor23).size(), (2, 3))
+        # expandable case (including scalar case)
+        self.assertEqual(torch.normal(tensor23, tensor21).size(), (2, 3))
+        self.assertEqual(torch.normal(tensor23, tensor3).size(), (2, 3))
+        self.assertEqual(torch.normal(tensor23, tensor1).size(), (2, 3))
+        self.assertEqual(torch.normal(tensor23, 2).size(), (2, 3))
+        self.assertEqual(torch.normal(2, tensor23).size(), (2, 3))
+        # non expandable but std and mean have same elements case
+        self.assertEqual(torch.normal(tensor23, tensor6).size(), (2, 3))
         self.assertEqual(torch.normal(tensor6, tensor23).size(), (6,))
-        #non expandable and std and mean have different number of element
+        # non expandable and std and mean have different number of element
         with self.assertRaises(RuntimeError):
             torch.normal(tensor23, tensor4)
 
