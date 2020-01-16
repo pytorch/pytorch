@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-
 from __future__ import division
-import sys
 import torch
 
 # TODO: remove this global setting
