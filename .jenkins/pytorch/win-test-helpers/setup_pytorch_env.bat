@@ -18,13 +18,12 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
-    :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
+    call conda install -y -q python=3.8 numpy cffi pyyaml boto3 protobuf
     call conda install -y -q -c conda-forge cmake
 )
-:: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow
+:: Numba is pinned to skip 0.45.0 to avoid https://github.com/numba/numba/issues/4352
+:: The version of hypothesis is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+python -m pip install ninja future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow "numba!=0.45.0"
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
