@@ -52,6 +52,10 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
   });
 }
 
+c10::optional<OperatorHandle> Dispatcher::findSchema(const char* name, const char* overload_name) {
+  return findSchema({name, overload_name});
+}
+
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {

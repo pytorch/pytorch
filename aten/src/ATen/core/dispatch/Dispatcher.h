@@ -73,6 +73,12 @@ public:
   c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
+   * Variant of findSchema that results in less code generated at the call site
+   * if you have string literals.
+   */
+  c10::optional<OperatorHandle> findSchema(const char* name, const char* overload_name);
+
+  /**
    * Register a kernel to the dispatch table for an operator.
    * If dispatch_key is nullopt, then this registers a fallback kernel.
    *
