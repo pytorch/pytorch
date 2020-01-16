@@ -18,6 +18,34 @@ def _no_grad_normal_(tensor, mean, std):
     with torch.no_grad():
         return tensor.normal_(mean, std)
 
+def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+    #Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
+    def norm_cdf(x):
+        #Computes standard normal cumulative distribution function
+        return (1+math.erf(x/math.sqrt(2.)))/2.
+    
+    with torch.no_grad():
+        l = norm_cdf((a-mean)/std)
+        u = norm_cdf((b-mean)/std)
+        sqrt_two = math.sqrt(2.)
+        
+        #First, fill with uniform values
+        tensor.uniform_(0., 1.)
+
+        #Scale by 2(l-u), shift by 2l-1
+        tensor.mul_(2*(u-l))
+        tensor.add_(2*l-1)
+        
+        #Ensure that the values are strictly between -1 and 1
+        eps = torch.finfo(tensor.dtype).eps
+        tensor.clamp_(min=-(1.-eps), max=(1.-eps))
+
+        #Now use the inverse erf to get distributed values
+        tensor.erfinv_()
+
+        #Clamp one last time to ensure it's still in the proper range
+        tensor.clamp_(min=a, max=b)
+        return tensor
 
 def _no_grad_fill_(tensor, val):
     with torch.no_grad():
@@ -103,6 +131,25 @@ def normal_(tensor, mean=0., std=1.):
         >>> nn.init.normal_(w)
     """
     return _no_grad_normal_(tensor, mean, std)
+
+def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+    # type: (Tensor, float, float, float, float) -> Tensor
+    r"""Fills the input Tensor with values drawn from the truncated
+    normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
+    using the Inverse CDF method.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        mean: the mean of the normal distribution
+        std: the standard deviation of the normal distribution
+        a: the minimum cutoff value
+        b: the maximum cutoff value
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.trunc_normal_(w)
+    """
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
 def constant_(tensor, val):
