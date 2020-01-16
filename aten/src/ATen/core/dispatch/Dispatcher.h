@@ -79,7 +79,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for an operator.
@@ -97,10 +97,13 @@ public:
    * key of the given operator arguments, it will check if there is such a
    * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  RegistrationHandleRAII registerBackendFallbackKernel(TensorTypeId dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
 
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
+
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const;
 
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
@@ -118,9 +121,9 @@ private:
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
+  void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
 
-  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
+  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatch_key) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
@@ -154,6 +157,11 @@ public:
     return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
+  template<class Return, class... Args>
+  Return callUnboxedWithDispatchKey(c10::optional<DispatchKey> dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxedWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  }
+
   void callBoxed(Stack* stack) const {
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
@@ -171,23 +179,30 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
+inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
+  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
+  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+}
+
+template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
-  const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-  return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
+  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+  return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
   kernel.callBoxed(op, stack);
 }
 
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey) const {
   if (C10_LIKELY(dispatchKey.has_value())) {
 
     const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
@@ -207,7 +222,7 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
     return *catchallKernel;
   }
 
-  if (!dispatchKey.has_value() || *dispatchKey == TensorTypeId::UndefinedTensorId) {
+  if (!dispatchKey.has_value() || *dispatchKey == DispatchKey::UndefinedTensorId) {
     TORCH_CHECK(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
