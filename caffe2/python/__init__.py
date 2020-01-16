@@ -46,6 +46,7 @@ if platform.system() == 'Windows':
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
     else:
-        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path, os.environ['PATH']]))
+        dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
+        dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
         os.environ['PATH'] = ';'.join(dll_paths)
