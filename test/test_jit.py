@@ -4633,20 +4633,21 @@ def foo(x):
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_take_as_arg(self):
-        def foo(stackstring : torch.classes._TorchScriptTesting_StackString):
+        def foo(stackstring):
+            # type: (torch.classes._TorchScriptTesting_StackString)
             stackstring.push("lel")
             return stackstring
-
-        # py_input = torch.classes._TorchScriptTesting_StackString([])
-        # py_output = foo(py_input)
-        # self.assertEqual(py_output.pop(), "lel")
 
         script_input = torch.classes._TorchScriptTesting_StackString([])
         scripted = torch.jit.script(foo)
         script_output = scripted(script_input)
         self.assertEqual(script_output.pop(), "lel")
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
@@ -4657,6 +4658,8 @@ def foo(x):
         self.assertEqual(out.pop(), "mom")
         self.assertEqual(out.pop(), "hi")
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance_from_method(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
