@@ -1176,7 +1176,11 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak):
+    # Notice `rpc.api.shutdown()` accesses `_delete_all_user_rrefs`
+    # through `torch.distributed.rpc.api`, so patching
+    # `torch.distributed.rpc._delete_all_user_rrefs` will not help.
+    @mock.patch.object(torch.distributed.rpc.api, "_delete_all_user_rrefs")
+    def _test_rref_leak(self, mock_delete_all_user_rrefs, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1194,6 +1198,10 @@ class RpcTest(RpcAgentTestFixture):
             torch.add,
             args=(torch.ones(2, 2), 1)
         )
+
+        # This is to ensure the RRef creation request is processed on
+        # owner node before calling `shutdown()`.
+        rref.to_here()
 
         import torch.distributed.rpc.api as api
         if ignore_leak:

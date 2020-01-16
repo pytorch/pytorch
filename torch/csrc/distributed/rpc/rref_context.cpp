@@ -19,7 +19,6 @@ RRefContext& RRefContext::getInstance() {
 
 void RRefContext::destroyInstance(bool ignoreRRefLeak) {
   auto& ctx = RRefContext::getInstance();
-  ctx.delAllUsers();
   {
     std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
     ctx.destroyed_ = true;
@@ -154,7 +153,7 @@ void RRefContext::delUser(
 }
 
 void RRefContext::delAllUsers() {
-  for (auto user : confirmedUsers_) {
+  for (const auto& user : confirmedUsers_) {
     auto rref_ptr = user.second.lock();
     if (rref_ptr == nullptr) {
       continue;
