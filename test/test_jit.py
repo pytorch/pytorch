@@ -21,7 +21,7 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins  # noqa: F401
-from jit.unsupported_ops import TestUnsupportedOps  # noqa: F401
+from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -534,6 +534,46 @@ class TestJit(JitTestCase):
 
         trace = torch.jit.trace(f, (a, b))
 
+    def test_peephole_with_writes(self):
+        def test_write(x):
+            s = 0
+            s += x
+            s += x
+            return s
+
+        self.checkScript(test_write, (torch.ones(4, 4),))
+
+
+    def test_peephole_with_non_output_writes(self):
+
+        @torch.jit.ignore
+        def nomnom(x):
+            pass
+
+        def test_write(x):
+            t = torch.ones_like(x)
+            z = x.clone()
+            y = z + 0
+            z.add_(t)
+            # this makes sure z isn't blasted out of existence
+            # because it isn't returned or used in a side-effectful
+            # way
+            nomnom(z)
+            return y + y
+
+        a = torch.ones(4, 4)
+        j = self.checkScript(test_write, (a,))
+
+    def test_peephole_no_output_aliasing(self):
+        def test_peephole(x):
+            y = x + 0
+            return x, y
+
+        a = torch.ones(4, 4)
+        j = self.checkScript(test_peephole, (a,))
+        r1, r2 = j(a)
+        self.assertNotEqual(r1.data_ptr(), r2.data_ptr())
+
     def test_peephole(self):
         a = torch.tensor([0.4])
         b = torch.tensor([0.7])
@@ -575,8 +615,8 @@ class TestJit(JitTestCase):
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
-        self.assertTrue(len(list(trace.graph.nodes())) == 0)
-
+        self.run_pass('dce', trace.graph)
+        FileCheck().check_not("type_as").run(str(trace.graph))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -2300,6 +2340,7 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
@@ -2309,6 +2350,7 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
@@ -5244,6 +5286,23 @@ a")
         traced = torch.jit.trace(Test(), ())
         torch.allclose(traced(), Test()())
 
+    def test_trace_save_load_copy(self):
+        class Test(torch.nn.Module):
+            def __init__(self):
+                super(Test, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        traced = torch.jit.trace(Test(), torch.rand(1, 3, 224, 224))
+        buffer = io.BytesIO()
+        torch.jit.save(traced, buffer)
+        buffer.seek(0)
+        loaded = torch.jit.load(buffer)
+        # should work
+        loaded.copy()
+
     def test_mul(self):
         def func(a, b):
             return a * b
@@ -5721,6 +5780,35 @@ a")
 
         graph_str = str(test.graph)
         self.assertTrue(graph_str.count("None = prim::Constant") == 1)
+
+    def test_constant_pooling_same_identity(self):
+        def foo():
+            a = torch.tensor([4])
+            b = (a,)
+            index = len(a) - 1
+            c = b[index]
+            d = b[index]
+            return c, d
+
+        foo_script = torch.jit.script(foo)
+        self.run_pass('constant_propagation', foo_script.graph)
+        self.run_pass('constant_pooling', foo_script.graph)
+        # even though the c & d escape scope, we are still able
+        # pool them into one constant because they are the same object
+        FileCheck().check_count("prim::Constant", 1, exactly=True).run(foo_script.graph)
+        self.assertEqual(foo(), foo_script())
+
+    def test_constant_pooling_introduce_aliasing(self):
+        @torch.jit.script
+        def foo():
+            a = torch.tensor(1)
+            b = torch.tensor(2)
+            return a, b
+
+        self.run_pass('constant_propagation', foo.graph)
+        self.run_pass('constant_pooling', foo.graph)
+        # dont pool constants bc it would introduce observable alias relationship changing
+        FileCheck().check_count("prim::Constant", 2, exactly=True).run(foo.graph)
 
     def test_literal(self):
         def func1(a, b):
@@ -7754,7 +7842,7 @@ a")
             )
 
         ops = ['is', 'is not']
-        type_literals = [True, False, None, [1, 1]]
+        type_literals = [True, False, None, [1, 1], 1, 2, .5, 1.5]
 
         # do literals product to try any types combinations
         for op, lhs, rhs in product(ops, type_literals, type_literals):
@@ -9066,13 +9154,14 @@ a")
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
 
-            __constants__ = ['b', 'i', 'c']
+            __constants__ = ['b', 'i', 'c', 's']
 
             def __init__(self):
                 super(M, self).__init__()
                 self.b = False
                 self.i = 1
                 self.c = 3.5
+                self.s = ["hello"]
 
             @torch.jit.script_method
             def forward(self):
@@ -10091,6 +10180,24 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    def test_trace_with_tensor_list_output(self):
+        def f():
+            return [torch.zeros(1), torch.zeros(5)]
+        traced_f = torch.jit.trace(f, [])
+        self.assertEqual(traced_f(), f())
+
+    def test_trace_with_number_list_output(self):
+        def f():
+            return [1, 5]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
+    def test_trace_with_nested_tensor_list_output(self):
+        def f():
+            return [[torch.zeros(1)], [torch.zeros(5)]]
+        with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
+            traced_f = torch.jit.trace(f, [])
+
     def test_script_copy(self):
         class M(torch.nn.Module):
             __annotations__ = {
@@ -10508,7 +10615,7 @@ a")
             fn = torch.jit.ignore(fn)
 
             with self.assertRaisesRegex(RuntimeError, r"Expected a value of type 'Tensor' for argument"
-                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
+                                                      r" 'x' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -10587,11 +10694,11 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Expected at most 2 arguments but found 3"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided."):
+        with self.assertRaisesRegex(RuntimeError, "Argument y not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
@@ -17533,11 +17640,23 @@ class TestDocs(unittest.TestCase):
         docs_dir = [os.path.dirname(__file__), '..', 'docs']
         docs_dir = os.path.join(*docs_dir)
 
-        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
+        def report_error(result):
             out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
+            raise RuntimeError("{}\n{}\n".format(err, out) +
+                               "Docs build failed (run `cd docs && " +
+                               "pip install -r requirements.txt && make doctest`)")
+        result = subprocess.run(
+            ['pip', 'install', '-r', 'requirements.txt'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            report_error(result)
+
+        result = subprocess.run(
+            ['make', 'doctest'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            report_error(result)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

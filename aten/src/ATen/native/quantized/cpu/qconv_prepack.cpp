@@ -317,14 +317,14 @@ static auto registry =
         .op("quantized::conv_prepack", // conv_prepack is deprecated, please use
                                        // conv2d_prepack for 2D conv.
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv2d_prepack", // We use  conv2d_prepack to be
                                          // consistent with conv3d_prepack
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d_prepack",
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<3>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native
