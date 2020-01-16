@@ -67,7 +67,8 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
-    'align_tensors',  # BUILD_NAMEDTENSOR only
+    # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    'align_tensors',
     'meshgrid',
     'cartesian_prod',
     'norm',

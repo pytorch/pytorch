@@ -103,7 +103,7 @@ class BasePruningMethod(ABC):
             hooks_to_remove = []
             for k, hook in module._forward_pre_hooks.items():
                 # if it exists, take existing thing, remove hook, then
-                # go thru normal thing
+                # go through normal thing
                 if (
                     isinstance(hook, BasePruningMethod)
                     and hook._tensor_name == name

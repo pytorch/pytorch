@@ -278,10 +278,6 @@ class BenchmarkRunner(object):
         curr_test_total_time = 0
         time_trace = []
         while True:
-            # Wipe cache
-            if self.args.wipe_cache:
-                torch.ops.operator_benchmark._clear_cache()
-
             run_time_sec = launch_test(test_case, iters, print_per_iter)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
@@ -315,7 +311,7 @@ class BenchmarkRunner(object):
         return (cmd_flag is None or test_flag == cmd_flag)
 
     def _check_operator_first_char(self, test_flag, cmd_flag):
-        if cmd_flag is None or test_flag[:1].lower in cmd_flag:
+        if cmd_flag is None or test_flag[:1].lower() in cmd_flag:
             return True
         return False
 

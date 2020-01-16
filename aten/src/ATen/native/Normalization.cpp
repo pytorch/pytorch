@@ -57,7 +57,7 @@ struct Var {
 };
 
 template<typename scalar_t>
-void batch_norm_cpu_inference_collect_liner_and_constant_terms(
+void batch_norm_cpu_inference_collect_linear_and_constant_terms(
     scalar_t* alpha, scalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& mean, const Tensor& variance, double eps) {
@@ -71,7 +71,7 @@ void batch_norm_cpu_inference_collect_liner_and_constant_terms(
   /// output(n, c, h, w)
   ///     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   ///         + bias(c)
-  ///     = input(n, c, h, w) * inv_var(c) * weight(c) +
+  ///     = input(n, c, h, w) * inv_var(c) * weight(c)
   ///         - mean(c) * inv_var(c) * weight(c) + bias(c),
   /// where inv_var(c) = 1 / sqrt(var(c) + eps).
   /// So the linear term, alpha(c) = inv_var(c) * weight(c),
@@ -103,19 +103,19 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  // Keep the loop struture simple to make sure compiler vectorization kicks in.
   if (image_size != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t c = 0; c < n_channel; ++c) {
@@ -156,12 +156,12 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
@@ -206,7 +206,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous()) {
 
-    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+    Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     batch_norm_cpu_inference_contiguous<scalar_t>(
       output, input, weight, bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -225,7 +225,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   int64_t n_input = input.size(1);
 
@@ -283,7 +283,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
-      
+
       // compute mean per input
       auto iter = TensorIterator();
       iter.add_input(in);
@@ -330,13 +330,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
+    grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_weight = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_bias = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);

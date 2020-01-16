@@ -2,6 +2,7 @@ import inspect
 import threading
 from functools import wraps
 import unittest
+import os
 import torch
 from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
@@ -247,6 +248,8 @@ device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
 
+PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
+
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
@@ -349,6 +352,27 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
+class expectedFailure(object):
+
+    def __init__(self, device_type):
+        self.device_type = device_type
+
+    def __call__(self, fn):
+
+        @wraps(fn)
+        def efail_fn(slf, device, *args, **kwargs):
+            if self.device_type is None or self.device_type == slf.device_type:
+                try:
+                    fn(slf, device, *args, **kwargs)
+                except Exception:
+                    return
+                else:
+                    slf.fail('expected test to fail, but it passed')
+
+            return fn(slf, device, *args, **kwargs)
+        return efail_fn
+
+
 class onlyOn(object):
 
     def __init__(self, device_type):
@@ -390,6 +414,17 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
+# Only runs the test on the CPU and CUDA (the native device types)
+def onlyOnCPUAndCUDA(fn):
+    @wraps(fn)
+    def only_fn(self, device, *args, **kwargs):
+        if self.device_type != 'cpu' and self.device_type != 'cuda':
+            reason = "Doesn't run on {0}".format(self.device_type)
+            raise unittest.SkipTest(reason)
+
+        return fn(self, device, *args, **kwargs)
+
+    return only_fn
 
 # Specifies per-dtype precision overrides.
 # Ex.
@@ -466,6 +501,10 @@ def onlyCPU(fn):
 
 def onlyCUDA(fn):
     return onlyOn('cuda')(fn)
+
+
+def expectedFailureCUDA(fn):
+    return expectedFailure('cuda')(fn)
 
 
 # Skips a test on CPU if LAPACK is not available.

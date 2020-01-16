@@ -111,6 +111,13 @@ class DeadCodeEliminator {
       // Special handling to deal with loop carried dependencies.
       auto loop = LoopView(outerNode);
       for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {
+        if (outerNode->kind() == c10::onnx::Loop) {
+          // Special handling for onnx loop.
+          // The number of body carried inputs and outputs are different.
+          // They cannot be mapped to each other easily by the same index.
+          liveValues_.insert(loop.bodyCarriedOutputs().at(i));
+          continue;
+        }
         auto innerInput = loop.bodyCarriedInputs().at(i);
         auto innerOutput = loop.bodyCarriedOutputs().at(i);
         auto outerOutput = loop.carriedOutputs().at(i);

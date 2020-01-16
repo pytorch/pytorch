@@ -57,7 +57,7 @@ class ASGD(Optimizer):
                     state['step'] = 0
                     state['eta'] = group['lr']
                     state['mu'] = 1
-                    state['ax'] = torch.zeros_like(p.data)
+                    state['ax'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 state['step'] += 1
 

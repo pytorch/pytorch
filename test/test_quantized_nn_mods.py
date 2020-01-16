@@ -13,7 +13,8 @@ from common_quantized import _calculate_dynamic_qparams, override_quantized_engi
 from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from hypothesis_utils import no_deadline
+import hypothesis_utils as hu
+hu.assert_deadline_disabled()
 
 import io
 import numpy as np
@@ -127,7 +128,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -181,7 +181,6 @@ class FunctionalAPITest(QuantizationTestCase):
                 W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias,
                 use_channelwise)
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            D=st.integers(4, 8),
@@ -207,7 +206,7 @@ class FunctionalAPITest(QuantizationTestCase):
            Y_zero_point=st.integers(0, 4),
            use_bias=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm")))
+           qengine=st.sampled_from(("fbgemm",)))
     def test_conv3d_api(
         self, batch_size, in_channels_per_group, D, H, W,
         out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,
@@ -239,7 +238,6 @@ class FunctionalAPITest(QuantizationTestCase):
 
 
 class DynamicModuleAPITest(QuantizationTestCase):
-    @no_deadline
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                          " with instruction set support avx2 or newer.")
@@ -265,7 +263,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Simple round-trip test to ensure weight()/set_weight() API
         self.assertEqual(qlinear.weight(), W_q)
-        W_pack = qlinear._packed_params
+        W_pack = qlinear._packed_params._packed_params
         Z_dq = qlinear(X)
 
         # Check if the module implementation matches calling the
@@ -275,9 +273,9 @@ class DynamicModuleAPITest(QuantizationTestCase):
 
         # Test serialization of dynamic quantized Linear Module using state_dict
         model_dict = qlinear.state_dict()
-        self.assertEqual(model_dict['weight'], W_q)
+        self.assertEqual(model_dict['_packed_params.weight'], W_q)
         if use_bias:
-            self.assertEqual(model_dict['bias'], B)
+            self.assertEqual(model_dict['_packed_params.bias'], B)
         b = io.BytesIO()
         torch.save(model_dict, b)
         b.seek(0)
@@ -288,8 +286,8 @@ class DynamicModuleAPITest(QuantizationTestCase):
         loaded_qlinear.load_state_dict(loaded_dict)
 
         linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_params),
-                         linear_unpack(loaded_qlinear._packed_params))
+        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                         linear_unpack(loaded_qlinear._packed_params._packed_params))
         if use_bias:
             self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
         self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
@@ -299,7 +297,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
 
         self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
         Z_dq2 = qlinear(X)
         self.assertEqual(Z_dq, Z_dq2)
 
@@ -357,7 +355,6 @@ class ModuleAPITest(QuantizationTestCase):
                          message="ReLU6 module API failed")
 
 
-    @no_deadline
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -403,7 +400,7 @@ class ModuleAPITest(QuantizationTestCase):
             qlinear.set_weight_bias(W_q, B)
             # Simple round-trip test to ensure weight()/set_weight() API
             self.assertEqual(qlinear.weight(), W_q)
-            W_pack = qlinear._packed_params
+            W_pack = qlinear._packed_params._packed_params
 
             qlinear.scale = float(scale)
             qlinear.zero_point = int(zero_point)
@@ -421,11 +418,10 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertEqual(Z_ref, Z_q)
 
             # Test serialization of quantized Linear Module using state_dict
-
             model_dict = qlinear.state_dict()
-            self.assertEqual(model_dict['weight'], W_q)
+            self.assertEqual(model_dict['_packed_params.weight'], W_q)
             if use_bias:
-                self.assertEqual(model_dict['bias'], B)
+                self.assertEqual(model_dict['_packed_params.bias'], B)
             b = io.BytesIO()
             torch.save(model_dict, b)
             b.seek(0)
@@ -439,8 +435,8 @@ class ModuleAPITest(QuantizationTestCase):
             loaded_qlinear.load_state_dict(loaded_dict)
 
             linear_unpack = torch.ops.quantized.linear_unpack
-            self.assertEqual(linear_unpack(qlinear._packed_params),
-                             linear_unpack(loaded_qlinear._packed_params))
+            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                             linear_unpack(loaded_qlinear._packed_params._packed_params))
             if use_bias:
                 self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
             self.assertEqual(qlinear.scale, loaded_qlinear.scale)
@@ -451,7 +447,7 @@ class ModuleAPITest(QuantizationTestCase):
             self.assertTrue(hasattr(qlinear, '_weight_bias'))
             self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
             self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params))
+            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
             Z_q2 = loaded_qlinear(X_q)
             self.assertEqual(Z_q, Z_q2)
 
@@ -647,7 +643,6 @@ class ModuleAPITest(QuantizationTestCase):
         # Smoke test extra_repr
         self.assertTrue(module_name in str(converted_qconv_module))
 
-    @no_deadline
     @given(batch_size=st.integers(1, 3),
            in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            H=st.integers(4, 16),
@@ -721,21 +716,21 @@ class ModuleAPITest(QuantizationTestCase):
                 Y_zero_point, use_bias, use_fused, use_channelwise)
 
     @given(batch_size=st.integers(1, 3),
-           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           D=st.integers(4, 8),
-           H=st.integers(4, 8),
-           W=st.integers(4, 8),
-           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           in_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
+           D=st.integers(3, 6),
+           H=st.integers(3, 6),
+           W=st.integers(3, 6),
+           out_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
            groups=st.integers(1, 4),
-           kernel_d=st.integers(1, 4),
-           kernel_h=st.integers(1, 4),
-           kernel_w=st.integers(1, 4),
+           kernel_d=st.integers(1, 3),
+           kernel_h=st.integers(1, 3),
+           kernel_w=st.integers(1, 3),
            stride_d=st.integers(1, 2),
            stride_h=st.integers(1, 2),
            stride_w=st.integers(1, 2),
-           pad_d=st.integers(0, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
+           pad_d=st.integers(0, 1),
+           pad_h=st.integers(0, 1),
+           pad_w=st.integers(0, 1),
            dilation=st.integers(1, 2),
            X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
@@ -746,7 +741,7 @@ class ModuleAPITest(QuantizationTestCase):
            use_bias=st.booleans(),
            use_fused=st.booleans(),
            use_channelwise=st.booleans(),
-           qengine=st.sampled_from(("fbgemm")))
+           qengine=st.sampled_from(("fbgemm",)))
     def test_conv3d_api(
         self, batch_size, in_channels_per_group, D, H, W,
         out_channels_per_group, groups, kernel_d, kernel_h, kernel_w,

@@ -12,6 +12,8 @@ namespace jit {
   _(ADFormulas)                        \
   _(Attributes)                        \
   _(Blocks)                            \
+  _(CallStack)                         \
+  _(CallStackCaching)                  \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \
@@ -46,6 +48,7 @@ namespace jit {
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
   _(ClassParser)                       \
+  _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
   _(InsertBailOuts)                    \
@@ -54,6 +57,8 @@ namespace jit {
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
+  _(ModuleClone)                       \
+  _(ModuleCloneInstance)               \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
@@ -71,7 +76,10 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
-  _(CommonAncestor)
+  _(CommonAncestor)                    \
+  _(AutogradSymbols)                   \
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterPrim)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -91,6 +99,8 @@ TH_FORALL_TESTS_CUDA(DECLARE_JIT_TEST)
 // and python test runners), but is instead invoked manually by the
 // torch_python_test.cpp
 void testEvalModeForLoadedModule();
+void testSerializationInterop();
+void testTorchSaveError();
 
 } // namespace jit
 } // namespace torch

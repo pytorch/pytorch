@@ -36,7 +36,7 @@ def main():
 
     parser.add_argument(
         '--operator_range',
-        help='Filter tests based on operator_range(e.g. a-c)',
+        help='Filter tests based on operator_range(e.g. a-c or b,c-d)',
         default=None)
 
     parser.add_argument(
@@ -131,13 +131,6 @@ def main():
         '--device',
         help='Run tests on the provided architecture (cpu, cuda)',
         default='None')
-
-    parser.add_argument(
-        '--wipe_cache',
-        help='Wipe cache before benchmarking each operator',
-        action='store_true',
-        default=False
-    )
 
     args, _ = parser.parse_known_args()
 
