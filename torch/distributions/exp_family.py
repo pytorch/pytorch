@@ -63,7 +63,7 @@ class ExponentialFamily(Distribution):
     def _from_natural_params(*params):
         raise NotImplementedError
 
-    def normalized_product(self, dim=-1, keepdim=True):
+    def normalized_product(self, dim=-1, keepdim=False):
         r"""
         Returns a new distribution object whose probability mass/density function is the normalized product 
         of the probability mass/density functions along given axis. The product of exponential family 
