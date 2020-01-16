@@ -981,6 +981,36 @@ void testWildcards() {
     AT_ASSERT(aliasDb.mayContainAlias(ten_list, ten_opt_list));
     AT_ASSERT(!aliasDb.mayAlias(ten_list, ten_opt_list));
   }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%float_3D : Float(*, *, *), %float_2D : Float(*, *)):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D"], vmap["float_2D"]));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%float_3D_list : Float(*, *, *)[], %float_2D_list : Float(*, *)[], %ten: Tensor):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D_list"], vmap["float_2D_list"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_3D_list"], vmap["ten"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_2D_list"], vmap["ten"]));
+  }
 }
 
 void testMemoryDAG() {
