@@ -10,8 +10,9 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -352,6 +353,7 @@ struct CodeImpl {
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
+  std::unordered_set<size_t> bailout_requests_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -1044,13 +1046,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto t = stack.back().toTensor();
-            auto actual = tensorTypeInCurrentExecutionContext(t);
-            const TypePtr& expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            if (frames.back().function->bailout_requests_.count(inst.X) != 0) {
+              GRAPH_DEBUG(
+                "Bailout ", inst.X, " triggered via bailout_requests_!");
+              frames.back().function->bailout_requests_.erase(inst.X);
+              push(stack, false);
+            } else {
+              auto t = stack.back().toTensor();
+              auto actual = tensorTypeInCurrentExecutionContext(t);
+              const TypePtr& expected = af.types[inst.X];
+              push(stack, *expected == *actual);
+            }
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
             af.functions[inst.X]->ensure_defined();
             size_t remaining_bailout_depth =
                 frames.back().function->remaining_bailout_depth_ > 0
@@ -1170,6 +1180,15 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_bailouts() const {
+  return pImpl->type_table_.size();
+}
+
+void Code::request_bailout(size_t index) {
+  pImpl->bailout_requests_.insert(index);
+  GRAPH_DEBUG("Added a bailout request for ", index);
 }
 
 size_t Code::num_inputs() const {
