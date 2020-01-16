@@ -840,20 +840,6 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return false;
 }
 
-bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
-  if (isContainerType(elem->type())) {
-    if (elem->node()->kind() != prim::TupleConstruct) {
-      return true;
-    }
-    auto inps = elem->node()->inputs();
-    return std::any_of(inps.begin(), inps.end(), [&](const Value* v) {
-      return cannotCheckAliasContainment(v);
-    });
-  }
-
-  return false;
-}
-
 bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   const std::vector<Value*> a_vec = {a};
   const std::vector<Value*> b_vec = {b};
@@ -874,30 +860,7 @@ std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
 bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
-  std::vector<Element*> a_elements;
-  for (const auto& val : a) {
-    if (cannotCheckAliasContainment(val)) {
-      return true;
-    }
-    if (mutableType(val)) {
-      a_elements.push_back(elementMap_.at(val));
-    }
-  }
-
-  if (a_elements.size() == 0) {
-    return false;
-  }
-
-  std::vector<Element*> b_elements;
-  for (const auto& val : b) {
-    if (cannotCheckAliasContainment(val)) {
-      return true;
-    }
-    if (mutableType(val)) {
-      b_elements.push_back(elementMap_.at(val));
-    }
-  }
-  return memoryDAG_->mayContainAlias(a_elements, b_elements);
+  return memoryDAG_->mayContainAlias(getElements(a), getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
