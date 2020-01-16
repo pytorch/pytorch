@@ -122,6 +122,7 @@ private:
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
+  [[noreturn]] static void reportError(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey);
 
   const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatch_key) const;
 
@@ -222,19 +223,7 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
     return *catchallKernel;
   }
 
-  if (!dispatchKey.has_value() || *dispatchKey == DispatchKey::UndefinedTensorId) {
-    TORCH_CHECK(false,
-          "There were no tensor arguments to this function (e.g., you passed an "
-          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
-          ".  This usually means that this function requires a non-empty list of Tensors.  "
-          "Available functions are ", dispatchTable.listAllDispatchKeys())
-  }
-
-  const std::string dispatchKeyStr = toString(*dispatchKey);
-  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
-          " from the '", dispatchKeyStr, "' backend. '",
-          dispatchTable.operatorName(), "' is only available for these backends: ",
-          dispatchTable.listAllDispatchKeys(), ".");
+  reportError(dispatchTable, dispatchKey);
 }
 
 } // namespace c10
