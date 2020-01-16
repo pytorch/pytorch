@@ -95,6 +95,24 @@ TEST(LLVMTest, BufferTest) {
   EXPECT_EQ(cg.value<int>(args), 0);
 }
 
+TEST(LLVMTest, BlockTest) {
+  Buffer a(Var("A", kHandle), kInt32, {32});
+  LLVMCodeGen cg({&a});
+  std::vector<int32_t> v = {1, 2};
+  std::vector<void*> args({v.data()});
+
+  auto block = Block::make({
+    Store::make(a, IntImm::make(0), IntImm::make(3), IntImm::make(1)),
+    Store::make(a, IntImm::make(1), IntImm::make(4), IntImm::make(1)),
+    Store::make(a, IntImm::make(0), IntImm::make(4), IntImm::make(1)),
+  });
+
+  block.accept(&cg);
+  EXPECT_EQ(cg.value<int>(args), 0);
+  EXPECT_EQ(v[0], 4);
+  EXPECT_EQ(v[1], 4);
+}
+
 TEST(LLVMTest, LoadStoreTest) {
   Buffer a(Var("A", kHandle), kInt32, {1});
   Buffer b(Var("B", kHandle), kInt32, {1});
