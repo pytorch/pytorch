@@ -47,7 +47,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t diff = scalar_end - scalar_start
+      scalar_t diff = scalar_end - scalar_start;
       double div = static_cast<double>(steps - 1);
 
       auto iter = TensorIterator::nullary_op(r);
