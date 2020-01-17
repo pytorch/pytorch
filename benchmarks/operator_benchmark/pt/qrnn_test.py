@@ -31,8 +31,8 @@ qrnn_dynamic_configs = op_bench.config_list(
 
 qrnn_static_configs = op_bench.config_list(
     attrs=[
-        [1, 3, 1],
-        [5, 7, 4],
+        [1, 3, 4],
+        [5, 7, 8],
     ],
     # names: input_size, hidden_size, num_layers
     attr_names=["I", "H", "NL"],
