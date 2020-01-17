@@ -7,7 +7,8 @@ namespace jit {
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(const std::shared_ptr<Graph>& graph);
 
-  ExecutionPlan getPlanFor(Stack& stack) override;
+  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+      override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
