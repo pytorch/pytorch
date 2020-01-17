@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/torch.h>
+#include <c10/core/TensorOptions.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -152,6 +154,71 @@ void testLiteInterpreterPrim() {
   auto resi = res.toInt();
   auto refi = ref.toInt();
   AT_ASSERT(resi == refi);
+}
+
+void testLiteInterpreterParams() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
+  m.define(R"(
+    def forward(self, x):
+      b = 1.0
+      return self.foo * x + b
+  )");
+
+  double learning_rate = 0.1, momentum = 0.1;
+  int n_epoc = 10;
+  // init: y = x + 1;
+  // target: y = 2 x + 1
+  std::vector<std::pair<Tensor, Tensor>> trainData{
+      {1 * torch::ones({1}), 3 * torch::ones({1})},
+  };
+
+  // Reference: Full jit
+  std::stringstream ms;
+  m.save(ms);
+  auto mm = load(ms);
+//  mm.train();
+  std::vector<::at::Tensor> parameters;
+  for (auto parameter : mm.parameters()) {
+    parameters.emplace_back(parameter);
+  }
+  ::torch::optim::SGD optimizer(
+      parameters,
+      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
+  for (int epoc = 0; epoc < n_epoc; ++epoc) {
+    for (auto &data : trainData) {
+      auto source = data.first, targets = data.second;
+      optimizer.zero_grad();
+      std::vector<IValue> train_inputs{source};
+      auto output = mm.forward(train_inputs).toTensor();
+      auto loss = ::torch::l1_loss(output, targets);
+      loss.backward();
+      optimizer.step();
+    }
+  }
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<::at::Tensor> bc_parameters;
+  for (auto slot : bc.slots()) {
+    bc_parameters.emplace_back(slot.toTensor());
+  }
+  ::torch::optim::SGD bc_optimizer(
+      bc_parameters,
+      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
+  for (int epoc = 0; epoc < n_epoc; ++epoc) {
+    for (auto &data : trainData) {
+      auto source = data.first, targets = data.second;
+      bc_optimizer.zero_grad();
+      std::vector<IValue> train_inputs{source};
+      auto output = bc.forward(train_inputs).toTensor();
+      auto loss = ::torch::l1_loss(output, targets);
+      loss.backward();
+      bc_optimizer.step();
+    }
+  }
+  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 } // namespace torch
 } // namespace jit
