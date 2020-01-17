@@ -201,10 +201,16 @@ pytorch_ios_params: &pytorch_ios_params
     ios_platform:
       type: string
       default: ""
+    op_list:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
+    SELECTED_OP_LIST: << parameters.op_list >>
+
+
 
 
 
@@ -1445,6 +1451,12 @@ jobs:
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+
+            #check the custom build flag
+            echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
+            if [ -n "${SELECTED_OP_LIST}" ]; then
+                export SELECTED_OP_LIST="${PROJ_ROOT}/ios/TestApp/custom_build/${SELECTED_OP_LIST}"
+            fi
             export BUILD_PYTORCH_MOBILE=1
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
@@ -1479,12 +1491,9 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            # Temporarily pin pillow to 6.2.1 as PILLOW_VERSION is replaced by
-            # _version_ in 7.0.0. Long term fix should be making changes to
-            # torchvision to be compatible with both < and >= v7.0.0.
-            pip install pillow==6.2.1 --progress-bar off
+            pip install pillow==7.0.0 --progress-bar off
             #install the latest version of PyTorch and TorchVision
-            pip install torch torchvision --progress-bar off
+            pip install torch "torchvision>=0.5.0" --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
@@ -2122,6 +2131,16 @@ workflows:
           ios_platform: "OS"
           requires:
             - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_arm64_custom_build
+          context: org-member
+          build_environment: "pytorch-ios-11.2.1-arm64_custom_build"
+          ios_arch: "arm64"
+          ios_platform: "OS"
+          op_list: "mobilenetv2.yaml"
+          requires:
+            - setup
+
       # PyTorch Mobile PR builds (use linux host toolchain + mobile build options)
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_mobile_build
