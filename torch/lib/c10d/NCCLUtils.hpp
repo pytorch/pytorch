@@ -92,6 +92,8 @@ class NCCLComm {
 
   // Move constructable
   NCCLComm(NCCLComm&& other) {
+    // Using other's lock, as it reads other's states
+    // Can not use this.mutex_, as this object is being constructed.
     std::unique_lock<std::mutex> lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
