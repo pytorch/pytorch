@@ -1977,7 +1977,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
-    def test_qnnpack_sigmoid_sweep(self, X):
+    def test_qnnpack_sigmoid_sweep(self):
         # Input parameters
         f_min = -4.0
         f_max = 4.0
