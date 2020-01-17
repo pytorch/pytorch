@@ -229,7 +229,7 @@ TEST(TensorTest, TorchTensorCtorScalarIntegralType) {
   ASSERT_EQ(tensor.dtype(), at::kLong);
   ASSERT_EQ(tensor.item<int64_t>(), 123);
 
-  auto tensor = torch::tensor(123l);
+  tensor = torch::tensor(123l);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
@@ -347,7 +347,7 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25f));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125f));
 
-  tensor = torch::tensor(at::ArrayRef<float>({1.5, 2.25, 3.125}));
+  tensor = torch::tensor(at::ArrayRef<float>({1.5f, 2.25f, 3.125f}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), default_dtype);
@@ -355,7 +355,7 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  tensor = torch::tensor(std::vector<float>({1.5, 2.25, 3.125}));
+  tensor = torch::tensor(std::vector<float>({1.5f, 2.25f, 3.125f}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -638,25 +638,29 @@ TEST(TensorTest, TorchTensorCtorWithoutSpecifyingDtype) {
   test_TorchTensorCtorWithoutSpecifyingDtype_expected_dtype(/*default_dtype=*/torch::kDouble);
 }
 
-void test_TorchTensorCtorWithNonDtypeTensorOptions_expected_dtype(c10::ScalarType default_dtype) {
+void test_TorchTensorCtorWithNonDtypeOptions_expected_dtype(c10::ScalarType default_dtype) {
   AutoDefaultDtypeMode dtype_mode(default_dtype);
 
   ASSERT_EQ(torch::tensor({1, 2, 3}, torch::TensorOptions()).dtype(), torch::kLong);
   ASSERT_EQ(torch::tensor(at::ArrayRef<int>({1, 2, 3}), torch::TensorOptions()).dtype(), torch::kLong);
   ASSERT_EQ(torch::tensor(std::vector<int>({1, 2, 3}), torch::TensorOptions()).dtype(), torch::kLong);
 
+  ASSERT_EQ(torch::tensor({1l, 2l, 3l}, torch::TensorOptions()).dtype(), torch::kLong);
+  ASSERT_EQ(torch::tensor(at::ArrayRef<int64_t>({1l, 2l, 3l}), torch::TensorOptions()).dtype(), torch::kLong);
+  ASSERT_EQ(torch::tensor(std::vector<int64_t>({1l, 2l, 3l}), torch::TensorOptions()).dtype(), torch::kLong);
+
   ASSERT_EQ(torch::tensor({1., 2., 3.}, torch::TensorOptions()).dtype(), default_dtype);
   ASSERT_EQ(torch::tensor(at::ArrayRef<double>({1., 2., 3.}), torch::TensorOptions()).dtype(), default_dtype);
   ASSERT_EQ(torch::tensor(std::vector<double>({1., 2., 3.}), torch::TensorOptions()).dtype(), default_dtype);
 
   ASSERT_EQ(torch::tensor({1.f, 2.f, 3.f}, torch::TensorOptions()).dtype(), default_dtype);
-  ASSERT_EQ(torch::tensor(at::ArrayRef<float>({1., 2., 3.}), torch::TensorOptions()).dtype(), default_dtype);
-  ASSERT_EQ(torch::tensor(std::vector<float>({1., 2., 3.}), torch::TensorOptions()).dtype(), default_dtype);
+  ASSERT_EQ(torch::tensor(at::ArrayRef<float>({1.f, 2.f, 3.f}), torch::TensorOptions()).dtype(), default_dtype);
+  ASSERT_EQ(torch::tensor(std::vector<float>({1.f, 2.f, 3.f}), torch::TensorOptions()).dtype(), default_dtype);
 }
 
-TEST(TensorTest, TorchTensorCtorWithNonDtypeTensorOptions) {
-  test_TorchTensorCtorWithNonDtypeTensorOptions_expected_dtype(/*default_dtype=*/torch::kFloat);
-  test_TorchTensorCtorWithNonDtypeTensorOptions_expected_dtype(/*default_dtype=*/torch::kDouble);
+TEST(TensorTest, TorchTensorCtorWithNonDtypeOptions) {
+  test_TorchTensorCtorWithNonDtypeOptions_expected_dtype(/*default_dtype=*/torch::kFloat);
+  test_TorchTensorCtorWithNonDtypeOptions_expected_dtype(/*default_dtype=*/torch::kDouble);
 }
 
 void test_Arange_expected_dtype(c10::ScalarType default_dtype) {
