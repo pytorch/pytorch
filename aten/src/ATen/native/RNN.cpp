@@ -206,7 +206,7 @@ struct QuantizedCellParamsStatic {
 
   // Assume [-8, 8] range
   static constexpr float kQ8BitScaleWithRange16 = 0.0625;
-  static constexpr int kQ8BitZeroPoint = 0;
+  static constexpr int kQ8BitZeroPoint = 128;
 
   Tensor matmul_ih(Tensor input) const {
     TORCH_CHECK(false, "matmul is not supported with quantized cell params");
@@ -468,7 +468,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       // Slice off the workspace argument (it's needed only for AD).
       return std::make_tuple(std::move(std::get<0>(result)), std::move(std::get<1>(result)));
     }
-
     const auto gates = params.linear_hh(hx).add_(
         pre_compute_input ? input : params.linear_ih(input));
     auto chunked_gates = gates.chunk(4, 1);
@@ -489,7 +488,7 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
   static constexpr float kQ8BitScaleWithRange2 = 2.0f / 256.0f;
   static constexpr float kQ8BitScaleWithRange16 = 16.0f / 256.0f;
   static constexpr float kQ32BitScaleWithRange256 = 256.0f / uint32_t(-1);
-  static constexpr int32_t kQZeroPoint = 0;
+  static constexpr int32_t kQZeroPoint = 128;
 
   hidden_type operator()(
       const Tensor& input,
@@ -505,12 +504,12 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     // need to `expand` the input.
     // Note: we don't want to use `repeat`, to avoid the copy
     const auto _input = pre_compute_input ? input : params.linear_ih(input);
-    const auto h_w_hh = params.linear_hh(hx);  // qint8
-    const auto i_w_ih = _input.expand({hx.size(0), -1});  // qint8
+    const auto h_w_hh = params.linear_hh(hx);
+    const auto i_w_ih = _input.expand({hx.size(0), -1});
     const auto gates = elementwise_arithmetic("quantized::add_out",
                                               i_w_ih, h_w_hh,
-                                              kQ8BitScaleWithRange16,
-                                              kQZeroPoint);  // qint8
+                                              kQ8BitScaleWithRange2,
+                                              kQZeroPoint);
 
     auto chunked_gates = gates.chunk(4, 1);
     auto ingate = at::sigmoid(chunked_gates[0]);
@@ -541,7 +540,7 @@ private:
   Tensor elementwise_arithmetic(const char* function_name,
                                 Tensor qa, Tensor qb,
                                 Scalar out_scale, Scalar out_zero_point) const {
-    static constexpr ScalarType qtype = at::kQInt8;
+    static constexpr ScalarType qtype = at::kQUInt8;
     auto rqa = demoting_requantization(qa, out_scale, out_zero_point, qtype);
     auto rqb = demoting_requantization(qb, out_scale, out_zero_point, qtype);
 
@@ -1341,11 +1340,11 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
   TORCH_CHECK(
       result_dtype == at::kChar || result_dtype == at::kQInt8 ||
-          result_dtype == at::kHalf,
+          result_dtype == at::kQUInt8 || result_dtype == at::kHalf,
       "dtype is not supported");
 
   std::tuple<Tensor, Tensor, Tensor> results;
-  if (result_dtype == at::kQInt8 && !use_dynamic) {
+  if (result_dtype == at::kQUInt8 && !use_dynamic) {
     // Use static here
     auto params = gather_quantized_params_static(_params);
     results = _qlstm_impl<FullLayer, FullBidirectionalLayer>(
