@@ -195,9 +195,9 @@ Module Module::clone_impl(
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
-      // this creates a new attribute for the underlying type if
-      // the type is not already cloned, otherwise it will do
-      // typecheck only
+      // this adds new slot and creates a new attribute for the underlying type if
+      // the type is not already cloned, otherwise it will only
+      // add a new slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),
