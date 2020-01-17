@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -23,10 +24,11 @@ Value* ConvertSelectToIndex(int64_t index, Node* insertBefore) {
 
 Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   // Create index tensor based on aten::slice node.
+  const int64_t int_max = std::numeric_limits<int>::max();
   auto graph = slice->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto start = slice->get(attr::start);
-  auto end = slice->get(attr::end);
+  auto start = slice->get(attr::start) ? slice->get(attr::start) : 0;
+  auto end = slice->get(attr::end) ? slice->get(attr::end) : int_max;
   auto step = slice->get(attr::step);
   auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   auto sliced_index = graph->insert(aten::slice, {index, {0}, start, end, step});
@@ -328,11 +330,57 @@ void PrepareIndexPutForONNX(Block* block) {
   }
 }
 
+// aten::pop is inplace. The tensor list input is updated.
+// This pass creates an aten::__getitem__ op to return the original output from aten::pop.
+// Then it makes the original aten::pop operator return the updated tensor list,
+// and replaces all later uses of that tensor list with this new output.
+static void PrepareListPopForONNX(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      PrepareListPopForONNX(child_block);
+    }
+
+    if (it->kind() == aten::pop) {
+      //   %ten : Tensor = aten::pop(%seq, %pos)
+      // Convert to
+      //   %ten : Tensor = aten::__getitem__(%seq, %pos)
+      //   %new_seq : Tensor[] = aten::pop(%seq, %pos)
+      // And replace all uses of %seq afterwards with %new_seq
+      Node* getitem_node =
+          b->owningGraph()->create(aten::__getitem__, {it->inputs()});
+      getitem_node->output()->copyMetadata(it->output());
+      getitem_node->insertBefore(*it);
+      it->output()->replaceAllUsesWith(getitem_node->output());
+
+      it->output()->copyMetadata(it->inputs()[0]);
+      it->inputs()[0]->replaceAllUsesAfterNodeWith(*it, it->output());
+    }
+  }
+}
+
+static void PrepareListAppendAndInsertForONNX(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      PrepareListPopForONNX(child_block);
+    }
+
+    if (it->kind() == aten::insert || it->kind() == aten::append) {
+      if (it->outputs().size() == 0) {
+        it->addOutput();
+        it->output()->copyMetadata(it->inputs()[0]);
+      }
+      it->inputs()[0]->replaceAllUsesAfterNodeWith(*it, it->output());
+    }
+  }
+}
+
 } // namespace
 
 void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
+  PrepareListPopForONNX(graph->block());
+  PrepareListAppendAndInsertForONNX(graph->block());
 }
 
 } // namespace jit

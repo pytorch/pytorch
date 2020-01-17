@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -45,6 +46,7 @@
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -92,7 +94,9 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
+#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+#endif
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -279,6 +283,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -290,6 +295,17 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() {
+        return true;
+      })
+#else
+      .def("_jit_run_cpp_tests", []() {
+        throw std::exception();
+      })
+      .def("_jit_has_cpp_tests", []() {
+        return false;
+      })
+#endif
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -304,6 +320,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -428,7 +445,7 @@ void initJITBindings(PyObject* module) {
           buffer.attr("write")(std::move(bytes));
           return size;
         };
-        return caffe2::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void *, size_t)> &>())
       .def("write_record",
@@ -480,8 +497,8 @@ void initJITBindings(PyObject* module) {
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
-        auto adapter = caffe2::make_unique<BufferAdapter>(std::move(buffer));
-        return caffe2::make_unique<PyTorchStreamReader>(std::move(adapter));
+        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
       }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
@@ -662,6 +679,7 @@ void initJITBindings(PyObject* module) {
     toIValue(obj, type);
   });
 
+  initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

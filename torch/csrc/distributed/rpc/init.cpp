@@ -1,11 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -35,22 +33,47 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto module = py::handle(rpc_module).cast<py::module>();
 
   auto rpcBackendOptions =
-      shared_ptr_class_<RpcBackendOptions>(module, "RpcBackendOptions")
-          .def_readwrite("rpc_timeout", &RpcBackendOptions::rpcTimeout)
-          .def_readwrite("init_method", &RpcBackendOptions::initMethod);
+      shared_ptr_class_<RpcBackendOptions>(
+          module,
+          "RpcBackendOptions",
+          R"(A structure encapsulating the options passed into the RPC backend.
+            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
+            in order to initialize RPC with specific configurations, such as the
+             RPC timeout and init_method to be used. )")
+          .def_readwrite(
+              "rpc_timeout",
+              &RpcBackendOptions::rpcTimeout,
+              R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
+                If an RPC does not complete in this timeframe, it will complete
+                with an exception indicating that it has timed out.)")
+          .def_readwrite(
+              "init_method",
+              &RpcBackendOptions::initMethod,
+              R"(URL specifying how to initialize the process group.
+                Default is env://)");
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
           module,
           "WorkerInfo",
-          R"(Encapsulates information of a worker in the system.)")
+          R"(A structure that encapsulates information of a worker in the system.
+            Contains the name and ID of the worker. This class is not meant to
+            be constructed directly, rather, an instance can be retrieved
+            through :meth:`~torch.distributed.rpc.get_worker_info` and the
+            result can be passed in to functions such as
+            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
+            every invocation.)")
           .def(
               py::init<std::string, worker_id_t>(),
               py::arg("name"),
               py::arg("id"))
-          .def_readonly("name", &WorkerInfo::name_, R"(Name of the worker.)")
           .def_readonly(
-              "id", &WorkerInfo::id_, R"(Globally unique id of the worker.)")
+              "name", &WorkerInfo::name_, R"(The name of the worker.)")
+          .def_readonly(
+              "id",
+              &WorkerInfo::id_,
+              R"(Globally unique id to identify the worker.)")
           .def("__eq__", &WorkerInfo::operator==, py::is_operator())
           // pybind11 suggests the syntax  .def(hash(py::self)), with the
           // unqualified "hash" function call. However the
@@ -168,12 +191,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // pythonRpcHandler is cleaned up in shutdown(), after
   // shutdown(), python objects returned from rpc python call can not be
   // resolved.
-  auto futureMessage =
-      shared_ptr_class_<FutureMessage>(module, "FutureMessage")
-          .def(
-              "wait",
-              [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-              py::call_guard<py::gil_scoped_release>());
+  auto future = shared_ptr_class_<FutureMessage>(module, "Future")
+                    .def(
+                        "wait",
+                        [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
+                        py::call_guard<py::gil_scoped_release>(),
+                        R"(
+Wait on future to complete and return the object it completed with.
+If the future completes with an error, an exception is thrown.
+              )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
@@ -243,9 +269,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRpcBuiltin(agent, dst, opName, args, kwargs);
+        return pyRpcBuiltin(agent, dst, opName, rf, args, kwargs);
       });
 
   module.def(
@@ -253,18 +280,25 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
-      });
+         std::vector<torch::Tensor>& tensors,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
 
   module.def(
       "_invoke_remote_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRemoteBuiltin(agent, dst, opName, args, kwargs);
+        return pyRemoteBuiltin(agent, dst, opName, rf, args, kwargs);
       });
 
   module.def(
@@ -272,9 +306,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
-      });
+         std::vector<torch::Tensor>& tensors,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
 
   module.def(
       "get_rpc_timeout",

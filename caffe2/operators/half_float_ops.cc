@@ -1,10 +1,34 @@
 #include "caffe2/operators/half_float_ops.h"
 #include <c10/util/Half.h>
+#include "caffe2/utils/cpuid.h"
 #ifdef USE_FBGEMM
 #include "fbgemm/FbgemmConvert.h"
 #endif
 
 namespace caffe2 {
+
+inline void FloatToFloat16_ref(
+    const float* in,
+    at::Half* out,
+    size_t N,
+    bool do_clip = false) {
+  if (do_clip) {
+    constexpr float FP16_MAX = 65504.f;
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = std::max(-FP16_MAX, std::min(in[i], FP16_MAX));
+    }
+  } else {
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = in[i];
+    }
+  }
+}
+
+inline void Float16ToFloat_ref(const at::Half* in, float* out, size_t N) {
+  for (size_t i = 0; i < N; ++i) {
+    out[i] = in[i];
+  }
+}
 
 template <>
 bool FloatToHalfOp<CPUContext>::RunOnDevice() {
@@ -19,16 +43,7 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   fbgemm::FloatToFloat16_simd(
       data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
 #else
-  if (clip_) {
-    constexpr float FP16_MAX = 65504.f;
-    for (size_t i = 0; i < N; ++i) {
-      out[i] = std::max(-FP16_MAX, std::min(data[i], FP16_MAX));
-    }
-  } else {
-    for (size_t i = 0; i < N; ++i) {
-      out[i] = data[i];
-    }
-  }
+  FloatToFloat16_ref(data, out, N, clip_);
 #endif
 
   return true;
@@ -47,9 +62,7 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   fbgemm::Float16ToFloat_simd(
       reinterpret_cast<const fbgemm::float16*>(data), out, N);
 #else
-  for (size_t i = 0; i < N; ++i) {
-    out[i] = data[i];
-  }
+  Float16ToFloat_ref(data, out, N);
 #endif
 
   return true;

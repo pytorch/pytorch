@@ -41,7 +41,7 @@ class TORCH_API DistEngine {
   // This method is used to kick off the autograd computation on a node when it
   // receives gradients from the corresponding 'recv' method on another node.
   // The gradients are accumulated in the provided autograd context.
-  void executeSendFunction(
+  std::shared_ptr<rpc::FutureMessage> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
@@ -86,7 +86,7 @@ class TORCH_API DistEngine {
   // Run the local autograd engine using the provided graphTask and graphRoot
   // and accumulate the gradients part 'outputEdges' in the provided autograd
   // context.
-  void runEngineAndAccumulateGradients(
+  std::shared_ptr<rpc::FutureMessage> runEngineAndAccumulateGradients(
       const ContextPtr& autogradContext,
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);

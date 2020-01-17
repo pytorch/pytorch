@@ -11,13 +11,14 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed.rpc import RRef
-from common_utils import load_tests
+from common_utils import load_tests, IS_MACOS
+from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 import dist_utils
-from dist_utils import dist_init
+from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
+from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
+
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
@@ -32,6 +33,19 @@ VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
 
 
+class StubRpcAgent:
+    def __init__(self, world_size):
+        self.world_size = world_size
+
+    def get_worker_infos(self):
+        return {
+            rpc.WorkerInfo(
+                name="worker{}".format(rank),
+                id=rank,
+            ) for rank in range(self.world_size)
+        }
+
+
 def _stub_construct_rpc_backend_options_handler(
     **kwargs
 ):
@@ -41,7 +55,7 @@ def _stub_construct_rpc_backend_options_handler(
 def _stub_start_rpc_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    return mock.Mock()  # RpcAgent.
+    return StubRpcAgent(world_size=world_size)
 
 
 def set_value(value):
@@ -360,7 +374,6 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
-        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_reinit(self):
@@ -372,16 +385,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # This is for the below `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -504,8 +508,51 @@ class RpcTest(RpcAgentTestFixture):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
 
-        # it's safe to call shutdown() multiple times
-        rpc.shutdown()
+    def test_wait_all_workers(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            self.assertTrue(self.world_size >= 3)
+
+            num_repeat = 30
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+        # worker0 calls this at the end after waiting for RPC responses.
+        # worker1/2 calls this immediately and has some works after it.
+        # worker3 calls this immediately and has no more work.
+        rpc.api._wait_all_workers()
+        rpc.shutdown(graceful=False)
 
     @dist_init
     def test_expected_src(self):
@@ -532,6 +579,68 @@ class RpcTest(RpcAgentTestFixture):
             kwargs={"a": n, "b": n + 1, "c": n + 2},
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
+
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
+        dst = (self.rank + 1) % self.world_size
+        # only run profiler on rank 1.
+        if self.rank == 1:
+            with torch.autograd.profiler.profile() as prof:
+                if rpc_exec_mode == RPCExecMode.SYNC:
+                    rpc.rpc_sync("worker{}".format(dst), func, args=args)
+                elif rpc_exec_mode == RPCExecMode.ASYNC:
+                    fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
+                    fut.wait()
+                else:
+                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                    rref = rpc.remote("worker{}".format(dst), func, args=args)
+                    rref.to_here()
+                    # We need to wait for the instance to be created on
+                    # the owner, and get back a positive confirmation.
+                    # Calling to_here does not ensure that we have finished
+                    # processing the Owner's confirmation of this RRef. To do
+                    # this, we wait until the current RRef context doesn't have
+                    # any pending users, which indicates that the confirmation
+                    # was processed on this worker.
+                    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+                    while num_pending_users != 0:
+                        time.sleep(0.1)
+                        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+
+            events = prof.function_events
+            rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
+            # the sender, dest worker, function run, and type of RPC should all
+            # be recorded.
+            self_worker_name = "worker{}".format(self.rank)
+            dst_worker_name = "worker{}".format(dst)
+            self.assertTrue(self_worker_name in rpc_event.name)
+            self.assertTrue(dst_worker_name in rpc_event.name)
+            self.assertTrue(func.__name__ in rpc_event.name)
+            self.assertTrue(rpc_exec_mode.value in rpc_event.name)
+            self.assertEqual(rpc_event.count, 1)
+
+    @dist_init
+    def test_profiler_with_sync_rpc_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
+
+    @dist_init
+    def test_profiler_with_async_rpc_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_async_rpc_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.ASYNC, torch.add, args=(torch.ones(1), torch.ones(1)))
+
+    @dist_init
+    def test_profiler_with_remote_udf(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
+
+    @dist_init
+    def test_profiler_with_remote_builtin(self):
+        self._profiler_test_with_rpc(RPCExecMode.REMOTE, torch.add, args=(torch.ones(1), torch.ones(1)))
 
     @dist_init
     def test_py_class_constructor(self):
@@ -714,10 +823,10 @@ class RpcTest(RpcAgentTestFixture):
             assert self.world_size >= 3
 
             num_repeat = 100
-            futs = []
 
             # Phase 1: Only worker1 has workload.
             dst = "worker1"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -730,6 +839,7 @@ class RpcTest(RpcAgentTestFixture):
             # If join is not correctly implemented,
             # worker2 should be closed by now.
             dst = "worker2"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -944,6 +1054,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(local_rref.local_value(), 35)
 
     @dist_init
+    def test_local_value_not_on_owner(self):
+        # ensure that an error message is thrown if a user tries to call
+        # local_value() on a non-owning node.
+        next_rank = (self.rank + 1) % self.world_size
+        rref = rpc.remote("worker{}".format(next_rank), torch.add, args=(
+            torch.ones(1), torch.ones(1)))
+        with self.assertRaisesRegex(RuntimeError, "Call it on worker{}".format(next_rank)):
+            rref.local_value()
+
+    @dist_init
     def test_return_local_rrefs(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -1056,7 +1176,7 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
-    def _test_rref_leak(self, ignore_leak=False):
+    def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
             backend=self.rpc_backend,
@@ -1065,16 +1185,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # This is for the below `dist.barrier`.
-        # For `RpcAgent` other than `ProcessGroupAgent`,
-        # no `_default_pg` is initialized.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -1084,16 +1195,18 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(2, 2), 1)
         )
 
+        import torch.distributed.rpc.api as api
         if ignore_leak:
-            import torch.distributed.rpc.api as api
             api._ignore_rref_leak = True
-
-        rpc.shutdown()
+            rpc.shutdown(graceful=True)
+        else:
+            api._ignore_rref_leak = False
+            with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
+                rpc.shutdown(graceful=True)
 
     @dist_init(setup_rpc=False)
     def test_rref_leak(self):
-        with self.assertRaisesRegex(RuntimeError, "Leaking RRef"):
-            self._test_rref_leak()
+        self._test_rref_leak(ignore_leak=False)
 
     @dist_init(setup_rpc=False)
     def test_ignore_rref_leak(self):
@@ -1115,23 +1228,32 @@ class RpcTest(RpcAgentTestFixture):
             "UserRRef(RRefId = {0}({1}, 1), ForkId = {0}({1}, 2))".format(id_class, self.rank)
         )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/30988")
     @dist_init
     def test_rref_context_debug_info(self):
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        # This test checks local states that are modified by remote workers.
+        # This means that we would need barrier before and after every check.
+        # The barrier before the check makes sure that all previous states are
+        # cleared globally, the barrier after ensures that no following states
+        # change gets into the current check.
+        initialize_pg(self.init_method, self.rank, self.world_size)
 
-        from torch.distributed.rpc import _rref_context_get_debug_info
+        # Check 1: local RRef does not update owners_ map or add a pending user.
+        #################################################
+
         rref1 = RRef(self.rank)
+
+        # don't need a barrier here as local RRef is handled by this thread
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
+        self.assertIn("num_pending_users", info)
         # RRef on local value is not added to context until shared across RPC
-        self.assertEqual("0", info["num_owner_rrefs"])
+        self.assertEqual(0, int(info["num_owner_rrefs"]))
+        self.assertEqual(0, int(info["num_pending_users"]))
+        # barrier after the check 1
+        dist.barrier()
+
+        # Check 2: Sharing RRef as an arg should update owners_ map
+        ###########################################################
 
         dst_rank = (self.rank + 1) % self.world_size
         rpc.rpc_sync(
@@ -1139,12 +1261,23 @@ class RpcTest(RpcAgentTestFixture):
             set_global_rref,
             args=(rref1,)
         )
+
+        # barrier before check 2
+        dist.barrier()
+
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
-        self.assertEqual("1", info["num_owner_rrefs"])
+        self.assertEqual(1, int(info["num_owner_rrefs"]))
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
+        # barrier after check 2
+        dist.barrier()
+
+        # clear states for check 2
         rpc.rpc_sync("worker{}".format(dst_rank), clear_global_rref)
 
-
+        # Check 3: rpc.remote call should update owners_ map
+        ####################################################
         rref2 = rpc.remote(
             "worker{}".format(dst_rank),
             torch.add,
@@ -1158,22 +1291,23 @@ class RpcTest(RpcAgentTestFixture):
         rref2.to_here()
         rref3.to_here()
 
-        # Use a barrier to make sure that OwnerRRefs are created on this worker
-        # before checking debug info
+        # barrier before check 3
         dist.barrier()
+
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
-        self.assertEqual("2", info["num_owner_rrefs"])
+        self.assertEqual(2, int(info["num_owner_rrefs"]))
+        # no pending users since the fork is finished
+        self.assertEqual(0, int(info["num_pending_users"]))
 
-        # Use another barrier to make sure that UserRRefs are only deleted after
-        # checking debug info
+        # barrier after check 3
         dist.barrier()
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
         from torch.distributed.rpc.api import _agent
-
+        initialize_pg(self.init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
         info = _agent.get_debug_info()
@@ -1183,7 +1317,10 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(int(info["num_pending_requests"]), 0)
         self.assertEqual(int(info["thread_pool_size"]), NUM_THREAD)
         self.assertEqual(int(info["num_idle_threads"]), NUM_THREAD)
-
+        # for the above check, add a barrier to ensure that another worker
+        # cannot send a request before we check num_idle_threads, since we'd
+        # use up an idle thread if we start processing that request.
+        dist.barrier()
         dst_rank = (self.rank + 1) % self.world_size
         fut = rpc.rpc_async(
             "worker{}".format(dst_rank),
@@ -1203,14 +1340,6 @@ class RpcTest(RpcAgentTestFixture):
         # as we cannot know for sure whether the send thread has returned, there
         # might be either 1 or 2 busy threads
         self.assertTrue(num_idle_threads in [NUM_THREAD - 1, NUM_THREAD - 2])
-
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
 
         # add a barrier to make sure the request is not finished before checking
         # num_pending_requests
@@ -1251,9 +1380,7 @@ class RpcTest(RpcAgentTestFixture):
         # without sending any messages.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1262,13 +1389,10 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init
+    @unittest.skip("Test is flaky. see https://github.com/pytorch/pytorch/issues/31846")
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
-        from torch.distributed.rpc import (
-            _get_debug_info,
-            _rref_context_get_debug_info
-        )
         from torch.distributed.rpc.api import _agent
         import torch.distributed.autograd as dist_autograd
 
@@ -1282,7 +1406,43 @@ class RpcTest(RpcAgentTestFixture):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        self.assertEqual(expected, info)
+        self.assertEqual(expected.keys(), info.keys())
+
+    @dist_init(setup_rpc=False)
+    @unittest.skipIf(IS_MACOS,
+                     "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019")
+    def test_handle_send_exceptions(self):
+        # test that if a callee node has gone down, we raise an appropriate
+        # exception instead of just crashing.
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[
+                dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+        # This barrier is needed to ensure that some workers do not exit before
+        # others have been brought up, for non ProcessGroupAgent backends.
+        initialize_pg(self.init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        if self.rank == 1:
+            dst_rank = (self.rank + 1) % self.world_size
+            dst_worker = "worker{}".format(dst_rank)
+            # allow destination worker to exit without joining
+            wait_until_node_failure(dst_rank)
+            fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
+            error_str = (
+                "Encountered exception in ProcessGroupAgent::enqueueSend"
+                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
+                else "(Request aborted during client shutdown)|"
+                     "(worker.: Error in reponse from worker.: server shutting down)")
+            with self.assertRaisesRegex(RuntimeError, error_str):
+                fut.wait()
+        # exit all workers non-gracefully.
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
@@ -1290,9 +1450,7 @@ class RpcTest(RpcAgentTestFixture):
         # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1307,13 +1465,7 @@ class RpcTest(RpcAgentTestFixture):
         # A barrier is needed to ensure that all RPCs are processed.
         # Otherwise, some RPCs can timeout since the receiving end
         # has terminated.
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=self.init_method,
-                rank=self.rank,
-                world_size=self.world_size,
-            )
+        initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
@@ -1326,7 +1478,7 @@ class RpcTest(RpcAgentTestFixture):
         # multiple times.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options
@@ -1334,7 +1486,7 @@ class RpcTest(RpcAgentTestFixture):
         from torch.distributed.rpc.api import _wait_all_workers
         # intentional call to internal _wait_all_workers.
         _wait_all_workers()
-        rpc.shutdown()
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):

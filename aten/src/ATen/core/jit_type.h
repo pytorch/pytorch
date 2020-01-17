@@ -50,7 +50,9 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(ClassType)              \
   _(CapsuleType)            \
   _(InterfaceType)          \
-  _(QSchemeType)
+  _(QSchemeType)            \
+  _(LayoutType)             \
+  _(ScalarTypeType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1239,7 +1241,9 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
-CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(
+    at::ArrayRef<TypePtr> elements,
+    std::ostream& why_not);
 
 namespace detail {
 template <typename T>
@@ -1250,6 +1254,13 @@ struct getTypePtr_ final {
     }
     auto res = getCustomClassType<T>();
     return std::dynamic_pointer_cast<Type>(res.type_);
+  }
+};
+
+template <>
+struct getTypePtr_<at::IValue> final {
+  static TypePtr call() {
+    return AnyType::get();
   }
 };
 
@@ -1431,8 +1442,8 @@ struct CAFFE2_API ClassType : public NamedType {
 
   const std::vector<Function*>& methods() const;
 
-  TypePtr getAttribute(const std::string& name) const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+  TypePtr findAttribute(const std::string& name) const {
+    TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
     for (const auto& attr : attributeNames_) {
       if (name == attr) {
@@ -1445,6 +1456,17 @@ struct CAFFE2_API ClassType : public NamedType {
       return nullptr;
     }
     return attributeTypes_[pos];
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    auto type = findAttribute(name);
+    TORCH_CHECK(
+        type,
+        python_str(),
+        " does not have an attribute with name '",
+        name,
+        "'");
+    return type;
   }
 
   size_t numAttributes() const {
@@ -1487,7 +1509,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
         false,
         python_str(),
-        " does not have a field with the name '",
+        " does not have an attribute with name '",
         name,
         "'");
   }
@@ -1561,13 +1583,39 @@ struct CAFFE2_API ClassType : public NamedType {
       const std::string& name,
       const IValue& value);
 
+  c10::optional<size_t> findConstantSlot(const std::string& name) const {
+    TORCH_CHECK(constantNames_.size() == constantValues_.size());
+    size_t slot = 0;
+    for (const auto& constant : constantNames_) {
+      if (name == constant) {
+        return slot;
+      }
+      slot++;
+    }
+    return c10::nullopt;
+  }
+
+  size_t getConstantSlot(const std::string& name) const {
+    if (auto r = findConstantSlot(name)) {
+      return *r;
+    }
+    TORCH_CHECK(
+        false,
+        python_str(),
+        " does not have constant field with the name '",
+        name,
+        "'");
+  }
+
   const std::string& getConstantName(size_t slot) const {
     TORCH_CHECK(constantNames_.size() == constantValues_.size());
     TORCH_CHECK(slot < constantNames_.size());
     return constantNames_[slot];
   }
 
-  c10::optional<IValue> getConstant(const std::string& name) const;
+  IValue getConstant(const std::string& name) const;
+  IValue getConstant(size_t slot) const;
+  c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
     TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
@@ -1581,6 +1629,14 @@ struct CAFFE2_API ClassType : public NamedType {
   at::ArrayRef<IValue> constantValues() const {
     return constantValues_;
   }
+
+  // [Internal Only] Remove constant from the ClassType
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  void unsafeRemoveConstant(const std::string& name);
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
@@ -1707,5 +1763,72 @@ struct CAFFE2_API InterfaceType : public NamedType {
   // flag to distinguish if it's an interface type from a module or not
   bool is_module_;
 };
+
+template <TypeKind K>
+struct EnumerationType : public Type {
+static const TypeKind Kind = K;
+
+bool operator==(const Type& rhs) const override {
+  return rhs.kind() == kind();
+}
+
+protected:
+EnumerationType() : Type(Kind) {}
+};
+
+struct LayoutType;
+using LayoutTypePtr = std::shared_ptr<LayoutType>;
+// This type represents a Generator
+struct CAFFE2_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
+static LayoutTypePtr create() {
+return LayoutTypePtr(
+    new LayoutType()); // NOLINT(modernize-make-shared)
+}
+std::string str() const override {
+return "Layout";
+}
+static const TypeKind Kind = TypeKind::LayoutType;
+// global singleton
+static LayoutTypePtr get();
+
+private:
+LayoutType() : EnumerationType() {}
+};
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
+// This type represents a Generator
+struct CAFFE2_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
+static ScalarTypeTypePtr create() {
+return ScalarTypeTypePtr(
+    new ScalarTypeType()); // NOLINT(modernize-make-shared)
+}
+std::string str() const override {
+return "ScalarType";
+}
+static const TypeKind Kind = TypeKind::ScalarTypeType;
+// global singleton
+static ScalarTypeTypePtr get();
+
+private:
+ScalarTypeType() : EnumerationType() {}
+};
+
+inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
+}
+
+inline bool IValue::isTensorList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(TensorType::get());
+}
+
+inline bool IValue::isIntList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(IntType::get());
+}
+
+inline bool IValue::isBoolList() const {
+  return isGenericList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(BoolType::get());
+}
 
 } // namespace c10

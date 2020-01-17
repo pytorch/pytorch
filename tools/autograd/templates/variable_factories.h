@@ -6,7 +6,6 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/core/MemoryFormat.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
@@ -16,9 +15,7 @@
 #include <initializer_list>
 #include <utility>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::DimnameList;
-#endif
 
 namespace torch {
 
@@ -83,12 +80,11 @@ inline at::Tensor from_blob(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(
-      data,
-      sizes,
-      strides,
-      /*deleter=*/[](void*) {},
-      options);
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, strides, options);
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
@@ -117,7 +113,11 @@ inline at::Tensor from_blob(
     void* data,
     at::IntArrayRef sizes,
     const at::TensorOptions& options = at::TensorOptions()) {
-  return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
+  at::Tensor tensor = ([&]() {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    return at::from_blob(data, sizes, options);
+  })();
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 ${function_definitions}

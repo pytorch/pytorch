@@ -9,6 +9,9 @@
 #include <sstream>
 #include <thread>
 
+#include <gtest/gtest.h>
+#include <torch/cuda.h>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -37,9 +40,10 @@ class SignalTest {
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
-    // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
+    // Set a timeout that is small enough to make this test run fast, but also
+    // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
+    options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
@@ -367,7 +371,8 @@ void testRecv(const std::string& path) {
   senderThread.join();
 }
 
-int main(int argc, char** argv) {
+TEST(ProcessGroupGlooTest, testExceptionsThrown) {
+  // test SIGSTOP
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
@@ -378,6 +383,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  // test SIGKILL
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGKILL);
@@ -387,46 +393,61 @@ int main(int argc, char** argv) {
       std::cout << "SIGKILL test got: " << ex.what() << std::endl;
     }
   }
+}
 
+TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CPU);
   }
+}
 
-#ifdef USE_CUDA
-  {
-    TemporaryFile file;
-    testAllreduce(file.path, at::DeviceType::CUDA);
-  }
-#endif
-
+TEST(ProcessGroupGlooTest, testBroadcastCPU) {
   {
     TemporaryFile file;
     testBroadcast(file.path, at::DeviceType::CPU);
   }
+}
 
-#ifdef USE_CUDA
-  {
-    TemporaryFile file;
-    testBroadcast(file.path, at::DeviceType::CUDA);
-  }
-#endif
-
+TEST(ProcessGroupGlooTest, testBarrier) {
   {
     TemporaryFile file;
     testBarrier(file.path);
   }
+}
 
+TEST(ProcessGroupGlooTest, testSend) {
   {
     TemporaryFile file;
     testSend(file.path);
   }
+}
 
+TEST(ProcessGroupGlooTest, testRecv) {
   {
     TemporaryFile file;
     testRecv(file.path);
   }
-
-  std::cout << "Test successful" << std::endl;
-  return 0;
 }
+
+#ifdef USE_CUDA
+// CUDA-only tests
+TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAllreduce(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testBroadcast(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+#endif

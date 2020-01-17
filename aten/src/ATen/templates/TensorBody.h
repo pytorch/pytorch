@@ -16,7 +16,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/NamedTensor.h>
 
 namespace caffe2 {
@@ -52,7 +51,7 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::VariableTensorId);
 }
 }
 
@@ -185,7 +184,6 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
-#ifdef BUILD_NAMEDTENSOR
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
   optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
@@ -194,7 +192,6 @@ class CAFFE2_API Tensor {
   DimnameList names() const {
     return impl::get_names(unsafeGetTensorImpl());
   }
-#endif
   int64_t ndimension() const {
     return dim();
   }
@@ -241,11 +238,11 @@ class CAFFE2_API Tensor {
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
+        dispatchKeyToBackend(legacyExtractDispatchKey(key_set())),
         scalar_type());
   }
-  TensorTypeSet type_set() const {
-    return impl_->type_set();
+  DispatchKeySet key_set() const {
+    return impl_->key_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -298,14 +295,12 @@ class CAFFE2_API Tensor {
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
 
-#ifdef BUILD_NAMEDTENSOR
   /// Returns if a `Tensor` has any dimension names
   bool has_names() const;
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
   NamedTensorMeta* get_named_tensor_meta();
-#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
@@ -475,9 +470,9 @@ class CAFFE2_API Tensor {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = c10::guts::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = c10::guts::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
 
   // Returns the index of the hook in the list which can be used to remove hook
   // Register a hook with no return value
@@ -528,8 +523,8 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace detail
 
-static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
-  return legacyExtractTypeId(t.type_set());
+static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
+  return legacyExtractDispatchKey(t.key_set());
 }
 
 } // namespace at

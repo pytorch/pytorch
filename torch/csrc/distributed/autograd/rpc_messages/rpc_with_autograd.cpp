@@ -140,7 +140,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     wrappedRpc = deserializeResponse(wrappedMessage);
   }
 
-  return c10::guts::make_unique<RpcWithAutograd>(
+  return std::make_unique<RpcWithAutograd>(
       workerId,
       originalMessageType,
       autogradMetadata,
