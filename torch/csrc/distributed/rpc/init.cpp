@@ -253,6 +253,7 @@ If the future completes with an error, an exception is thrown.
   });
 
   module.def("_delete_all_user_rrefs", []() {
+    LOG(FATAL) << "In the binding code";
     RRefContext::getInstance().delAllUsers();
   });
 
