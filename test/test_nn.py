@@ -48,7 +48,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     ctcloss_reference, new_module_tests
 from common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf
+    skipCUDAIfRocm, skipCUDAIf, expectedFailureXLA
 
 from torch.nn import MultiheadAttention
 
@@ -10465,40 +10465,42 @@ class TestNNDeviceType(NNTestCase):
         for reduction in ['mean', 'none']:
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
+    def _nll_loss_helper(self, input_size, reduction, expected, device):
+        input = torch.rand(input_size, requires_grad=True, device=device)
+        num_channels = input_size[1]
+        target_size = (input_size[0], ) + tuple(input_size[2:])
+        target = torch.randint(num_channels, target_size, device=device)
+
+        output = F.nll_loss(input, target, reduction=reduction)
+        self.assertEqual(output, expected)
+
+        output.sum().backward()
+        self.assertEqual(input.grad.size(), input.size())
+
+    def test_nll_loss_empty_tensor_reduction_none(self, device):
+        self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device)
+        self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
-    def test_nll_loss_empty_tensor(self, device):
-
-        def helper(input_size, reduction, expected):
-            input = torch.rand(input_size, requires_grad=True, device=device)
-            num_channels = input_size[1]
-            target_size = (input_size[0], ) + tuple(input_size[2:])
-            target = torch.randint(num_channels, target_size, device=device)
-
-            output = F.nll_loss(input, target, reduction=reduction)
-            self.assertEqual(output, expected)
-
-            output.sum().backward()
-            self.assertEqual(input.grad.size(), input.size())
-
-        helper([0, 3], "none", torch.empty([0], device=device))
-        helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device))
-        helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device))
-        helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device))
-        helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device))
-
+    @expectedFailureXLA  # https://github.com/pytorch/xla/issues/1539
+    def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
-        helper([0, 3], "mean", nan)
-        helper([0, 3, 5, 7], "mean", nan)
-        helper([2, 3, 0, 7], "mean", nan)
-        helper([2, 3, 5, 0], "mean", nan)
-        helper([2, 3, 5, 7, 0], "mean", nan)
+        self._nll_loss_helper([0, 3], "mean", nan, device)
+        self._nll_loss_helper([0, 3, 5, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
 
+    def test_nll_loss_empty_tensor_reduction_sum(self, device):
         zero = torch.tensor([0], device=device).resize_([])
-        helper([0, 3], "sum", zero)
-        helper([0, 3, 5, 7], "sum", zero)
-        helper([2, 3, 0, 7], "sum", zero)
-        helper([2, 3, 5, 0], "sum", zero)
-        helper([2, 3, 5, 7, 0], "sum", zero)
+        self._nll_loss_helper([0, 3], "sum", zero, device)
+        self._nll_loss_helper([0, 3, 5, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
     def test_nll_loss_zero_tensor(self, device):
 
