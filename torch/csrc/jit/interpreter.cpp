@@ -381,9 +381,12 @@ struct CodeImpl {
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
   std::vector<std::unique_ptr<Function>> bailout_functions_;
+  size_t remaining_bailout_depth_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph)
-      : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -936,7 +939,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+                // consider passing
+                // `frames.back().function->remaining_bailout_depth_` into
+                // `get_executor().getPlanFor()` to propagate caller's depth
+                // restrictions onto children while this strategy has a
+                // potential to reduce the number of compilations for too
+                // dynamic callers we might miss opportunities where a caller is
+                // dynamic but a callee gets stable arguments
+                af.functions[inst.X]
+                    ->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
@@ -946,11 +959,22 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // this can be more optimized if necessary, caching parts
             // of the hashing computation or storing the offset when
             // the object is turned into an interface
+
+            // consider passing
+            // `frames.back().function->remaining_bailout_depth_` into
+            // `get_executor().getPlanFor()` to propagate caller's depth
+            // restrictions onto children while this strategy has a potential to
+            // reduce the number of compilations for too dynamic callers we
+            // might miss opportunities where a caller is dynamic but a callee
+            // gets stable arguments
             auto function = peek(stack, 0, inst.N)
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code = function->get_executor().getPlanFor(stack).code;
+            const Code& code =
+                function->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - inst.N);
             af = ActiveFrame(frames.back());
@@ -1028,8 +1052,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            size_t remaining_bailout_depth =
+                frames.back().function->remaining_bailout_depth_ > 0
+                ? frames.back().function->remaining_bailout_depth_ - 1
+                : 0;
+            const Code& code = af.functions[inst.X]
+                                   ->get_executor()
+                                   .getPlanFor(stack, remaining_bailout_depth)
+                                   .code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
@@ -1134,7 +1164,8 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
