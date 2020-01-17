@@ -554,9 +554,9 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       for (size_t i = 0; i < at->elements().size(); ++i) {
         work.emplace_back(Work{at->elements().at(i), bt->elements().at(i)});
       }
-    } else if (item.a.isGenericList()) {
-      auto al = item.a.toGenericList();
-      auto bl = item.b.toGenericList();
+    } else if (item.a.isList()) {
+      auto al = item.a.toList();
+      auto bl = item.b.toList();
       for (size_t i = 0; i < al.size(); ++i) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }

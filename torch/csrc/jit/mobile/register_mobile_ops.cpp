@@ -31,11 +31,11 @@ void _convolution_kernel(const c10::OperatorHandle& op, Stack* stack) {
       (std::move(peek(*stack, 0, 12))).toTensor(),
       (std::move(peek(*stack, 1, 12))).toTensor(),
       toOptionalTensor((std::move(peek(*stack, 2, 12)))),
-      (std::move(peek(*stack, 3, 12))).toIntListRef(),
-      (std::move(peek(*stack, 4, 12))).toIntListRef(),
-      (std::move(peek(*stack, 5, 12))).toIntListRef(),
+      (std::move(peek(*stack, 3, 12))).toIntVector(),
+      (std::move(peek(*stack, 4, 12))).toIntVector(),
+      (std::move(peek(*stack, 5, 12))).toIntVector(),
       (std::move(peek(*stack, 6, 12))).toBool(),
-      (std::move(peek(*stack, 7, 12))).toIntListRef(),
+      (std::move(peek(*stack, 7, 12))).toIntVector(),
       (std::move(peek(*stack, 8, 12))).toInt(),
       (std::move(peek(*stack, 9, 12))).toBool(),
       (std::move(peek(*stack, 10, 12))).toBool(),
@@ -53,9 +53,9 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
         (std::move(peek(*stack, 0, 7))).toTensor(),
         (std::move(peek(*stack, 1, 7))).toTensor(),
         toOptionalTensor((std::move(peek(*stack, 2, 7)))),
-        (std::move(peek(*stack, 3, 7))).toIntListRef(),
-        (std::move(peek(*stack, 4, 7))).toIntListRef(),
-        (std::move(peek(*stack, 5, 7))).toIntListRef(),
+        (std::move(peek(*stack, 3, 7))).toIntVector(),
+        (std::move(peek(*stack, 4, 7))).toIntVector(),
+        (std::move(peek(*stack, 5, 7))).toIntVector(),
         (std::move(peek(*stack, 6, 7))).toInt()
         );
     drop(*stack, 7);
@@ -67,7 +67,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
       );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -75,7 +75,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
   );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -83,7 +83,7 @@ void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::cat(
-      (std::move(peek(*stack, 0, 2))).toTensorListRef(),
+      (std::move(peek(*stack, 0, 2))).toTensorVector(),
       (std::move(peek(*stack, 1, 2))).toInt()
   );
   drop(*stack, 2);

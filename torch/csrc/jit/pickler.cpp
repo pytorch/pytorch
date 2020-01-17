@@ -59,21 +59,21 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, "build_intlist", [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntListRef()) {
+          for (const int64_t item : ivalue.toIntVector()) {
             pushInt(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorListRef()) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
             pushIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, "build_doublelist", [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleListRef()) {
+          for (double item : ivalue.toDoubleVector()) {
             pushDouble(item);
           }
         });
@@ -84,9 +84,9 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
             pushBool(item);
           }
         });
-  // note: isGenericList must be after isIntList and friends because
-  // isGenericList is true for all lists.
-  } else if (ivalue.isGenericList()) {
+  // note: isList must be after isIntList and friends because
+  // isList is true for all lists.
+  } else if (ivalue.isList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
@@ -472,7 +472,7 @@ size_t Pickler::pushNextBinPut() {
 }
 
 void Pickler::pushGenericList(const IValue& ivalue) {
-  auto list = ivalue.toGenericListRef();
+  auto list = ivalue.toListRef();
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
 
   push<PickleOpCode>(PickleOpCode::MARK);

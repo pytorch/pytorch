@@ -66,13 +66,13 @@ at::Tensor castTensorTo(
 
 std::vector<int64_t> compute_sizes(const IValue& seq) {
   std::vector<int64_t> sizes;
-  auto seq_recur = seq.toGenericList();
+  auto seq_recur = seq.toList();
   while (true) {
     sizes.push_back(seq_recur.size());
-    if (seq_recur.size() == 0 || !seq_recur.get(0).isGenericList()) {
+    if (seq_recur.size() == 0 || !seq_recur.get(0).isList()) {
       break;
     }
-    seq_recur = seq_recur.get(0).toGenericList();
+    seq_recur = seq_recur.get(0).toList();
   }
   return sizes;
 }
@@ -117,7 +117,7 @@ void recursiveStore(
     const IValue& obj) {
   auto ndim = sizes.size();
   auto n = sizes[dim];
-  auto seq = obj.toGenericListRef();
+  auto seq = obj.toListRef();
   checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
     for (int64_t i = 0; i < n; i++) {
@@ -200,7 +200,7 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntListRef(),
+              (std::move(peek(stack, 1, 3))).toIntVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -227,7 +227,7 @@ RegisterOperators reg({
           RECORD_FUNCTION("sizes", last(stack, 2));
 
           auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntVector();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -244,7 +244,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -325,7 +325,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),
