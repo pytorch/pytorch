@@ -43,9 +43,8 @@ def _get_valid_min_max(qparams):
     max_value = min((long_max - zero_point) * scale, (long_max / scale + zero_point))
     return np.float32(min_value), np.float32(max_value)
 
-# This wrapper wraps around `st.floats` and checks the version of `hypothesis`, if
-# it is too old, removes the `width` parameter (which was introduced)
-# in 3.67.0
+# This wrapper wraps around `st.floats` and checks the version of `hypothesis`.
+# If it is too old, removes the `width` parameter (introduced in 3.67.0).
 def _floats_wrapper(*args, **kwargs):
     if 'width' in kwargs and _hypothesis_version < (3, 67, 0):
         kwargs.pop('width')
