@@ -48,7 +48,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     ctcloss_reference, new_module_tests
 from common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm
 
 from torch.nn import MultiheadAttention
 
@@ -10130,9 +10130,9 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(device)
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
     def test_batchnorm_eval_bfloat16(self, device):
-        with torch.backends.cudnn.flags(enabled=False):
-            self._test_batchnorm_eval(device, torch.bfloat16)
+        self._test_batchnorm_eval(device, torch.bfloat16)
 
     def _test_batchnorm_simple_average(self, device, dtype):
         module = nn.BatchNorm1d(3, momentum=None).to(dtype=dtype, device=device)
@@ -10471,6 +10471,7 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
     def test_activations_bfloat16(self, device):
         def test(activation):
             # fp32 compute
