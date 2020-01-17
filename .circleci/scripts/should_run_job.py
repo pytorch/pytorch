@@ -58,6 +58,7 @@ default_set = set([
     # Pytorch iOS builds
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
+    'pytorch-ios-11.2.1-arm64_custom_build',
     # PyTorch Mobile builds
     'pytorch-linux-xenial-py3-clang5-mobile-build',
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis',

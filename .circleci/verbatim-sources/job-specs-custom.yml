@@ -437,6 +437,12 @@
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+
+            #check the custom build flag
+            echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
+            if [ -n "${SELECTED_OP_LIST}" ]; then
+                export SELECTED_OP_LIST="${PROJ_ROOT}/ios/TestApp/custom_build/${SELECTED_OP_LIST}"
+            fi
             export BUILD_PYTORCH_MOBILE=1
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
