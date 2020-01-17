@@ -2,6 +2,7 @@
 
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
+#include "fbgemm/FbgemmFP16.h"
 #include "fbgemm/QuantUtils.h"
 
 #include <ATen/Tensor.h>
@@ -23,6 +24,11 @@ struct FBGEMM_API PackedLinearWeight {
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
   c10::QScheme q_scheme;
+};
+
+struct FBGEMM_API PackedLinearWeightFp16 {
+  std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w;
+  c10::optional<at::Tensor> bias;
 };
 
 template <int kSpatialDim = 2>
