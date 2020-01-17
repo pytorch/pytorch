@@ -1372,6 +1372,7 @@ static bool hastensor(script::Module& m, const char* name) {
 class FoldConvBatchNorm2dHelper {
  public:
   void run(const script::Module& module);
+
  private:
   bool tryExtractingConvBNParameters(
       script::Module& conv,
