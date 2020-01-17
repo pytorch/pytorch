@@ -52,6 +52,10 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
   });
 }
 
+OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overload_name) {
+  return findSchema({name, overload_name}).value();
+}
+
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
@@ -153,6 +157,22 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   }
 
   listeners_->addListener(std::move(listener));
+}
+
+[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey) {
+  if (!dispatchKey.has_value() || *dispatchKey == DispatchKey::UndefinedTensorId) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
+
+  const std::string dispatchKeyStr = toString(*dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 }
