@@ -77,7 +77,7 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
 
 static void LowerAllTuples(Block* block);
 
-static void TryRemoveTupleConstant(Node* n) {
+static void RemoveTupleConstants(Node* n) {
   if (!(n->kind() == prim::Constant &&
         n->output()->type()->cast<TupleType>())) {
     return;
@@ -98,7 +98,7 @@ static void TryRemoveTupleConstant(Node* n) {
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
   for (Value * elem: elements) {
-    TryRemoveTupleConstant(elem->node());
+    RemoveTupleConstants(elem->node());
   }
 
   n->replaceAllUsesWith(tuple_construct);
@@ -185,7 +185,7 @@ static void LowerAllTuples(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     auto n = *it++;
-    TryRemoveTupleConstant(n);
+    RemoveTupleConstants(n);
     VisitNode(n, *it);
   }
   // tuples in return lists of blocks behave exactly the same as
