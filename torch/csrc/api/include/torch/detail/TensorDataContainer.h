@@ -150,8 +150,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
   // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
-  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
-  // yf225 TODO: isn't there a mismatch between the above mentioned type and the type in the example? Add a test to repro this!
+  // `torch::tensor(std::vector<int>({1, 2}))`:
   // ```
   // error: no matching function for call to 'tensor(const std::vector<int>&)'
   // no known conversion for argument 1 from 'const std::vector<int>' to
