@@ -33,7 +33,10 @@ using c10::ivalue::Future;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
-  explicit Code(const std::shared_ptr<Graph>& graph);
+  // num_bailouts is irrelevant in a `Code` object unless the `Code` is directly
+  // created by `GraphExecutor` in which case it's likely to contain
+  // `prim::BailOut`s to control the maximum depth of bailout chains
+  explicit Code(const std::shared_ptr<Graph>& graph, size_t num_bailouts = 0);
   ~Code();
 
   const std::vector<GraphExecutor*>& grad_executors();
@@ -47,7 +50,6 @@ struct TORCH_API Code {
   const std::vector<Instruction>& instructions() const;
   const std::vector<Node*>& instructions_source() const;
   size_t register_size() const;
-  void setNumBailOuts(size_t num_bailouts);
 
  private:
   std::shared_ptr<CodeImpl> pImpl;

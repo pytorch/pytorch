@@ -164,8 +164,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   runProfilingOptimizations(copy);
   // cache
-  optimized_plan_ = ExecutionPlan(copy);
-  optimized_plan_->code.setNumBailOuts(num_bailouts);
+  optimized_plan_ = ExecutionPlan(copy, num_bailouts);
   return *optimized_plan_;
 }
 

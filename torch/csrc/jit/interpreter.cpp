@@ -383,10 +383,10 @@ struct CodeImpl {
   std::vector<std::unique_ptr<Function>> bailout_functions_;
   size_t num_bailouts_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph)
+  CodeImpl(const std::shared_ptr<Graph>& graph, size_t num_bailouts)
       : preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
-        num_bailouts_(0) {
+        num_bailouts_(num_bailouts) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -432,10 +432,6 @@ struct CodeImpl {
       }
       last_inserted_op_ = current_node_;
     }
-  }
-
-  void setNumBailOuts(size_t num_bailouts) {
-    num_bailouts_ = num_bailouts;
   }
 
   void truncateInstructions(size_t size) {
@@ -1167,7 +1163,8 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, size_t num_bailouts)
+    : pImpl(new CodeImpl(graph, num_bailouts)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
@@ -1180,10 +1177,6 @@ size_t Code::num_inputs() const {
 
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
-}
-
-void Code::setNumBailOuts(size_t num_bailouts) {
-  return pImpl->setNumBailOuts(num_bailouts);
 }
 
 const std::vector<c10::IValue>& Code::constant_table() const {
