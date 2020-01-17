@@ -44,12 +44,13 @@ static int getGradParamsNumThreads(int batchSize){
 
 
 // Your regular forward pass hopefully
+// This code should not have changed since pull req 25437
 template <typename T, typename accT, typename IndexType, int kSize>
 __global__ void depthwiseConv3DOutput(
-    const T * input,
-    T * output,
-    const T * weight,
-    const T * bias,
+    const T * input, // 5D
+    T * output, // 5D
+    const T * weight,  // 5D
+    const T * bias,  // 1D
     bool biasEnabled,
     IndexType totalElements,
     const int outputChannels,
@@ -91,6 +92,7 @@ __global__ void depthwiseConv3DOutput(
     const int n = indtmp2;
 
     int inputChannel = c;
+    
     int inputChannels = outputChannels;
 
     int weightOffset = c * kernelTime * kernelHeight * kernelWidth;
@@ -136,9 +138,9 @@ __global__ void depthwiseConv3DOutput(
 
 template <typename T, typename accT, typename IndexType, int kSize, int stride>
 __global__ void depthwiseConv3dUpdateGradInput(
-    const T * gradOutput,
-    T * gradInput,
-    const T * weight,
+    const T * gradOutput,  // 5D
+    T * gradInput,  // 5D
+    const T * weight,  // 5D
     IndexType totalElements,
     const int inputChannels,
     const int outputChannels,
