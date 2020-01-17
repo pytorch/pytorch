@@ -223,8 +223,7 @@ struct QuantizedCellParamsStatic {
     TORCH_INTERNAL_ASSERT(
         output_ih_list.size() == 1,
         "The output vector should have exactly one element");
-    const Tensor output_ih = output_ih_list[0].toTensor();
-    return output_ih;
+    return output_ih_list[0].toTensor();
   }
   Tensor linear_hh(Tensor h) const {
     const auto kFuncName = "quantized::linear";
@@ -235,8 +234,7 @@ struct QuantizedCellParamsStatic {
     TORCH_INTERNAL_ASSERT(
         output_hh_list.size() == 1,
         "The output vector should have exactly one element");
-    const Tensor output_hh = output_hh_list[0].toTensor();
-    return output_hh;
+    return output_hh_list[0].toTensor();
   }
 };
 
@@ -485,9 +483,9 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
   using hidden_type = std::tuple<Tensor, Tensor>;
 
   // constants for different ranges.
-  static constexpr float kQ8BitScaleWithRange2 = 2.0f / 256.0f;
-  static constexpr float kQ8BitScaleWithRange16 = 16.0f / 256.0f;
-  static constexpr float kQ32BitScaleWithRange256 = 256.0f / uint32_t(-1);
+  static constexpr float kQ8BitScaleWithRange2 = 2.0f / 255.0f;
+  static constexpr float kQ8BitScaleWithRange16 = 16.0f / 255.0f;
+  static constexpr float kQ32BitScaleWithRange256 = 256.0f / (uint32_t(-1) - 1);
   static constexpr int32_t kQZeroPoint = 128;
 
   hidden_type operator()(
@@ -495,8 +493,8 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
       const hidden_type& hidden,
       const QuantizedCellParamsStatic& params,
       bool pre_compute_input = false) const override {
-    const auto& hx = std::get<0>(hidden);
-    const auto& cx = std::get<1>(hidden);
+    const Tensor& hx = std::get<0>(hidden);
+    const Tensor& cx = std::get<1>(hidden);
 
     // quantization `add` expects the inputs to be of the same shape.
     // i@w_ih shape: [batch_num, 4*hsize]
@@ -552,21 +550,23 @@ private:
     return out;
   }
 
-  // Demotes from qint32 to qint8
+  // Demotes to 8-bit signed quantization.
   Tensor demoting_requantization(Tensor qa, Scalar out_scale,
                                  Scalar out_zero_point, ScalarType qtype) const {
+    TORCH_CHECK(qtype == kQUInt8 || qtype == kQInt8, "Can only demote to 8 bit");
     // TODO: Need to optimize this part.
-    if (qa.scalar_type() == at::kQUInt8) {
-      auto dqa = qa.dequantize();
-      auto qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(), out_zero_point.toLong(), qtype);
-      return qqa;
+    switch(qa.scalar_type()) {
+      case at::kQInt8:
+        return qa
+      case at::kQUint8:
+      case at::kQInt32:
+        Tensor dqa = qa.dequantize();
+        Tensor qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(),
+                                             out_zero_point.toLong(), qtype);
+        return qqa;
+      default:
+        return qa;
     }
-    if (qa.scalar_type() != at::kQInt32) {
-      return qa;
-    }
-    auto dqa = qa.dequantize();
-    auto qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(), out_zero_point.toLong(), qtype);
-    return qqa;
   }
 };
 
