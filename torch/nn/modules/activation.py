@@ -779,7 +779,7 @@ class MultiheadAttention(Module):
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
-            the batches while a 3D mask allows different mask on each batch.
+            the batches while a 3D mask allows a different mask on each batch.
 
     Shape:
         - Inputs:
