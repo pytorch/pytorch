@@ -661,8 +661,8 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   }
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
   metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
-  if (getMetricsProfiling()) {
-    // Add time-series based metrics
+  if (isGILProfilingEnabled()) {
+    // Add time-series based metrics, just GIL wait times for now.
     {
       std::unique_lock<std::mutex> lock(metricsMutex_);
       auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();

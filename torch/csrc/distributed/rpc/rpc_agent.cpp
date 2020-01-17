@@ -13,7 +13,7 @@ RpcAgent::RpcAgent(
     : workerInfo_(std::move(workerId)),
       cb_(std::move(cb)),
       rpcTimeout_(rpcTimeout),
-      profilingEnabled_(true) {}
+      profilingEnabled_(false) {}
 
 RpcAgent::~RpcAgent() = default;
 
@@ -35,11 +35,11 @@ void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
   defaultRpcAgent_ = std::move(defaultRpcAgent);
 }
 
-void RpcAgent::setMetricsProfiling(bool flag) {
+void RpcAgent::enableGILProfiling(bool flag) {
   profilingEnabled_ = flag;
 }
 
-bool RpcAgent::getMetricsProfiling() {
+bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 

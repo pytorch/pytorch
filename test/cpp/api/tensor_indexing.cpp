@@ -41,7 +41,7 @@ TEST(TensorIndexingTest, TensorIndex) {
     TensorIndex(".."),
     "Expected \"...\" to represent an ellipsis index, but got \"..\"");
 
-  // NOTE: Some compilers such as Clang 5 and MSVC always treat `TensorIndex({1})` the same as
+  // NOTE: Some compilers such as Clang and MSVC always treat `TensorIndex({1})` the same as
   // `TensorIndex(1)`. This is in violation of the C++ standard
   // (`https://en.cppreference.com/w/cpp/language/list_initialization`), which says:
   // ```
@@ -64,8 +64,8 @@ TEST(TensorIndexingTest, TensorIndex) {
   // ```
   // Therefore, if the compiler strictly follows the standard, it should treat `TensorIndex({1})` as
   // `TensorIndex(std::initializer_list<c10::optional<int64_t>>({1}))`. However, this is not the case for
-  // compilers such as Clang 5 and MSVC, and hence we skip this test for those compilers.
-#if (!defined(__clang__) || (defined(__clang__) && __clang_major__ != 5)) && !defined(_MSC_VER)
+  // compilers such as Clang and MSVC, and hence we skip this test for those compilers.
+#if !defined(__clang__) && !defined(_MSC_VER)
   ASSERT_THROWS_WITH(
     TensorIndex({1}),
     "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got 1 element(s)");
