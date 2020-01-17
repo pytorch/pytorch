@@ -534,15 +534,15 @@ void pytorch_q8gemm_dq_ukernel_4x8__neon(
   float32x4_t * vout3_ptr = vout3;
 
   float* c0 = c;
-  float* c1 = (float*)((uintptr_t)c0 + c_stride);
+  float* c1 = c0 + c_stride;
   if (mr < 2) {
     c1 = c0;
   }
-  float* c2 = (float*)((uintptr_t)c1 + c_stride);
+  float* c2 = c1 + c_stride;
   if (mr <= 2) {
     c2 = c1;
   }
-  float* c3 = (float*)((uintptr_t)c2 + c_stride);
+  float* c3 = c2 + c_stride;
   if (mr != 4) {
     c3 = c2;
   }

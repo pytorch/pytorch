@@ -11,7 +11,7 @@
 
 .syntax unified
 
-# void pytorch_q8gemm_ukernel_4x8__aarch32_neon(
+# void pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
 #     size_t k,

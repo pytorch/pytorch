@@ -315,12 +315,9 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
       for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
-      // Pass in dummy zero bias to pack function
-      auto bias_fp32 = at::zeros(rows_w, weight_contig.options().dtype(at::kFloat));
-
-      at::Tensor bias = at::quantize_per_tensor(bias_fp32, 1.0, 0, kQInt32);
 
       // Update the input scale to not pack again.
+      // Pass in nullptr for bias, as we pass FP32 bias to run function.
       pack_ptr.input_scale = q_params.scale;
       pack_ptr.w.reset();
       pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
@@ -329,7 +326,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
           kernel_zp,
           kernel_scale,
           (uint8_t*)qnnp_w_data,
-          (int32_t*)bias.data_ptr<c10::qint32>());
+          nullptr);
       packB = pack_ptr.w.get();
     }
 
@@ -397,10 +394,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<false>>(TensorTypeId::CPUTensorId))
+                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(TensorTypeId::CPUTensorId));
+                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

@@ -27,8 +27,7 @@ static void compute_q8gemm_dq(
     size_t group_range /* always 1 */,
     size_t pixel_range,
     size_t mr_block_size,
-    size_t nr_block_size)
-{
+    size_t nr_block_size) {
   const size_t k = context->k;
   const size_t k_stride = context->k_stride;
   const size_t n = context->n;
@@ -46,10 +45,11 @@ static void compute_q8gemm_dq(
       k,
       a + (pixel_index + mr_block_start) * a_stride + group_index * k,
       a_stride,
-      (const void*) ((uintptr_t) packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
+      (const void*)((uintptr_t)packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
       bias + nr_block_start,
-      c + (pixel_index + mr_block_start) * c_stride * sizeof(float) + nr_block_start + group_index * n, // TODO verify this math
-      c_stride * sizeof(float),
+      c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
+          group_index * n,
+      c_stride,
       &context->quantization_params);
 }
 
@@ -67,8 +67,7 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
     const float* bias,
     float* output,
     const size_t output_stride,
-    pthreadpool_t threadpool)
-{
+    pthreadpool_t threadpool) {
   const size_t groups = 1;
   const size_t group_input_channels = input_channels;
   const size_t group_output_channels = output_channels;
@@ -80,10 +79,9 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
 
   const size_t output_size = batch_size * 1;
 
-  const struct pytorch_qnnp_conv_dynamic_quantization_params quantizationParams{
-        input_zero_point,
-        kernel_zero_point,
-        input_scale * kernel_scale,
+  const struct pytorch_qnnp_conv_dynamic_quantization_params
+      quantizationParams {
+    input_zero_point, kernel_zero_point, input_scale *kernel_scale,
   };
 
   struct q8gemm_dq_context q8gemm_dq_context = {
@@ -93,7 +91,7 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
       .n_stride = n_stride,
       .a = input,
       .a_stride = input_stride,
-      .packed_w = (uint8_t*) packed_weights,
+      .packed_w = (uint8_t*)packed_weights,
       .bias = bias,
       .c = output,
       .c_stride = output_stride,
@@ -103,7 +101,7 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
 
   pthreadpool_compute_4d_tiled(
       threadpool,
-      (pthreadpool_function_4d_tiled_t) compute_q8gemm_dq,
+      (pthreadpool_function_4d_tiled_t)compute_q8gemm_dq,
       &q8gemm_dq_context,
       groups,
       1 * output_size,
