@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
@@ -479,6 +480,47 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
+#ifdef USE_PYTORCH_QNNPACK
+
+// QNNPACK can access up to 8 bytes beyond the beginning of the tensor's storage
+// boundary which does trigger ASAN, and can result in a segfault if the memory falls
+// on a different page out of the process's address space.
+// Here we define a custom allocator that allocates the extra storage required to keep
+// this behavior safe.  This same allocator can be used for FBGEMM as well.
+struct QAllocator final : at::Allocator {
+public:
+  virtual ~QAllocator() override = default;
+
+  virtual at::DataPtr allocate(size_t nbytes) const override {
+    Cast memory{c10::alloc_cpu(kGuard + nbytes)};
+    memory.as_byte_ptr += kGuard;
+    return {
+      memory.as_void_ptr,
+      memory.as_void_ptr,
+      &deleter,
+      at::Device(at::DeviceType::CPU)};
+  }
+
+  virtual at::DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+
+  static void deleter(void * const pointer) {
+    const Cast memory{pointer};
+    c10::free_cpu(memory.as_byte_ptr - kGuard);
+  }
+
+ private:
+  static constexpr uint32_t kGuard = 8u;
+
+  union Cast final {
+    void * const as_void_ptr;
+    uint8_t * as_byte_ptr;
+  };
+};
+
+#endif
+
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
@@ -486,8 +528,16 @@ inline Tensor new_qtensor_cpu(
     MemoryFormat memory_format=MemoryFormat::Contiguous) {
   AT_ASSERT(options.device().is_cpu());
 
+  at::Allocator* allocator = at::getCPUAllocator();
+
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    static QAllocator qallocator;
+    allocator = &qallocator;
+  }
+#endif
+
   native::check_size_nonnegative(sizes);
-  auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
