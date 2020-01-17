@@ -117,6 +117,7 @@ class TestScriptPy3(JitTestCase):
         self.checkScript(fn, [torch.randn(2, 2)])
 
         GG = namedtuple('GG', ['f', 'g'])
+
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
