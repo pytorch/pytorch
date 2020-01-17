@@ -106,6 +106,7 @@ from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
+from .truncated_distribution import TruncatedDistribution
 from .uniform import Uniform
 from .weibull import Weibull
 
@@ -144,6 +145,7 @@ __all__ = [
     'Uniform',
     'Weibull',
     'TransformedDistribution',
+    'TruncatedDistribution',
     'biject_to',
     'kl_divergence',
     'register_kl',
