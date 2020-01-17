@@ -9,19 +9,40 @@
 #include <qnnpack/assembly.h>
 #include <requantization/runtime-assembly.h>
 
+# r0 mr
+# r1 nr
+# r2 k
+# r3 a
+# r6 a_stride
+
+# d14 a_zero_point
+# d15 b_zero_point
+
+## Stack
+# 4     quantization_params
+# 4     c_stride
+# 4     c
+# 4     b
+# 4     w
+# 4     a_stride
+# --
+# 16    r4-r7
+# 64    d8-d18
+
 .syntax unified
 
-# void pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon(
+# void pytorch_q8gemm_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
 #     size_t k,
-#     const uint8_t*restrict a,
+#     const uint8_t* restrict a,
 #     size_t a_stride,
-#     const void*restrict w,
-#     uint8_t*restrict c,
+#     const void* restrict w,
+#     const float* restrict b,
+#     uint8_t* restrict c,
 #     size_t c_stride,
-#     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
+#     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
+BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -30,57 +51,46 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
+    ADD ip, ip, 32
+
     PUSH {r4, r5, r6, r7}
-
     VPUSH {d8-d15}
-    # Load quantization params
-    # - r7 = quantization_params
-    LDR r7, [sp, 96]
-
-    # Load bias0123, bias4567
-    VLDM ip!, {d16-d19}
 
     # Load a_stride
     # - r6 = a_stride
     LDR r6, [sp, 80]
-    CMP r0, 2
 
-    ADD r4, r3, r6
+    # Load quantization params
+    # - r7 = quantization_params
+    LDR r7, [sp, 100]
 
-    # Load b_zero_point:
-    # - d15 = b_zero_point
+    VLD1.8 {d14[]}, [r7]
+    ADD r7, r7, 2
     VLD1.8 {d15[]}, [r7]
     ADD r7, r7, 2
+    VLD1.32 {d12[]}, [r7]
 
-    # Load a_zero_point:
-    # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r7]
-
+    CMP r0, 2
+    ADD r4, r3, r6
     MOVLO r4, r3
 
-    ADD r7, r7, 2
     ADD r5, r4, r6
-
-    # q10 := vacc1x0123
-    VMOV.I32 q10, q8
     MOVLS r5, r4
-    # q11 := vacc1x4567
-    VMOV.I32 q11, q9
-    ADD r6, r5, r6
-    # q12 := vacc2x0123
-    VMOV.I32 q12, q8
+
     CMP r0, 4
-    # q13 := vacc2x4567
-    VMOV.I32 q13, q9
+    ADD r6, r5, r6
     MOVNE r6, r5
-    # q14 := vacc3x0123
-    VMOV.I32 q14, q8
+
+    VEOR q8,  q8,  q8
+    VEOR q9,  q9,  q9
+    VEOR q10, q10, q10
+    VEOR q11, q11, q11
+    VEOR q12, q12, q12
+    VEOR q13, q13, q13
+    VEOR q14, q14, q14
+    VEOR q15, q15, q15
+
     SUBS r2, r2, 8
-    # q15 := vacc3x4567
-    VMOV.I32 q15, q9
-    # Load multiplier:
-    # - d12 = vmultiplier
-    VLD1.32 {d12[]}, [r7]!
     BLO 1f
 
     .p2align 5
@@ -639,110 +649,65 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     .p2align 4
 2:
-    # Load right_shift
-    # - q4 = d8:d9 = vright_shift
-    VLD1.32 {d8[], d9[]}, [r7]!
+    LDR r6, [sp, 88]
+    VLD1.32 {q0, q1}, [r6]
 
-    VQRDMULH.S32  q8, q8, d12[0]
-    VQRDMULH.S32  q9, q9, d12[0]
-    VQRDMULH.S32 q10, q10, d12[0]
-    VQRDMULH.S32 q11, q11, d12[0]
+    VCVT.F32.S32 q8, q8
+    VCVT.F32.S32 q9, q9
+    VCVT.F32.S32 q10, q10
+    VCVT.F32.S32 q11, q11
+    VCVT.F32.S32 q12, q12
+    VCVT.F32.S32 q13, q13
+    VCVT.F32.S32 q14, q14
+    VCVT.F32.S32 q15, q15
 
-    # Compute vzero_shift_mask
-    # - q5 = vzero_shift_mask
-    VCEQ.S32 q5, q4, 0
+    VMUL.F32 q8, q8, d12[0]
+    VMUL.F32 q9, q9, d12[0]
+    VMUL.F32 q10, q10, d12[0]
+    VMUL.F32 q11, q11, d12[0]
+    VMUL.F32 q12, q12, d12[0]
+    VMUL.F32 q13, q13, d12[0]
+    VMUL.F32 q14, q14, d12[0]
+    VMUL.F32 q15, q15, d12[0]
 
-    VQRDMULH.S32 q12, q12, d12[0]
-    VQRDMULH.S32 q13, q13, d12[0]
-    VQRDMULH.S32 q14, q14, d12[0]
-    VQRDMULH.S32 q15, q15, d12[0]
-
-    VBIC q0,  q8, q5
-    VBIC q1,  q9, q5
-    VBIC q2, q10, q5
-    VBIC q3, q11, q5
-
-    VSRA.S32  q8, q0, 31
-    VSRA.S32  q9, q1, 31
-    VSRA.S32 q10, q2, 31
-    VSRA.S32 q11, q3, 31
-
-    # Load zero_point
-    # - q7 = d14:d15 = vzero_point
-    VLD1.16 {d14[], d15[]}, [r7]!
-
-    VBIC q0, q12, q5
-    VBIC q1, q13, q5
-    VBIC q2, q14, q5
-    VBIC q3, q15, q5
-
-    VSRA.S32 q12, q0, 31
-    VSRA.S32 q13, q1, 31
-    VSRA.S32 q14, q2, 31
-    VSRA.S32 q15, q3, 31
-
-    # Load max:
-    # - q5 = d10:d11 = vmax
-    VLD1.8 {d10[], d11[]}, [r7]!
-
-    VRSHL.S32  q8,  q8, q4
-    VRSHL.S32  q9,  q9, q4
-    VRSHL.S32 q10, q10, q4
-    VRSHL.S32 q11, q11, q4
-    VRSHL.S32 q12, q12, q4
-    VRSHL.S32 q13, q13, q4
-    VRSHL.S32 q14, q14, q4
-    VRSHL.S32 q15, q15, q4
+    VADD.F32 q8, q8, q0
+    VADD.F32 q9, q9, q1
+    VADD.F32 q10, q10, q0
+    VADD.F32 q11, q11, q1
+    VADD.F32 q12, q12, q0
+    VADD.F32 q13, q13, q1
+    VADD.F32 q14, q14, q0
+    VADD.F32 q15, q15, q1
 
     # Load c, c_stride:
     # - r2 = c
-    # - r2 = c_stride
-    LDRD r2, r3, [sp, 88]
-
-    VQMOVN.S32 d16,  q8
-    VQMOVN.S32 d17,  q9
-    VQMOVN.S32 d18, q10
-    VQMOVN.S32 d19, q11
-    VQMOVN.S32 d20, q12
-    VQMOVN.S32 d21, q13
-    VQMOVN.S32 d22, q14
-    VQMOVN.S32 d23, q15
-
-    # Load min:
-    # - q4 = q8:q9 = vmin
-    VLD1.8 {d8[], d9[]}, [r7]!
+    # - r3 = c_stride
+    LDRD r2, r3, [sp, 92]
+    LSL r3, r3, 2
     ADD r4, r2, r3
 
-    VQADD.S16  q8,  q8, q7
-    VQADD.S16  q9,  q9, q7
     CMP r0, 2
-    VQADD.S16 q10, q10, q7
-    VQADD.S16 q11, q11, q7
     MOVLO r4, r2
 
-    VQMOVUN.S16 d16,  q8
-    VQMOVUN.S16 d17,  q9
     ADD r5, r4, r3
-    VQMOVUN.S16 d18, q10
-    VQMOVUN.S16 d19, q11
     MOVLS r5, r4
 
-    VMIN.U8 q8, q8, q5
     CMP r0, 4
-    VMIN.U8 q9, q9, q5
     ADD r3, r5, r3
-
-    VMAX.U8 q8, q8, q4
     MOVNE r3, r5
-    CMP r1, 8
-    VMAX.U8 q9, q9, q4
 
+    CMP r1, 8
     BNE 4f
 
-    VST1.8 {d16}, [r2]
-    VST1.8 {d17}, [r4]
-    VST1.8 {d18}, [r5]
-    VST1.8 {d19}, [r3]
+    VST1.32 {q8}, [r2]!
+    VST1.32 {q10}, [r4]!
+    VST1.32 {q12}, [r5]!
+    VST1.32 {q14}, [r3]!
+
+    VST1.32 {q9}, [r2]
+    VST1.32 {q11}, [r4]
+    VST1.32 {q13}, [r5]
+    VST1.32 {q15}, [r3]
 
     VPOP {d8-d15}
     POP {r4, r5, r6, r7}
@@ -753,42 +718,48 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     CMP r1, 4
     BLO 5f
 
-    VST1.32 {d16[0]}, [r2]!
-    VST1.32 {d17[0]}, [r4]!
-    VST1.32 {d18[0]}, [r5]!
-    VST1.32 {d19[0]}, [r3]!
+    VST1.32 {q8}, [r2]!
+    VST1.32 {q10}, [r4]!
+    VST1.32 {q12}, [r5]!
+    VST1.32 {q14}, [r3]!
 
     SUB r1, 4
-    VEXT.8 q8, q8, q8, 4
-    VEXT.8 q9, q9, q9, 4
+
+    VMOV.32 q8, q9
+    VMOV.32 q10, q11
+    VMOV.32 q12, q13
+    VMOV.32 q14, q15
 
 5:
     CMP r1, 2
     BLO 6f
 
-    VST1.16 {d16[0]}, [r2]!
-    VST1.16 {d17[0]}, [r4]!
-    VST1.16 {d18[0]}, [r5]!
-    VST1.16 {d19[0]}, [r3]!
+    VST1.32 {d16}, [r2]!
+    VST1.32 {d20}, [r4]!
+    VST1.32 {d24}, [r5]!
+    VST1.32 {d28}, [r3]!
 
     SUB r1, 2
-    VEXT.8 q8, q8, q8, 2
-    VEXT.8 q9, q9, q9, 2
+
+    VEXT.32 q8, q8, 2
+    VEXT.32 q10, q10, 2
+    VEXT.32 q12, q12, 2
+    VEXT.32 q14, q14, 2
 
 6:
     TEQ r1, 0
     BEQ 7f
 
-    VST1.8 {d16[0]}, [r2]
-    VST1.8 {d17[0]}, [r4]
-    VST1.8 {d18[0]}, [r5]
-    VST1.8 {d19[0]}, [r3]
+    VST1.32 {d16[0]}, [r2]!
+    VST1.32 {d20[0]}, [r4]!
+    VST1.32 {d24[0]}, [r5]!
+    VST1.32 {d28[0]}, [r3]!
 
 7:
     VPOP {d8-d15}
     POP {r4, r5, r6, r7}
     BX lr
-END_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
+END_FUNCTION pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
