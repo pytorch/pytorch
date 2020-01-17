@@ -235,6 +235,9 @@ script::Module clone(
 
     // only clone the methods if the ClassType is not cloned before
     if (!type_already_cloned) {
+      for (size_t i = 0; i < type->numConstants(); ++i) {
+        r.type()->addConstant(type->getConstantName(i), type->getConstant(i));
+      }
       // Clone methods remapping the types to the cloned ones.
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);

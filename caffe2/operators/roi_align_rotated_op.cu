@@ -206,3 +206,8 @@ bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(RoIAlignRotated, RoIAlignRotatedOp<float, CUDAContext>);
 } // namespace caffe2
+
+using RoIAlignRotatedOpFloatCUDA =
+    caffe2::RoIAlignRotatedOp<float, caffe2::CUDAContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(RoIAlignRotated, RoIAlignRotatedOpFloatCUDA);
