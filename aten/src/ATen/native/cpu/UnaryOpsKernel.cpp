@@ -372,6 +372,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
     at::uniform_real_distribution<scalar_t> uniform(0, 1);
     data[i] = uniform(generator);
   }
+
   for (int64_t i = 0; i < size - 15; i += 16) {
     normal_fill_16<scalar_t>(data + i, mean, std);
   }
@@ -386,7 +387,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
   }
 }
 
-static void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
+void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
   auto size = self.numel();
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
     if (size >= 16 && self.is_contiguous()) {
