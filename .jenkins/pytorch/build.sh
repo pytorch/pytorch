@@ -14,13 +14,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # (2) build with NCCL and MPI
 # (3) build with only MPI
 # (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
@@ -66,7 +66,7 @@ if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
@@ -205,16 +205,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   assert_git_not_dirty
 
-  # Test documentation build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    pushd docs
-    # TODO: Don't run this here
-    pip_install -r requirements.txt || true
-    LC_ALL=C make html
-    popd
-    assert_git_not_dirty
-  fi
-
   # Build custom operator tests.
   CUSTOM_OP_BUILD="$PWD/../custom-op-build"
   CUSTOM_OP_TEST="$PWD/test/custom_operator"
@@ -228,7 +218,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   assert_git_not_dirty
 else
   # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
     mkdir -p c10/build
     pushd c10/build
     cmake ..
