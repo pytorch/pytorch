@@ -238,7 +238,7 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
                                             scale_neg_zp_premul_vec);
         for (int idx = 0; idx < value_dx.size(); ++idx) {
-          value_dx[idx] = Vec256<float>(0.0f) - value_dx[idx];
+          value_dx[idx] = value_dx[idx].neg();
           value_dx[idx] = value_dx[idx].exp();
           value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
           value_dx[idx] = value_dx[idx].reciprocal();
