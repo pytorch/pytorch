@@ -16,8 +16,10 @@ struct Code;
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph, size_t num_bailouts = 0)
-      : code(graph, num_bailouts), graph(std::move(graph)) {}
+  ExecutionPlan(
+      std::shared_ptr<Graph> graph,
+      size_t remaining_bailout_depth = 0)
+      : code(graph, remaining_bailout_depth), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -42,15 +44,16 @@ struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph);
   void run(Stack& inputs);
-  // `num_bailouts` stands for the maximum number of profiled and specialized
-  // recompilations allowed for the current `GraphExecutor`. if num_bailouts is
-  // equal to 0, `GraphExecutor` won't perform any profiling and specialization.
-  // This is also equivalent to the SIMPLE_EXECUTOR mode. if num_bailouts is
-  // greater than 0, `GraphExecutor` will profile and specialize its input graph
-  // based on the profiled information whenever a bailout check is
-  // failed/triggered, a new `GraphExecutor` will be created. This new
-  // `GraphExecutor`'s num_bailouts will be reduced by 1.
-  ExecutionPlan getPlanFor(Stack& inputs, size_t num_bailouts);
+  // `remaining_bailout_depth` stands for the maximum number of profiled and
+  // specialized recompilations allowed for the current `GraphExecutor`. if
+  // remaining_bailout_depth is equal to 0, `GraphExecutor` won't perform any
+  // profiling and specialization. This is also equivalent to the
+  // SIMPLE_EXECUTOR mode. if remaining_bailout_depth is greater than 0,
+  // `GraphExecutor` will profile and specialize its input graph based on the
+  // profiled information whenever a bailout check is failed/triggered, a new
+  // `GraphExecutor` will be created. This new `GraphExecutor`'s
+  // remaining_bailout_depth will be reduced by 1.
+  ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
   }

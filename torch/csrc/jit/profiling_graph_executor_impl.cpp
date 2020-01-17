@@ -128,7 +128,7 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    size_t num_bailouts) {
+    size_t remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
@@ -137,7 +137,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   // simple executor
-  if (num_bailouts == 0) {
+  if (remaining_bailout_depth == 0) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
@@ -164,7 +164,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   runProfilingOptimizations(copy);
   // cache
-  optimized_plan_ = ExecutionPlan(copy, num_bailouts);
+  optimized_plan_ = ExecutionPlan(copy, remaining_bailout_depth);
   return *optimized_plan_;
 }
 
