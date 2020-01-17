@@ -348,7 +348,7 @@ class MinMaxObserver(_ObserverBase):
             key = prefix + name
             if key in state_dict:
                 setattr(self, name, state_dict.pop(key))
-            elif strict and not key in optional_keys:
+            elif strict and key not in optional_keys:
                 missing_keys.append(key)
         super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                           missing_keys, unexpected_keys, error_msgs)
@@ -514,7 +514,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
             key = prefix + name
             if key in state_dict:
                 setattr(self, name, state_dict.pop(key))
-            elif strict and not key in optional_keys:
+            elif strict and key not in optional_keys:
                 missing_keys.append(key)
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                                     missing_keys, unexpected_keys, error_msgs)
@@ -858,7 +858,7 @@ class HistogramObserver(_ObserverBase):
             key = prefix + name
             if key in state_dict:
                 setattr(self, name, state_dict.pop(key))
-            elif strict and not key in optional_keys:
+            elif strict and key not in optional_keys:
                 missing_keys.append(key)
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                              missing_keys, unexpected_keys, error_msgs)
