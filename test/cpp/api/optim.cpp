@@ -133,7 +133,7 @@ void check_exact_values(
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for(int i=0; i<3; i++) {
+  for (size_t i = 0; i < 3; i++) {
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);
@@ -144,7 +144,7 @@ TEST(OptimTest, OptimizerAccessors) {
   auto& params_groups = optimizer.param_groups();
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
-  for(size_t i = 0; i < params_1.size(); i++) {
+  for (size_t i = 0; i < params_1.size(); i++) {
     torch::equal(params[i], params_1[i]);
   }
 

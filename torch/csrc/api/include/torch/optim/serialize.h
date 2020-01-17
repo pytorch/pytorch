@@ -18,7 +18,7 @@ namespace detail {
       serialize::OutputArchive& archive,
       const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& state) {
     for (const auto& item : state) {
-      serialize::OutputArchive param_state_archive(archive.compilation_unit()); // For each OptimizerParamState
+      serialize::OutputArchive param_state_archive(archive.compilation_unit());
       std::string tensorimpl_key = item.first;
       const DerivedOptimizerParamState& curr_state = static_cast<const DerivedOptimizerParamState&>(*(item.second.get()));
       curr_state.serialize(param_state_archive);

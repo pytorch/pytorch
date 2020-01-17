@@ -128,7 +128,7 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 
 void Adagrad::load(serialize::InputArchive& archive) {
   IValue pytorch_version;
-  if(archive.try_read("pytorch_version", pytorch_version)){
+  if (archive.try_read("pytorch_version", pytorch_version)) {
     serialize(*this, archive);
   }
   else { // deserializing archives saved in old format (prior to version 1.5.0)

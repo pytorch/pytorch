@@ -199,7 +199,7 @@ TEST(SerializeTest, KeysFunc) {
   input_archive.load_from(tempfile.name);
   std::vector<std::string> keys = input_archive.keys();
   ASSERT_EQ(keys.size(), 3);
-  for(size_t i = 0; i < keys.size(); i++) {
+  for (size_t i = 0; i < keys.size(); i++) {
     ASSERT_EQ(keys[i], "element/" + c10::to_string(i));
   }
 }
@@ -475,8 +475,10 @@ TEST(SerializeTest, Optim_Adagrad) {
   step(optim1, model1);
   auto optim1_2 = Adagrad(model1->parameters(), torch::optim::AdagradOptions(1e-1));
 
-  std::vector<torch::Tensor> sum_buffers; // fill up with optim1 sum_buffers
-  std::vector<int64_t> step_buffers; // fill up with optim1 state_buffers
+  // fill up with optim1 sum_buffers
+  std::vector<torch::Tensor> sum_buffers;
+   // fill up with optim1 state_buffers
+  std::vector<int64_t> step_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (size_t i = 0; i < params_.size(); i++) {
