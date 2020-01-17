@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
+#include <torch/csrc/jit/fuser/cuda/cs_ir/test.h>
+
 // #include "../common/ir.h"
 // #include "../common/ir_printer.h"
 // #include "../common/expr.h"
@@ -192,6 +194,10 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       // Short-circuits if NVRTC version too low
       AT_ASSERT(nvrtc_major >= 6);
 
+      auto kernel_name = "saxpy";
+      auto kernel_string = Fuser::saxpy_codegen(kernel_name);
+      std::cout << kernel_string << std::endl;
+
       // Major and minor is determined by device properties and
       // possibly "downcompiled" to a lower (compatible) compute architecture
       // based on the NVRTC version
@@ -226,7 +232,7 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
 
       AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(kernel_entry->module_), ptx.data()));
       AT_CUDA_DRIVER_CHECK(
-          nvrtc().cuModuleGetFunction(&(kernel_entry->function_), kernel_entry->module_, "saxpy"));
+          nvrtc().cuModuleGetFunction(&(kernel_entry->function_), kernel_entry->module_, kernel_name));
       AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
           &kernel_entry->maxBlocks_, kernel_entry->function_, 128, 0));
       kernel_entry->maxBlocks_ *= kernel_entry->prop_->multiProcessorCount;
