@@ -168,6 +168,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
+      LOG(INFO) << "Deleting fork: " << rud.rrefId() << " " << rud.forkId();
       ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
       return wrap(std::move(RRefAck()).toMessage());
     }
