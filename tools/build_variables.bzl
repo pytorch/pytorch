@@ -240,6 +240,7 @@ libtorch_sources = [
 libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
+<<<<<<< HEAD:tools/build_variables.bzl
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -298,6 +299,16 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/sgd.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
+=======
+    "torch/csrc/jit/fuser/cuda/interface.cpp",
+    "torch/csrc/autograd/profiler_cuda.cpp",
+    "torch/csrc/autograd/functions/comm.cpp",
+    "torch/csrc/jit/fuser/cuda/cs_ir/IR.cpp",
+    "torch/csrc/jit/fuser/cuda/cs_ir/IRMutator.cpp",
+    "torch/csrc/jit/fuser/cuda/cs_ir/IRVisitor.cpp",
+    "torch/csrc/jit/fuser/cuda/cs_ir/Printer.cpp",
+    "torch/csrc/jit/fuser/cuda/cs_ir/test.cpp"
+>>>>>>> it builds!:tools/build_variables.py
 ]
 
 libtorch_python_cuda_sources = [
