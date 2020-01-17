@@ -3484,22 +3484,22 @@ class TestNN(NNTestCase):
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
 
     def test_multihead_attn_3d_attn_mask(self):
-        embed_dim = 8                                                                                                         
-        num_heads = 4                                                                                                         
-        batch_size = 8          
-        src_len = 3  
+        embed_dim = 8
+        num_heads = 4
+        batch_size = 8
+        src_len = 3
         tgt_len = 2
 
         query = torch.rand(batch_size, tgt_len, embed_dim)  # [N, T, D]
-        key = torch.rand(batch_size, src_len, embed_dim)  # [N, S, D]                                                                      
-        value = key  # [N, S, D]           
+        key = torch.rand(batch_size, src_len, embed_dim)  # [N, S, D]
+        value = key  # [N, S, D]
         attn_mask = torch.randint(0, 2, (batch_size, tgt_len, src_len)).float()  # [N, T, S]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))  
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
 
-        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)    
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)
 
         # Generate 3D results
-        attn_mask_3d = torch.repeat_interleave(attn_mask, num_heads, dim=0)  # [N * H, T, S]    
+        attn_mask_3d = torch.repeat_interleave(attn_mask, num_heads, dim=0)  # [N * H, T, S]
         output_3d = mta_model(query.transpose(0, 1), key.transpose(0, 1), value.transpose(0, 1), attn_mask=attn_mask_3d)[0]
         output_3d = output_3d.transpose(0, 1)  # [N, T, D]
 
