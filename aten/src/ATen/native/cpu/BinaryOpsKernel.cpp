@@ -415,7 +415,7 @@ void ne_kernel(TensorIterator& iter) {
 }
 
 void smooth_l1_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
     cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
       auto z = std::abs(a - b);
       return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
