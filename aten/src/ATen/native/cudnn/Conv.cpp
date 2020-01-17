@@ -1108,7 +1108,7 @@ Tensor cudnn_convolution_transpose(
 //
 // ---------------------------------------------------------------------
 
-void raw_cudnn_convolution_backward_weight_out(
+void raw_cudnn_convolution_backward_weight_out_32bit(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
@@ -1140,6 +1140,54 @@ void raw_cudnn_convolution_backward_weight_out(
       args.odesc.desc(), grad_output.data_ptr(),
       args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace.data, workspace.size,
       &zero, args.wdesc.desc(), grad_weight.data_ptr()));
+}
+
+void raw_cudnn_convolution_backward_weight_out(
+    const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  const int64_t ni = input.numel();
+  const int64_t no = grad_output.numel();
+  // Assume the shape of the tensor is (N, C, D1, D2, ...)
+  // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
+  if (ni <= int_max && no <= int_max) {
+    raw_cudnn_convolution_backward_weight_out_32bit(grad_weight, grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    return;
+  }
+  // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
+  //
+  // Here we use a simple heuristics to determine the size of each split
+  // We don't max out the 2^31 address space because this number is super
+  // large and very likely to get an OOM.
+  int64_t n = grad_output.size(0);
+  int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
+  int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
+  int64_t num_splits = (n + split_size - 1) / split_size;
+  if (split_size * max_inner_size < int_max) {
+    for (int64_t i = 0; i < num_splits; i++) {
+      int64_t start = split_size * i;
+      int64_t split_size_ = std::min<int64_t>(split_size, n - start);
+      Tensor input_ = input.narrow(0, start, split_size_);
+      Tensor grad_output_ = grad_output.narrow(0, start, split_size_);
+      Tensor grad_weight_ = at::empty_like(grad_weight);
+      raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic);
+      grad_weight.add_(grad_weight_);
+    }
+    return;
+  }
+  // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
+  // For example, for conv2d, there following questions needs to be considered.
+  // - Is the memory layout NCHW or NHWC ?
+  // - If the conv is NCHW -> NC'H'W', then should we
+  //   - split only NC?
+  //   - split only N'C'?
+  //   - split both?
+  // - If the conv is NHWC, then we need to split across H, we need to be very careful about the boundary condition
+  //   to make sure that the boundary is handled correctly.
+  // - If we decide to make these splits, is the memory contiguous? Do we need to copy the memory?
+  // Considering the complexity of this issue, it is better not to use cuDNN for this case
+  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
 Tensor cudnn_convolution_backward_weight(
