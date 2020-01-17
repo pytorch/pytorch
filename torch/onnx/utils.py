@@ -484,7 +484,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
                 strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
-        _check_onnx_proto(proto)
+
+        if operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            # Only run checker if we are not using ATEN fallback
+            _check_onnx_proto(proto)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)

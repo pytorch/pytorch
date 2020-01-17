@@ -20,6 +20,7 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 import torchvision
+import onnx
 
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
@@ -2466,13 +2467,11 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         f = io.BytesIO()
         torch.onnx._export(Model(), x, f)
-        data = list(f.getvalue())
-        # Set the IR version to 0 to force an ONNX check error
-        data[1] = 0
-        data = bytes(data)
+        model = onnx.load(f)
+        model.ir_version = 0
 
         def check_proto():
-            torch._C._check_onnx_proto(data)
+            torch._C._check_onnx_proto(model.SerializeToString())
         self.assertRaises(RuntimeError, check_proto)
 
 

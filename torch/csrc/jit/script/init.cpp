@@ -1309,7 +1309,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<>());
   m.def("_check_onnx_proto",
      [](const std::string& proto_string) {
-        check_onnx_proto(proto_string);
+            check_onnx_proto(proto_string);
         },
         py::arg("proto_string")
       );
