@@ -1,5 +1,6 @@
 import collections
 import copyreg
+from enum import Enum
 import io
 import pickle
 import threading
@@ -7,10 +8,16 @@ import traceback
 
 import torch
 
+
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
 
+
+class RPCExecMode(Enum):
+    SYNC = "sync"
+    ASYNC = "async"
+    REMOTE = "remote"
 
 class _InternalRPCPickler:
     r"""
@@ -22,6 +29,7 @@ class _InternalRPCPickler:
     using JIT pickler. This format will make tensor handling in C++ much easier,
     e.g. attach tensor to distributed autograd graph in C++
     """
+
     def __init__(self):
         # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
         # as _InternalRPCPickler still got build in python2 even
@@ -39,7 +47,7 @@ class _InternalRPCPickler:
         global _thread_local_tensor_tables
         _thread_local_tensor_tables.send_tables.append(obj)
         tensor_index = len(_thread_local_tensor_tables.send_tables) - 1
-        return (_InternalRPCPickler._tensor_receiver, (tensor_index, ))
+        return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
 
     def serialize(self, obj):
         r"""
@@ -119,9 +127,11 @@ def _run_function(binary_data, tensor_table):
         result = RemoteException(except_str)
     return result
 
+
 def _handle_exception(result):
     if isinstance(result, RemoteException):
         raise Exception(result.msg)
+
 
 def _load_return_value(binary_data, tensor_table):
     r"""
@@ -134,6 +144,31 @@ def _load_return_value(binary_data, tensor_table):
     result = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
     _handle_exception(result)
     return result
+
+
+def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
+    """
+    This function should be called from RPC/RRef functions to create a
+    RecordFunction object for profiling. This function also runs the before
+    callbacks that start the profiling, though the user is responsible for
+    running the appropriate callbacks when the function to be profiled finishes.
+
+    Arguments:
+        exec_type (RPCExecMode): Type of RPC/RRef call
+        func_name (str): Name of function being profiled.
+        current_worker_name (str): Name of current worker.
+        dest_worker_name (str): Name of the destination worker.
+
+    Returns:
+        An instance of `torch.autograd._RecordFunction`.
+    """
+    assert torch.autograd._profiler_enabled(), "Autograd profiler should be enabled."
+    profile_key = "rpc_{}#{}({} -> {})".format(
+        exec_type.value, str(func_name), current_worker_name, dest_worker_name
+    )
+    rf = torch.autograd._RecordFunction()
+    torch.autograd._run_before_callbacks(rf, profile_key)
+    return rf
 
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])

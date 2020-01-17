@@ -627,11 +627,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
-  AT_ERROR("Tracing float lists currently not supported!");
-}
-
-void addInputs(Node* n, const char* name, const std::vector<double>& value) {
+void addInputs(Node* n, const char* name, ArrayRef<double> value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
@@ -659,7 +655,7 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
 }
 
 void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
-  return addOutput(node, c10::impl::toVector(outputs));
+  return addOutput(node, outputs.vec());
 }
 
 const std::shared_ptr<TracingState>& getTracingState() {

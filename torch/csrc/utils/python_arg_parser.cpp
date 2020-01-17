@@ -713,15 +713,19 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
     signature.parse(args, kwargs, parsed_args, true);
   }
 
+  auto options = get_signatures();
+  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
+  throw TypeError("%s", msg.c_str());
+}
+
+std::vector<std::string> PythonArgParser::get_signatures() const {
   std::vector<std::string> options;
   for (auto& signature : signatures_) {
     if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }
-
-  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  throw TypeError("%s", msg.c_str());
+  return options;
 }
 
 at::Tensor PythonArgs::tensor_slow(int i) {

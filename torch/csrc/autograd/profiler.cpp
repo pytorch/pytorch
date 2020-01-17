@@ -22,19 +22,25 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerState state = ProfilerState::Disabled;
 uint16_t next_thread_id = 0;
-std::mutex all_event_lists_mutex;
-std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+// Protects access to next_thread_id and all_event_lists_map.
+std::mutex all_event_lists_map_mutex;
+std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
+    all_event_lists_map;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
+
+uint16_t getThreadId() {
+  return thread_id;
+}
 
 ProfilerConfig::~ProfilerConfig() = default;
 
 RangeEventList& getEventList() {
   if (!event_list) {
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+    std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
-    all_event_lists.emplace_front(event_list);
+    thread_id = ++next_thread_id;
+    all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
 }
@@ -155,7 +161,35 @@ void enableProfiler(ProfilerConfig config) {
           pushRangeImpl(fn.name(), msg, fn.seqNr(), {});
         }
       },
-      [](const RecordFunction& /* unused */) { popRange(); },
+      [](const RecordFunction& fn) {
+        if (fn.getThreadId() != 0) {
+          // If we've overridden the thread_id on the RecordFunction, then find
+          //  the eventList that was created for the original thread_id. Then,
+          // record the end event on this list so that the block is added to
+          // the correct list, instead of to a new list. This should only run
+          // when calling RecordFunction::end() in a different thread.
+          if (state == ProfilerState::Disabled) {
+            return;
+          } else {
+            std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
+            const auto& eventListIter =
+                all_event_lists_map.find(fn.getThreadId());
+            TORCH_INTERNAL_ASSERT(
+                eventListIter != all_event_lists_map.end(),
+                "Did not find thread_id matching ",
+                fn.getThreadId());
+
+            auto& eventList = eventListIter->second;
+            eventList->record(
+                      EventKind::PopRange,
+                      StringView(""),
+                      fn.getThreadId(),
+                      state == ProfilerState::CUDA);
+          }
+        } else {
+          popRange();
+        }
+      },
       config.report_input_shapes);
   state = new_state;
 
@@ -193,15 +227,15 @@ thread_event_lists disableProfiler() {
     return thread_event_lists();
   } else {
     thread_event_lists result;
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
-    for (auto it = all_event_lists.begin(); it != all_event_lists.end();) {
-      auto & list = *it;
+    std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
+    for (auto it = all_event_lists_map.begin(); it != all_event_lists_map.end();) {
+      auto & list = it->second;
       result.emplace_back(list->consolidate());
       // GC lists that are not held by any threads
       if (list.use_count() == 1) {
         auto current_it = it;
         ++it;
-        all_event_lists.erase(current_it);
+        all_event_lists_map.erase(current_it);
       } else {
         ++it;
       }
