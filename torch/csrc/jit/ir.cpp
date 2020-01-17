@@ -96,57 +96,6 @@ std::ostream& operator<<(
   return out;
 }
 
-#define PRINT_VALUE(dtype)                                    \
-  static void printAttribute(std::ostream& out, dtype attr) { \
-    out << attr;                                              \
-  }
-PRINT_VALUE(bool)
-PRINT_VALUE(int64_t)
-PRINT_VALUE(double)
-
-#define PRINT_LIST(container, dtype, format_item)        \
-  static void printAttribute(                            \
-      std::ostream& out, const container<dtype>& attr) { \
-    out << "[";                                          \
-    int i = 0;                                           \
-    for (dtype item : attr) {                            \
-      if (i++ > 0) {                                     \
-        out << ", ";                                     \
-      }                                                  \
-      out << format_item;                                \
-    }                                                    \
-    out << "]";                                          \
-  }
-
-// clang-format off
-PRINT_LIST(std::vector, int64_t, item)
-PRINT_LIST(c10::List, int64_t, item)
-
-/* use ivalue printing to corretly format floats with no decimal */
-PRINT_LIST(std::vector, double, IValue(item))
-PRINT_LIST(c10::List, double, IValue(item))
-
-// bool[] attributes stored as int64_t[], no need for std::vector overload
-PRINT_LIST(c10::List, bool, item)
-// clang-format on
-
-static void printAttribute(std::ostream& out, const std::string& attr) {
-  c10::printQuotedString(out, attr);
-}
-
-static void printAttribute(
-    std::ostream& out,
-    const std::vector<std::string>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0)
-      out << ", ";
-    c10::printQuotedString(out, item);
-  }
-  out << "]";
-}
-
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
@@ -171,69 +120,19 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   }
 }
 
-static void printAttribute(
-    std::ostream& out,
-    const std::vector<at::Tensor>& attr) {
-  out << "[<Tensors>]";
-}
-
-static void printAttribute(
-    std::ostream& out,
-    const c10::List<at::Tensor>& attr) {
-  out << "[<Tensors>]";
-}
-
-static void printAttribute(
-    std::ostream& out,
-    const c10::intrusive_ptr<at::ivalue::Tuple>& attr);
-
 static void printAttribute(std::ostream& out, const IValue& ival) {
-#define PRINT_IVALUE(type)                \
-  if (ival.is##type()) {                  \
-    printAttribute(out, ival.to##type()); \
-    return;                               \
+  const auto customFormatter = [](std::ostream& ss, const IValue& input) {
+    if (input.isTensor()) {
+      printAttribute(ss, input.toTensor());
+      return true;
+    } else if (input.isTensorList()) {
+      ss << "[<Tensors>]";
+      return true;
+    }
+    return false;
   };
-  PRINT_IVALUE(Int)
-  PRINT_IVALUE(IntList)
-  PRINT_IVALUE(Bool)
-  PRINT_IVALUE(BoolList)
-  PRINT_IVALUE(Double)
-  PRINT_IVALUE(DoubleList)
-  PRINT_IVALUE(Tensor)
-  PRINT_IVALUE(TensorList)
-  PRINT_IVALUE(Tuple)
-  if (ival.isString()) {
-    printAttribute(out, ival.toStringRef());
-    return;
-  }
-  if (ival.type()->isSubtypeOf(ListType::ofStrings())) {
-    auto str_list = ival.toGenericListRef();
-    printAttribute(out, fmap(str_list, [](const IValue& ival) {
-                     return ival.toStringRef();
-                   }));
-    return;
-  }
-  if (ival.isNone()) {
-    out << "None";
-    return;
-  }
-  TORCH_INTERNAL_ASSERT(false);
-}
-
-static void printAttribute(
-    std::ostream& out,
-    const c10::intrusive_ptr<at::ivalue::Tuple>& attr) {
-  out << "(";
-  const char* delim = "";
-  for (const auto& elem : attr->elements()) {
-    out << delim;
-    printAttribute(out, elem);
-    delim = ", ";
-  }
-  if (attr->elements().size() == 1) {
-    out << ",";
-  }
-  out << ")";
+  std::stringstream ss;
+  ival.repr(ss, customFormatter);
 }
 
 static void printTypeList(
@@ -273,7 +172,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printAttribute(out, t(name));
       break;
     case AttributeKind::ts:
-      printAttribute(out, ts(name));
+      out << "[<Tensors>]";
       break;
     case AttributeKind::ival:
       printAttribute(out, ival(name));
@@ -1572,6 +1471,7 @@ Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
     tuple_type = TupleType::create(std::move(types));
   }
   auto n = create(prim::TupleConstruct, values);
+
   n->output()->setType(tuple_type);
   return n;
 }

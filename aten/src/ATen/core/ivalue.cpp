@@ -130,8 +130,12 @@ std::ostream& IValue::repr(
   }
 
   const IValue& v = *this;
-  auto formatter = [&](std::ostream& out, const IValue& v) {
-    v.repr(out, customFormatter);
+  // continue to use custom formatter in recursion
+  auto formatter = [&](std::ostream& out, const IValue& input) {
+    if (customFormatter(out, input)) {
+      return;
+    }
+    input.repr(out, customFormatter);
   };
   switch (v.tag) {
     case IValue::Tag::None:

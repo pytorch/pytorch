@@ -77,7 +77,7 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
 
 static void LowerAllTuples(Block* block);
 
-static void removeTupleConstant(Node * n) {
+static void TryRemoveTupleConstant(Node* n) {
   if (!(n->kind() == prim::Constant &&
         n->output()->type()->cast<TupleType>())) {
     return;
@@ -98,18 +98,10 @@ static void removeTupleConstant(Node * n) {
   // insert the tuple first before recursing on its elements, so that its
   // elements will have a use
   for (Value * elem: elements) {
-    removeTupleConstant(elem->node());
+    TryRemoveTupleConstant(elem->node());
   }
 
   n->replaceAllUsesWith(tuple_construct);
-}
-
-void LowerTupleConstants(Block * b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end();
-       it != end;) {
-    auto n = *it++;
-    removeTupleConstant(n);
-  }
 }
 
 static void VisitNode(Node* n, Node* insert_point) {
@@ -193,6 +185,7 @@ static void LowerAllTuples(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     auto n = *it++;
+    TryRemoveTupleConstant(n);
     VisitNode(n, *it);
   }
   // tuples in return lists of blocks behave exactly the same as
@@ -219,7 +212,6 @@ static void EnsureNoTuples(Block* block) {
 }
 
 void LowerAllTuples(const std::shared_ptr<Graph>& graph) {
-  LowerTupleConstants(graph->block());
   LowerAllTuples(graph->block());
   EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());

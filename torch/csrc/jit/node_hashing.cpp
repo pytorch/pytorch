@@ -19,14 +19,6 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
-bool tensorListEqual(
-    const std::vector<at::Tensor>& lhs,
-    const std::vector<at::Tensor>& rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
-}
-
 bool typeListEqual(
     const std::vector<TypePtr>& lhs,
     const std::vector<TypePtr>& rhs) {
@@ -49,106 +41,64 @@ bool attributesEqual(const at::Tensor& a1, const at::Tensor& a2) {
   return tensorEqual(a1, a2);
 }
 
-bool attributesEqual(
-    const std::vector<at::Tensor>& a1,
-    const std::vector<at::Tensor>& a2) {
-  return tensorListEqual(a1, a2);
-}
+bool ivaluesEqual(const IValue& a1, const IValue& a2);
 
 bool attributesEqual(
-    const c10::List<at::Tensor>& lhs,
-    const c10::List<at::Tensor>& rhs) {
+    const std::vector<at::Tensor>& lhs,
+    const std::vector<at::Tensor>& rhs) {
   if (lhs.size() != rhs.size())
     return false;
   return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
 }
 
-// c10::List<bool> == c10::List<bool> does not compile
-bool attributesEqual(const c10::List<bool>& lhs, const c10::List<bool>& rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
-}
-
-bool attributesEqual(
-    const c10::List<double>& lhs,
-    const c10::List<double>& rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
-}
-
-bool attributesEqual(
-    const c10::List<int64_t>& lhs,
-    const c10::List<int64_t>& rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin());
-}
-
-bool ivaluesEqual(const IValue& a1, const IValue& a2);
-
-bool attributesEqual(const IValue& a1, const IValue& a2) {
-  return ivaluesEqual(a1, a2);
-}
-
-std::vector<std::string> toStringList(const IValue& val) {
-  std::vector<std::string> ss;
-  auto generic_list = val.toGenericListRef();
-  for (const IValue& ival : generic_list) {
-    ss.push_back(ival.toStringRef());
-  }
-  return ss;
-}
-
-bool attributesEqual(
-    const c10::intrusive_ptr<at::ivalue::Tuple>& a1,
-    const c10::intrusive_ptr<at::ivalue::Tuple>& a2) {
-  if (a1->elements().size() != a2->elements().size()) {
+bool attributesEqual(at::ArrayRef<IValue> a1, at::ArrayRef<IValue> a2) {
+  if (a1.size() != a2.size()) {
     return false;
   }
-  for (size_t i = 0; i < a1->elements().size(); ++i) {
-    const auto& elem_1 = a1->elements().at(i);
-    const auto& elem_2 = a2->elements().at(i);
-    if (!ivaluesEqual(elem_1, elem_2)) {
+  for (size_t i = 0; i < a1.size(); ++i) {
+    if (!ivaluesEqual(a1[i], a2[i])) {
       return false;
     }
   }
   return true;
 }
 
+bool attributesEqual(const IValue& a1, const IValue& a2) {
+  return ivaluesEqual(a1, a2);
+}
+
 // this is not a general-purpose comparison of IValues, it only covers the
-// ivalues that are allowed as attributes.
+// ivalues that are allowed as attributes, and it does not check type
+// equivalence of containers.
 bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   if (a1.tagKind() != a2.tagKind()) {
     return false;
   }
-#define COMPARE_IVALUE(type)                              \
-  if (a1.is##type()) {                                    \
-    return attributesEqual(a1.to##type(), a2.to##type()); \
-  };
-  // primitive IValue types
-  COMPARE_IVALUE(Int)
-  COMPARE_IVALUE(IntList)
-  COMPARE_IVALUE(Bool)
-  COMPARE_IVALUE(BoolList)
-  COMPARE_IVALUE(Double)
-  COMPARE_IVALUE(DoubleList)
-  COMPARE_IVALUE(Tensor)
-  COMPARE_IVALUE(TensorList)
-  COMPARE_IVALUE(Tuple)
+  if (a1.isInt()) {
+    return a1.toInt() == a2.toInt();
+  }
+  if (a1.isBool()) {
+    return a1.toBool() == a2.toBool();
+  }
+  if (a1.isDouble()) {
+    return a1.toDouble() == a2.toDouble();
+  }
+  if (a1.isTensor()) {
+    return attributesEqual(a1.toTensor(), a2.toTensor());
+  }
   if (a1.isNone()) {
     return true;
   }
   if (a1.isString()) {
     return attributesEqual(a1.toStringRef(), a2.toStringRef());
   }
-  if (!a1.type()->isSubtypeOf(a2.type()) ||
-      !a2.type()->isSubtypeOf(a1.type())) {
-    return false;
+  if (a1.isGenericList()) {
+    return attributesEqual(a1.toGenericListRef(), a2.toGenericListRef());
   }
-  if (a1.type()->isSubtypeOf(ListType::ofStrings())) {
-    return attributesEqual(toStringList(a1), toStringList(a2));
+  if (a1.isTuple()) {
+    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    return attributesEqual(a1_elem, a2_elem);
   }
   TORCH_INTERNAL_ASSERT(false);
 }

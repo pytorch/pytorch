@@ -28,23 +28,16 @@ bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isTensor()) {
     return insertableTensor(ivalue.toTensor());
   }
-  if (ivalue.isBoolList() || ivalue.isDoubleList() || ivalue.isIntList() ||
-      ivalue.type()->isSubtypeOf(ListType::ofStrings())) {
-    return true;
-  }
-  if (ivalue.isTensorList()) {
-    auto ten_list = ivalue.toTensorList();
-    return std::all_of(
-        ten_list.begin(), ten_list.end(), [](const at::Tensor& tensor) {
-          return insertableTensor(tensor);
-        });
-  }
-  if (ivalue.isTuple()) {
-    auto tup_elems = ivalue.toTuple()->elements();
-    return std::all_of(
-        tup_elems.begin(), tup_elems.end(), [](const IValue& tup_elem) {
-          return insertableIValue(tup_elem);
-        });
+  if (ivalue.isGenericList() || ivalue.isTuple()) {
+    c10::ArrayRef<IValue> elems;
+    if (ivalue.isTuple()) {
+      elems = ivalue.toTuple()->elements();
+    } else {
+      elems = ivalue.toGenericListRef();
+    }
+    return std::all_of(elems.begin(), elems.end(), [](const IValue& tup_elem) {
+      return insertableIValue(tup_elem);
+    });
   }
   return false;
 }
