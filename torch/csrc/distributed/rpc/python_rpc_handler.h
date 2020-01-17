@@ -61,22 +61,20 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
-  class GilWaitTimeGuard {
-   public:
-    explicit GilWaitTimeGuard();
-    void markAcquired();
-
-   private:
-    std::chrono::time_point<std::chrono::high_resolution_clock> start_;
-  };
-
 // A macro that grabs the GIL, profiling the acquisition time. The average GIL
 // acquisition time will be recorded in RpcAgent's getMetrics().
-#define PROFILE_GIL_SCOPED_ACQUIRE                               \
-  GilWaitTimeGuard g;                                            \
-  pybind11::gil_scoped_acquire ag;                               \
-  if (RpcAgent::getDefaultRpcAgent()->isGILProfilingEnabled()) { \
-    g.markAcquired();                                            \
+#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
+  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
+  auto shouldProfileGIL =                                                \
+      RpcAgent::getDefaultRpcAgent()->isGILProfilingEnabled();           \
+  if (shouldProfileGIL) {                                                \
+    startTime = std::chrono::high_resolution_clock::now();               \
+  }                                                                      \
+  pybind11::gil_scoped_acquire ag;                                       \
+  if (shouldProfileGIL) {                                                \
+    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
+        std::chrono::high_resolution_clock::now() - startTime);          \
+    RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);                 \
   }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;

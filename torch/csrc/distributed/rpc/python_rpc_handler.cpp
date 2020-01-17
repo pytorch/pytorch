@@ -19,15 +19,6 @@ py::object getFunction(const py::object& module, const char* name) {
 
 } // namespace
 
-PythonRpcHandler::GilWaitTimeGuard::GilWaitTimeGuard()
-    : start_(std::chrono::high_resolution_clock::now()) {}
-
-void PythonRpcHandler::GilWaitTimeGuard::markAcquired() {
-  auto dur = std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::high_resolution_clock::now() - start_);
-  RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);
-}
-
 PythonRpcHandler::PythonRpcHandler() {
   PROFILE_GIL_SCOPED_ACQUIRE;
   py::object module = py::module::import("torch.distributed.rpc.internal");
