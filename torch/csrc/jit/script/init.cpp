@@ -102,11 +102,6 @@ struct PythonResolver : public Resolver {
     if (classType_ && name == classname_) {
       return classType_;
     }
-    if (name.find("torch.classes") == 0) {
-      if (auto custom_class_ptr = getCustomClass(name)) {
-        return custom_class_ptr;
-      }
-    }
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -685,9 +680,6 @@ void initJitScriptBindings(PyObject* module) {
   // STL containers are not mutable by default and hence we need to bind as
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
-
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
   py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
