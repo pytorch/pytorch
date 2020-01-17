@@ -25,6 +25,7 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
         return (1+math.erf(x/math.sqrt(2.)))/2.
     
     with torch.no_grad():
+        #Compute upper and lower cdf values
         l = norm_cdf((a-mean)/std)
         u = norm_cdf((b-mean)/std)
         sqrt_two = math.sqrt(2.)
@@ -32,7 +33,7 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
         #First, fill with uniform values
         tensor.uniform_(0., 1.)
 
-        #Scale by 2(l-u), shift by 2l-1
+        #Scale by 2(u-l), shift by 2l-1
         tensor.mul_(2*(u-l))
         tensor.add_(2*l-1)
         
@@ -134,9 +135,11 @@ def normal_(tensor, mean=0., std=1.):
 
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
     # type: (Tensor, float, float, float, float) -> Tensor
-    r"""Fills the input Tensor with values drawn from the truncated
+    r"""Fills the input `Tensor` with values drawn from a truncated
+    normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
-    using the Inverse CDF method.
+    with values outside :math:`[a, b]` redrawn until they are within
+    the bounds.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
