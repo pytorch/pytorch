@@ -267,6 +267,9 @@
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   self: cummax_backward(indices, grad.to(self.scalar_type()), self, dim)
 
+- name: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  self: cummin_backward(indices, grad.to(self.scalar_type()), self, dim)
+
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
 

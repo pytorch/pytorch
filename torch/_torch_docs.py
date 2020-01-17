@@ -1402,6 +1402,30 @@ Example::
         indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
 """.format(**reduceops_common_args))
 
+add_docstr(torch.cummin,
+           r"""
+cummin(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.2284, -0.6628,  0.0975,  0.2680, -1.3298, -0.4220, -0.3885,  1.1762,
+         0.9165,  1.6684])
+    >>> torch.cummin(a, dim=0)
+    torch.return_types.cummin(
+        values=tensor([-0.2284, -0.6628, -0.6628, -0.6628, -1.3298, -1.3298, -1.3298, -1.3298,
+        -1.3298, -1.3298]),
+        indices=tensor([0, 1, 1, 1, 4, 4, 4, 4, 4, 4]))
+""".format(**reduceops_common_args))
+
 add_docstr(torch.cumprod,
            r"""
 cumprod(input, dim, out=None, dtype=None) -> Tensor
