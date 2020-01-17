@@ -47,8 +47,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t diff = scalar_end - scalar_start;
-      double div = static_cast<double>(steps - 1);
+      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
       auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
@@ -57,17 +56,16 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      double step = static_cast<double>(scalar_end - scalar_start) / (steps - 1);
 
       auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
-          scalar_t inc = step * static_cast<scalar_t>(ind);
-          scalar_t val = scalar_start + inc;
-          return val;
-        });
+        scalar_t val = scalar_start + step * ind;
+        return val;
+      });
     });
   }
 
