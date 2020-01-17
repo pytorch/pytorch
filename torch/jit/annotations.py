@@ -288,7 +288,8 @@ def try_ann_to_type(ann, loc):
         return DeviceObjType.get()
     else:
         # Maybe resolve a NamedTuple to a Tuple Type
-        fake_rcb = lambda key: None
+        def fake_rcb(key):
+            return None
         the_type = torch._C._resolve_type_from_object(ann, loc, fake_rcb)
         if the_type is not None:
             return the_type
