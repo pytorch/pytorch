@@ -132,9 +132,6 @@ std::ostream& IValue::repr(
   const IValue& v = *this;
   // continue to use custom formatter in recursion
   auto formatter = [&](std::ostream& out, const IValue& input) {
-    if (customFormatter(out, input)) {
-      return;
-    }
     input.repr(out, customFormatter);
   };
   switch (v.tag) {
@@ -166,9 +163,6 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, v.toStringRef());
       return out;
     case IValue::Tag::GenericList: {
-      auto formatter = [&](std::ostream& out, const IValue& v) {
-        v.repr(out, customFormatter);
-      };
       return printMaybeAnnotatedList(out, *this, formatter);
     }
     case IValue::Tag::Device: {

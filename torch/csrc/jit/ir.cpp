@@ -131,8 +131,7 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
     }
     return false;
   };
-  std::stringstream ss;
-  ival.repr(ss, customFormatter);
+  ival.repr(out, customFormatter);
 }
 
 static void printTypeList(
