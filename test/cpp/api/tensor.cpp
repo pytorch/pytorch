@@ -286,7 +286,7 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  auto tensor = torch::tensor({1l, 2l, 3l});
+  tensor = torch::tensor({1l, 2l, 3l});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
