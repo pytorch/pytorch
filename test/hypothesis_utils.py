@@ -11,6 +11,8 @@ from hypothesis.strategies import SearchStrategy
 
 from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
 
+_hypothesis_version = hypothesis.version.__version_info__
+
 # Setup for the hypothesis tests.
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
 # element is enforced zero_point. If None, any zero_point point within the
@@ -45,14 +47,14 @@ def _get_valid_min_max(qparams):
 # it is too old, removes the `width` parameter (which was introduced)
 # in 3.67.0
 def _floats_wrapper(*args, **kwargs):
-    if 'width' in kwargs and hypothesis.version.__version_info__ < (3, 67, 0):
+    if 'width' in kwargs and _hypothesis_version < (3, 67, 0):
         kwargs.pop('width')
     return st.floats(*args, **kwargs)
 
 def floats(*args, **kwargs):
     if 'width' not in kwargs:
         kwargs['width'] = 32
-    return st.floats(*args, **kwargs)
+    return _floats_wrapper(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
@@ -311,24 +313,40 @@ def tensor_conv(
     return X, W, b, groups
 
 
-hypothesis_version = hypothesis.version.__version_info__
-settings._settings__definitions_are_locked = False
-if hypothesis_version < (3, 56, 10):
-    define_setting = settings.define_setting
-else:
-    define_setting = settings._define_setting
-if hypothesis_version < (3, 27, 0):
-    define_setting('deadline', 'Hypothesis deadline hack',
-                   default=None, validator=lambda *args: True)
-settings._settings__definitions_are_locked = True
+def _new_hypothesis_setting(name, introduced_version, default=None,
+                            validator=None):
+    """Adds a new setting to the outdated hypothesis.
+
+    Args:
+        name: name of the setting to add
+        introduced_version: version of the hypothesis when this setting was
+            officially introduced. You can find the settings versions here:
+            https://hypothesis.readthedocs.io/en/latest/changes.html
+        default: default value for the setting
+        validator: callable that checks if the provided setting value is valid.
+    """
+    lock_state = hypothesis.settings._settings__definitions_are_locked
+    hypothesis.settings._settings__definitions_are_locked = False
+    if _hypothesis_version < (3, 56, 10):
+        define_setting = hypothesis.settings.define_setting
+    else:
+        define_setting = hypothesis.settings._define_setting
+    if _hypothesis_version < introduced_version:
+        define_setting(name, 'Hypothesis {} hack'.format(name),
+                       default=default, validator=validator)
+    hypothesis.settings._settings__definitions_are_locked = lock_state
+
+# Add members
+_new_hypothesis_setting('deadline', (3, 27, 0), default=None, validator=lambda *args: True)
+
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
-current_settings = settings._profiles[settings._current_profile].__dict__
-current_settings['deadline'] = None
+_current_settings = settings._profiles[settings._current_profile].__dict__
+_current_settings['deadline'] = None
 def assert_deadline_disabled():
     assert settings().deadline is None
-    if hypothesis_version < (3, 27, 0):
+    if _hypothesis_version < (3, 27, 0):
         import warnings
         warning_message = (
             "Your version of hypothesis is outdated. "

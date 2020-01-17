@@ -21,7 +21,7 @@ from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins  # noqa: F401
-from jit.unsupported_ops import TestUnsupportedOps  # noqa: F401
+from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -534,6 +534,46 @@ class TestJit(JitTestCase):
 
         trace = torch.jit.trace(f, (a, b))
 
+    def test_peephole_with_writes(self):
+        def test_write(x):
+            s = 0
+            s += x
+            s += x
+            return s
+
+        self.checkScript(test_write, (torch.ones(4, 4),))
+
+
+    def test_peephole_with_non_output_writes(self):
+
+        @torch.jit.ignore
+        def nomnom(x):
+            pass
+
+        def test_write(x):
+            t = torch.ones_like(x)
+            z = x.clone()
+            y = z + 0
+            z.add_(t)
+            # this makes sure z isn't blasted out of existence
+            # because it isn't returned or used in a side-effectful
+            # way
+            nomnom(z)
+            return y + y
+
+        a = torch.ones(4, 4)
+        j = self.checkScript(test_write, (a,))
+
+    def test_peephole_no_output_aliasing(self):
+        def test_peephole(x):
+            y = x + 0
+            return x, y
+
+        a = torch.ones(4, 4)
+        j = self.checkScript(test_peephole, (a,))
+        r1, r2 = j(a)
+        self.assertNotEqual(r1.data_ptr(), r2.data_ptr())
+
     def test_peephole(self):
         a = torch.tensor([0.4])
         b = torch.tensor([0.7])
@@ -575,8 +615,8 @@ class TestJit(JitTestCase):
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
-        self.assertTrue(len(list(trace.graph.nodes())) == 0)
-
+        self.run_pass('dce', trace.graph)
+        FileCheck().check_not("type_as").run(str(trace.graph))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -2300,6 +2340,7 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp(self):
         from cpp.jit import tests_setup
@@ -2309,6 +2350,7 @@ graph(%Ra, %Rb):
 
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
@@ -3798,6 +3840,20 @@ class TestScript(JitTestCase):
         out = fct_loop(x)
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
+
+    def test_loop_liveness(self):
+        with enable_profiling_mode():
+            @torch.jit.script
+            def f(i):
+                # type: (int) -> Tensor
+                l = []
+                for n in [2, 1]:
+                    l.append(torch.zeros(n, i))
+
+                return l[0]
+
+            f(2)
+            f(1)
 
     def test_bailout_loop_carried_deps_name_clash(self):
         with enable_profiling_mode():
@@ -9112,13 +9168,14 @@ a")
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
 
-            __constants__ = ['b', 'i', 'c']
+            __constants__ = ['b', 'i', 'c', 's']
 
             def __init__(self):
                 super(M, self).__init__()
                 self.b = False
                 self.i = 1
                 self.c = 3.5
+                self.s = ["hello"]
 
             @torch.jit.script_method
             def forward(self):
@@ -17597,11 +17654,23 @@ class TestDocs(unittest.TestCase):
         docs_dir = [os.path.dirname(__file__), '..', 'docs']
         docs_dir = os.path.join(*docs_dir)
 
-        result = subprocess.run(['make', 'doctest'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
-        if result.returncode != 0:
+        def report_error(result):
             out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
-            raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
+            raise RuntimeError("{}\n{}\n".format(err, out) +
+                               "Docs build failed (run `cd docs && " +
+                               "pip install -r requirements.txt && make doctest`)")
+        result = subprocess.run(
+            ['pip', 'install', '-r', 'requirements.txt'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            report_error(result)
+
+        result = subprocess.run(
+            ['make', 'doctest'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=docs_dir)
+        if result.returncode != 0:
+            report_error(result)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

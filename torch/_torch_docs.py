@@ -170,7 +170,7 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, alpha=1, other, out=None)
+.. function:: add(input, other, *, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -187,8 +187,8 @@ a real number, otherwise it should be an integer.
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
+    alpha (Number): the scalar multiplier for :attr:`other`
 
 Keyword arguments:
     {out}
@@ -213,7 +213,7 @@ Example::
 
 add_docstr(torch.addbmm,
            r"""
-addbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor
+addbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored
 in :attr:`batch1` and :attr:`batch2`,
@@ -236,11 +236,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :
 must be real numbers, otherwise they should be integers.
 
 Args:
+    batch1 (Tensor): the first batch of matrices to be multiplied
+    batch2 (Tensor): the second batch of matrices to be multiplied
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
-    batch1 (Tensor): the first batch of matrices to be multiplied
-    batch2 (Tensor): the second batch of matrices to be multiplied
     {out}
 
 Example::
@@ -256,7 +256,7 @@ Example::
 
 add_docstr(torch.addcdiv,
            r"""
-addcdiv(input, value=1, tensor1, tensor2, out=None) -> Tensor
+addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
@@ -272,9 +272,9 @@ a real number, otherwise an integer.
 
 Args:
     input (Tensor): the tensor to be added
-    value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     tensor1 (Tensor): the numerator tensor
     tensor2 (Tensor): the denominator tensor
+    value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     {out}
 
 Example::
@@ -282,7 +282,7 @@ Example::
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
-    >>> torch.addcdiv(t, 0.1, t1, t2)
+    >>> torch.addcdiv(t, t1, t2, value=0.1)
     tensor([[-0.2312, -3.6496,  0.1312],
             [-1.0428,  3.4292, -0.1030],
             [-0.5369, -0.9829,  0.0430]])
@@ -290,7 +290,7 @@ Example::
 
 add_docstr(torch.addcmul,
            r"""
-addcmul(input, value=1, tensor1, tensor2, out=None) -> Tensor
+addcmul(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise multiplication of :attr:`tensor1`
 by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
@@ -307,9 +307,9 @@ a real number, otherwise an integer.
 
 Args:
     input (Tensor): the tensor to be added
-    value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     tensor1 (Tensor): the tensor to be multiplied
     tensor2 (Tensor): the tensor to be multiplied
+    value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     {out}
 
 Example::
@@ -317,7 +317,7 @@ Example::
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
-    >>> torch.addcmul(t, 0.1, t1, t2)
+    >>> torch.addcmul(t, t1, t2, value=0.1)
     tensor([[-0.8635, -0.6391,  1.6174],
             [-0.7617, -0.5879,  1.7388],
             [-0.8353, -0.6249,  1.6511]])
@@ -325,7 +325,7 @@ Example::
 
 add_docstr(torch.addmm,
            r"""
-addmm(beta=1, input, alpha=1, mat1, mat2, out=None) -> Tensor
+addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -345,11 +345,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     mat1 (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     {out}
 
 Example::
@@ -364,7 +364,7 @@ Example::
 
 add_docstr(torch.addmv,
            r"""
-addmv(beta=1, input, alpha=1, mat, vec, out=None) -> Tensor
+addmv(input, mat, vec, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix-vector product of the matrix :attr:`mat` and
 the vector :attr:`vec`.
@@ -385,11 +385,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): vector to be added
-    alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     {out}
 
 Example::
@@ -403,7 +403,7 @@ Example::
 
 add_docstr(torch.addr,
            r"""
-addr(beta=1, input, alpha=1, vec1, vec2, out=None) -> Tensor
+addr(input, vec1, vec2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs the outer-product of vectors :attr:`vec1` and :attr:`vec2`
 and adds it to the matrix :attr:`input`.
@@ -425,11 +425,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     vec1 (Tensor): the first vector of the outer product
     vec2 (Tensor): the second vector of the outer product
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     {out}
 
 Example::
@@ -641,7 +641,7 @@ Example::
 
 add_docstr(torch.baddbmm,
            r"""
-baddbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor
+baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -664,11 +664,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): the tensor to be added
-    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     {out}
 
 Example::
@@ -1377,6 +1377,30 @@ Example::
             [-0.8304, -1.3037,  0.5650],
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
+
+add_docstr(torch.cummax,
+           r"""
+cummax(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
+         1.9946, -0.8209])
+    >>> torch.cummax(a, dim=0)
+    torch.return_types.cummax(
+        values=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
+         1.9946,  1.9946]),
+        indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumprod,
            r"""
