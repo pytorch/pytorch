@@ -30,7 +30,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
         });
       });
   }
-} 
+}
 
 void atan2_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atan2_cpu", [&]() {
@@ -264,7 +264,7 @@ void logical_xor_kernel(TensorIterator& iter) {
 
 template<typename scalar_t>
 static inline scalar_t rshift_wrapper(scalar_t a, scalar_t b) {
-  return a >> b;    
+  return a >> b;
 }
 
 static inline int8_t rshift_wrapper(int8_t a, int8_t b) {
@@ -302,7 +302,7 @@ void rshift_kernel(TensorIterator& iter) {
         [](scalar_t a, scalar_t b) -> scalar_t {
           return rshift_wrapper(a, b);
       });
-    }); 
+    });
   }
 }
 
@@ -415,7 +415,7 @@ void ne_kernel(TensorIterator& iter) {
 }
 
 void smooth_l1_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
     cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
       auto z = std::abs(a - b);
       return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
