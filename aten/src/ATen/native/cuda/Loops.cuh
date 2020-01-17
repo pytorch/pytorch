@@ -181,14 +181,14 @@ namespace modern {
 namespace detail {
 
 template <typename func_t, typename array_t, std::size_t... I>
-__device__ inline constexpr decltype(auto) apply_impl(func_t f, array_t t, std::index_sequence<I...>)
+__device__ inline constexpr decltype(auto) invoke_with_array_impl(func_t f, array_t t, std::index_sequence<I...>)
 {
     return f(t[I]...);
 }
 template <typename func_t, typename array_t>
-__device__ inline constexpr decltype(auto) array_apply(func_t f, array_t a) {
+__device__ inline constexpr decltype(auto) invoke_with_array(func_t f, array_t a) {
   constexpr auto arity = function_traits<func_t>::arity;
-  return apply_impl(f, a, std::make_index_sequence<arity>{});
+  return invoke_with_array_impl(f, a, std::make_index_sequence<arity>{});
 }
 
 namespace arg_type {
@@ -263,7 +263,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx + nt * i < N) {
-      results[i] = detail::array_apply<func_t, arg_t[nargs]>(f, args[i]);
+      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
