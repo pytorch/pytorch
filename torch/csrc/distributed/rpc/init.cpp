@@ -308,16 +308,19 @@ If the future completes with an error, an exception is thrown.
   // implemented as generic Future<IValue>, we can consider all rpc call
   // to return a future<IValue> later on.
   shared_ptr_class_<PythonFutureWrapper>(module, "_pyFuture")
-      .def("wait", [](PythonFutureWrapper& fut) {
-        fut.fut->wait();
-        auto res = fut.fut->value();
-        {
-          // acquiring GIL as torch::jit::toPyObject creates new py::object
-          // without grabbing the GIL.
-          AutoGIL ag;
-          return torch::jit::toPyObject(std::move(res));
-        }
-      });
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            fut.fut->wait();
+            auto res = fut.fut->value();
+            {
+              // acquiring GIL as torch::jit::toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return torch::jit::toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_script",
@@ -338,7 +341,8 @@ If the future completes with an error, an exception is thrown.
             fnSchema, args, kwargs, c10::nullopt);
         auto fut = rpcTorchscriptCall(dst, name, stack);
         return PythonFutureWrapper(fut);
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",

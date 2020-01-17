@@ -426,7 +426,7 @@ def rpc_sync(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin or annotated TorchScript
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
                          functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
@@ -494,7 +494,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. builtin or annotated TorchScript
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
                          functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
@@ -612,9 +612,7 @@ def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    args = args if args else ()
-    kwargs = kwargs if kwargs else {}
-    fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
+    fut = _rpc_async_torchscript(to, qualified_name, args, kwargs)
     return fut.wait()
 
 
