@@ -1374,7 +1374,7 @@ static bool hastensor(script::Module& m, const char* name) {
 
 class FoldConvBatchNorm2dHelper {
  public:
-  void run(const script::Module& module);
+  void run(script::Module& module);
 
  private:
   bool tryExtractingConvBNParameters(
@@ -1430,7 +1430,7 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   return true;
 }
 
-void FoldConvBatchNorm2dHelper::run(const script::Module& module) {
+void FoldConvBatchNorm2dHelper::run(script::Module& module) {
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
     %conv_submodule = match::module[name="Conv2d"](%self)
@@ -1600,9 +1600,11 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void FoldConvBatchNorm2d(const script::Module& module) {
+script::Module FoldConvBatchNorm2d(const script::Module& module) {
   FoldConvBatchNorm2dHelper h;
-  h.run(module);
+  script::Module m = module.clone();
+  h.run(m);
+  return m;
 }
 
 void FoldQuantizeCallIntoBuffer(
