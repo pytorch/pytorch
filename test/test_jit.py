@@ -3096,6 +3096,21 @@ graph(%Ra, %Rb):
         self.run_pass('peephole', graph)
         FileCheck().check("prim::unchecked_cast").run(graph)
 
+    def test_unchecked_cast(self):
+        def test(cond):
+            # type: (bool)
+            a = torch.tensor([10])
+            if cond:
+                b = None
+            else:
+                b = a
+            if b is not None:
+                b[0] = 5
+            return a.int()
+
+        self.checkScript(test, (True,))
+        self.checkScript(test, (False,))
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
