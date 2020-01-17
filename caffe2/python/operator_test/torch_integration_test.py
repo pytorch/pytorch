@@ -511,6 +511,63 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
 
+    @given(
+        N=st.integers(min_value=1, max_value=2),
+        C=st.integers(min_value=4, max_value=4),
+        H=st.integers(min_value=10, max_value=10),
+        W=st.integers(min_value=8, max_value=8),
+    )
+    def _test_roi_align_rotated(self, N, C, H, W, device):
+        def rand_rotated_roi():
+            return np.array(
+                [
+                    float(int(N * np.random.rand())),
+                    np.random.rand() * W,
+                    np.random.rand() * H,
+                    np.random.rand() * W,
+                    np.random.rand() * H,
+                    np.random.rand() * 360 - 180
+                ]
+            ).astype(np.float32)
+
+        feature = np.random.randn(N, C, H, W).astype(np.float32)
+        rois = np.array([rand_rotated_roi() for _ in range(10)])
+
+        def roi_align_ref(_feature, _rois):
+            ref_op = core.CreateOperator(
+                "RoIAlignRotated",
+                ["feature", "rois"],
+                ["roi_feature"],
+                spatial_scale=1.0,
+                pooled_h=3,
+                pooled_w=3,
+                sampling_ratio=0,
+            )
+            workspace.FeedBlob("feature", _feature)
+            workspace.FeedBlob("rois", _rois)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("roi_feature")
+
+        roi_feature_ref = roi_align_ref(feature, rois)
+        roi_feature = torch.ops._caffe2.RoIAlignRotated(
+            torch.Tensor(feature).to(device),
+            torch.Tensor(rois).to(device),
+            order="NCHW",
+            spatial_scale=1.0,
+            pooled_h=3,
+            pooled_w=3,
+            sampling_ratio=0,
+            aligned=False,
+        )
+        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+
+    def test_roi_align_rotated_cpu(self):
+        self._test_roi_align_rotated(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_roi_align_rotated_cuda(self):
+        self._test_roi_align_rotated(device="cuda")
+
     @given(roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10))
     def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts):
         batch_size = len(roi_counts)
@@ -718,6 +775,16 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(x, torch.Tensor([3, 6]).to(device))
         # y should also change because y is alias of x
         torch.testing.assert_allclose(y, torch.Tensor([3, 6]).to(device))
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_copy_between_cpu_and_gpu(self):
+        x_cpu_ref = torch.Tensor([1, 2, 3])
+        x_gpu_ref = x_cpu_ref.to("cuda")
+
+        x_gpu = torch.ops._caffe2.CopyCPUToGPU(x_cpu_ref)
+        torch.testing.assert_allclose(x_gpu, x_gpu_ref)
+        x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
+        torch.testing.assert_allclose(x_cpu, x_cpu_ref)
 
 
 if __name__ == '__main__':
