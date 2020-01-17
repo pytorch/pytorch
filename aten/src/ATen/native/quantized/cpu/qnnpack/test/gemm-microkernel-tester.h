@@ -401,7 +401,7 @@ class GemmMicrokernelTester {
           packedW.data(),
           bias.data(),
           c.data(),
-          cStride() * sizeof(float),
+          cStride(),
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
