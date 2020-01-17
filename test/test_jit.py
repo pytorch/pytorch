@@ -1426,7 +1426,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 return x
 
         eager = TestModule()
-        scripted = torch.jit.script(eager)
+        scripted = torch.jit.script(eager).copy()
         eager.eval()
         scripted.eval()
 
