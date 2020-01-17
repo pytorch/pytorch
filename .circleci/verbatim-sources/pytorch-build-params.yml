@@ -29,10 +29,16 @@ pytorch_ios_params: &pytorch_ios_params
     ios_platform:
       type: string
       default: ""
+    op_list:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
+    SELECTED_OP_LIST: << parameters.op_list >>
+
+
 
 
 
