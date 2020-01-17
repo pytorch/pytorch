@@ -10445,7 +10445,7 @@ class TestTorchDeviceType(TestCase):
             self.assertRaises(RuntimeError, lambda: m2 + m1)
             self.assertRaises(RuntimeError, lambda: torch.add(m1, m2))
             self.assertRaises(RuntimeError, lambda: torch.add(m2, m1))
-            continue
+            return
         self.assertEqual(m1 + m2, res)
         self.assertEqual(m2 + m1, res)
         self.assertEqual(torch.add(m1, m2), res)
@@ -10511,7 +10511,7 @@ class TestTorchDeviceType(TestCase):
             self.assertRaises(RuntimeError, lambda: m2 * m1)
             self.assertRaises(RuntimeError, lambda: torch.mul(m1, m2))
             self.assertRaises(RuntimeError, lambda: torch.mul(m2, m1))
-            continue
+            return
         self.assertEqual(m1 * m2, res)
         self.assertEqual(m2 * m1, res)
         self.assertEqual(torch.mul(m1, m2), res)
