@@ -1,18 +1,22 @@
+# coding=utf-8
+r"""Quantized RNN modules."""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import torch
-import torch.nn as nn
-from torch import Tensor  # noqa: F401
-from torch.nn import _VF
-from torch._jit_internal import Tuple, Optional, List  # noqa: F401
-from torch.nn.utils.rnn import PackedSequence
 import numbers
 
+import torch
+from torch import Tensor  # noqa: F401
+
+import torch.nn as nn
+from torch.nn import _VF
 from torch.nn.modules.rnn import apply_permutation
-from torch.nn.quantized.dynamic.modules.rnn import PackedParameter  # noqa
+from torch.nn.utils.rnn import PackedSequence
+
+from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+
 
 def _prepack(weight, bias=None):
     return torch.ops.quantized.linear_prepack(weight, bias)
@@ -30,6 +34,31 @@ def _reshape_list(list, shape):
         stop = start + step
         new_list.append(_reshape_list(list[start:stop], shape[1:]))
     return new_list
+
+
+class PackedParameter(torch.nn.Module):
+    def __init__(self, param):
+        super(PackedParameter, self).__init__()
+        self.param = param
+
+    @torch.jit.export
+    def __getstate__(self):
+        return (self._unpack(), self.training)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.param = torch.ops.quantized.linear_prepack(*state[0])
+        self.training = state[1]
+
+    def _unpack(self):
+        return torch.ops.quantized.linear_unpack(self.param)
+
+    # This only exists because there's a bug in recursive scripting
+    # that arises only in Python 2 where a recursively scripted
+    # module does not have a forward(). We can delete this once we
+    # drop python 2 support
+    def forward(self):
+        raise RuntimeError('PackedParameter cannot be called')
 
 
 class RNNBase(torch.nn.Module):
@@ -178,7 +207,7 @@ class LSTM(RNNBase):
             zeros = torch.zeros(self.num_layers * num_directions,
                                 max_batch_size, self.hidden_size)
             h = torch.quantize_per_tensor(zeros, scale=0.0625, zero_point=0,
-                                          dtype=torch.qint8)
+                                          dtype=torch.quint8)
             x = torch.quantize_per_tensor(zeros, scale=5.95e-8, zero_point=0,
                                           dtype=torch.qint32)
             hx = (h, x)
@@ -196,11 +225,11 @@ class LSTM(RNNBase):
         if batch_sizes is None:
             result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
                                         float(self.dropout), self.training, self.bidirectional,
-                                        self.batch_first, dtype=torch.qint8, use_dynamic=False)
+                                        self.batch_first, dtype=torch.quint8, use_dynamic=False)
         else:
             result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
                                         self.num_layers, float(self.dropout), self.training,
-                                        self.bidirectional, dtype=torch.qint8, use_dynamic=False)
+                                        self.bidirectional, dtype=torch.quint8, use_dynamic=False)
         output = result[0]
         hidden = result[1:]
 
