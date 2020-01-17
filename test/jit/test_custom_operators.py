@@ -69,9 +69,9 @@ class TestCustomOperators(JitTestCase):
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            r"aten::transpose\(\) is missing value for argument 'dim0'."
+            r"aten::type_as\(\) is missing value for argument 'other'."
         ):
-            torch.ops.aten.transpose(torch.ones(5, 5))
+            torch.ops.aten.type_as(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(
