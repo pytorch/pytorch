@@ -143,7 +143,9 @@ class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers
 
     Args:
-        encoder_layer: an instance of the TransformerEncoderLayer() class (required).
+        encoder_layer: the transformer encoder layer (required).
+            For example, an instance of TransformerEncoderLayer() class.
+            It could also be a custom transformer encoder layer.
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
 
@@ -188,7 +190,9 @@ class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers
 
     Args:
-        decoder_layer: an instance of the TransformerDecoderLayer() class (required).
+        decoder_layer: the transformer decoder layer (required).
+            For example, an instance of TransformerDecoderLayer() class.
+            It could also be a custom transformer decoder layer.
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
 
