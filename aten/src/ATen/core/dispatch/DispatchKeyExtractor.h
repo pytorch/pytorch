@@ -43,7 +43,9 @@ namespace detail {
       }
     }
     void operator()(at::Generator* gen) {
-      ts = ts | gen->key_set();
+      if (gen != nullptr) {
+        ts = ts | gen->key_set();
+      }
     }
     template <typename T>
     void operator()(const T& x) {
