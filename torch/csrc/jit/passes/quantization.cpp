@@ -1374,7 +1374,7 @@ static bool hastensor(script::Module& m, const char* name) {
 
 class FoldConvBatchNorm2dHelper {
  public:
-  void run(script::Module& module);
+  void run(const script::Module& module);
 
  private:
   bool tryExtractingConvBNParameters(
@@ -1392,7 +1392,6 @@ class FoldConvBatchNorm2dHelper {
   std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
       const ConvBNParameters& p);
 
-  std::unordered_set<Graph*> folded_graph_;
 };
 
 std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::computeUpdatedConvWeightAndBias(
@@ -1498,15 +1497,6 @@ graph(%self, %x):
             "Conv and BN modules didn't have all required parameters or attributes...");
         continue;
       }
-      auto new_w_b = computeUpdatedConvWeightAndBias(params);
-
-      Graph* g = method.graph().get();
-      if (folded_graph_.find(g) != folded_graph_.end()) {
-        conv_submodule.setattr("weight", std::get<0>(new_w_b));
-        conv_submodule.setattr("bias", std::get<1>(new_w_b));
-        continue;
-      }
-      folded_graph_.insert(g);;
 
       // We are using a separate vector for saving Values we want to rewrite to
       // make sure that the order in which we perform these transformations is
@@ -1524,6 +1514,7 @@ graph(%self, %x):
       nodes_to_delete.insert(matched_bn);
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
+      auto new_w_b = computeUpdatedConvWeightAndBias(params);
       conv_submodule.setattr("weight", std::get<0>(new_w_b));
       if (hastensor(conv_submodule, "bias")) {
         conv_submodule.setattr("bias", std::get<1>(new_w_b));
@@ -1602,9 +1593,7 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
 
 script::Module FoldConvBatchNorm2d(const script::Module& module) {
   FoldConvBatchNorm2dHelper h;
-  script::Module m = module.clone();
-  h.run(m);
-  return m;
+  h.run(module);
 }
 
 void FoldQuantizeCallIntoBuffer(
