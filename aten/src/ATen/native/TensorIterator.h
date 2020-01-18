@@ -303,6 +303,16 @@ struct CAFFE2_API TensorIterator {
     return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
   }
 
+  bool has_contiguous_first_dim() const {
+    int num_tensors = ntensors();
+    for (int i = 0; i < num_tensors; i++) {
+      if (strides(i)[0] != element_size(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
   }
