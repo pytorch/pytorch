@@ -6186,6 +6186,8 @@ class TestNN(NNTestCase):
 
         self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
         self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
+        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
+        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
 
     def test_BatchNorm2d_leaves_running_variables_intact_for_0_dim_input(self):
         bn = torch.nn.BatchNorm2d(5) 
@@ -6195,6 +6197,8 @@ class TestNN(NNTestCase):
         
         self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
         self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
+        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
+        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
 
     def test_BatchNorm3d_leaves_running_variables_intact_for_0_dim_input(self):
         bn = torch.nn.BatchNorm3d(5) 
@@ -6204,6 +6208,8 @@ class TestNN(NNTestCase):
         
         self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
         self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
+        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
+        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
         
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
