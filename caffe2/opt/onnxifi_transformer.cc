@@ -694,7 +694,7 @@ bool OnnxifiTransformer::supportOpOnnx(
       for (const auto& i : n.input()) {
         bool is_new = used_inputs.emplace(i).second;
         // The input is not seen and it's not referred by any nodes before as
-        // output, we count it as an boudary input
+        // output, we count it as an boundary input
         if (is_new && !used_outputs.count(i)) {
           boundary_inputs.emplace_back(i);
         }

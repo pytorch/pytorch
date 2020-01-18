@@ -41,7 +41,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   weight = THCTensor_(newContiguous)(state, weight);
   bias = bias ? THCTensor_(newContiguous)(state, bias) : bias;
 
-  // Following the behvaior of other THCUNN functions, we shape the output
+  // Following the behavior of other THCUNN functions, we shape the output
   // Tensor ourselves
 
   int batchSize = input->size(0);

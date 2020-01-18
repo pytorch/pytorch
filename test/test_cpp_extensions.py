@@ -882,13 +882,13 @@ class TestMSNPUTensor(common.TestCase):
         weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
         bias = torch.empty(6, device='msnpu')
 
-        # Make sure forward is overriden
+        # Make sure forward is overridden
         out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(msnpu_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])
 
-        # Make sure backward is overriden
+        # Make sure backward is overridden
         # Double backward is dispatched to _convolution_double_backward.
         # It is not tested here as it involves more computation/overrides.
         grad = torch.autograd.grad(out, input, out, create_graph=True)

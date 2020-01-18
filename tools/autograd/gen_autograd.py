@@ -55,7 +55,7 @@ VIEW_FUNCTIONS = {
     'indices': 'self',
     'values': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
-    # but we only supports making as view of a single varible, and indices is
+    # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',

@@ -125,7 +125,7 @@ graph(%a):
     AT_ASSERT(graph->inputs()[0]->type()->isSubtypeOf(TensorType::get()));
   }
   {
-    // Check that parser corectly handles values reusing the same name.
+    // Check that parser correctly handles values reusing the same name.
     auto graph = std::make_shared<Graph>();
     script::parseIR(
         R"IR(

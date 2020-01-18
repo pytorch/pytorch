@@ -645,7 +645,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
-  // Preferrably use c10::optional, but nvcc doesn't work
+  // Preferably use c10::optional, but nvcc doesn't work
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;

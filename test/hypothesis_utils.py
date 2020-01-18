@@ -125,7 +125,7 @@ Args:
     min_side / max_side: minimum and maximum dimensions per rank.
 
 Generates:
-    Possibe shapes for a tensor, constrained to the rank and dimensionality.
+    Possible shapes for a tensor, constrained to the rank and dimensionality.
 
 Example:
     # Generates 3D and 4D tensors.

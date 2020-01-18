@@ -323,7 +323,7 @@ def gen_nn_modules(out):
     def replace_forward(m):
         # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
         # would otherwise correctly point out that Module's descendants' `forward` declarations
-        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the
+        # conflict with `Module`s. Specifically, `Module` defines `forward(self, *args)` while the
         # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
         # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
         forward_def = m.group(0) + "  # type: ignore"

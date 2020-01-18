@@ -156,7 +156,7 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     start_bin = next_start_bin;
     end_bin = next_end_bin;
   }
-  VLOG(2) << "best quantiation range " << start_bin << "," << end_bin + 1 << ","
+  VLOG(2) << "best quantization range " << start_bin << "," << end_bin + 1 << ","
           << norm_min;
 
   double selected_sum = 0;

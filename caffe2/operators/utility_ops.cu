@@ -100,7 +100,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
     for (int j = 0; j < InputSize(); j++) {
       Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
-      // Hack to cause allocaiton happen here, so it won't happen
+      // Hack to cause allocation happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
       // copies seem to possibly lock with NCCL.
       cpu_X.mutable_data<float>();

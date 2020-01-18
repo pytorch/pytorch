@@ -1366,7 +1366,7 @@ struct getTypePtr_<at::optional<T>> final {
 } // namespace detail
 template <class T>
 inline TypePtr getTypePtr() {
-  // TODO: static_assert that a templated function exists, and throw a friendy
+  // TODO: static_assert that a templated function exists, and throw a friendly
   // error message if not
   return detail::getTypePtr_<T>::call();
 }

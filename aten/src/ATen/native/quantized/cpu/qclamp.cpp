@@ -23,7 +23,7 @@ Tensor quantized_clamp_impl(
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
     TORCH_CHECK(
-        false, "Both min and max should be specifed for quantized clamp!");
+        false, "Both min and max should be specified for quantized clamp!");
   }
   return qy;
 }

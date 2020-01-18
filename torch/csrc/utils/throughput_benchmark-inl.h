@@ -28,7 +28,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     std::mt19937 engine(seeder());
     TORCH_CHECK(
         !inputs_.empty(),
-        "Please provide benchmark inptus."
+        "Please provide benchmark inputs."
         "Did you forget to call add_input()? ");
     std::uniform_int_distribution<int> dist(0, inputs_.size() - 1);
 

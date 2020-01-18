@@ -194,7 +194,7 @@ class MultiProcessTestCase(TestCase):
         self.file_name = file_name
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
+        # We're retrieving a corresponding test and executing it.
         getattr(self, test_name)()
         # exit to avoid run teardown() for fork processes
         sys.exit(0)

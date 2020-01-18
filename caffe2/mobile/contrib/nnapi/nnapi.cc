@@ -56,7 +56,7 @@ bool NNApi::run(const TensorVector& inputs, TensorVector* outputs) {
   try {
     init(inputs, outputs);
   } catch (const std::exception& e) {
-    LOG(ERROR) << "Error duing model initialization: " << e.what();
+    LOG(ERROR) << "Error during model initialization: " << e.what();
     return false;
   }
 

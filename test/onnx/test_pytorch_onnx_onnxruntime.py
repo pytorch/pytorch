@@ -83,7 +83,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
-        # if addiional test inputs are provided run the onnx
+        # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
             for test_input in test_with_inputs:

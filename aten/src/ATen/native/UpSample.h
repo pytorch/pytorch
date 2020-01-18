@@ -28,7 +28,7 @@
  * are computed from the input and the output size;
  *
  *
- * When the scales are infered from the input and output sizes,
+ * When the scales are inferred from the input and output sizes,
  * we view each pixel as an area, idx + 0.5 as its center index.
  * Here is an example formula in 1D case.
  * if align_corners: center of two corner pixel areas are preserved,

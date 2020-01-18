@@ -345,7 +345,7 @@ void BlockToONNX(
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
     if (node->kind().is_caffe2()) {
-      // Pass on Caffe2 opeartor, since we already preprocess it
+      // Pass on Caffe2 operator, since we already preprocess it
       cloneNode(node);
     } else if (node->kind() == prim::PythonOp) {
       callPySymbolicMethod(static_cast<ConcretePythonOp*>(node));

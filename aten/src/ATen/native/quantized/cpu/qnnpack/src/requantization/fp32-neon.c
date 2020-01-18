@@ -63,7 +63,7 @@ void pytorch_qnnp_requantize_fp32__neon(
 
 #ifdef __aarch64__
     /*
-     * Leverage "Floating-point Convert to Signed integer, rouding to nearest
+     * Leverage "Floating-point Convert to Signed integer, rounding to nearest
      * with ties to even" instruction. This is an ARMv8 instruction (always
      * available in AArch64), which saturates result on overflow. We don't need
      * to specifically consider saturated results, they will be clamped at the

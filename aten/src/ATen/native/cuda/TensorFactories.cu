@@ -211,7 +211,7 @@ inline int64_t resolve_root_int(
 //                       (row + 2f - 1)row <= 2x
 //                  row^2 + (2f-1)row - 2x <= 0.                            [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = 2f - 1
@@ -254,7 +254,7 @@ inline void get_coordinate_in_tril_trapezoid(
 //                       (-row + 2f + 1)row <= 2x
 //                   row^2 - (2f+1)row + 2x >= 0.                           [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = -1 - 2f

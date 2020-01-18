@@ -265,7 +265,7 @@ class RecurrentNetworkTest(serial.SerializedTestCase):
         since there is no enough element of input_state sequence are available.
         So the initial_state for input_state contains several elements
         (exactly how many pads we need for the first step). Also, because of
-        that all offseting over input_state sequnece is being shifted
+        that all offseting over input_state sequence is being shifted
         by length of initial_input_state: see `link_offset` and `alias_offset`
         arguments of RecurrentNetwork.
 

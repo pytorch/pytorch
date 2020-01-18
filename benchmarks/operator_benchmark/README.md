@@ -37,7 +37,7 @@ List all the supported tests:
 $ python -m pt.add_test --list_tests
 ```
 
-Filter and run a test (use `add_M8_N16_K32` as an exapmle):
+Filter and run a test (use `add_M8_N16_K32` as an example):
 ```
 $ python -m pt.add_test --test_name add_K32_M8_N1
 --omp_num_threads 1 --mkl_num_threads 1

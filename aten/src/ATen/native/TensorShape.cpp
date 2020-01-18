@@ -618,7 +618,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     self - sparse tensor, its shape is sizes = sparse_shape + dense_shape
       indices - 2-D tensor of indices, shape is (sparse_dims, nnz)
       values - (1+len(dense_shape))-D tensor of values, shape is (nnz,) + dense_shape
-    index_select(dim, index) returns a sparse tensor with the follwing data
+    index_select(dim, index) returns a sparse tensor with the following data
       new_sizes = sizes[:dim] + (n,) + sizes[dim+1:]
       new_indices - shape is (sparse_dims, new_nnz)
       new_values - shape is (new_nnz,) + dense_shape

@@ -540,7 +540,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
         TypePtr elem =
             lc_node->output()->type()->cast<ListType>()->getElementType();
         if (elem->cast<IntType>()) {
-          // ListConstruct Int[] output case, we need to transfrom to ONNX
+          // ListConstruct Int[] output case, we need to transform to ONNX
           // Concat to ensure the output is a single tensor(dynamic) type in
           // order to be consumed as inputs
           std::vector<Value*> unsqueezed;

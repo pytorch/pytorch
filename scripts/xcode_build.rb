@@ -16,7 +16,7 @@ option_parser = OptionParser.new do |opts|
  opts.on('-c', '--provisioning_profile ', 'provisioning profile for code signing') { |value|
     options[:profile] = value
  }
- opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+ opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
 end.parse!

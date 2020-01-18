@@ -197,7 +197,7 @@ void THVector_(normal_fill)(scalar_t *data,
 }
 
 /*
- * This struct's constructor initalizes the dispatch tables. It simply checks
+ * This struct's constructor initializes the dispatch tables. It simply checks
  * what SIMD extensions are available, and then walks the dispatch table
  * to choose the best function.
  * NOTE: As implemented, it will initialize the dispatch pointer to the first supported function.

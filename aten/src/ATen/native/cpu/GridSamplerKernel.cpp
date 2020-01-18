@@ -158,7 +158,7 @@ namespace at { namespace native { namespace {
  *      `apply_fn` will be called multiple times, and together cover the entire
  *      output spatial space.
  *
- *  Now you should be able tp understand everything about the implementaion of
+ *  Now you should be able tp understand everything about the implementation of
  *  2D forward kernel shown at the beginning of this note.
  *
  **/
