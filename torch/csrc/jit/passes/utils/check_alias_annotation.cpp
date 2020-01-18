@@ -18,15 +18,15 @@ IValue deepCopy(const IValue& self) {
   }
   if (self.isTensorList()) {
     c10::List<at::Tensor> newList;
-    for (const at::Tensor& oldTensor : self.toTensorListRef()) {
+    for (const at::Tensor& oldTensor : self.toTensorVector()) {
       newList.push_back(oldTensor.clone(at::MemoryFormat::Preserve));
     }
     return newList;
   }
 
   // Lists of ivalues should recursively deep copy their contents
-  if (self.isGenericList()) {
-    auto source = std::move(self).toGenericList();
+  if (self.isList()) {
+    auto source = std::move(self).toList();
     auto newList = c10::impl::GenericList(source.elementType());
     newList.reserve(source.size());
     for (const IValue& value : source) {
@@ -68,7 +68,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntListRef() == rhs.toIntListRef();
+    return lhs.toIntVector() == rhs.toIntVector();
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
