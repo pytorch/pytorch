@@ -819,7 +819,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(res->second, 1);
+  auto retObject = ivalue::Object::create(res, 1);
   auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
 
   retObject->setSlot(0, IValue(objPtr));
