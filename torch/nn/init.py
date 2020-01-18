@@ -22,12 +22,12 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     #Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x):
         #Computes standard normal cumulative distribution function
-        return (1+math.erf(x/math.sqrt(2.)))/2.
+        return (1. + math.erf(x / math.sqrt(2.))) / 2.
     
     with torch.no_grad():
         # Get upper and lower cdf values
-        l = norm_cdf((a-mean)/std)
-        u = norm_cdf((b-mean)/std)
+        l = norm_cdf((a - mean) / std)
+        u = norm_cdf((b - mean) / std)
         
         # Fill tensor with uniform values from [l, u]
         tensor.uniform_(l, u)
@@ -38,11 +38,11 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
         #Ensure that the values are strictly between -1 and 1 for erfinv
         eps = torch.finfo(tensor.dtype).eps
-        tensor.clamp_(min=-(1.-eps), max=(1.-eps))
+        tensor.clamp_(min=-(1. - eps), max=(1. - eps))
         tensor.erfinv_()
         
         # Transform to proper mean, std
-        tensor.mul_(std*math.sqrt(2.))
+        tensor.mul_(std * math.sqrt(2.))
         tensor.add_(mean)
 
         #Clamp one last time to ensure it's still in the proper range
