@@ -254,7 +254,7 @@ struct CAFFE2_API NNModule {
   NNModule(NNModule&&) = default;
   NNModule() {}
 
-  /* Repalce subgraph sg by node, using the order of
+  /* Replace subgraph sg by node, using the order of
    * node_inputs and node_outputs to determine how to link
    * them to the node.  node_inputs *must* enumerate all the
    * inputs to the subgraph (NeuralNetData that do not

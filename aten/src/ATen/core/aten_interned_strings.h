@@ -280,6 +280,7 @@ _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
 _(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \

@@ -537,7 +537,7 @@ def include_paths(cuda=False):
     if cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
-        # but gcc dosn't like having /usr/include passed explicitly
+        # but gcc doesn't like having /usr/include passed explicitly
         if cuda_home_include != '/usr/include':
             paths.append(cuda_home_include)
         if CUDNN_HOME is not None:
