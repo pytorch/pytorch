@@ -94,8 +94,9 @@ class Normal(ExponentialFamily):
 
     @staticmethod
     def _from_natural_params(p1, p2, **kwargs):
-        loc = (-0.5) * p1 / p2
-        scale = torch.rsqrt(p2 * (-2))
+        p2_ = p2 * -2
+        loc = p1 / p2_
+        scale = p2_.rsqrt_()
         return Normal(loc, scale, **kwargs)
 
     def _log_normalizer(self, x, y):
