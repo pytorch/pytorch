@@ -199,7 +199,7 @@ namespace arg_type {
 // in this case, we still need to return a valid type, but we don't
 // really care what type this is.
 
-struct dont_care {};
+using dont_care = int;
 
 template <typename func_t, std::size_t arity>
 struct arg_type_helper {
