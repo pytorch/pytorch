@@ -179,7 +179,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   if (v->node()->kind() != prim::Constant || v->type()->cast<FunctionType>()) {
     return c10::nullopt;
   }
-  // use implemenation of prim::Constant to compute the output IValue
+  // use implementation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;
   op(stack);

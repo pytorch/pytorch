@@ -29,7 +29,7 @@ TORCH_API std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
 // Some Tensors are effectively views of larger Tensors, where only a small
 // subset of the Storage data is referenced. This normally is good and avoids
 // copies when kept locally, but if we naively push the whole Storage over the
-// wire, we'll end up with excess network trafic. This change clones tensors if
+// wire, we'll end up with excess network traffic. This change clones tensors if
 // we'd save at least half the data, and over a minimum hurdle.
 TORCH_API c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors);

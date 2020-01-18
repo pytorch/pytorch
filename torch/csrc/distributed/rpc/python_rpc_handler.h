@@ -49,7 +49,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Our local tests also caught this segment faults if py::objects are cleaned
   // up at program exit. The explanation is: CPython cleans up most critical
   // utilities before cleaning up PythonRpcHandler singleton, so when
-  // PythonRpcHandler signleton cleans up py::objects and call dec_ref(), it
+  // PythonRpcHandler singleton cleans up py::objects and call dec_ref(), it
   // will crash.
   // The solution is to clean up py::objects earlier when Rpc agent join().
   // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
