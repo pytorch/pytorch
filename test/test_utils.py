@@ -368,7 +368,7 @@ class TestBottleneck(TestCase):
 
     def _check_environment_summary(self, output):
         results = re.search('Environment Summary', output)
-        self.assertIsNotNone(results, self._fail_msg('Should have Enviroment Summary', output))
+        self.assertIsNotNone(results, self._fail_msg('Should have Environment Summary', output))
 
         # Up to five lines away from the heading, there should be the version number
         results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)

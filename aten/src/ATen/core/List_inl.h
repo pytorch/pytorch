@@ -54,7 +54,7 @@ List<T> toTypedList(impl::GenericList list) {
 }
 
 template<class T>
-impl::GenericList toGenericList(List<T> list) {
+impl::GenericList toList(List<T> list) {
   return GenericList(std::move(list.impl_));
 }
 }

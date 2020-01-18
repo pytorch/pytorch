@@ -118,7 +118,7 @@ class TestDataParallel(JitTestCase):
         r0_forward = replica[0].forward(x)
         self.assertEqual(second_forward, r0_forward)
 
-        # replca which is on a different GPU has a deep copy of the original
+        # replica which is on a different GPU has a deep copy of the original
         # params and buffers
         x1 = torch.ones(2, 2, requires_grad=True).cuda(device=1)
         r1_forward = replica[1].forward(x1)
