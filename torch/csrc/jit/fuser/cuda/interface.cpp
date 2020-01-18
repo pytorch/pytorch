@@ -194,10 +194,20 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       // Short-circuits if NVRTC version too low
       AT_ASSERT(nvrtc_major >= 6);
 
-      auto kernel_name = "saxpy";
-      auto kernel_string = Fuser::saxpy_codegen(kernel_name);
-      std::cout << kernel_string << std::endl;
+      std::string kernel_name = "saxpy";
+      //std::string kernel_string = "#include<vector>\n";
+      std::string kernel_string = "namespace Fuser {\n";
+      kernel_string += Fuser::typeinfo + std::string("\n");
+      kernel_string += Fuser::saxpy_codegen(kernel_name);
+      kernel_string += std::string("\n}");
 
+      std::cout << "---------------------" << std::endl;
+      std::cout << kernel_string << std::endl;
+      std::cout << "---------------------" << std::endl;
+      auto func_name = "Fuser::" + kernel_name + "<" +
+          Fuser::getTypeName<Fuser::IO_struct<float>>() + ">";
+      std::cout << func_name << std::endl;
+      
       // Major and minor is determined by device properties and
       // possibly "downcompiled" to a lower (compatible) compute architecture
       // based on the NVRTC version
@@ -205,11 +215,13 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       minor = prop->minor;
       nvrtcProgram program;
       AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
-          &program, saxpy, nullptr, 0, nullptr, nullptr));
+          &program, kernel_string.c_str(), nullptr, 0, nullptr, nullptr));
       const std::string compute = "--gpu-architecture=compute_" +
           std::to_string(major) + std::to_string(minor);
       const std::vector<const char*> args = {
           "--std=c++11", compute.c_str(), "-default-device"};
+
+      nvrtc().nvrtcAddNameExpression(program, func_name.c_str());
       const auto result =
           nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
       if (result != NVRTC_SUCCESS) {
@@ -221,6 +233,9 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
         cu << log.data();
         throw std::runtime_error(cu.str());
       }
+      const char *lowered_kernel_name;
+      nvrtc().nvrtcGetLoweredName(program, func_name.c_str(), &lowered_kernel_name);
+
       ResourceGuard holdProgram(
           [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
       AT_CUDA_NVRTC_CHECK(result);
@@ -232,7 +247,7 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
 
       AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&(kernel_entry->module_), ptx.data()));
       AT_CUDA_DRIVER_CHECK(
-          nvrtc().cuModuleGetFunction(&(kernel_entry->function_), kernel_entry->module_, kernel_name));
+          nvrtc().cuModuleGetFunction(&(kernel_entry->function_), kernel_entry->module_, lowered_kernel_name));
       AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
           &kernel_entry->maxBlocks_, kernel_entry->function_, 128, 0));
       kernel_entry->maxBlocks_ *= kernel_entry->prop_->multiProcessorCount;
@@ -256,13 +271,37 @@ void CUDAFusionBackend::callFusion(
   std::vector<void*> arguments;
   size_t numel = outputs[0].numel();
   const auto nBlocks = std::min(kernel_entry->maxBlocks_, ceilDiv(numel, 128));
-  void *operand0 = inputs[0].toTensor().data_ptr();
+  // void *operand0 = inputs[0].toTensor().data_ptr();
+  // arguments.push_back(&operand0);
+  // void *operand1 = inputs[1].toTensor().data_ptr();
+  // arguments.push_back(&operand1);
+  // void *output = outputs[0].data_ptr();
+  // arguments.push_back(&output);
+  Fuser::IO_struct<float> operand0;
+  auto t = inputs[0].toTensor();
+  operand0.data = t.data_ptr<float>();
+  for (int i = 0; i < t.dim(); i++) {
+    operand0.shapes[i] = t.sizes()[i];
+    operand0.strides[i] = t.strides()[i];
+  }
   arguments.push_back(&operand0);
-  void *operand1 = inputs[1].toTensor().data_ptr();
+
+  Fuser::IO_struct<float> operand1;
+  t = inputs[1].toTensor();
+  operand1.data = t.data_ptr<float>();
+  for (int i = 0; i < t.dim(); i++) {
+    operand1.shapes[i] = t.sizes()[i];
+    operand1.strides[i] = t.strides()[i];
+  }
   arguments.push_back(&operand1);
-  void *output = outputs[0].data_ptr();
+
+  Fuser::IO_struct<float> output;
+  output.data = outputs[0].data_ptr<float>();
+  for (int i = 0; i < t.dim(); i++) {
+    output.shapes[i] = outputs[0].sizes()[i];
+    output.strides[i] = outputs[0].strides()[i];
+  }
   arguments.push_back(&output);
-  arguments.push_back(&numel);
 
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       kernel_entry->function_,

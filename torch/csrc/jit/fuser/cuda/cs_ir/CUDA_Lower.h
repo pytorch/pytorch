@@ -33,7 +33,7 @@ public:
     void visit(const TensorAccessor *op)
     {
         const Tensor *tensor = op->tensor.as<Tensor>();
-        os << tensor->name << "->data(";
+        os << tensor->name << ".data[";
 
         for(size_t i = 0; i<op->indexers.size(); ++i){
             PrintVisitor::visit(op->indexers[i]);
@@ -42,7 +42,7 @@ public:
             if(i != op->indexers.size()-1)
                 os<<" + ";
         }
-        os << ")";
+        os << "]";
     }
 
     void visit(const For *op)
@@ -82,18 +82,19 @@ public:
             for(int i=0; i<tensor->ndims; i++){
                 const auto& size = tensor->shapes[i].as<Variable>();
                 assert(size);
-                var_lookup[size] = tensor->name + "->shapes[" + std::to_string(i) + "]";
+                var_lookup[size] = tensor->name + ".shapes[" + std::to_string(i) + "]";
                 const auto& stride = tensor->strides[i].as<Variable>();
                 assert(stride);
-                var_lookup[stride] = tensor->name + "->strides[" + std::to_string(i) + "]";
+                var_lookup[stride] = tensor->name + ".strides[" + std::to_string(i) + "]";
             }
         }
 
-        os<<"__global__\n"<<"templace<typename IO_struct>\nvoid "<<kernel_name<<"( ";
+        //os<<"\n__global__\n"<<"template<typename T>\nvoid "<<kernel_name<<"( ";
+        os<<"\ntemplate<typename T>\n__global__\nvoid "<<kernel_name<<"( ";
         for(const auto& T : tensor_list){
             const auto& tensor = T.as<Tensor>();
             assert(tensor);
-            os<<"IO_struct* "<<tensor->name;
+            os<<"T "<<tensor->name;
             if(!T.same_as(tensor_list[tensor_list.size()-1]))
                 os<<", ";
 
