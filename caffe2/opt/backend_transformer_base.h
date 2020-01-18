@@ -93,7 +93,7 @@ class BackendTransformerBase {
   // Input mapping of input name -> original input name
   std::unordered_map<std::string, std::string> input_mapping_;
 
-  // Input mapping of orignal input name -> input name
+  // Input mapping of original input name -> input name
   std::unordered_map<std::string, std::string> reverse_input_mapping_;
 };
 } // namespace caffe2

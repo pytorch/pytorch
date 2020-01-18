@@ -355,7 +355,7 @@ def skipIfNotRegistered(op_name, message):
 
     Args:
         op_name: Check if this op is registered in `core._REGISTERED_OPERATORS`.
-        message: mesasge to fail with.
+        message: message to fail with.
 
     Usage:
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')

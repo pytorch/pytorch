@@ -45,7 +45,7 @@ encode the operation history. Every new function requires you to implement 2 met
   the autograd engine.
 
   - :meth:`~torch.autograd.function._ContextMethodMixin.save_for_backward` must be
-    used when saving input or ouput of the forward to be used later in the backward.
+    used when saving input or output of the forward to be used later in the backward.
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_dirty` must be used to
     mark any input that is modified inplace by the forward function.
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
