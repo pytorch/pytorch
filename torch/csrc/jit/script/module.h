@@ -224,7 +224,8 @@ struct TORCH_API Module : public Object {
 
   // Clones both the underlying `ClassType` and the module instance(data), this function
   // creates a new `ClassType` and returns a new instance that has the same data
-  // as the current instance but with the new type
+  // as the current instance but with the new type, shared ClassType will be
+  // preserved as well
   Module clone() const;
 
   // Clones the module instance but shares the underlying type with the
