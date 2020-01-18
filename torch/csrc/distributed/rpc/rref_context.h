@@ -139,7 +139,10 @@ class RRefContext {
 
   static std::atomic<local_id_t> nextLocalId_;
 
+ public:
   const std::shared_ptr<RpcAgent> agent_;
+
+ private:
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
