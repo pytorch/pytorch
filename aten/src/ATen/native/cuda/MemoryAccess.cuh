@@ -166,25 +166,32 @@ struct vectorized {
   }
 };
 
-template<typename scalar_t, bool = false>
-inline int can_vectorize_up_to_impl(char *pointer) {
-  return 1;
-}
+template<typename scalar_t, bool>
+struct can_vectorize_up_to_impl;
 
 template<typename scalar_t>
-inline int can_vectorize_up_to_impl<scalar_t, true>(char *pointer) {
-  uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  if (address % Info<scalar_t, 4>::alignment == 0) {
-    return 4;
-  } else if (address % Info<scalar_t, 2>::alignment == 0) {
-    return 2;
+struct can_vectorize_up_to_impl<scalar_t, false> {
+  static constexpr inline int get(char *pointer) {
+    return 1;
   }
-  return 1;
-}
+};
+
+template<typename scalar_t>
+struct can_vectorize_up_to_impl<scalar_t, true> {
+  static constexpr inline int get(char *pointer) {
+    uint64_t address = reinterpret_cast<uint64_t>(pointer);
+    if (address % Info<scalar_t, 4>::alignment == 0) {
+      return 4;
+    } else if (address % Info<scalar_t, 2>::alignment == 0) {
+      return 2;
+    }
+    return 1;
+  }
+};
 
 template<typename scalar_t>
 inline int can_vectorize_up_to(char *pointer) {
-  return can_vectorize_up_to_impl<scalar_t, has_builtin_vector_type<scalar_t>::value>(pointer);
+  return can_vectorize_up_to_impl<scalar_t, has_builtin_vector_type<scalar_t>::value>::get(pointer);
 }
 
 }}} // namespace at::native::memory

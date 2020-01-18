@@ -307,6 +307,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = detail::can_vectorize_up_to<func_t>(data);
+  std::cout << "vec_size = " << vec_size << std::endl;
   switch (vec_size) {
   case 4:
     elementwise_kernel<4, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);

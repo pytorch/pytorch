@@ -21,6 +21,7 @@ void reset_buffers() {
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
+  std::cout << ((uint64_t)ptr) << std::endl;
 
   ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 1);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr), 4);
@@ -51,7 +52,7 @@ template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   using vectorized = vectorized<scalar_t, 64, 256, vec_size>;
   scalar_t buf[vectorized::thread_work_size];
-  auto accessor = [&](int index) -> scalar_t & { return buf[index]; }
+  auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   vectorized::load(accessor, src + 256 * blockIdx.x);
   vectorized::store(dst + 256 * blockIdx.x, accessor);
 }
@@ -59,14 +60,20 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
   double *b1 = reinterpret_cast<double *>(buffer1);
   double *b2 = reinterpret_cast<double *>(buffer2);
+  std::cout << "buffer1 = " << reinterpret_cast<uint64_t>(buffer1) << std::endl;
+  std::cout << "buffer2 = " << reinterpret_cast<uint64_t>(buffer2) << std::endl;
 
   // vec4 copy
   reset_buffers();
   cudaDeviceSynchronize();
   vectorized_copy<double, 4><<<16, 64>>>(b2, b1);
   cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
-    ASSERT_EQ(buffer1[i], buffer2[i]);
+    ASSERT_EQ(buffer1[i].x, buffer2[i].x);
+    ASSERT_EQ(buffer1[i].y, buffer2[i].y);
+    ASSERT_EQ(buffer1[i].z, buffer2[i].z);
+    ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
 
   // vec2 copy
@@ -74,8 +81,12 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   cudaDeviceSynchronize();
   vectorized_copy<double, 2><<<16, 64>>>(b2, b1);
   cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
-    ASSERT_EQ(buffer1[i], buffer2[i]);
+    ASSERT_EQ(buffer1[i].x, buffer2[i].x);
+    ASSERT_EQ(buffer1[i].y, buffer2[i].y);
+    ASSERT_EQ(buffer1[i].z, buffer2[i].z);
+    ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
 
   // vec1 copy
@@ -83,24 +94,28 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   cudaDeviceSynchronize();
   vectorized_copy<double, 1><<<16, 64>>>(b2, b1);
   cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
-    ASSERT_EQ(buffer1[i], buffer2[i]);
+    ASSERT_EQ(buffer1[i].x, buffer2[i].x);
+    ASSERT_EQ(buffer1[i].y, buffer2[i].y);
+    ASSERT_EQ(buffer1[i].z, buffer2[i].z);
+    ASSERT_EQ(buffer1[i].w, buffer2[i].w);
   }
 
   // unaligned
-  for (int i = 0; i <= 16; i++) {
-    for (int j = 0; j <= 16; j++) {
+  for (int i = 0; i < 16; i++) {
+    for (int j = 0; j < 16; j++) {
       b1 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer1) + i);
-      b2_ = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
-      auto f = []() {
-        cudaDeviceSynchronize();
-        vectorized_copy<double, 4><<<1, 64>>>(b2, b1);
-        cudaDeviceSynchronize();
-      };
+      b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
+      cudaGetLastError();
+      cudaDeviceSynchronize();
+      vectorized_copy<double, 4><<<1, 64>>>(b2, b1);
+      cudaDeviceSynchronize();
+      auto err = cudaGetLastError();
       if (i % 16 == 0 && j % 16 == 0) {
-        f();
+        ASSERT_EQ(err, cudaSuccess);
       } else {
-        ASSERT_THROW(f(), std::runtime_error);
+        ASSERT_EQ(err, cudaErrorMisalignedAddress);
       }
     }
   }
