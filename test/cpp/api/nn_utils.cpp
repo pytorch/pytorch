@@ -8,6 +8,30 @@ using namespace torch::nn;
 
 struct NNUtilsTest : torch::test::SeedingFixture {};
 
+TEST_F(NNUtilsTest, PadSequence) {
+  auto a = torch::tensor({1, 2, 3});
+  auto b = torch::tensor({4, 5});
+  auto c = torch::tensor({6});
+
+  auto expected = torch::tensor({{4, 5, 0}, {1, 2, 3}, {6, 0, 0}});
+
+  std::vector<torch::Tensor> input = {b, a, c};
+  auto padded = utils::pad_sequence(input, true);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  padded = utils::pad_sequence(input);
+  ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
+
+  expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
+  padded = utils::pad_sequence(input, true, 1);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  input = {a, b, c};
+  expected = torch::tensor({{1, 2, 3}, {4, 5, 0}, {6, 0, 0}});
+  padded = utils::pad_sequence(input, true);
+  ASSERT_TRUE(padded.allclose(expected));
+}
+
 TEST_F(NNUtilsTest, ClipGradNorm) {
   auto l = Linear(10, 10);
   float max_norm = 2;
