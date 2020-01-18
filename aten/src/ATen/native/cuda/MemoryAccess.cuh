@@ -81,36 +81,6 @@ DEFINE_VECTOR_INFO( double,    1,  double,         8);
 DEFINE_VECTOR_INFO( double,    2, double2,        16);
 DEFINE_VECTOR_INFO( double,    4, double4,        16);
 
-
-// //                                    TYPE, SIZE,                              VECTYPE, ALIGNMENT
-// DEFINE_VECTOR_INFO(               at::Half,    1,                             at::Half,         2);
-// DEFINE_VECTOR_INFO(               at::Half,    2,                fake_vector<at::Half>,         0);
-// DEFINE_VECTOR_INFO(               at::Half,    4,                fake_vector<at::Half>,         0);
-
-// DEFINE_VECTOR_INFO(                   bool,    1,                                 bool,         1);
-// DEFINE_VECTOR_INFO(                   bool,    2,                    fake_vector<bool>,         0);
-// DEFINE_VECTOR_INFO(                   bool,    4,                    fake_vector<bool>,         0);
-
-// DEFINE_VECTOR_INFO(           at::BFloat16,    1,                         at::BFloat16,         2);
-// DEFINE_VECTOR_INFO(           at::BFloat16,    2,            fake_vector<at::BFloat16>,         0);
-// DEFINE_VECTOR_INFO(           at::BFloat16,    4,            fake_vector<at::BFloat16>,         0);
-
-// DEFINE_VECTOR_INFO(    std::complex<float>,    1,                  std::complex<float>,         4);
-// DEFINE_VECTOR_INFO(    std::complex<float>,    2,     fake_vector<std::complex<float>>,         0);
-// DEFINE_VECTOR_INFO(    std::complex<float>,    4,     fake_vector<std::complex<float>>,         0);
-
-// DEFINE_VECTOR_INFO( thrust::complex<float>,    1,               thrust::complex<float>,         4);
-// DEFINE_VECTOR_INFO( thrust::complex<float>,    2,  fake_vector<thrust::complex<float>>,         0);
-// DEFINE_VECTOR_INFO( thrust::complex<float>,    4,  fake_vector<thrust::complex<float>>,         0);
-
-// DEFINE_VECTOR_INFO(   std::complex<double>,    1,                 std::complex<double>,         8);
-// DEFINE_VECTOR_INFO(   std::complex<double>,    2,    fake_vector<std::complex<double>>,         0);
-// DEFINE_VECTOR_INFO(   std::complex<double>,    4,    fake_vector<std::complex<double>>,         0);
-
-// DEFINE_VECTOR_INFO(thrust::complex<double>,    1,               thrust::complex<double>,        8);
-// DEFINE_VECTOR_INFO(thrust::complex<double>,    2,  fake_vector<thrust::complex<double>>,        0);
-// DEFINE_VECTOR_INFO(thrust::complex<double>,    4,  fake_vector<thrust::complex<double>>,        0);
-
 #undef DEFINE_VECTOR_INFO
 
 template <typename scalar_t, int size>
