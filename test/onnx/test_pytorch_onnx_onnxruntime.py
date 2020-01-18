@@ -83,7 +83,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
-        # if addiional test inputs are provided run the onnx
+        # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
             for test_input in test_with_inputs:
@@ -2038,30 +2038,26 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_sort(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=True)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=True))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=False)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=False))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
