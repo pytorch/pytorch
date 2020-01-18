@@ -77,7 +77,7 @@ call_analyzer() {
     -load="${BUILD_ROOT}/libOpDependencyPass.so" \
     -op_dependency \
     -disable-output \
-    -op_schema_pattern="^(aten|quantized|profiler|_test)::[^ ]+" \
+    -op_schema_pattern="^(_aten|_prim|aten|quantized|profiler|_test)::[^ ]+" \
     -op_register_pattern="c10::RegisterOperators::(op|checkSchemaAndRegisterOp_)" \
     -op_invoke_pattern="c10::Dispatcher::findSchema|callOp" \
     -format="${FORMAT}" \
