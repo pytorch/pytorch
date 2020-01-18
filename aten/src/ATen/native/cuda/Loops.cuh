@@ -232,7 +232,7 @@ inline int can_vectorize_up_to(array_t pointers) {
 
 }  // namespace detail
 
-template<int vec_size, int nt, int vt, typename func_t, typename array_t>
+template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
@@ -249,12 +249,11 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // an array of size 1 and just don't use it.
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
-  int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x;
+  int nv = num_threads * thread_work_size;
   int remaining = N - nv * blockIdx.x;
 
   // compute base pointers for this block
+  int idx = nv * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   arg_t *args_base[nargs];
   #pragma unroll
@@ -263,8 +262,9 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   if (remaining < nv) {  // if this block handles the reminder, just do a naive strided loop
+    int tid = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < vt; i++) {
+    for (int i = 0; i < thread_work_size; i++) {
       if (tid < remaining) {
         return_t *result = result_base + tid;
         arg_t args[nargs];
@@ -277,34 +277,22 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
       tid += nt
     }
   } else {  // if this block has a full `nv` data to handle, use vectorized memory access
-    // fetch data
-    return_t results[vt];
-    arg_t args[vt][nargs];
+    return_t results[thread_work_size];
+    arg_t args[thread_work_size][nargs];
+    // load
     #pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if (idx + nt * i < N) {
-        #pragma unroll
-        for (int j = 0; j < arity; j++) {
-          args[i][j] = *(args_base[j] + i * nt);
-        }
-      }
+    for (int i = 0; i < arity; i++) {
+      auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
+      memory::vectorized<arg_t, nt, nv, vec_size>::load(args_accessor, args_base[i]);
     }
-
     // compute
     #pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if (idx + nt * i < N) {
-        results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
-      }
+    for (int i = 0; i < thread_work_size; i++) {
+      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
-
-    // store data
-    #pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if (idx + nt * i < N) {
-        *(result_base + i * nt) = results[i];
-      }
-    }
+    // store
+    auto result_accessor = [&] __device__ (int index) -> return_t & { return result_accessor[index]; };
+    memory::vectorized<return_t, nt, nv, vec_size>::store(result_base, results);
   }
 }
 

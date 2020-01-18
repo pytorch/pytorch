@@ -126,7 +126,8 @@ struct vectorized {
   static constexpr int thread_work_size = block_work_size / num_threads;
   static constexpr int loop_size = thread_work_size / vec_size;
 
-  __device__ static inline void load(scalar_t to[thread_work_size], scalar_t *from) {
+  template<typename accessor_t>
+  __device__ static inline void load(accessor_t to, scalar_t *from) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
@@ -136,12 +137,13 @@ struct vectorized {
       vec_t vector = from_[index];
       #pragma unroll
       for (int j = 0; j < vec_size; j++) {
-        to[vec_size * i + j] = vector[j];
+        to(vec_size * i + j) = vector[j];
       }
     }
   }
 
-  __device__ static inline void store(scalar_t *to, scalar_t from[thread_work_size]) {
+  template<typename accessor_t>
+  __device__ static inline void store(scalar_t *to, accessor_t from) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
@@ -150,7 +152,7 @@ struct vectorized {
       int index = thread_idx + i * num_threads;
       vec_t vector;
       for (int j = 0; j < vec_size; j++) {
-        vector[j] = from[vec_size * i + j];
+        vector[j] = from(vec_size * i + j);
       }
       to_[index] = vector;
     }
