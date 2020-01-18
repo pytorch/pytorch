@@ -1492,7 +1492,11 @@ protected:
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous();
-    is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
+    // is_channels_last_ is suggested memory_format.
+    // Being channels_last_contiguous doesn't necessarily mean the tensor is
+    // strided like channels_last: for strides on size-1 dimension could suggest
+    // desired memory_layout, but it doesn't affect memory storage
+    is_channels_last_ = compute_strides_like_channels_last();
     is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
   }
 

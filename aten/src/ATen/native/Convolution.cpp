@@ -39,7 +39,6 @@ struct ConvParams {
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool cudnn_use_channels_last(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
@@ -388,17 +387,6 @@ auto ConvParams::use_cudnn_depthwise(
   }
 }
 
-auto ConvParams::cudnn_use_channels_last(
-        const at::Tensor& input, const at::Tensor& weight) const -> bool {
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
-    return false;
-  }
-  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-  // old cudnn version has sparse group convolution support for NHWC layout
-  return (groups == 1 || cudnn_version >= 7603) &&
-      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
-}
-
 static void check_shape_forward(const at::Tensor& input,
                                 const at::Tensor& weight, const at::Tensor& bias,
                                 const ConvParams& params, bool input_is_mkldnn) {
@@ -619,7 +607,7 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  at::MemoryFormat cudnn_memory_format = params.cudnn_use_channels_last(input, weight) ?
+  at::MemoryFormat cudnn_memory_format = cudnn_conv_use_channels_last(input, weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
   Tensor output;

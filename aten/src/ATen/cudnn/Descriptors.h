@@ -33,10 +33,22 @@ inline int dataSize(cudnnDataType_t dataType)
 // that the stride for dim i is the product of the sizes of dims
 // i+1 to the end.  This stride is indeed uniquely determined.  This
 // function modifies 'stride' in place so this invariant holds.
-static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
+static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bool nhwc) {
   int64_t z = 1;
-  for(int d = dim-1; d >= 0; d--)
-  {
+  int index = 0;
+  std::vector<int> permutation(dim);
+  
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (int d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (int d : permutation) {
     if (size[d] == 1) {
       stride[d] = z;
     } else {
@@ -123,8 +135,10 @@ public:
   void print();
 
 private:
-  void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
+  void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
+
+  void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    fixSizeOneDimStride(dim, size, stride, nhwc);
     AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -137,7 +151,7 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+  void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
