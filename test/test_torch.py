@@ -11055,11 +11055,11 @@ class TestTorchDeviceType(TestCase):
         # If on GPU, allow for minor error depending on dtype.
         tol = 0.
         if device != 'cpu':
-            if dtype==torch.half:
+            if dtype == torch.half:
                 tol = 1e-1
-            elif dtype==torch.float:
+            elif dtype == torch.float:
                 tol = 1e-5
-            elif dtype==torch.double:
+            elif dtype == torch.double:
                 tol = 1e-10
 
         self.assertEqual(expected_lin.to(dtype), actual_lin, tol)
