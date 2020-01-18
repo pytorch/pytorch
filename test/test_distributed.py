@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from common_utils import TestCase, run_tests, skipIfRocm
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from common_distributed import simple_sparse_reduce_tests, skip_if_not_multigpu, skip_if_rocm
+from common_distributed import simple_sparse_reduce_tests, skip_if_rocm
 
 try:
     import torchvision
@@ -1027,12 +1027,13 @@ class _DistTestBase(object):
             dist.all_reduce(tensors[0], dist.ReduceOp.SUM, group_id)
             self.assertEqual(tensors[0], outputs[0])
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support all reduce on sparse tensors")
+    @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
     def test_sparse_all_reduce_sum(self):
         self._test_sparse_all_reduce_sum(lambda t: t)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support all reduce on sparse tensors")
-    @skip_if_not_multigpu
+    @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
     @skip_if_rocm
     def test_sparse_all_reduce_sum_cuda(self):
         self._test_sparse_all_reduce_sum(lambda t: t.clone().cuda())

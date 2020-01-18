@@ -908,6 +908,7 @@ def all_reduce(tensor,
     else:
         work.wait()
 
+
 def all_reduce_coalesced(tensors,
                          op=ReduceOp.SUM,
                          group=group.WORLD,
