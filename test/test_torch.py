@@ -11050,18 +11050,18 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
 
         # Check linspace for generating the correct output for each dtype.
-        expected_lin = torch.tensor([-100. + (2. / 3.) * i for i in range(301)], device=device, dtype=torch.double)
-        actual_lin = torch.linspace(-100, 100, 301, device=device, dtype=dtype)
+        expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
+        actual_lin = torch.linspace(-100, 100, 401, device=device, dtype=dtype)
         #If on GPU, allow for minor error depending on dtype.
-        tol = 0
-        if device=='cuda':
+        tol = 0.
+        if device is not 'cpu':
             if dtype==torch.half:
                 tol = 1e-1
             elif dtype==torch.float:
                 tol = 1e-5
             elif dtype==torch.double:
                 tol = 1e-10
-                
+
         self.assertEqual(expected_lin.to(dtype), actual_lin, tol)
 
         # Check linspace for generating with start > end.
