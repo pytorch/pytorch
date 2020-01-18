@@ -8,12 +8,9 @@
 
 namespace Fuser {
 
-template<typename T>
-struct IO_struct {
-  std::vector<int> shapes;
-  std::vector<int> strides;
-  T* data;
-};
+#define STRINGIFY(x) x
+#include "data_struct.h"
+#undef STRINGIFY
 
 // TODO: totally not safe!
 template<typename T>
@@ -24,6 +21,12 @@ std::string getTypeName() {
   assert(status==0);
   return undecorated_name;
 }
+
+#define STRINGIFY(x) #x
+static auto typeinfo = 
+#include"data_struct.h"
+;
+#undef STRINGIFY
 
 std::string saxpy_codegen(std::string name);
 
