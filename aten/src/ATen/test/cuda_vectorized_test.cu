@@ -10,12 +10,12 @@ void reset_buffers() {
     buffer1[i].x = i;
     buffer1[i].y = i + 0.1;
     buffer1[i].z = i + 0.2;
-    buffer1[i].u = i + 0.3;
+    buffer1[i].w = i + 0.3;
 
     buffer2[2].x = -i;
     buffer2[2].y = -(i + 0.1);
     buffer2[2].z = -(i + 0.2);
-    buffer2[2].u = -(i + 0.3);
+    buffer2[2].w = -(i + 0.3);
   }
 }
 
