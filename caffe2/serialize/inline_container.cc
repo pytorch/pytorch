@@ -50,11 +50,17 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
   return in_->read(pos, buf, n, "reading file");
 }
 
+
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(std::make_unique<mz_zip_archive>()),
       in_(std::make_unique<FileAdapter>(file_name)) {
   init();
 }
+PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name, size_t mmap_threshold)
+: PyTorchStreamReader(file_name) {
+  mmap_threshold_ = mmap_threshold;
+}
+
 
 PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
     : ar_(std::make_unique<mz_zip_archive>()),
@@ -217,12 +223,17 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  void * ptr = malloc(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(ar_.get(), key, ptr, stat.m_uncomp_size, 0);
-  valid("reading file ", name.c_str());
 
-  at::DataPtr retval(ptr, ptr, free, at::kCPU);
-  return std::make_tuple(std::move(retval), stat.m_uncomp_size);
+  if (in_->canMMap() && stat.m_uncomp_size > mmap_threshold_ && stat.m_method == 0/*no compression*/) {
+    return std::make_tuple(in_->mmap(getRecordOffset(&stat), stat.m_uncomp_size), stat.m_uncomp_size);
+  } else {
+    void * ptr = malloc(stat.m_uncomp_size);
+    mz_zip_reader_extract_to_mem(ar_.get(), key, ptr, stat.m_uncomp_size, 0);
+    valid("reading file ", name.c_str());
+
+    at::DataPtr retval(ptr, ptr, free, at::kCPU);
+    return std::make_tuple(std::move(retval), stat.m_uncomp_size);
+  }
 }
 
 static int64_t read_le_16(uint8_t* buf) {
@@ -233,15 +244,20 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retrieving file meta-data for ", name.c_str());
+  return getRecordOffset(&stat);
+}
+
+size_t PyTorchStreamReader::getRecordOffset(void* stat_v) {
+  auto stat = static_cast<mz_zip_archive_file_stat*>(stat_v);
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
-      stat.m_local_header_ofs,
+      stat->m_local_header_ofs,
       local_header,
       MZ_ZIP_LOCAL_DIR_HEADER_SIZE,
       "reading file header");
   size_t filename_len = read_le_16(local_header + MZ_ZIP_LDH_FILENAME_LEN_OFS);
   size_t extra_len = read_le_16(local_header + MZ_ZIP_LDH_EXTRA_LEN_OFS);
-  return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
+  return stat->m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
 }
 
 

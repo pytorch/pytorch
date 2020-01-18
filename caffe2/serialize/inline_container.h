@@ -99,6 +99,7 @@ constexpr uint64_t kFieldAlignment = 64;
 class CAFFE2_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
+  explicit PyTorchStreamReader(const std::string& file_name, size_t mmap_threshold);
   explicit PyTorchStreamReader(std::istream* in);
   explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
 
@@ -117,6 +118,7 @@ class CAFFE2_API PyTorchStreamReader final {
   size_t read(uint64_t pos, char* buf, size_t n);
   void valid(const char* what, const char* info = "");
   size_t getRecordID(const std::string& name);
+  size_t getRecordOffset(void* stat);
 
   friend size_t
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
@@ -124,6 +126,7 @@ class CAFFE2_API PyTorchStreamReader final {
   std::string archive_name_;
   std::string archive_name_plus_slash_;
   std::unique_ptr<ReadAdapterInterface> in_;
+  size_t mmap_threshold_ = 4*1024*1024/*4MB*/;
   int64_t version_;
 };
 
