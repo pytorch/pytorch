@@ -1739,6 +1739,35 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
     return input / div
 
 
+def relation(input, g, embedding=None, max_pairwise=None):
+    r"""Applies an all-to-all pairwise relation function to a set of objects.
+    See :class:`~torch.nn.Relation` for details.
+    """
+    # Batch size, number of objects, feature size
+    b, o, c = input.size()
+    # Create pairwise matrix
+    pairs = torch.cat((input.unsqueeze(1).expand(b, o, o, c).contiguous().view(b, o * o, c),
+                       input.unsqueeze(2).expand(b, o, o, c).contiguous().view(b, o * o, c)), 2)
+    # Append embedding if provided
+    if embedding is not None:
+        pairs = torch.cat((pairs, embedding.unsqueeze(1).expand(b, o ** 2, embedding.size(1))), 2)
+    # Calculate new feature size
+    c = pairs.size(2)
+    # Pack into batches
+    pairs = pairs.view(b * o ** 2, c)
+    # Pass through g
+    if max_pairwise is None:
+        output = g(pairs)
+    else:
+        outputs = []
+        for batch in range(0, b * o ** 2, max_pairwise):
+            outputs.append(g(pairs[batch:batch + max_pairwise]))
+        output = torch.cat(outputs, 0)
+    # Unpack
+    output = output.view(b, o ** 2, output.size(1)).sum(1).squeeze(1)
+    return output
+
+
 # loss
 
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,

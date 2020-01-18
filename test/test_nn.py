@@ -3018,6 +3018,28 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_relation(self):
+        relation = nn.Relation(lambda x: x)
+        input = torch.rand(4, 5, 6)
+        output = relation(input)
+        self.assertEqual(output.size(), (4, 2 * 6))  # output is 2x input size
+        self.assertEqual(output[:, :6], output[:, 6:])  # same without g
+        self.assertEqual(input.mul(2 * 5).sum(), output.sum())  # pairs concat
+
+    def test_relation_max_pairwise(self):
+        relation = nn.Relation(lambda x: x)
+        relation_max = nn.Relation(lambda x: x, max_pairwise=3)
+        input = torch.rand(4, 5, 6)
+        self.assertEqual(relation(input), relation_max(input))
+
+    def test_relation_embedding(self):
+        g = nn.Linear(2 * 6 + 7, 11)
+        relation = nn.Relation(g)
+        input = torch.rand(4, 5, 6)
+        embedding = torch.rand(4, 7)
+        output = relation(input, embedding)
+        self.assertEqual(output.size(), (4, 11))  # output size = g output size
+
     def test_threshold_int(self):
         x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
