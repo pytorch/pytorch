@@ -3926,7 +3926,7 @@
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_add_
+    CPU: scatter_add_cpu_
     CUDA: legacy::cuda::_th_scatter_add_
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor

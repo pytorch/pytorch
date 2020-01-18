@@ -71,6 +71,8 @@ DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
+DEFINE_DISPATCH(scatter_add_stub);
+
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
   auto strides = tensors[0].strides();
@@ -492,6 +494,11 @@ Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Ten
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   return self.clone(at::MemoryFormat::Preserve).scatter_(dim, index, source);
+}
+
+Tensor & scatter_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  scatter_add_stub(self.device().type(), self, dim, index, src);
+  return self;
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
