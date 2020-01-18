@@ -6179,7 +6179,7 @@ class TestNN(NNTestCase):
         out = bn(data).sum().backward()
 
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
-        x = torch.rand(10)[None,:,None]
+        x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
             torch.nn.BatchNorm1d(10)(x)
 
@@ -9015,7 +9015,7 @@ class TestNNDeviceType(NNTestCase):
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
-        x = torch.rand(10)[None,:,None]
+        x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x).to(device)
 
@@ -9033,9 +9033,9 @@ class TestNNDeviceType(NNTestCase):
 
 
     def test_groupnorm_raises_error_if_less_than_one_value_per_channel(self, device):
-        x = torch.rand(10)[None,:,None]
+        x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
-            torch.nn.GroupNorm(10,10)(x).to(device)
+            torch.nn.GroupNorm(10, 10)(x).to(device)
 
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)

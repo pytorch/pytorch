@@ -1646,9 +1646,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         per_sample_weights)
     return ret
 
+
 def _verify_batch_size(size):
-    # type: (List[int]) -> None
-    
+    # type: (List[int]) -> None    
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size
     # check to a simple equivalent for loop
@@ -1663,7 +1663,8 @@ def _verify_batch_size(size):
         size_prods *= size[i + 2]
     if size_prods == 1:
         raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-        
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
