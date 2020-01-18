@@ -36,6 +36,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
 
@@ -215,15 +216,28 @@ using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::t
 
 }  // namespace arg_type
 
+template<typename func_t, typename array_t>
+inline int can_vectorize_up_to(array_t pointers) {
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using arg_t = detail::arg_type::type<func_t>;
+  constexpr int arity = traits::arity;
+  int result = memory::can_vectorize_up_to<return_t>(pointers[0]);
+  #pragma unroll
+  for (int i = 0; i < arity; i++) {
+    result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
+  }
+  return result;
+}
+
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t>
+template<int vec_size, int nt, int vt, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(nt)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using arg_t = detail::arg_type::type<func_t>;
@@ -236,9 +250,10 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 
   int tid = threadIdx.x;
   int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
+  int idx = nv * blockIdx.x;
+  int remaining = N - nv * blockIdx.x;
 
-  // compute base pointers
+  // compute base pointers for this block
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   arg_t *args_base[nargs];
   #pragma unroll
@@ -246,32 +261,48 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  // fetch data
-  return_t results[vt];
-  arg_t args[vt][nargs];
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      #pragma unroll
-      for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * nt);
+  if (remaining < nv) {  // if this block handles the reminder, just do a naive strided loop
+    #pragma unroll
+    for (int i = 0; i < vt; i++) {
+      if (tid < remaining) {
+        return_t *result = result_base + tid;
+        arg_t args[nargs];
+        #pragma unroll
+        for (int j = 0; j < arity; j++) {
+          args[j] = reinterpret_cast<arg_t *>(args_base[j])[tid];
+        }
+        *result = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args);
+      }
+      tid += nt
+    }
+  } else {  // if this block has a full `nv` data to handle, use vectorized memory access
+    // fetch data
+    return_t results[vt];
+    arg_t args[vt][nargs];
+    #pragma unroll
+    for (int i = 0; i < vt; i++) {
+      if (idx + nt * i < N) {
+        #pragma unroll
+        for (int j = 0; j < arity; j++) {
+          args[i][j] = *(args_base[j] + i * nt);
+        }
       }
     }
-  }
 
-  // compute
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+    // compute
+    #pragma unroll
+    for (int i = 0; i < vt; i++) {
+      if (idx + nt * i < N) {
+        results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+      }
     }
-  }
 
-  // store data
-  #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
+    // store data
+    #pragma unroll
+    for (int i = 0; i < vt; i++) {
+      if (idx + nt * i < N) {
+        *(result_base + i * nt) = results[i];
+      }
     }
   }
 }
@@ -286,7 +317,20 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+  int vec_size = detail::can_vectorize_up_to<func_t>(data);
+  switch (vec_size) {
+  case 4:
+    elementwise_kernel<4, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    break;
+  case 2:
+    elementwise_kernel<2, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    break;
+  case 1:
+    elementwise_kernel<1, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    break;
+  default:
+    TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
+  }
   AT_CUDA_CHECK(cudaGetLastError());
 }
 

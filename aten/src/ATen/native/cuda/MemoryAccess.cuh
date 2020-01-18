@@ -89,7 +89,7 @@ struct Vec<scalar_t, 2> {
     case 1:
       return v.y;
     }
-    return 0;  // no boundary check here
+    // no boundary check here
   }
 };
 
@@ -105,9 +105,9 @@ struct Vec<scalar_t, 4> {
     case 2:
       return v.z;
     case 3:
-      return v.t;
+      return v.w;
     }
-    return 0;  // no boundary check here
+    // no boundary check here
   }
 };
 
@@ -118,15 +118,15 @@ struct Vec<scalar_t, 4> {
 template <
   typename scalar_t,     // type of data.
   int num_threads,       // number of threads in a block.
-  int block_load_size,   // number of elements each block needs to handle.
+  int block_work_size,   // number of elements each block needs to handle.
   int vec_size           // vector size, can be 1, 2, or 3.
 >
 struct vectorized {
 
-  static constexpr int thread_load_size = block_load_size / num_threads;
-  static constexpr int loop_size = thread_load_size / vec_size;
+  static constexpr int thread_work_size = block_work_size / num_threads;
+  static constexpr int loop_size = thread_work_size / vec_size;
 
-  __device__ inline void load(scalar_t to[thread_load_size], scalar_t *from) {
+  __device__ static inline void load(scalar_t to[thread_work_size], scalar_t *from) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
@@ -141,32 +141,41 @@ struct vectorized {
     }
   }
 
-  __device__ void store(scalar_t *to, scalar_t from[thread_load_size]) {
+  __device__ static inline void store(scalar_t *to, scalar_t from[thread_work_size]) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
+      int index = thread_idx + i * num_threads;
       vec_t vector;
       for (int j = 0; j < vec_size; j++) {
         vector[j] = from[vec_size * i + j];
       }
-      *to_ = vector;
+      to_[index] = vector;
     }
   }
 };
 
+template<typename scalar_t, bool = false>
+inline int can_vectorize_up_to_impl(char *pointer) {
+  return 1;
+}
+
 template<typename scalar_t>
-inline int can_vectorize_up_to(char *pointer) {
+inline int can_vectorize_up_to_impl<scalar_t, true>(char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  if (has_builtin_vector_type<scalar_t>::value) {
-    if (address % Info<scalar_t, 4>::alignment == 0) {
-      return 4;
-    } else if (address % Info<scalar_t, 2>::alignment == 0) {
-      return 2;
-    }
+  if (address % Info<scalar_t, 4>::alignment == 0) {
+    return 4;
+  } else if (address % Info<scalar_t, 2>::alignment == 0) {
+    return 2;
   }
   return 1;
+}
+
+template<typename scalar_t>
+inline int can_vectorize_up_to(char *pointer) {
+  return can_vectorize_up_to_impl<scalar_t, has_builtin_vector_type<scalar_t>::value>(pointer);
 }
 
 }}} // namespace at::native::memory
