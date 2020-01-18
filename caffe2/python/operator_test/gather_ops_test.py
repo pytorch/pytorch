@@ -13,7 +13,7 @@ import hypothesis.extra.numpy as hnp
 
 # Basic implementation of gather for axis == 0, shich is lookup of indices
 # in the outer dimension. Keeping it for reference here, although is similar
-# to more general funciton below.
+# to more general function below.
 def ref_gather_axis0():
     def inner(data, ind):
         if ind.size == 0 or data.shape[0] == 0:

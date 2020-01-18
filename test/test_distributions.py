@@ -80,7 +80,7 @@ except ImportError:
 
 def pairwise(Dist, *params):
     """
-    Creates a pair of distributions `Dist` initialzed to test each element of
+    Creates a pair of distributions `Dist` initialized to test each element of
     param with each other.
     """
     params1 = [torch.tensor([p] * len(p)) for p in params]
