@@ -13,8 +13,25 @@ ScriptCall::ScriptCall(
     std::vector<at::IValue>&& args)
     : op_(std::move(op)), stack_(args) {}
 
+ScriptCall::ScriptCall(
+    const c10::QualifiedName& qualifiedName,
+    std::vector<at::IValue>&& args)
+    : qualifiedName_(qualifiedName), stack_(args) {}
+
+bool ScriptCall::hasOp() const {
+  return op_ ? true : false;
+}
+
 std::shared_ptr<Operator> ScriptCall::op() const {
   return *op_;
+}
+
+bool ScriptCall::hasQualifiedName() const {
+  return qualifiedName_ ? true : false;
+}
+
+const c10::QualifiedName ScriptCall::qualifiedName() const {
+  return *qualifiedName_;
 }
 
 const std::vector<at::IValue>& ScriptCall::stack() const {
@@ -30,7 +47,10 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     ivalues.push_back(value);
   }
 
-  if (op_) {
+  if (hasOp()) {
+    TORCH_CHECK(
+        !hasQualifiedName(),
+        "It is builtin operator call, qualifiedName_ should not be set.");
     // TODO: replace this with a real overload_name when FunctionSchema supports
     // that.
     ivalues.emplace_back(toString((*op_)->schema()));
@@ -44,11 +64,24 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     // aten::add -> torch.ops.aten.add
     opName.replace(0, ATEN_PREFIX_.length(), BUILTIN_OP_NAMESPACE_);
     ivalues.emplace_back(std::move(opName));
+  } else if (hasQualifiedName()) {
+    TORCH_CHECK(
+        !hasOp(),
+        "It is TorchScript function call, operator should not be set.");
+    ivalues.emplace_back((*qualifiedName_).qualifiedName());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Either builtin operator or TorchScript function name should be set.");
   }
 }
 
-std::shared_ptr<Operator> ScriptCall::fromIValues(
+std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
+  // Last element in the vector is always qualifiedName for both
+  // builitin operator and TorchScript function
+  // If the qualifiedName is not a builtin operator name, then treat it
+  // as TorchScript function name
   const std::string& qualifiedName = ivalues.back().toStringRef();
 
   if (qualifiedName.rfind(BUILTIN_OP_NAMESPACE_) == 0) {
@@ -58,9 +91,11 @@ std::shared_ptr<Operator> ScriptCall::fromIValues(
 
     ivalues.pop_back();
     // remove str_schema from ivalues
-    return op;
+    return std::make_unique<ScriptCall>(op, std::move(ivalues));
   } else {
-    TORCH_CHECK(false, "Unrecognized qualified name ", qualifiedName);
+    ivalues.pop_back();
+    return std::make_unique<ScriptCall>(
+        c10::QualifiedName(qualifiedName), std::move(ivalues));
   }
 }
 
@@ -83,8 +118,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
 
   auto values = value.toTuple()->elements();
-  auto op = fromIValues(values);
-  return std::make_unique<ScriptCall>(op, std::move(values));
+  return fromIValues(values);
 }
 
 std::shared_ptr<Operator> ScriptCall::matchOperator(

@@ -124,19 +124,6 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
           resp.pickledPayload(), resp.tensors());
     }
-    case MessageType::FORWARD_AUTOGRAD_RESP: {
-      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
-
-      // Attach 'recv' autograd function.
-      addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(),
-          rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
-
-      // Handle the original RPC.
-      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
-    }
     default: {
       TORCH_CHECK(false, "Unrecognized response message type ", messageType);
     }
@@ -144,7 +131,9 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
 }
 
 py::object toPyObj(const Message& message) {
-  return toPyObjInternal(*deserializeResponse(message), message.type());
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  return toPyObjInternal(*response, msgType);
 }
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
