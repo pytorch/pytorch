@@ -263,11 +263,14 @@ class DWConvMicrokernelTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       const float requantizationScale = 1.0f / float(outputScale);
+    // Passing address of kernel_zero_scale and convolution_scale
+    // is not safe as they are stack variables. However for now just staging this change.
+    // TODO: Eventually, we will find a better way to handle this.
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
-              kernelZeroPoint(),
-              requantizationScale,
+              &this->kernelZeroPoint_,
+              &requantizationScale,
               outputZeroPoint,
               qmin(),
               qmax());
@@ -437,11 +440,14 @@ class DWConvMicrokernelTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       const float requantizationScale = 1.0f / float(outputScale);
+    // Passing address of kernel_zero_scale and convolution_scale
+    // is not safe as they are stack variables. However for now just staging this change.
+    // TODO: Eventually, we will find a better way to handle this.
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
-              kernelZeroPoint(),
-              requantizationScale,
+              &this->kernelZeroPoint_,
+              &requantizationScale,
               outputZeroPoint,
               qmin(),
               qmax());

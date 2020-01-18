@@ -127,13 +127,31 @@ pytorch_qnnp_compute_requantization_params(
 static inline union pytorch_qnnp_conv_quantization_params
 pytorch_qnnp_compute_conv_quantization_params(
     uint8_t input_zero_point,
-    uint8_t kernel_zero_point,
-    float scale,
+    const uint8_t* kernel_zero_point,
+    const float* requantization_scale_ptr,
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max) {
   /* Compute requantization parameters */
-  const uint32_t scale_bits = fp32_to_bits(scale);
+
+  union pytorch_qnnp_conv_quantization_params params;
+  //requantization_scale_ptr[0] = input_scale * kernel_scale[0] / output_scale;
+  const float requantization_scale = requantization_scale_ptr[0];
+  /*
+  if (requantization_scale >= 1.0f) {
+    pytorch_qnnp_log_error(
+        "failed to create fully connected operator with %.7g input scale, %.7g "
+        "kernel scale, and %.7g output scale: "
+        "requantization scale %.7g is greater or equal to 1.0",
+        input_scale,
+        kernel_scale,
+        output_scale,
+        requantization_scale);
+    return false;
+  }
+  */
+
+  const uint32_t scale_bits = fp32_to_bits(requantization_scale);
 
   /* Multiplier is in [0x40000000, 0x7FFFFF80] range */
   const int32_t multiplier = (int32_t)(
@@ -142,17 +160,16 @@ pytorch_qnnp_compute_conv_quantization_params(
   assert(multiplier <= INT32_C(0x7FFFFF80));
 
   /* Shift is in [0, 31] range */
-  const int32_t shift = 127 + 31 - 32 - (fp32_to_bits(scale) >> 23);
+  const int32_t shift = 127 + 31 - 32 - (fp32_to_bits(requantization_scale) >> 23);
   assert(shift >= 0);
   assert(shift < 32);
 
-  union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
   const uint32_t remainder_threshold = remainder_mask >> 1;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.input_zero_point[i] = (int16_t)(uint16_t)input_zero_point;
-    params.sse2.kernel_zero_point[i] = (int16_t)(uint16_t)kernel_zero_point;
+    params.sse2.kernel_zero_point[i] = (int16_t)(uint16_t)kernel_zero_point[0];
   }
   params.sse2.multiplier[0] = multiplier;
   params.sse2.multiplier[1] = multiplier;
@@ -179,7 +196,7 @@ pytorch_qnnp_compute_conv_quantization_params(
   }
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.input_zero_point = (int16_t)(uint16_t)input_zero_point;
-  params.neon.kernel_zero_point = (int16_t)(uint16_t)kernel_zero_point;
+  params.neon.kernel_zero_point = (int16_t)(uint16_t)kernel_zero_point[0];
   params.neon.multiplier = multiplier;
   params.neon.right_shift = -shift;
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
@@ -189,7 +206,7 @@ pytorch_qnnp_compute_conv_quantization_params(
   const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
   const uint32_t remainder_threshold = remainder_mask >> 1;
   params.scalar.input_zero_point = (int32_t)(uint32_t)input_zero_point;
-  params.scalar.kernel_zero_point = (int32_t)(uint32_t)kernel_zero_point;
+  params.scalar.kernel_zero_point = (int32_t)(uint32_t)kernel_zero_point[0];
   params.scalar.multiplier = multiplier;
   params.scalar.remainder_mask = (int32_t)remainder_mask;
   params.scalar.remainder_threshold = (int32_t)remainder_threshold;

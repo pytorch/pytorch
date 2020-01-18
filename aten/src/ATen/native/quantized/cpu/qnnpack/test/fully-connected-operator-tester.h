@@ -125,7 +125,7 @@ class FullyConnectedOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    std::vector<uint8_t> kernelZeroPoint(1, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
@@ -146,7 +146,7 @@ class FullyConnectedOperatorTester {
                 (int32_t(inputPtr[i * inputStride() + ic]) -
                  int32_t(inputZeroPoint)) *
                 (int32_t(kernel[oc * inputChannels() + ic]) -
-                 int32_t(kernelZeroPoint));
+                 int32_t(kernelZeroPoint[0]));
           }
         }
       }
@@ -177,21 +177,20 @@ class FullyConnectedOperatorTester {
               new qnnpack::PackBMatrix(
                   inputChannels(),
                   outputChannels(),
-                  kernelZeroPoint,
+                  kernelZeroPoint[0],
                   1.0f,
                   kernel.data(),
                   bias.data()));
 
+          std::vector<float> requantization_scale(outputChannels(), 1 / outputScale);
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
               batchSize() /* batch_size */,
               inputChannels() /* input_channels */,
               outputChannels() /* output_channels */,
               inputZeroPoint,
-              1.0f /* input scale */,
-              kernelZeroPoint,
-              1.0f /* kernel scale */,
+              kernelZeroPoint.data(),
+              requantization_scale.data(),
               outputZeroPoint,
-              outputScale,
               qmin(),
               qmax(),
               inputPtr,
@@ -213,7 +212,7 @@ class FullyConnectedOperatorTester {
                 outputChannels(),
                 inputZeroPoint,
                 1.0f /* input scale */,
-                kernelZeroPoint,
+                kernelZeroPoint[0],
                 1.0f /* kernel scale */,
                 kernel.data(),
                 bias.data(),

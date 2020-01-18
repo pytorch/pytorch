@@ -24,8 +24,8 @@ struct PackedLinearWeightsQnnp {
   at::Tensor orig_weight;
   at::Tensor bias;
   c10::optional<double> input_scale;
-  double w_scale;
-  int64_t w_zp;
+  at::Tensor w_scale;
+  at::Tensor w_zp;
 };
 
 struct PackedConvWeightsQnnp {

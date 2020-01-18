@@ -17,8 +17,8 @@ struct conv_param_t {
   const uint32_t groups;
   const size_t input_channels;
   const size_t output_channels;
-  const uint8_t kernel_zero_point;
-  const float kernel_scale;
+  const uint8_t* kernel_zero_point;
+  const float* requantization_scale;
   const uint8_t output_min;
   const uint8_t output_max;
 
@@ -38,8 +38,8 @@ struct conv_param_t {
       const uint32_t grp,
       const size_t in_ch,
       const size_t out_ch,
-      const uint8_t kernel_zp,
-      const float kernel_s,
+      const uint8_t* kernel_zp,
+      const float* scale,
       const uint8_t out_min,
       const uint8_t out_max)
       : kernel_dims(kernel),
@@ -50,7 +50,7 @@ struct conv_param_t {
         input_channels(in_ch),
         output_channels(out_ch),
         kernel_zero_point(kernel_zp),
-        kernel_scale(kernel_s),
+        requantization_scale(scale),
         output_min(out_min),
         output_max(out_max) {
     const uint32_t kernel_width = kernel_dims[0];
@@ -93,11 +93,13 @@ struct conv_param_t {
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
-    if (kernel_scale <= 0.0f || !std::isnormal(kernel_scale)) {
+    // This has to be checked for all the output channel requant scales.
+    // TODO
+    if (requantization_scale[0] <= 0.0f || !std::isnormal(requantization_scale[0])) {
       pytorch_qnnp_log_error(
           "failed to create convolution with %.7g kernel scale: scale must be"
           "finite and positive",
-          kernel_scale);
+          requantization_scale[0]);
       assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
 
