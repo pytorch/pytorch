@@ -11052,9 +11052,9 @@ class TestTorchDeviceType(TestCase):
         # Check linspace for generating the correct output for each dtype.
         expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
         actual_lin = torch.linspace(-100, 100, 401, device=device, dtype=dtype)
-        #If on GPU, allow for minor error depending on dtype.
+        # If on GPU, allow for minor error depending on dtype.
         tol = 0.
-        if device is not 'cpu':
+        if device != 'cpu':
             if dtype==torch.half:
                 tol = 1e-1
             elif dtype==torch.float:
