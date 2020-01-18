@@ -208,6 +208,7 @@ def shutdown(graceful=True):
 
     if graceful:
         _wait_all_workers()
+        _agent.sync()
         _delete_all_user_rrefs()
         _agent.join()
     try:
