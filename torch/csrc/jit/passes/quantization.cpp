@@ -1374,7 +1374,9 @@ static bool hastensor(script::Module& m, const char* name) {
 
 class FoldConvBatchNorm2dHelper {
  public:
-  void run(const script::Module& module);
+  void analyze(script::Module& module);
+  void transform();
+  void cleanup();
 
  private:
   bool tryExtractingConvBNParameters(
@@ -1393,6 +1395,11 @@ class FoldConvBatchNorm2dHelper {
       const ConvBNParameters& p);
 
   std::unordered_set<Graph*> folded_graph_;
+  std::unordered_map<script::ModulePtr, std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
+  std::unordered_map<Value*, Value*> rewrite_map_;
+  std::vector<Value*> values_to_rewrite_;
+  std::unordered_set<Node*> nodes_to_delete_;
+  std::unordered_set<ClassType*> conv_types_;
 };
 
 std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::computeUpdatedConvWeightAndBias(
@@ -1411,6 +1418,7 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
       !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
       !hastensor(bn, "running_var") ||
       !bn.hasattr("eps")) {
+    GRAPH_DEBUG("has eps:", bn.hasattr("eps"));
     return false;
   }
 
@@ -1430,7 +1438,7 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   return true;
 }
 
-void FoldConvBatchNorm2dHelper::run(const script::Module& module) {
+void FoldConvBatchNorm2dHelper::analyze(script::Module& module) {
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
     %conv_submodule = match::module[name="Conv2d"](%self)
@@ -1461,10 +1469,6 @@ graph(%self, %x):
     }
 
     // Process forward method of the current module
-    std::unordered_map<Value*, Value*> rewrite_map;
-    std::vector<Value*> values_to_rewrite;
-    std::unordered_set<Node*> nodes_to_delete;
-
     script::Method method = current.get_method("forward");
     GRAPH_DUMP(
         current.type()->name()->name() +
@@ -1472,6 +1476,10 @@ graph(%self, %x):
         method.graph());
     const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
+    GRAPH_DEBUG("match? ", matches.size());
+    Graph* g = method.graph().get();
+    bool is_folded_graph = folded_graph_.find(g) != folded_graph_.end();
+    folded_graph_.insert(g);;
     for (const Match& match : matches) {
       GRAPH_DEBUG("Checking next match...");
       Node* matched_conv = match.nodes_map.at(pattern_conv);
@@ -1499,63 +1507,75 @@ graph(%self, %x):
         continue;
       }
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
+      conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
 
-      Graph* g = method.graph().get();
-      if (folded_graph_.find(g) != folded_graph_.end()) {
-        conv_submodule.setattr("weight", std::get<0>(new_w_b));
-        conv_submodule.setattr("bias", std::get<1>(new_w_b));
+      if (is_folded_graph) {
+        GRAPH_DEBUG("ConvBn in the graph is already folded, skipping modifications on"
+                    " graph and type");
         continue;
       }
-      folded_graph_.insert(g);;
-
       // We are using a separate vector for saving Values we want to rewrite to
       // make sure that the order in which we perform these transformations is
       // deterministic. Iterating through keys of rewrite_map would result in
       // non-determinism that might not manifest as a bug now, but can bite us
       // later.
-      values_to_rewrite.push_back(matched_bn->output());
-      rewrite_map[matched_bn->output()] = matched_conv->output();
+      values_to_rewrite_.push_back(matched_bn->output());
+      rewrite_map_[matched_bn->output()] = matched_conv->output();
       GRAPH_UPDATE(
           "Rewriting %",
           matched_bn->output()->debugName(),
           " with %",
           matched_conv->output()->debugName());
 
-      nodes_to_delete.insert(matched_bn);
+      nodes_to_delete_.insert(matched_bn);
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
-      conv_submodule.setattr("weight", std::get<0>(new_w_b));
-      if (hastensor(conv_submodule, "bias")) {
-        conv_submodule.setattr("bias", std::get<1>(new_w_b));
-      } else {
+      // If conv submodule has bias as attribute/constant
+      // we want to remove the constant
+      if (conv_submodule.hasattr("bias")) {
         // conv module has an existing non-Tensor bias
-        if (conv_submodule.hasattr("bias")) {
-          if (conv_submodule._ivalue()->type()->hasConstant("bias")) {
-            GRAPH_UPDATE("Removing bias constant from conv module");
+        if (conv_submodule.type()->hasConstant("bias")) {
+          if (conv_submodule.type()->getConstant("bias").isNone()) {
             conv_submodule.type()->unsafeRemoveConstant("bias");
+            GRAPH_UPDATE("Removing bias None from conv module");
           } else {
-            TORCH_CHECK(conv_submodule.type()->findAttributeSlot("bias").has_value());
-            GRAPH_UPDATE("Removing existing non-Tensor bias attribute from conv module");
-            conv_submodule._ivalue()->unsafeRemoveAttr("bias");
-            conv_submodule.type()->unsafeRemoveAttribute("bias");
+            TORCH_CHECK(false, "We don't support folding Conv"
+                        " module with non-None bias constants");
           }
         }
-        conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
       }
-    }
 
-    // Perform planned rewritings
-    for (auto v : values_to_rewrite) {
-      v->replaceAllUsesWith(rewrite_map.at(v));
-    }
+    } // matches
+  } // while
+}
 
-    // Perform planned deletions
-    for (auto n : nodes_to_delete) {
-      n->removeAllInputs();
-    }
-    for (auto n : nodes_to_delete) {
-      n->destroy();
-    }
+void FoldConvBatchNorm2dHelper::transform() {
+  for (auto item : conv_module_and_params_) {
+    script::Module conv(item.first);
+    auto w_b = item.second;
+    GRAPH_DEBUG("setting weight and bias for conv");
+    conv.setattr("weight", std::get<0>(w_b));
+    conv.register_parameter("bias", std::get<1>(w_b), false);
+  }
+}
+
+
+void FoldConvBatchNorm2dHelper::cleanup() {
+  // Perform planned rewritings
+  for (auto v : values_to_rewrite_) {
+    v->replaceAllUsesWith(rewrite_map_.at(v));
+  }
+
+  // Perform planned deletions
+  for (auto n : nodes_to_delete_) {
+    n->removeAllInputs();
+  }
+  for (auto n : nodes_to_delete_) {
+    n->destroy();
+  }
+
+  for (auto* conv_type: conv_types_) {
+    conv_type->unsafeRemoveConstant("bias");
   }
 }
 
@@ -1600,9 +1620,13 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void FoldConvBatchNorm2d(const script::Module& module) {
+script::Module FoldConvBatchNorm2d(const script::Module& module) {
   FoldConvBatchNorm2dHelper h;
-  h.run(module);
+  script::Module m = module.clone();
+  h.analyze(m);
+  h.transform();
+  h.cleanup();
+  return m;
 }
 
 void FoldQuantizeCallIntoBuffer(

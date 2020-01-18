@@ -1497,7 +1497,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             .run(str(get_forward(scripted._c).graph))
 
         # Run FoldConvBatchnorm2d pass.
-        torch._C._jit_pass_fold_convbn(scripted._c)
+        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
 
         # Check that after the pass one of the CallMethods is gone (supposedly,
         # the bn.forward).
@@ -1534,7 +1534,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             .run(str(get_forward_graph(scripted._c)))
 
         # Run FoldConvBatchnorm2d pass.
-        torch._C._jit_pass_fold_convbn(scripted._c)
+        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
 
         # Check that after the pass one of the CallMethods is gone (supposedly,
         # the bn.forward).
@@ -1572,7 +1572,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
             .run(str(get_forward_graph(m.sub._c)))
 
-        torch._C._jit_pass_fold_convbn(m._c)
+        m = wrap_cpp_module(torch._C._jit_pass_fold_convbn(m._c))
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
             .run(str(get_forward_graph(m.sub._c)))
