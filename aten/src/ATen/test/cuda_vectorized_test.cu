@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <ATen/ATen.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 using namespace at::native::memory;
@@ -58,6 +59,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
 }
 
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
+  if (!at::cuda::is_available()) return;
   double *b1 = reinterpret_cast<double *>(buffer1);
   double *b2 = reinterpret_cast<double *>(buffer2);
   std::cout << "buffer1 = " << reinterpret_cast<uint64_t>(buffer1) << std::endl;
