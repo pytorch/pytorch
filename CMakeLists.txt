@@ -302,6 +302,8 @@ ENDIF(NOT MSVC)
 # applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
+  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
