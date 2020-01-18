@@ -52,7 +52,7 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeTensorTypeIdGuard guard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
   callBoxedWorkaround(op, stack);
 }
 
@@ -61,7 +61,7 @@ void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* sta
 struct GenericWrapperTensorImpl : public c10::TensorImpl {
   explicit GenericWrapperTensorImpl(at::Tensor rep)
     : TensorImpl(
-        c10::TensorTypeSet(c10::TensorTypeId::TESTING_ONLY_GenericWrapperTensorId),
+        c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapperTensorId),
         rep.dtype(),
         rep.device()
         // TODO: propagate size!
@@ -83,7 +83,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
     // TODO: Handle tensor list
     if (args[i].isTensor()) {
       auto* impl = args[i].unsafeToTensorImpl();
-      if (impl->type_set().has(TensorTypeId::TESTING_ONLY_GenericWrapperTensorId)) {
+      if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapperTensorId)) {
         auto* wrapper = static_cast<GenericWrapperTensorImpl*>(impl);
         torch::jit::push(*stack, wrapper->rep_);  // no move!
       } else {
@@ -110,19 +110,19 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
 struct Environment {
   c10::RegistrationHandleRAII registry1 = c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      TensorTypeId::TESTING_ONLY_GenericWrapperTensorId,
+      DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
 
   c10::RegistrationHandleRAII registry2 = c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      TensorTypeId::TESTING_ONLY_GenericModeTensorId,
+      DispatchKey::TESTING_ONLY_GenericModeTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
   );
 };
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   Environment e;
-  c10::impl::IncludeTensorTypeIdGuard guard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
+  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);

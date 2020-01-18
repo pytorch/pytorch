@@ -2558,6 +2558,19 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def test_record_function_callbacks(self):
+        x = torch.randn(10, 10)
+        with profile() as p:
+            rf = torch.autograd._RecordFunction()
+            torch.autograd._run_before_callbacks(rf, "foo")
+            y = x * 2 + 4
+            # ensure that we run destructor for RecordFunction, which invokes
+            # end callbacks
+            del rf
+        function_events = p.function_events
+        foo_event = [event for event in function_events if "foo" in event.name][0]
+        self.assertEqual(foo_event.count, 1)
+
     def test_profiler_aggregation_fake(self):
         events = EventList()
         id = [0]
@@ -3772,6 +3785,20 @@ for shape in [(1,), ()]:
         MyFunction.apply(inp).sum().backward()
         # Case where original==True
         MyFunction.apply(inp).sum().backward(create_graph=True)
+
+    def test_power_function(self):
+        a = torch.tensor([0., 0., 0.])
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(a**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(s**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

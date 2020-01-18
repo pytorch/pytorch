@@ -3,6 +3,7 @@ import sys
 from textwrap import dedent
 
 import torch
+import unittest
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -101,7 +102,7 @@ class TestUnsupportedOps(JitTestCase):
         with self.assertRaisesRegex(Exception, "Argument dims_self"):
             torch.jit.script(tensordot)
 
-
+    @unittest.skipIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")
     def test_init_ops(self):
         def calculate_gain():
             return torch.nn.init.calculate_gain('leaky_relu', 0.2)
