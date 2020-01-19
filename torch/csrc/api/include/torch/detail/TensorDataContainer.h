@@ -24,17 +24,22 @@ inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
 }
 
 inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
+  // NOTE: the dtype computation in this function only takes effect when the user passes
+  // an integer literal / floating-point literal or a braced-init-list to `torch::tensor`
+  // constructor. It doesn't affect `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)`
+  // as the specified dtype `T` is always respected.
   if (scalar_type == at::kInt || scalar_type == at::kLong) {
     // In C++, an integer literal without suffix (e.g. `1` instead of `1u`) can be one of
     // `int` / `long int` / `long long int` types. When we find that `scalar_type` is one
     // of those types, we always use `torch.int64` type, because In Python `torch.tensor(1)`
     // always gives a tensor of `torch.int64` dtype.
-    //
-    // Note that this dtype computation only takes effect when the user passes an integer
-    // literal or a braced-init-list to `torch::tensor` constructor. It doesn't affect
-    // `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)` as the specified
-    // dtype `T` is always respected.
     return at::kLong;
+  } else if (scalar_type == at::kDouble) {
+    // When `scalar_type == at::kDouble`, we know that the user is passing in
+    // a floating-point literal without specifying its type (e.g. `1.0` instead of `1.0f`).
+    // In Python, the dtype of `torch.tensor(1.0)` depends on the value of
+    // `torch.get_default_dtype()`, and we should do the same for C++ `torch::tensor(1.0)`.
+    return at::typeMetaToScalarType(at::get_default_dtype());
   } else {
     return scalar_type;
   }
@@ -94,7 +99,9 @@ struct TensorDataContainer {
   // the innermost `TensorDataContainer`.
   TensorDataContainer() :
       sizes_({0}),
-      scalar_type_(at::kFloat),
+      // NOTE: In Python, the dtype of tensors with zero-size dimensions (e.g. `torch.tensor([[], []])`)
+      // depends on the value of `torch.get_default_dtype()`, and we should do the same for the C++ equivalent.
+      scalar_type_(at::typeMetaToScalarType(at::get_default_dtype())),
       type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \

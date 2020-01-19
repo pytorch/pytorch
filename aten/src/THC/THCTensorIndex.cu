@@ -19,6 +19,7 @@
 #ifdef __HIP_PLATFORM_HCC__
 #include "ATen/rocm/ROCm_uint24.hpp"
 #endif
+#include <c10/macros/Macros.h>
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -43,7 +44,7 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstCopyDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < dstCopyDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -98,7 +99,7 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstCopyDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < dstCopyDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -135,7 +136,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -150,7 +151,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
         IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+      gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
     }
   }
 }
@@ -231,7 +232,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    assert(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -241,7 +242,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
       IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+    gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
 }
 
@@ -313,7 +314,7 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(dstIndex_ < dstFillDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex_ < dstFillDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -362,7 +363,7 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(dstIndex_ < dstFillDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex_ < dstFillDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -395,7 +396,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(srcIndex < srcSelectDimSize);
+    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -491,7 +492,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    assert(srcIndex < srcSelectDimSize);
+    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -558,7 +559,7 @@ __device__ __forceinline__ IndexType indexToOffset(
     IndexType size)
 {
   IndexType linearIndex = static_cast<IndexType>(index);
-  assert(linearIndex < size && linearIndex >= -size);
+  CUDA_KERNEL_ASSERT(linearIndex < size && linearIndex >= -size);
   if (linearIndex < 0) {
     linearIndex += size;
   }
@@ -570,7 +571,7 @@ struct WrapIndexOp {
 
   __device__ __forceinline__ void operator()(int64_t* out, int64_t* in) {
     auto idx = *in;
-    assert(idx < size && idx >= -size);
+    CUDA_KERNEL_ASSERT(idx < size && idx >= -size);
     *out = idx < 0 ? idx + size : idx;
   }
 

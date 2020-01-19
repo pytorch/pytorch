@@ -136,7 +136,7 @@ static void unfolded3d_copy(
 
 // Kernel for fast unfold+copy
 // Borrowed from Theano
-// Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
+// Authors: Arjun Jain, Frederic Bastien, Jan Schluter, Nicolas Ballas
 template <typename scalar_t>
 static void unfolded3d_acc(
     scalar_t* finput_data,

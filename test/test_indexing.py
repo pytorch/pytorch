@@ -1,5 +1,5 @@
 from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests
+from common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
 import torch
 from torch import tensor
 import unittest
@@ -104,6 +104,28 @@ class TestIndexing(TestCase):
         self.assertEqual(v[[0, 4, 2]].shape, (3, 7, 3))
         self.assertEqual(v[:, [0, 4, 2]].shape, (5, 3, 3))
         self.assertEqual(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bool, torch.bfloat16)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bool)
+    def test_index_put_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        indices = (torch.tensor([0, 2, 1]),)
+        res = src.index_put_(indices, vals, accumulate=True)
+        self.assertEqual(res.shape, src.shape)
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
+    def test_index_src_datatype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        # test index
+        res = src[[0, 2, 1], :, :]
+        self.assertEqual(res.shape, src.shape)
+        # test index_put, no accum
+        src[[0, 2, 1], :, :] = res
+        self.assertEqual(res.shape, src.shape)
 
     def test_int_indices2d(self, device):
         # From the NumPy indexing example
@@ -349,6 +371,15 @@ class TestIndexing(TestCase):
 
         self.assertRaisesRegex(IndexError, 'invalid index', runner)
 
+    @onlyCUDA
+    def test_invalid_device(self, device):
+        idx = torch.tensor([0, 1])
+        b = torch.zeros(5, device=device)
+        c = torch.tensor([1., 2.], device="cpu")
+
+        for accumulate in [True, False]:
+            self.assertRaisesRegex(RuntimeError, 'expected device', lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
+
 
 # The tests below are from NumPy test_indexing.py with some modifications to
 # make them compatible with PyTorch. It's licensed under the BDS license below:
@@ -489,11 +520,9 @@ class NumpyTests(TestCase):
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
 
-        with warnings.catch_warnings(record=True) as w:
-            index = torch.ByteTensor(4, 4).to(device).zero_()
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
-            self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
-            self.assertEquals(len(w), 2)
+        index = torch.ByteTensor(4, 4).to(device).zero_()
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+        self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
 
     def test_boolean_indexing_onedim(self, device):
         # Indexing a 2-dimensional array with

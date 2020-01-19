@@ -71,12 +71,12 @@ CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 // when enabled will cause `legacyTensorType()` and `getType()` to always return
 // non-Variable type, even if the tensor being called on is a variable.
 //
-// TODO: Since `torch::NoGradGuard` serves the same purpose in libtorch, we should
-// merge these two thread-local guards.  However, NoGradGuard does something
-// subtly different: it turns of gradient recording, but DOES NOT skip
-// VariableType implementation (as we still might need to profile or trace).
-// To unify the two, we would first have to move profiling and tracing out of
-// VariableType.
+// TODO: Since `torch::NoGradGuard` serves almost the same purpose in libtorch,
+// we should merge these two thread-local guards.  However, NoGradGuard does
+// something subtly different: it turns off gradient recording, but DOES NOT
+// skip VariableType implementation (as we still might need to profile or
+// trace).  To unify the two, we would first have to move profiling and tracing
+// out of VariableType.
 
 struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
@@ -88,11 +88,5 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   }
   c10::impl::ExcludeTensorTypeIdGuard guard_;
 };
-
-namespace impl {
-inline bool variable_is_excluded() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
-}
-}
 
 } // namespace at

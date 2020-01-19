@@ -200,6 +200,14 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
+Each CUDA version only supports one particular XCode version. The following combinations have been reported to work with PyTorch.
+
+| CUDA version | XCode version |
+| ------------ | ------------- |
+| 10.0         | XCode 9.4     |
+| 10.1         | XCode 10.1    |
+
+
 On Windows
 
 At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.

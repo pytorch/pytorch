@@ -206,6 +206,23 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
 
+    def test_constant_fold_reshape(self):
+        class ReshapeModule(torch.nn.Module):
+            def __init__(self, ):
+                super(ReshapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                b = self.weight.reshape(1, -1, 1, 1)
+                return x * b
+
+        _set_opset_version(self.opset_version)
+        x = torch.randn(4, 5)
+        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Reshape"
+        assert len(list(graph.nodes())) == 1
+
     def test_strip_doc_string(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
@@ -244,6 +261,12 @@ class TestUtilityFuns(TestCase):
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
+
+
+# opset 11 tests
+TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=11))
 
 
 if __name__ == '__main__':

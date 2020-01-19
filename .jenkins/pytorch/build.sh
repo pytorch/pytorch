@@ -36,6 +36,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-build* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
+fi
+
 echo "Python version:"
 python --version
 
@@ -44,6 +52,11 @@ gcc --version
 
 echo "CMake version:"
 cmake --version
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  echo "NVCC version:"
+  nvcc --version
+fi
 
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
@@ -58,6 +71,24 @@ if ! which conda; then
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
   fi
 fi
 
@@ -133,10 +164,6 @@ export TORCH_CUDA_ARCH_LIST="5.2"
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
-  export DEBUG=1
 fi
 
 # Patch required to build xla
@@ -238,7 +265,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
+  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
   sudo ./bazel-*.sh
   BAZEL="$(which bazel)"
@@ -250,7 +277,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
-  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"

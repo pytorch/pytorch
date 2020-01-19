@@ -214,7 +214,7 @@ int get_num_threads() {
 #else
   caffe2::ThreadPool* pool = caffe2::mobile_threadpool();
   // caffe2::ThreadPool::getNumThreads() counts the current thread.
-  return !pool ? 1 /* current thread */ : pool->getNumThreads();
+  return !pool || in_parallel_region() ? 1 /* current thread */ : pool->getNumThreads();
 #endif // C10_MOBILE
 }
 

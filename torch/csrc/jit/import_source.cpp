@@ -24,17 +24,6 @@ struct OpsValue : public SugaredValue {
   size_t version_;
 };
 
-struct ConstantValue : public SugaredValue {
-  ConstantValue(IValue value) : value_(std::move(value)) {}
-  IValue value_;
-  std::string kind() const override {
-    return "constant";
-  }
-  Value* asValue(const SourceRange& loc, Function& m) override {
-    return m.graph()->insertConstant(value_);
-  }
-};
-
 // Represents nested namespaces, like `foo.bar.Baz`.
 // Right now these namespaces can only contain other namespaces or NamedTypes
 struct TORCH_API ClassNamespaceValue : public SugaredValue {
@@ -116,12 +105,6 @@ struct SourceImporterImpl : public Resolver,
         {"annotate", SpecialFormValue::create(prim::annotate)},
         {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
         {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
-        {"inf",
-         std::make_shared<ConstantValue>(
-             std::numeric_limits<double>::infinity())},
-        {"nan",
-         std::make_shared<ConstantValue>(
-             std::numeric_limits<double>::quiet_NaN())},
     };
   }
 
@@ -193,7 +176,7 @@ struct SourceImporterImpl : public Resolver,
       const script::Module& mod,
       const std::shared_ptr<Source>& src) {
     auto self = SimpleSelf(mod.type());
-    c10::QualifiedName prefix = mod.name();
+    c10::QualifiedName prefix = *mod.type()->name();
     Parser p(src);
 
     parsePossibleVersionNumber(p.lexer());
@@ -218,7 +201,15 @@ struct SourceImporterImpl : public Resolver,
     if (it != env_.end()) {
       return it->second;
     }
-
+    auto graph = m.graph();
+    if (name == "inf") {
+      return std::make_shared<SimpleValue>(
+          graph->insertConstant(std::numeric_limits<double>::infinity(), loc));
+    }
+    if (name == "nan") {
+      return std::make_shared<SimpleValue>(
+          graph->insertConstant(std::numeric_limits<double>::quiet_NaN(), loc));
+    }
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(
           c10::QualifiedName(name), shared_from_this());
@@ -274,6 +265,7 @@ struct SourceImporterImpl : public Resolver,
     std::vector<Def> methods;
     std::vector<ResolverPtr> resolvers;
     std::vector<Assign> attributes;
+    std::vector<Assign> constants;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
@@ -304,14 +296,15 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                // This is a regular attribute assignment, of the form:
-                //   foo : Tensor
                 if (assign.rhs().present()) {
-                  throw ErrorReport(assign.rhs())
-                      << "Unexpected right-hand found in assignment in class body. "
-                         "This is not yet supported.";
+                  // This is a constant assignemnt, of the form:
+                  // foo : Final[int] = 3
+                  constants.push_back(assign);
+                } else {
+                  // This is a regular attribute assignment, of the form:
+                  // foo : Tensor
+                  attributes.push_back(assign);
                 }
-                attributes.push_back(assign);
               }
             } break;
             case TK_SUBSCRIPT: {
@@ -365,6 +358,13 @@ struct SourceImporterImpl : public Resolver,
           class_type->addAttribute(name, type, is_parameter);
         }
       }
+    }
+
+    // Populate class constants
+    for (const auto& assign : constants) {
+      auto const_val = type_parser.parseClassConstant(assign);
+      const auto name = Var(assign.lhs()).name().name();
+      class_type->addConstant(name, const_val);
     }
 
     cu_->register_type(class_type);

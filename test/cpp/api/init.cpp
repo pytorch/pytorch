@@ -29,8 +29,9 @@ void check_exact_values(
     }
 
     for (size_t p = 0; p < layerParameters.size(0); p++) {
-      auto tensor = layerParameters[p];
-      auto expectedTensor = expectedLayerParameters[p];
+      // Always compare using double dtype, regardless of the original dtype of the tensors
+      auto tensor = layerParameters[p].to(torch::kFloat64);
+      auto expectedTensor = expectedLayerParameters[p].to(torch::kFloat64);
 
       if (!tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4)) {
         std::cout << "layer " << i << ": " << tensor << " != " << expectedTensor

@@ -1,8 +1,8 @@
 #pragma once
-
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/macros/Macros.h>
 
 
 namespace c10 {
@@ -45,11 +45,34 @@ struct inter_copy_type<uint8_t> {
 template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
 
+template<typename dest_t, typename src_t>
+struct needs_real {
+  constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
+};
+
+template<bool, typename src_t>
+struct maybe_real {
+  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+    return src;
+  }
+};
+
+template<typename src_t>
+struct maybe_real<true, src_t> {
+  C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
+    return src.real();
+  }
+};
+
+
 template <typename dest_t, typename src_t>
-C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
-  return static_cast<dest_t>(
-    static_cast<inter_copy_type_t<dest_t>>(src));
-}
+struct static_cast_with_inter_type {
+  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+    constexpr bool real = needs_real<dest_t, src_t>::value;
+    return static_cast<dest_t>(
+      static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
+  }
+};
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -98,52 +121,29 @@ C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
 //
 
 #ifdef C10_HOST_DEVICE
-#define ERROR_UNSUPPORTED_CAST assert(false);
+#define ERROR_UNSUPPORTED_CAST CUDA_KERNEL_ASSERT(false);
 #else
 #define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
 #endif
 
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
-#define FETCH_AND_CAST_COMPLEX_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(std::real(*(const type *)ptr));
+#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t, type>::apply(*(const type *)ptr);
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, FETCH_AND_CAST_CASE)
-#ifndef C10_HOST_DEVICE
-    AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_COMPLEX_CASE)
-#endif
-    default:;
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
+    default:
+      ERROR_UNSUPPORTED_CAST
   }
-  ERROR_UNSUPPORTED_CAST
   return dest_t(0); // just to avoid compiler warning
 }
 
 // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type>(value); return;
+#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type, src_t>::apply(value); return;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    default:;
-  }
-  ERROR_UNSUPPORTED_CAST
-}
-
-template<>
-inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
-  auto value = std::real(value_);
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
-    default:;
-  }
-  ERROR_UNSUPPORTED_CAST
-}
-template<>
-inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, void *ptr, std::complex<double> value_) {
-  auto value = std::real(value_);
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
     default:;
   }
   ERROR_UNSUPPORTED_CAST
@@ -151,20 +151,19 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
 
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
-inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  assert(ScalarType::scalartype_ == src_type);                                    \
+C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                    \
   return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
-inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  assert(ScalarType::scalartype_ == dest_type);                                   \
+C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                   \
   *(T *)ptr = value;                                                              \
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 
 #undef FETCH_AND_CAST_CASE
-#undef FETCH_AND_CAST_COMPLEX_CASE
 #undef CAST_AND_STORE_CASE
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST

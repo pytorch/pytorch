@@ -68,7 +68,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
     // Let current stream wait on the completing of the NCCL work
     // Throws on exceptions. Blocking operation, which will wait for work

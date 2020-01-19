@@ -6,6 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" psutil
 
+# TODO move this to docker
+pip install unittest-xml-reporting
+
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
   pip install -q faulthandler
@@ -65,22 +68,20 @@ test_libtorch() {
 
     echo "Testing libtorch"
 
-    CPP_BUILD="$PWD/../cpp-build"
-    rm -rf $CPP_BUILD
-    mkdir -p $CPP_BUILD/caffe2
-
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    pushd $CPP_BUILD/caffe2
-    VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
-    popd
-
+    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      build/bin/test_jit
+    else
+      build/bin/test_jit "[cpu]"
+    fi
+    python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 
     # Unfortunately it seems like the test can't load from miniconda3
     # without these paths being set
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-    TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
 
     assert_git_not_dirty
   fi
@@ -99,7 +100,6 @@ test_custom_script_ops() {
 
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
-  python test_custom_classes.py -v
   python model.py --export-script-module=model.pt
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt

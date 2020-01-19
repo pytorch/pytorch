@@ -116,15 +116,40 @@ Tensor quantized_relu6(const Tensor& qx) {
   return qy;
 }
 
+Tensor quantized_relu6_(Tensor& qx) {
+  const auto zero_point = qx.q_zero_point();
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6_", [&]() {
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qx, qx);
+    auto zero_point_vec = Vec(scalar_t(zero_point));
+    scalar_t six = at::quantize_val<scalar_t>(qx.q_scale(), qx.q_zero_point(),
+                                              /*value=*/6.0);
+    auto six_vec = Vec(six);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          underlying_t relu_val = std::max<underlying_t>(value.val_,
+                                                         zero_point);
+          return scalar_t(std::min<underlying_t>(relu_val, six.val_));
+        },
+        [&](Vec value) -> Vec { return value.relu6(zero_point_vec, six_vec); });
+  });
+  return qx;
+}
+
 class QRelu6 final : public c10::OperatorKernel {
  public:
-  Tensor operator()(Tensor qx) {
-    return quantized_relu6(qx);
+  Tensor operator()(Tensor qx, bool inplace) {
+    if (inplace) {
+      return quantized_relu6_(qx);
+    } else {
+      return quantized_relu6(qx);
+    }
   }
 };
 
 static auto registry = c10::RegisterOperators()
-.op("quantized::relu6(Tensor qx) -> Tensor",
+.op("quantized::relu6(Tensor qx, bool inplace=False) -> Tensor",
     c10::RegisterOperators::options().kernel<QRelu6>(TensorTypeId::QuantizedCPUTensorId));
 } // namespace
 
