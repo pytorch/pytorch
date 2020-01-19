@@ -114,17 +114,16 @@ namespace torch { namespace autograd {
         //      The cuda api says we must create that event on the same device as the stream.
         //      However, calling code has made the producer stream (and device) current,
         //      so we temporarily guard onto default_stream's device.
-        c10::OptionalDeviceGuard device_guard{default_stream->device()};
+        c10::OptionalDeviceGuard device_guard{default_stream.device()};
         auto event = c10::Event{c10::DeviceType::CUDA};
-        event.record(*default_stream);
+        event.record(default_stream);
         opt_accumulate_stream->wait(event);
       }
     } else if (on_producer && !on_consumer) {
       // (4) CUDA variable, on producer stream's device but not consumer stream's device
       // Accumulation happens on var's device's default stream
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-      const auto default_stream = guard.getDefaultStream(*device_of(var));
-      opt_accumulate_stream = default_stream;
+      opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
       if (opt_accumulate_stream != opt_producer_stream) {
         // (4a) Sync accumulate with producer
         auto event = c10::Event{c10::DeviceType::CUDA};
@@ -136,7 +135,6 @@ namespace torch { namespace autograd {
       AT_ERROR("Gradient (var) is on an unexpected device.");
     }
   }
-      c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
 
   auto& old_var = buffer[pos];
   if (!old_var.defined()) {
