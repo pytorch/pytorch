@@ -201,6 +201,7 @@ Tensor& upsample_nearest1d_out_cpu(
 
 Tensor upsample_nearest1d_cpu(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales) {
   auto output = at::empty({0}, input.options());
+  std::cout << "upsample_nearest1d_cpu.\n";
   upsample_nearest1d_out_cpu_template(output, input, output_size, scales);
   return output;
 }
