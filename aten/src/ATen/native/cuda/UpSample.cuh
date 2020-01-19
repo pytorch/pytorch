@@ -35,10 +35,14 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 && input.size(2) != 0;
+    
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "non-empty 3D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -70,10 +74,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "non-empty 4D input tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -111,10 +119,14 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = false;
+    valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);

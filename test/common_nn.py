@@ -1834,6 +1834,12 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+        input_size=(0, 2, 4),
+        fullname='interpolate_nearest_1d_zero_dim',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3),
         fullname='interpolate_nearest_tuple_1d',
@@ -1843,12 +1849,6 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         input_size=(1, 2, 4),
         fullname='interpolate_nearest_scale_1d',
-        pickle=False,
-    ),
-    dict(
-        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
-        input_size=(0, 2, 4),
-        fullname='interpolate_nearest_1d_zero_dim',
         pickle=False,
     ),
     dict(

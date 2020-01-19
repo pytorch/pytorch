@@ -103,6 +103,10 @@ static void upsample_nearest1d_out_cuda_template(
   Tensor input = input_.contiguous();
   output.resize_({input.size(0), input.size(1), output_width});
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   // upsample_1d_shape_check makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
@@ -161,6 +165,10 @@ static void upsample_nearest1d_backward_out_cuda_template(
 
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_({nbatch, channels, input_width});
+
+  if (grad_input.numel() == 0) {
+    return;
+  }
 
   // upsample_1d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
