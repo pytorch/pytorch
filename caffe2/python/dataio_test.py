@@ -93,7 +93,7 @@ class TestCompositeReader(TestCase):
         for d, offset in zip(data, offsets):
             npt.assert_array_equal(d, range(offset, offset + size))
 
-        # Make an identically-sized empty destnation dataset
+        # Make an identically-sized empty destination dataset
         dst_ds_schema = schema.Struct(
             *[
                 (name, src_ds.content().clone_schema())
@@ -126,7 +126,7 @@ class TestCompositeReader(TestCase):
             for (name, offset) in zip(names, offsets)
         ]
 
-        # Make an identically-sized empty destnation dataset
+        # Make an identically-sized empty destination dataset
         dst_ds_schema = schema.Struct(
             *[
                 (name, src_ds_builder.schema())

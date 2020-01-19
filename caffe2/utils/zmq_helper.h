@@ -55,7 +55,7 @@ class ZmqSocket {
  public:
   explicit ZmqSocket(int type)
       : context_(1), ptr_(zmq_socket(context_.ptr(), type)) {
-    CAFFE_ENFORCE(ptr_ != nullptr, "Faild to create zmq socket.");
+    CAFFE_ENFORCE(ptr_ != nullptr, "Failed to create zmq socket.");
   }
 
   ~ZmqSocket() {
