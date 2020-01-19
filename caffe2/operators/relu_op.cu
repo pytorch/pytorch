@@ -51,7 +51,7 @@ __global__ void ReluCUDAKernel<half2>(const int N, const half2* X, half2* Y) {
 #else
     const float2 xx = __half22float2(X[i]);
     Y[i] =
-        __floats2half2_rn(xx.x > 0.0f ? xx.x : 0.0f, xx.y > 0.0f ? xx.y : 0.0f);
+        __floats2half2_rn(xx.x > 0.0f ? float(xx.x) : 0.0f, xx.y > 0.0f ? float(xx.y) : 0.0f);
 #endif
   }
 }
@@ -101,7 +101,7 @@ __global__ void ReluGradientCUDAKernel<half2>(
     const float2 dy = __half22float2(dY[i]);
     const float2 yy = __half22float2(Y[i]);
     dX[i] =
-        __floats2half2_rn(yy.x > 0.0f ? dy.x : 0.0f, yy.y > 0.0f ? dy.y : 0.0f);
+        __floats2half2_rn(yy.x > 0.0f ? float(dy.x) : 0.0f, yy.y > 0.0f ? float(dy.y) : 0.0f);
 #endif
   }
 }
