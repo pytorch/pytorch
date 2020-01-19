@@ -13642,7 +13642,8 @@ class TestTorchDeviceType(TestCase):
 
     def _test_lobpcg_method(self, device, dtype, method):
         from common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
-        from torch.lobpcg import get_matmul, lobpcg, qform
+        from torch._linalg_utils import get_matmul, qform
+        from torch.lobpcg import lobpcg
 
         def test_tracker(istep, A, B, X, E, R, rerr, nc, k, tol, **params):
             if k <= nc:
@@ -13755,7 +13756,8 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_lobpcg_utils(self, device, dtype):
         from common_utils import random_symmetric_pd_matrix, random_matrix
-        from torch.lobpcg import get_matmul, svqb, ortho, get_RR_transform
+        from torch._linalg_utils import get_matmul
+        from torch.lobpcg import svqb, ortho, get_RR_transform
         mm = torch.matmul
 
         for m, n in [(5, 1), (6, 2), (9, 3), (100, 5)]:

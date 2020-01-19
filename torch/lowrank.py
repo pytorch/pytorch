@@ -1,15 +1,10 @@
 """Implement various linear algebra algorithms for low rank matrices.
 """
 
+__all__ = ['svd', 'pca']
+
 import torch
-
-
-def is_sparse(A):
-    """Check if tensor A is a sparse tensor"""
-    if isinstance(A, torch.Tensor):
-        return A.layout == torch.sparse_coo
-    import scipy.sparse
-    return isinstance(A, scipy.sparse.base.spmatrix)
+from . import _linalg_utils as _utils 
 
 
 def uniform(low=0.0, high=1.0, size=None, dtype=None, device=None):
@@ -46,59 +41,6 @@ def uniform(low=0.0, high=1.0, size=None, dtype=None, device=None):
             i = low + (high - low) * torch.rand(*size, **attrs)
         return r + 1j * i
     return r
-
-
-def get_floating_dtype(A):
-    """Return the floating point dtype of tensor A.
-    """
-    if isinstance(A, torch.Tensor):
-        index = (0, ) * len(A.shape)
-        return (A.__getitem__(index) * 1.0).dtype
-    return A.dtype.type
-
-
-def get_matmul(A):
-    """Return matrix multiplication implementation.
-    """
-    if A is None:  # A is identity
-        return lambda A, other: other
-    if isinstance(A, torch.Tensor):
-        if is_sparse(A):
-            return torch.sparse.mm
-        else:
-            return torch.matmul
-    else:
-        import numpy
-        import scipy.sparse
-        if isinstance(A, scipy.sparse.coo.coo_matrix):
-            return lambda A, other : A.dot(other)
-        elif isinstance(A, numpy.ndarray):
-            return numpy.dot
-
-    raise NotImplementedError('get_matmul(<{} instance>)'
-                              .format(type(A).__name__))
-
-
-def conjugate(A):
-    """Return conjugate of tensor A.
-
-    .. note:: If A's dtype is not complex, A is returned.
-    """
-    if A.dtype in [torch.complex32, torch.complex64, torch.complex128]:    
-        return A.conj()
-    return A
-
-
-def batch_transpose(A):
-    """Return transpose of a matrix or batches of matrices.
-    """
-    return A.transpose(-1, -2)
-
-
-def batch_transjugate(A):
-    """Return transpose conjugate of a matrix or batches of matrices.
-    """
-    return conjugate(batch_transpose(A))
 
 
 def get_approximate_basis(A, q, niter=2, M=None):
@@ -144,21 +86,21 @@ def get_approximate_basis(A, q, niter=2, M=None):
 
     """
     m, n = A.shape[-2:]
-    dtype = get_floating_dtype(A)
-    matmul = get_matmul(A)
+    dtype = _utils.get_floating_dtype(A)
+    matmul = _utils.get_matmul(A)
 
     R = uniform(low=-1.0, high=1.0, size=(n, q),
                 dtype=dtype, device=A.device)
 
-    A_H = batch_transjugate(A)
+    A_H = _utils.transjugate(A)
     if M is None:
         (Q, _) = matmul(A, R).qr()
         for i in range(niter):
             (Q, _) = matmul(A_H, Q).qr()
             (Q, _) = matmul(A, Q).qr()
     else:
-        matmul2 = get_matmul(M)
-        M_H = batch_transjugate(M)
+        matmul2 = _utils.get_matmul(M)
+        M_H = _utils.transjugate(M)
         (Q, _) = (matmul(A, R) - matmul2(M, R)).qr()
         for i in range(niter):
             (Q, _) = (matmul(A_H, Q) - matmul2(M_H, Q)).qr()
@@ -208,13 +150,13 @@ def svd(A, q=6, niter=2, M=None):
 
     """
     m, n = A.shape[-2:]
-    matmul = get_matmul(A)
+    matmul = _utils.get_matmul(A)
     if M is None:
         M_t = None
     else:
-        matmul2 = get_matmul(M)
-        M_t = batch_transpose(M)
-    A_t = batch_transpose(A)
+        matmul2 = _utils.get_matmul(M)
+        M_t = _utils.transpose(M)
+    A_t = _utils.transpose(A)
 
     # Algorithm 5.1 in Halko et al 2009, slightly modified to reduce
     # the number conjugate and transpose operations
@@ -222,7 +164,7 @@ def svd(A, q=6, niter=2, M=None):
         # computing the SVD approximation of a transpose in order to
         # keep B shape minimal
         Q = get_approximate_basis(A_t, q, niter=niter, M=M_t)
-        Q_c = conjugate(Q)
+        Q_c = _utils.conjugate(Q)
         if M is None:
             B_t = matmul(A, Q_c)
         else:
@@ -231,12 +173,12 @@ def svd(A, q=6, niter=2, M=None):
         V = Q.matmul(V)
     else:
         Q = get_approximate_basis(A, q, niter=niter, M=M)
-        Q_c = conjugate(Q)
+        Q_c = _utils.conjugate(Q)
         if M is None:
             B = matmul(A_t, Q_c)
         else:
             B = matmul(A_t, Q_c) - matmul2(M_t, Q_c)
-        U, S, V = torch.svd(batch_transpose(B))
+        U, S, V = torch.svd(_utils.transpose(B))
         U = Q.matmul(U)
 
     return U, S, V
@@ -296,12 +238,12 @@ def pca(A, q=None, center=True, niter=2):
         raise ValueError('niter(={}) must be non-negative integer'
                          .format(niter))
 
-    dtype = get_floating_dtype(A)
+    dtype = _utils.get_floating_dtype(A)
 
     if not center:
         return svd(A, q, niter=niter)
 
-    if is_sparse(A):
+    if _utils.is_sparse(A):
         if len(A.shape) != 2:
             raise ValueError('pca input is expected to be 2-dimensional tensor')
         c = torch.sparse.sum(A, dim=-2) / m
@@ -315,7 +257,7 @@ def pca(A, q=None, center=True, niter=2):
             indices, c.values(), (n, 1), dtype=dtype, device=A.device)
 
         ones_m1_t = torch.ones(A.shape[:-2] + (1, m), dtype=dtype, device=A.device)
-        M = batch_transpose(torch.sparse.mm(C_t, ones_m1_t))
+        M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
         return svd(A, q, niter=niter, M=M)
     else:
         c = A.sum(axis=-2) / m
