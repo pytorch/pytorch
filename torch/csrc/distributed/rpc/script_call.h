@@ -14,13 +14,23 @@ namespace rpc {
 using torch::jit::Operator;
 
 // A ScriptCall instance represents an invocation of a builtin operator for a
-// TorchScript function (not implemented yet). If it is a builtin operator, it
+// TorchScript function. If it is a builtin operator, it
 // contains a shared ptr to the `Operator` and a list of arguments.
+// If it is a TorchScript function, it contains a non empty qualifiedName string
+// to the TorchScript function schema name and a list of arguments.
 class TORCH_API ScriptCall : public RpcCommandBase {
  public:
+  // Constructor for builitin operator call.
   ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
+  // Constructor for TorchScript function call.
+  ScriptCall(
+      const c10::QualifiedName& qualifiedName,
+      std::vector<at::IValue>&& args);
 
+  bool hasOp() const;
   std::shared_ptr<Operator> op() const;
+  bool hasQualifiedName() const;
+  const c10::QualifiedName qualifiedName() const;
   // return the argument stack of this builtin operator
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
@@ -32,7 +42,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
 
  protected:
   virtual void toIValues(std::vector<at::IValue>& ivalues) const;
-  static std::shared_ptr<Operator> fromIValues(
+  static std::unique_ptr<ScriptCall> fromIValues(
       std::vector<at::IValue>& ivalues);
 
  private:
@@ -45,6 +55,9 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   // This field has value if this ScriptCall represents invocation of a builtin
   // operator.
   c10::optional<std::shared_ptr<Operator>> op_;
+  // This field has non empty string if this ScriptCall represents invocation of
+  // an annotated torchscript function defined by users.
+  c10::optional<const c10::QualifiedName> qualifiedName_;
   std::vector<at::IValue> stack_;
 };
 
