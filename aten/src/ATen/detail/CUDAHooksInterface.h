@@ -95,6 +95,10 @@ struct CAFFE2_API CUDAHooksInterface {
     return -1;
   }
 
+  virtual void set_device(int64_t) const {
+    return;
+  }
+
   virtual bool hasPrimaryContext(int64_t device_index) const {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }

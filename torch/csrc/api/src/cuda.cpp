@@ -10,6 +10,14 @@ size_t device_count() {
   return at::detail::getCUDAHooks().getNumGPUs();
 }
 
+int current_device() {
+  return at::detail::getCUDAHooks().current_device();
+}
+
+void set_device(int idx) {
+  return at::detail::getCUDAHooks().set_device(idx);
+}
+
 bool is_available() {
   // NB: the semantics of this are different from at::globalContext().hasCUDA();
   // ATen's function tells you if you have a working driver and CUDA build,

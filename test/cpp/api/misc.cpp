@@ -45,6 +45,22 @@ TEST(UtilsTest, WarnOnce) {
   }
 }
 
+TEST(UtilsTest, SetDevice) {
+  if (!torch::cuda::is_available()) {
+    ASSERT_EQ(torch::cuda::device_count(), 0);
+    ASSERT_EQ(torch::cuda::current_device(), -1);
+    torch::cuda::set_device(10); // No-op
+    return;
+  }
+
+  ASSERT_TRUE(torch::cuda::device_count() > 0);
+  for (int i = 0; i < torch::cuda::device_count(); ++i) {
+    torch::cuda::set_device(i);
+    ASSERT_EQ(torch::cuda::current_device(), i);
+  }
+  ASSERT_THROW(torch::cuda::set_device(10000), c10::Error);
+}
+
 TEST(NoGradTest, SetsGradModeCorrectly) {
   torch::manual_seed(0);
   torch::NoGradGuard guard;

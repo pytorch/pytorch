@@ -151,6 +151,10 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
+void CUDAHooks::set_device(int64_t idx) const {
+  AT_CUDA_CHECK(cudaSetDevice(static_cast<int>(idx)));
+}
+
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);

@@ -53,6 +53,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
+  DeviceGuard guard(CUDADevice(0));
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 

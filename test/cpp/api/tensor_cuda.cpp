@@ -19,6 +19,7 @@ TEST(TensorTest, AllocatesTensorOnTheCorrectDevice_MultiCUDA) {
 }
 
 TEST(TensorTest, ToDevice_MultiCUDA) {
+  at::DeviceGuard guard(at::Device(at::kCUDA, 0));
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 
@@ -60,6 +61,7 @@ TEST(TensorTest, ToDevice_MultiCUDA) {
 }
 
 TEST(TensorTest, ToTensorAndTensorAttributes_MultiCUDA) {
+  at::DeviceGuard guard(at::Device(at::kCUDA, 0));
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 
