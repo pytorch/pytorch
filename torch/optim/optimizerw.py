@@ -47,6 +47,9 @@ class OptimizerW(Optimizer):
                     continue
 
                 if grad.is_sparse:
+                    if weight_decay > 0:
+                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
+                    
                     update = self.get_sparse_update(p, **group)
                 else:
                     update = self.get_update(p, **group)

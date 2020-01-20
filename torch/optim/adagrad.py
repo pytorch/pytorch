@@ -52,7 +52,7 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['sum'].share_memory_()
 
-    def get_update(self, par, eps=1e-10, lr_decay=0., weigh_decay=0., **_):
+    def get_update(self, par, eps=1e-10, lr_decay=0., weight_decay=0., **_):
         grad = par.grad
         if weight_decay > 0:
             grad = grad.add(weight_decay, par)

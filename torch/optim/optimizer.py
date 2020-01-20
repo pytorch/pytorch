@@ -207,7 +207,7 @@ class Optimizer(object):
 
         return loss
 
-    def get_update(self, par, grad, **kwargs):
+    def get_update(self, par, **kwargs):
         """
         Compute the update for a parameter from its gradients.
 
