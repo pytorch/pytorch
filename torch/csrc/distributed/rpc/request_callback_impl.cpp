@@ -102,8 +102,9 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
-      IValue py_ivalue =
-        jit::toIValue(PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()), PyObjectType::get());
+      IValue py_ivalue = jit::toIValue(
+          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()),
+          PyObjectType::get());
 
       ownerRRef->setValue(std::move(py_ivalue));
 
@@ -123,8 +124,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(srf.rrefId());
+      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -145,11 +145,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(prf.rrefId());
+      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result =
-            PythonRpcHandler::getInstance().serialize(jit::toPyObject(rref->getValue()));
+        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+            jit::toPyObject(rref->getValue()));
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
       }
 
@@ -161,8 +160,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           [responseFuture, messageId, rref](
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& /* unused */) {
-            SerializedPyObj result =
-                PythonRpcHandler::getInstance().serialize(jit::toPyObject(rref->getValue()));
+            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+                jit::toPyObject(rref->getValue()));
             Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
             m.setId(messageId);
             responseFuture->markCompleted(m);
@@ -244,10 +243,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       execFuture->addCallback(
           [responseFuture, messageId](
               const Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            Message m = std::move(PropagateGradientsResp()).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
+              const c10::optional<utils::FutureError>& error) {
+            if (!error) {
+              Message m = std::move(PropagateGradientsResp()).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(error->what());
+            }
           });
       return responseFuture;
     };

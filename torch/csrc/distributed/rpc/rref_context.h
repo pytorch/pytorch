@@ -51,12 +51,12 @@ class RRefContext {
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
-  // method.
-  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd, c10::optional<TypePtr> type={});
+  // method, we pass type here to validate or help the rref creation.
+  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd, const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
-  std::shared_ptr<OwnerRRef> getOrCreateOwnerRRef(const RRefId& rrefId, c10::optional<TypePtr> opt_type={});
+  std::shared_ptr<OwnerRRef> getOrCreateOwnerRRef(const RRefId& rrefId, const TypePtr& type);
 
   // Create an empty owner rref of type.
   std::shared_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);

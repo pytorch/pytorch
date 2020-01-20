@@ -4,7 +4,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
 
 namespace torch {
 namespace distributed {
@@ -109,8 +108,7 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   auto& ctx = RRefContext::getInstance();
   auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
   std::shared_ptr<RRef> rref = nullptr;
-  jit::script::ScriptTypeParser typeParser;
-  TypePtr rref_type = typeParser.parseType(rfd.type_str_);
+  TypePtr rref_type = PythonRpcHandler::getInstance().parseTypeFromStr(rfd.type_str_);
   rref = ctx.getOrCreateRRef(rfd, rref_type);
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);

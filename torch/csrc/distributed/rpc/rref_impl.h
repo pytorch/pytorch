@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_interface.h>
@@ -215,7 +215,7 @@ class RRef : public RRefInterface {
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type);
+  RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type);
 
   RRefForkData fork() const;
 
@@ -255,7 +255,7 @@ class UserRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, const TypePtr& type);
+  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, const TypePtr type);
 
   const ForkId forkId_;
 };
@@ -290,10 +290,10 @@ class OwnerRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type)
       : OwnerRRef(ownerId, rrefId, type, {}) {}
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type, c10::optional<IValue> value)
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type, c10::optional<IValue> value)
       : RRef(ownerId, rrefId, type) {
     value_ = std::move(value);
   }
