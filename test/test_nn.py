@@ -10479,6 +10479,7 @@ class TestNNDeviceType(NNTestCase):
         test(torch.nn.Softshrink())
         test(torch.nn.LeakyReLU())
 
+    @onlyCUDA    
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
     def test_conv_cudnn_nhwc(self, device):
