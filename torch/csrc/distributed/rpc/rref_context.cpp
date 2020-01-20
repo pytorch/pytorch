@@ -67,18 +67,17 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
       }
     }
 
-    if (ignoreRRefLeak) {
-      LOG(WARNING)
-          << "Detected RRef Leaks during shutdown. This usually "
-          << "occurs when the application code still holds references to RRef "
-          << "instances when calling shutdown(). If the program has "
-          << "completed correctly and the process is exiting, it is OK to "
-          << "ignore these leaks. However, if you program will keep running "
-          << "after this, these leaks could result in memory leaks on RRef "
-          << "owners. Please make sure all RRefs are out of scope and Python "
-          << "GC has deleted them before calling shutdown(): \n"
-          << ss.str();
-    } else {
+    LOG(WARNING)
+        << "Detected RRef Leaks during shutdown. This usually "
+        << "occurs when the application code still holds references to RRef "
+        << "instances when calling shutdown(). If the program has "
+        << "completed correctly and the process is exiting, it is OK to "
+        << "ignore these leaks. However, if you program will keep running "
+        << "after this, these leaks could result in memory leaks on RRef "
+        << "owners. Please make sure all RRefs are out of scope and Python "
+        << "GC has deleted them before calling shutdown(): \n"
+        << ss.str();
+    if (!ignoreRRefLeak) {
       TORCH_CHECK(false, ss.str());
     }
   }
@@ -135,21 +134,22 @@ void RRefContext::delUser(
 
 c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
     const RRefForkData& rfd,
-    c10::optional<TypePtr> type) {
+    const TypePtr& type) {
   auto& ownerId = rfd.ownerId_;
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
   if (ownerId == getWorkerId()) {
-    return getOwnerRRef(rrefId);
+    auto ownerRRef = getOwnerRRef(rrefId);
+    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    return ownerRRef;
   } else {
-    TORCH_INTERNAL_ASSERT(type.has_value());
-    return createUserRRef(ownerId, rrefId, forkId, type.value());
+    return createUserRRef(ownerId, rrefId, forkId, type);
   }
 }
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     const RRefId& rrefId,
-    c10::optional<TypePtr> type) {
+    const TypePtr& type) {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto iter = owners_.find(rrefId);
   if (iter == owners_.end()) {
@@ -157,15 +157,16 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
-    TORCH_INTERNAL_ASSERT(type.has_value());
     auto rref =
-        c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type.value());
+        c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
     ownerCV_.notify_all();
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
-    return c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    auto ownerRRef = c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    return ownerRRef;
   }
 }
 

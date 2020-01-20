@@ -17,7 +17,6 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"number", NumberType::get()},
       {"None", NoneType::get()},
       {"Any", AnyType::get()},
-      {"PyObject", PyObjectType::get()},
   };
   return map;
 }
