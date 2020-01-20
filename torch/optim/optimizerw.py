@@ -40,7 +40,7 @@ class OptimizerW(Optimizer):
 
         for group in self.param_groups:
             lr = group['lr']
-            weight_decay = group['weight_decay']
+            weight_decay = group.pop('weight_decay')
             for p in group['params']:
                 grad = p.grad
                 if grad is None:
@@ -49,7 +49,7 @@ class OptimizerW(Optimizer):
                 if grad.is_sparse:
                     update = self.get_sparse_update(p, **group)
                 else:
-                    update = self.get_update(p, grad, **group)
+                    update = self.get_update(p, **group)
 
                 p.mul_(1 - weight_decay * lr).add_(-lr, update)
 
