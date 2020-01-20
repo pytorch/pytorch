@@ -209,7 +209,7 @@ OPERATOR_SCHEMA(SwapBestPath)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a sequence of idices and a matrix, enforce that these indices have the
+Given a sequence of indices and a matrix, enforce that these indices have the
 best columnwise scores
 score
 )DOC")
