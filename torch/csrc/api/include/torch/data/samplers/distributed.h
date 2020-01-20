@@ -129,6 +129,32 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
   std::vector<size_t> all_indices_;
 };
 
+/// DistributedStreamSampler like `torch::data::samplers::StreamSampler`
+class DistributedStreamSampler : public DistributedSampler<BatchSize> {
+ public:
+  DistributedStreamSampler(
+      size_t epoch_size,
+      size_t num_replicas = 1,
+      size_t rank = 0,
+      bool allow_duplicates = true);
+
+  /// Resets the `DistributedStreamSampler` to a new set of indices.
+  void reset(optional<size_t> new_size = nullopt) override;
+    
+  /// Returns the next batch of indices.
+  optional<BatchSize> next(size_t batch_size) override;
+    
+  /// Serializes the `DistributedStreamSampler` to the `archive`.
+  void save(serialize::OutputArchive& archive) const override;
+    
+  /// Deserializes the `DistributedStreamSampler` from the `archive`.
+  void load(serialize::InputArchive& archive) override;
+    
+ private:
+  size_t local_epoch_size_ = 0;
+  size_t examples_retrieved_so_far_ = 0;
+};
+
 } // namespace samplers
 } // namespace data
 } // namespace torch

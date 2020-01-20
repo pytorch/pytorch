@@ -161,6 +161,47 @@ size_t DistributedSequentialSampler::index() const noexcept {
   return sample_index_;
 }
 
+DistributedStreamSampler::DistributedStreamSampler(
+    size_t epoch_size,
+    size_t num_replicas,
+    size_t rank,
+    bool allow_duplicates)
+    : DistributedSampler(epoch_size, num_replicas,
+      rank, allow_duplicates) {
+  reset(size_);
+}
+
+optional<BatchSize> DistributedStreamSampler::next(size_t batch_size) {
+  AT_ASSERT(examples_retrieved_so_far_ <= local_epoch_size_);
+  if (examples_retrieved_so_far_ == local_epoch_size_) {
+      return nullopt;
+  }
+  if (examples_retrieved_so_far_ + batch_size > local_epoch_size_) {
+      batch_size = local_epoch_size_ - examples_retrieved_so_far_;
+  }
+  examples_retrieved_so_far_ += batch_size;
+  return BatchSize(batch_size);
+}
+
+void DistributedStreamSampler::reset(optional<size_t> new_size) {
+  size_ = new_size.value_or(size_);
+  local_epoch_size_ = local_sample_count();
+  examples_retrieved_so_far_ = 0;
+}
+
+void DistributedStreamSampler::save(serialize::OutputArchive& archive) const {
+  archive.write(
+    "examples_retrieved_so_far",
+    torch::tensor(static_cast<int64_t>(examples_retrieved_so_far_),
+      torch::kInt64), /*is_buffer=*/true);
+}
+
+void DistributedStreamSampler::load(serialize::InputArchive& archive) {
+  auto tensor = torch::empty(1, torch::kInt64);
+  archive.read("examples_retrieved_so_far", tensor, /*is_buffer=*/true);
+  examples_retrieved_so_far_ = tensor.item<int64_t>();
+}
+
 } // namespace samplers
 } // namespace data
 } // namespace torch
