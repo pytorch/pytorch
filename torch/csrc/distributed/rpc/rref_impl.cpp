@@ -57,7 +57,11 @@ RRefForkData::RRefForkData(
     const ForkId& forkId,
     worker_id_t parent,
     const std::string& type_str)
-    : ownerId_(ownerId), rrefId_(rrefId), forkId_(forkId), parent_(parent), type_str_(std::move(type_str)) {}
+    : ownerId_(ownerId),
+      rrefId_(rrefId),
+      forkId_(forkId),
+      parent_(parent),
+      type_str_(type_str) {}
 
 py::tuple RRefForkData::toPyTuple() const {
   return py::make_tuple(
@@ -91,13 +95,20 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
 
 //////////////////////////////  RRef  /////////////////////////////////////
 
-RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr& type)
-    : RRefInterface(), ownerId_(ownerId), rrefId_(rrefId), type_(type) {}
+RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type)
+    : RRefInterface(),
+      ownerId_(ownerId),
+      rrefId_(rrefId),
+      type_(std::move(type)) {}
 
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId(), type_->str());
+      ownerId_,
+      rrefId_,
+      ctx.genGloballyUniqueId(),
+      ctx.getWorkerId(),
+      type_->str());
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -106,7 +117,7 @@ UserRRef::UserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId,
-    const TypePtr& type)
+    const TypePtr type)
     : RRef(ownerId, rrefId, type), forkId_(forkId) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
@@ -157,8 +168,10 @@ IValue UserRRef::toHere() {
   auto response = deserializeResponse(message);
   auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
   if (isPyObj()) {
-    return jit::toIValue(PythonRpcHandler::getInstance().deserialize(
-           SerializedPyObj::fromIValues(rfr.values())), PyObjectType::get());
+    return jit::toIValue(
+        PythonRpcHandler::getInstance().deserialize(
+            SerializedPyObj::fromIValues(rfr.values())),
+        PyObjectType::get());
   } else {
     return rfr.values().front();
   }

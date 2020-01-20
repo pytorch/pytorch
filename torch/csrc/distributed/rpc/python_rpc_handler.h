@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 namespace torch {
 namespace distributed {
@@ -57,6 +58,17 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
+  // Parse the string to recover the jit_type, this is used for RRef python
+  // pickling/unpickling type recovery. The type string inference rule is as
+  // follows:
+  // 1. first try to parse if this is primitive types.
+  //    i.e. TensorType, IntType, PyObjectType, etc.
+  // 2. if not primitive type, we query the python_cu to see if it is a
+  //    class type or interface type registered in python
+  // We use a ScriptTypeParser instance with custom PythonTypeResolver
+  // to resolve types according to the above rules.
+  TypePtr parseTypeFromStr(const std::string& typeStr);
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
@@ -77,6 +89,10 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
+
+  // jit type parser to parse type_str back to TypePtr for RRef type
+  // recovery when pickling and unpickling RRef
+  std::shared_ptr<jit::script::ScriptTypeParser> typeParser_;
 };
 
 } // namespace rpc
