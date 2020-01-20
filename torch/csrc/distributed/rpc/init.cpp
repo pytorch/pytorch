@@ -22,6 +22,88 @@ namespace {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+using namespace torch::distributed::autograd;
+
+std::shared_ptr<Operator> matchBuiltinOp(
+    const std::string& opName,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    Stack& stack) {
+  Symbol symbol = Symbol::fromQualString(opName);
+  if (symbol.is_aten()) {
+    for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
+      try {
+        // FIXME: This is temporary solution. We should at least refactor
+        // ``createStackForSchema`` to avoid throwing an error.
+        stack = torch::jit::createStackForSchema(
+            op->schema(), args, kwargs, c10::nullopt);
+      } catch (std::runtime_error& e) {
+        VLOG(1) << "Couldn't match schema: " << op->schema()
+                << " to args: " << args << " and kwargs: " << kwargs
+                << ", reason: " << e.what();
+        continue;
+      }
+
+      // Found the right op!
+      return op;
+    }
+  }
+
+  TORCH_CHECK(
+      false,
+      "Failed to match operator name ",
+      opName,
+      " and arguments "
+      "(args: ",
+      args,
+      ", kwargs: ",
+      kwargs,
+      ") to a builtin operator");
+}
+
+py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
+  switch (messageType) {
+    case MessageType::SCRIPT_RET: {
+      auto& ret = static_cast<ScriptResp&>(rpc);
+      Stack stack;
+      stack.push_back(ret.value());
+      {
+        pybind11::gil_scoped_acquire ag;
+        // The createPyObjectForStack does not acquire GIL, but creating a new
+        // py::object requires GIL.
+        return torch::jit::createPyObjectForStack(std::move(stack));
+      }
+    }
+    case MessageType::PYTHON_RET: {
+      // TODO: Try to avoid a copy here.
+      auto& resp = static_cast<PythonResp&>(rpc);
+
+      return PythonRpcHandler::getInstance().loadPythonUDFResult(
+          resp.pickledPayload(), resp.tensors());
+    }
+    case MessageType::FORWARD_AUTOGRAD_RESP: {
+      auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      // Handle the original RPC.
+      auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
+      return toPyObjInternal(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
+    }
+    default: {
+      TORCH_CHECK(false, "Unrecognized response message type ", messageType);
+    }
+  }
+}
+
+py::object toPyObj(const Message& message) {
+  return toPyObjInternal(*deserializeResponse(message), message.type());
+}
+
 
 PyObject* rpc_init(PyObject* /* unused */) {
   auto rpc_module =
@@ -298,7 +380,9 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRemoteBuiltin(agent, dst, opName, rf, args, kwargs);
+        Stack stack;
+        auto op = matchBuiltinOp(opName, args, kwargs, stack);
+        return RemoteBuiltin(agent, dst, op, stack);
       });
 
   module.def(

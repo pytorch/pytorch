@@ -9,6 +9,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using RRefPtr = c10::intrusive_ptr<RRef>;
+
 py::object toPyObj(const Message& message);
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
@@ -26,13 +28,11 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
-PyRRef pyRemoteBuiltin(
+RRefPtr RemoteBuiltin(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
-    const py::args& args,
-    const py::kwargs& kwargs);
+    const std::shared_ptr<Operator>& opName,
+    const Stack& stack);
 
 PyRRef pyRemotePythonUdf(
     RpcAgent& agent,
