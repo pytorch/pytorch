@@ -593,7 +593,8 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
              " and input of shape ", input.sizes());
 
     // Apply group norm
-    auto input_reshaped = input.contiguous().view({1, b * num_groups, -1});
+    // view(..., -1) does not work for empty tensor
+    auto input_reshaped = input.contiguous().view({1, b * num_groups, b ? -1 : 1});
 
     auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
                               cudnn_enabled);

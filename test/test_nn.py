@@ -8919,8 +8919,11 @@ class TestNNDeviceType(NNTestCase):
         out.backward(gO)
         self.assertEqual(out.size(), inp.size())
         for p in module.parameters():
+            # TODO: p.grad should not be None, but this is not yet supported
+            # (https://github.com/pytorch/pytorch/issues/12013)
             if p.requires_grad and p.grad is not None:
                 self.assertEqual(p.grad, torch.zeros_like(p.grad))
+        self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     def test_Dropout(self, device):
         input = torch.Tensor(1000)
@@ -8990,6 +8993,14 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_GroupNorm_empty(self, device):
+        mod = torch.nn.GroupNorm(2, 4).to(device)
+        inp = torch.randn(0, 4, 2, 2, device=device)
+        self._test_module_empty_input(mod, inp)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp)
 
     def test_BatchNorm_empty(self, device):
         mod = torch.nn.BatchNorm2d(3).to(device)
