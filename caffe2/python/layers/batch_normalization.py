@@ -19,6 +19,7 @@ class BatchNormalization(ModelLayer):
         bias_optim=None,
         momentum=0.9,
         order='NCHW',
+        scale_init_value=1.0,
         **kwargs
     ):
         super(BatchNormalization, self).__init__(
@@ -50,7 +51,7 @@ class BatchNormalization(ModelLayer):
 
         self.scale = self.create_param(param_name='scale',
                                        shape=[input_dims],
-                                       initializer=('ConstantFill', {'value': 1.0}),
+                                       initializer=('ConstantFill', {'value': scale_init_value}),
                                        optimizer=scale_optim)
         self.bias = self.create_param(param_name='bias',
                                        shape=[input_dims],

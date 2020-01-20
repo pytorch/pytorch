@@ -52,8 +52,8 @@ class AliasDb {
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
-      const at::ArrayRef<Value*>& a,
-      const at::ArrayRef<Value*>& b) const;
+      const at::ArrayRef<Value*> a,
+      const at::ArrayRef<Value*> b) const;
 
   // Do `a` and `b` potentially share a memory location?
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
@@ -73,6 +73,11 @@ class AliasDb {
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
+
+  // Is it safe to change whether `a` and `b` alias each other ?
+  TORCH_API bool safeToChangeAliasingRelationship(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -136,6 +141,8 @@ class AliasDb {
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
 
+  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
+
   /**
    * Special analysis methods
    */
@@ -186,6 +193,8 @@ class AliasDb {
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
   bool mayAliasWildcard(const Value* v) const;
+  bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   /**
    * State for tracking write info.
