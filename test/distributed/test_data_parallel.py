@@ -630,6 +630,35 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_zero_grad(self):
+        # zero_grad should zero the original parameters, not just the copies
+
+        class Net(torch.nn.Module):
+            def __init__(self, testcase):
+                super(Net, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, 5)
+                self._testcase = testcase
+
+            def forward(self, x):
+                x = self.conv1(x)
+
+                self.zero_grad()
+                ohe = torch.rand_like(x)
+                x.backward(gradient=ohe, retain_graph=True)
+                self.zero_grad()
+
+                for p in self.parameters():
+                    self._testcase.assertTrue(p.grad is None or (p.grad == 0.).all())
+
+                return x
+
+        module = Net(self).cuda()
+        dpm = dp.DataParallel(module)
+        dpm(torch.rand(4, 3, 6, 5))
+
+        for p in dpm.parameters():
+            self.assertTrue(p.grad is None or (p.grad == 0.).all())
 
 
 if __name__ == '__main__':

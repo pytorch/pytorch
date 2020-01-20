@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import weakref
 
 import torch
 from ..parameter import Parameter
@@ -1164,4 +1165,17 @@ class Module(object):
         replica._parameters = replica._parameters.copy()
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
+
+        # zero_grad on the replica should zero the parent as well
+        old_zero_grad = replica.__class__.zero_grad
+        weak_self = weakref.ref(replica)
+
+        def zero_grad():
+            replica = weak_self()
+            if replica:
+                old_zero_grad(replica)
+            self.zero_grad()
+
+        replica.zero_grad = zero_grad
+
         return replica
