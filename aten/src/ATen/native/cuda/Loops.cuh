@@ -261,24 +261,25 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive strided loop
-    int tid = threadIdx.x;
+  return_t results[thread_work_size];
+  arg_t args[thread_work_size][nargs];
+
+  if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
+    // load
+    #pragma unroll
+    for (int i = 0; i < arity; i++) {
+      auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
+      memory::checked_unroll<arg_t, num_threads, block_work_size>::load(args_accessor, args_base[i], remaining);
+    }
+    // compute
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
-      if (tid < remaining) {
-        return_t *result = result_base + tid;
-        arg_t args[nargs];
-        #pragma unroll
-        for (int j = 0; j < arity; j++) {
-          args[j] = reinterpret_cast<arg_t *>(args_base[j])[tid];
-        }
-        *result = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args);
-      }
-      tid += num_threads;
+      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
+    // store
+    auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
+    memory::checked_unroll<return_t, num_threads, block_work_size>::store(result_base, result_accessor, remaining);
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    return_t results[thread_work_size];
-    arg_t args[thread_work_size][nargs];
     // load
     #pragma unroll
     for (int i = 0; i < arity; i++) {
