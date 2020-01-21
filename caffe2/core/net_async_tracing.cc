@@ -461,7 +461,7 @@ std::shared_ptr<Tracer> create(
     const std::string& net_name) {
   // Enable the tracer if the net has the "enable_tracing" argument set OR
   // if the command line option includes the net name option in the list of
-  // tracable nets.
+  // traceable nets.
   bool trace_net = hasEnableTracingFlag(net) || isTraceableNetName(net_name);
   return trace_net
       ? std::make_shared<Tracer>(net, net_name, getTracingConfigFromNet(net))

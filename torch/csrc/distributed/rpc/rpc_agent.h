@@ -138,10 +138,10 @@ class TORCH_API RpcAgent {
   // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
 
-  // Retrive metrics as KV map
+  // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
-  // Retrive debug info in addition to metrics as KV map
+  // Retrieve debug info in addition to metrics as KV map
   virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
 
  protected:
