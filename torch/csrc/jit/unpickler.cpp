@@ -100,11 +100,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case ListType::Kind: {
         // specialized lists do not need their type refined, so we can exit
         // early here
-        if (!w.value.isGenericList()) {
+        if (!w.value.isList()) {
           break;
         }
         auto elem_type = w.static_type->cast<ListType>()->getElementType();
-        auto lst = w.value.toGenericList();
+        auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue& item : lst) {
           Work elem = {elem_type, item};
@@ -217,7 +217,7 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
 template <typename T>
 static std::vector<T> convertList(const IValue& v) {
   return fmap(
-      v.toGenericListRef(), [](const IValue& elem) { return elem.to<T>(); });
+      v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -438,7 +438,7 @@ void Unpickler::readGlobal(
       });
     } else if (class_name == "IntList") {
       globals_.emplace_back([this] {
-        stack_.back().toGenericList().unsafeSetElementType(IntType::get());
+        stack_.back().toList().unsafeSetElementType(IntType::get());
       });
     } else {
       AT_ERROR("Unknown pickler class id", class_name);
@@ -471,7 +471,7 @@ void Unpickler::readGlobal(
       // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
       globals_.emplace_back([this, elem_type] {
         // Pop reduce arg off the stack
-        auto data = stack_.back().toTuple()->elements().at(0).toGenericList();
+        auto data = stack_.back().toTuple()->elements().at(0).toList();
         stack_.pop_back();
         data.unsafeSetElementType(elem_type);
         stack_.emplace_back(std::move(data));
@@ -685,8 +685,8 @@ void Unpickler::readList(IValue list_ivalue) {
     for (const auto& elem : elements) {
       list.push_back(elem.toBool());
     }
-  } else if (list_ivalue.isGenericList()) {
-    auto list = std::move(list_ivalue).toGenericList();
+  } else if (list_ivalue.isList()) {
+    auto list = std::move(list_ivalue).toList();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem);

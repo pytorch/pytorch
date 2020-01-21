@@ -44,7 +44,7 @@ TypePtr IValue::type() const {
       return DictType::create(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return ListType::create(toGenericList().elementType());
+      return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
     case Tag::Device:
@@ -88,10 +88,10 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toGenericListRef().size() == 0) {
+  if (the_list.toListRef().size() == 0) {
     out << "annotate(" << the_list.type()->python_str() << ", [])";
   } else {
-    return printList(out, the_list.toGenericListRef(), "[", "]", formatter);
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
   return out;
 }
@@ -220,7 +220,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Capsule:
       return out << "Capsule";
     case IValue::Tag::GenericList:
-      return printList(out, v.toGenericList(), "[", "]", formatter);
+      return printList(out, v.toList(), "[", "]", formatter);
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
