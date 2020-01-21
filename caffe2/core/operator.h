@@ -187,7 +187,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // if the first input is a tensor list, we get input tensors by indexing into that list.
       // currently, this means that only tensors from that list are accessible as inputs.
       // any hypothetical input tensors that come after the list are not accessible.
-      auto tensorList = newstyle_inputs_[0].toTensorListRef();
+      auto tensorList = newstyle_inputs_[0].toTensorVector();
       DCHECK_LT((size_t)idx, tensorList.size());
       ival = tensorList[idx];
     } else {
@@ -645,7 +645,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
-  // Preferrably use c10::optional, but nvcc doesn't work
+  // Preferably use c10::optional, but nvcc doesn't work
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
@@ -714,7 +714,7 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
 template <>
 inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
     const c10::IValue& value) const {
-  auto vs = value.toIntListRef();
+  auto vs = value.toIntVector();
   vector<int> out;
   out.reserve(vs.size());
   for (int64_t v : vs) {
@@ -726,7 +726,7 @@ inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
 template <>
 inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
     const c10::IValue& value) const {
-  const auto& vs = value.toDoubleListRef();
+  const auto& vs = value.toDoubleVector();
   vector<float> out;
   out.reserve(vs.size());
   for (double v : vs) {

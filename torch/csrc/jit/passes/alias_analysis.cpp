@@ -336,8 +336,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-    case prim::unchecked_cast:
       return analyzeExtractor(node);
+    case prim::unchecked_cast:
+      return makePointerTo(node->output(), node->input());
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
@@ -660,7 +661,7 @@ void AliasDb::analyzeWait(Node* node) {
 
 void AliasDb::analyzeTupleConstruct(Node* node) {
   // Because we currently mark all Tuples as needing annotation
-  // (even those containing just prmitive types), an element needs to be created
+  // (even those containing just primitive types), an element needs to be created
   // for TupleConstruct. When that changes we can create an element
   // only if it contains elements which need annotation
   getOrCreateElement(node->output());

@@ -203,7 +203,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     data_ptr_ = std::move(data_ptr);
     // NOTE: data_type might change and so it's also possible that capacity
     // might not be divisible by itemsize. There is no way for us to keep track
-    // of the exact capacity if we're not explicity storing is. More conrectely
+    // of the exact capacity if we're not explicitly storing is. More concretely
     // capacity() might not return the value that was set here, if itemsize does
     // not evenly divide it.
     numel_ = capacity / data_type_.itemsize();

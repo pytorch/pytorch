@@ -172,7 +172,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
       }
     );
   } else {
-    auto offset_calc = at::native::make_offset_calculator<1>(iter);
+    auto offset_calc = at::native::legacy::make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
       rng_engine_inputs,

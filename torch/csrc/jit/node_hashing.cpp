@@ -92,8 +92,8 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   if (a1.isString()) {
     return attributesEqual(a1.toStringRef(), a2.toStringRef());
   }
-  if (a1.isGenericList()) {
-    return attributesEqual(a1.toGenericListRef(), a2.toGenericListRef());
+  if (a1.isList()) {
+    return attributesEqual(a1.toListRef(), a2.toListRef());
   }
   if (a1.isTuple()) {
     at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();

@@ -382,7 +382,7 @@ class CheckpointManager(object):
         Args:
             user_epoch: An integer. Optional parameter for user to explicitly
                 identify the epoch-id to load checkpoint from
-        Retruns:
+        Returns:
             epoch: the epoch-id to load checkpoints from
                 or None if no checkpoints were written
         """
@@ -586,7 +586,7 @@ class MultiNodeCheckpointManager(object):
         Args:
             user_epoch: An integer. Optional parameter for user to explicitly
                 identify the epoch-id to load checkpoint from
-        Retruns:
+        Returns:
             epoch: the epoch-id to load checkpoints from
                 or None if no checkpoints were written
         """
