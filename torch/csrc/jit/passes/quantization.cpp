@@ -843,30 +843,37 @@ class InsertQuantDeQuantHelper {
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
-      TORCH_CHECK(toAffine(qscheme_for_graph_.at(g)) == toAffine(qscheme) ||
+      TORCH_CHECK(
+          qscheme_for_graph_.at(g) == qscheme ||
 
-                  "Quantizing same graph with different types of "
-                  "QSchemes is not supported.\n",
-                  " Expecting:",
-                  c10::toString(qscheme_for_graph_.at(g)),
-                  " Got:",
-                  c10::toString(qscheme));
+              "Quantizing same graph with different types of "
+              "QSchemes is not supported.\n",
+          " Expecting:",
+          c10::toString(qscheme_for_graph_.at(g)),
+          " Got:",
+          c10::toString(qscheme));
     } else {
-      qscheme_for_graph_[g] = qscheme;
+      qscheme_for_graph_[g] = toAffine(qscheme);
     }
   }
+
   c10::optional<script::Module> findChildModuleToQuantize(
       script::Module& module,
       Value* child_instance);
   void collectObserverNodesAndValueToQuantize(script::Module& module, Value*);
+  // Cleanup observer nodes from graph and observer modules
+  // from module object and ClassType
   void cleanup(script::Module& module);
   void cleanup(script::Module& module, Graph* g);
   void quantizeTensors(script::Module& module, Graph* g, Value* self);
 
  private:
-  // TODO: we don't need to call this for each graph
   std::unordered_map<Graph*, std::vector<std::string>>
       observer_modules_to_remove_;
+  // We only remove observer module attributes from type in the
+  // first encounter of the graph, after that since the attributes
+  // is already removed from the ClassType, we'll use the list of slot index to replay
+  // this removal
   std::unordered_map<Graph*, std::vector<int>> removed_observer_slots_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
   // Map from Graph to observer node, we can use observer node to
@@ -913,9 +920,7 @@ void InsertQuantDeQuantHelper::cleanup(script::Module& module) {
   }
 }
 
-void InsertQuantDeQuantHelper::cleanup(
-    script::Module& module,
-    Graph* g) {
+void InsertQuantDeQuantHelper::cleanup(script::Module& module, Graph* g) {
   GRAPH_DUMP("Before Remove Observers:", g);
   if (nodes_to_destroy_.count(g)) {
     for (auto& n : nodes_to_destroy_.at(g)) {
@@ -927,10 +932,12 @@ void InsertQuantDeQuantHelper::cleanup(
     nodes_to_destroy_.at(g).clear();
   }
 
-  // If we have seen this graph before, we'll replay the observer
-  // slots removal using the slot index
+  // If we have seen this graph before, this means the observer
+  // attributes has been removed from the type, but the slot
+  // index of these attributes are kept in the list, we'll replay the observer
+  // slots removal using these slot indexes
   if (removed_observer_slots_.count(g)) {
-    for (auto slot: removed_observer_slots_.at(g)) {
+    for (auto slot : removed_observer_slots_.at(g)) {
       module._ivalue()->unsafeRemoveSlot(slot);
     }
   }
@@ -938,14 +945,15 @@ void InsertQuantDeQuantHelper::cleanup(
   // Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
-  // O(N) where N is number of observer moduels with this optimization
+  // O(N) where N is number of observer modules with this optimization
   if (observer_modules_to_remove_.count(g)) {
     auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {
       auto observer_name = observers[i];
       GRAPH_DEBUG("Trying to remove: ", observer_name);
       if (module.type()->hasAttribute(observer_name)) {
-        removed_observer_slots_[g].push_back(module.type()->getAttributeSlot(observer_name));
+        removed_observer_slots_[g].push_back(
+            module.type()->getAttributeSlot(observer_name));
         module._ivalue()->unsafeRemoveAttr(observer_name);
         module.type()->unsafeRemoveAttribute(observer_name);
       }
@@ -1014,7 +1022,9 @@ std::tuple<c10::QScheme, QParamMap> InsertQuantDeQuantHelper::
     getQSchemeAndQParamMap(script::Module& module, Node* n) {
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
-  TORCH_INTERNAL_ASSERT(v->type()->isSubtypeOf(TensorType::get()), "Expected output of observer node to be Tensor");
+  TORCH_INTERNAL_ASSERT(
+      v->type()->isSubtypeOf(TensorType::get()),
+      "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
       observer_name,
@@ -1408,8 +1418,7 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     ConvBNParameters& r) {
   if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
       !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
-      !hastensor(bn, "running_var") ||
-      !bn.hasattr("eps")) {
+      !hastensor(bn, "running_var") || !bn.hasattr("eps")) {
     return false;
   }
 
@@ -1525,8 +1534,10 @@ graph(%self, %x):
             GRAPH_UPDATE("Removing bias constant from conv module");
             conv_submodule.type()->unsafeRemoveConstant("bias");
           } else {
-            TORCH_CHECK(conv_submodule.type()->findAttributeSlot("bias").has_value());
-            GRAPH_UPDATE("Removing existing non-Tensor bias attribute from conv module");
+            TORCH_CHECK(
+                conv_submodule.type()->findAttributeSlot("bias").has_value());
+            GRAPH_UPDATE(
+                "Removing existing non-Tensor bias attribute from conv module");
             conv_submodule._ivalue()->unsafeRemoveAttr("bias");
             conv_submodule.type()->unsafeRemoveAttribute("bias");
           }

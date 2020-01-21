@@ -27,7 +27,7 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // specifically, each NCCL call is scheduled on a separate CUDA stream that is
 // different from the current CUDA stream. This is for the purpose of
 // achieving potentially concurrency and better performance. As a result,
-// it is the callers' responsibilty to make sure that the CUDA stream their
+// it is the callers' responsibility to make sure that the CUDA stream their
 // code works on needs to wait for the NCCL operation from
 // this class.
 //
