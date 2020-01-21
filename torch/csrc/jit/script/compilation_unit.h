@@ -283,5 +283,17 @@ struct StrongFunctionPtr {
   std::shared_ptr<script::CompilationUnit> cu_;
   Function* function_;
 };
+
+class ScriptCodeObj : public StrongFunctionPtr {
+ public:
+  ScriptCodeObj(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* function,
+      std::string qualname)
+      : StrongFunctionPtr(cu, function), qualname(std::move(qualname)) {}
+
+  std::string qualname;
+};
+
 } // namespace jit
 } // namespace torch
