@@ -121,10 +121,20 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
           T *output,
-          T *total_weight)
+          T *total_weight,
+          int nElement)
 {
-  if (*total_weight > 0)
+  if (nElement == 0) {
+    // Mean reduction on empty tensors produces NaN
+#if !AT_ROCM_ENABLED()
+    *output = std::nan("");
+#else // AT_ROCM_ENABLED
+    *output = .0/.0;
+#endif
+  }
+  if (*total_weight != 0) {
     *output = THCNumerics<T>::div(*output, *total_weight);
+  }
 }
 
 template<typename T>

@@ -41,14 +41,14 @@ from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, PY3, to_gpu, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, TemporaryFileName
+    ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf
+    skipCUDAIfRocm, skipCUDAIf, expectedFailureXLA
 
 from torch.nn import MultiheadAttention
 
@@ -4291,19 +4291,6 @@ class TestNN(NNTestCase):
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
-
-    def test_nll_loss_mismatched_batch(self):
-        x = torch.randn((10, 3), requires_grad=True)
-        # t should have size (10,)
-        t = torch.zeros((3,), dtype=torch.int64)
-        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
-            F.nll_loss(x, t)
-
-    def test_nll_loss_out_of_bounds_ignore_index(self):
-        x = torch.randn(6, 3, requires_grad=True)
-        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64)
-        for reduction in ['mean', 'none']:
-            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
     def test_poisson_nll_loss_reduction_modes(self):
         input = torch.tensor([0.5, 1.5, 2.5])
@@ -10531,6 +10518,70 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    def test_nll_loss_mismatched_batch(self, device):
+        x = torch.randn((10, 3), requires_grad=True, device=device)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self, device):
+        x = torch.randn(6, 3, requires_grad=True, device=device)
+        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+        for reduction in ['mean', 'none']:
+            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
+
+    def _nll_loss_helper(self, input_size, reduction, expected, device):
+        input = torch.rand(input_size, requires_grad=True, device=device)
+        num_channels = input_size[1]
+        target_size = (input_size[0], ) + tuple(input_size[2:])
+        target = torch.randint(num_channels, target_size, device=device)
+
+        output = F.nll_loss(input, target, reduction=reduction)
+        self.assertEqual(output, expected)
+
+        output.sum().backward()
+        self.assertEqual(input.grad.size(), input.size())
+
+    def test_nll_loss_empty_tensor_reduction_none(self, device):
+        self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device)
+        self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
+
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    @expectedFailureXLA  # https://github.com/pytorch/xla/issues/1539
+    def test_nll_loss_empty_tensor_reduction_mean(self, device):
+        nan = torch.tensor(float('nan'), device=device)
+        self._nll_loss_helper([0, 3], "mean", nan, device)
+        self._nll_loss_helper([0, 3, 5, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
+
+    def test_nll_loss_empty_tensor_reduction_sum(self, device):
+        zero = torch.tensor(0, device=device)
+        self._nll_loss_helper([0, 3], "sum", zero, device)
+        self._nll_loss_helper([0, 3, 5, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
+
+    def test_nll_loss_total_weight_is_zero(self, device):
+
+        def helper(input_size):
+            input = torch.ones(input_size, requires_grad=True, device=device)
+            num_channels = input_size[1]
+            target_size = (input_size[0], ) + tuple(input_size[2:])
+            target = torch.zeros(target_size, dtype=torch.long, device=device)
+            weight = torch.zeros([num_channels], device=device)
+            self.assertEqual(F.nll_loss(input, target, weight).item(), 0)
+
+        helper([2, 3])
+        helper([2, 3, 5, 7])
+        helper([2, 3, 5, 7, 9])
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
