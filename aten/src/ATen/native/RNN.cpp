@@ -558,12 +558,13 @@ private:
     switch(qa.scalar_type()) {
       case at::kQInt8:
         return qa;
-      case at::kQUInt8:
-      case at::kQInt32:
+      case at::kQUInt8:  // Fallthrough
+      case at::kQInt32: {
         Tensor dqa = qa.dequantize();
         Tensor qqa = at::quantize_per_tensor(dqa, out_scale.toDouble(),
                                              out_zero_point.toLong(), qtype);
         return qqa;
+      }
       default:
         return qa;
     }
