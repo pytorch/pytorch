@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
@@ -26,6 +27,7 @@ PythonRpcHandler::PythonRpcHandler() {
   pyLoadReturnValue_ = getFunction(module, "_load_return_value");
   pySerialize_ = getFunction(module, "serialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
+  jitCompilationUnit_ = torch::jit::get_python_cu();
 }
 
 void PythonRpcHandler::cleanup() {
@@ -34,11 +36,17 @@ void PythonRpcHandler::cleanup() {
   pyLoadReturnValue_ = py::none();
   pySerialize_ = py::none();
   pyHandleException_ = py::none();
+  jitCompilationUnit_ = nullptr;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
   static PythonRpcHandler handler;
   return handler;
+}
+
+std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
+    jitCompilationUnit() {
+  return jitCompilationUnit_;
 }
 
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(

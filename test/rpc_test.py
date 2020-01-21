@@ -18,6 +18,7 @@ from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch._jit_internal import _qualified_name
 
 
 def requires_process_group_agent(message=""):
@@ -237,6 +238,23 @@ def set_global_rref(rref):
 def clear_global_rref():
     global global_rref
     global_rref = None
+
+
+@torch.jit.script
+class MyScriptClass:
+    def __init__(self):
+        self.a = 10
+
+
+class MyScriptModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.a = 10
+
+    @torch.jit.script_method
+    def my_method(self):
+        self.a = 11
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -765,6 +783,53 @@ class RpcTest(RpcAgentTestFixture):
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
+
+    @dist_init
+    def test_script_function_exception(self):
+        @torch.jit.script
+        def no_args():
+            a = 1
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(Exception, "no_args"):
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
+
+    @dist_init
+    def test_script_functions_not_supported(self):
+        # Right now _rpc_sync_torchscript does not accept annotated torchscript
+        # class name or script module class name or their class method names.
+        # But rpc_sync still accepts script class name and run it in
+        # the same code path as python call.
+        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
+        # accept script module and script module method.
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptClass),
+                args=())
+        ret = rpc.rpc_sync(
+            'worker{}'.format(dst_rank), MyScriptClass, args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule),
+                args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule().my_method),
+                args=())
+        # Python 3.5 and Python 3.6 throw different error message, the only
+        # common word can be greped is "pickle".
+        with self.assertRaisesRegex(Exception, "pickle"):
+            ret = rpc.rpc_sync(
+                'worker{}'.format(dst_rank),
+                MyScriptModule().my_method,
+                args=())
 
     @dist_init
     def test_nested_rpc(self):
