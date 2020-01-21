@@ -8,7 +8,7 @@
 
 #include <cusparse.h>
 
-#if (!((CUSPARSE_VER_MAJOR >= 10) && (CUSPARSE_VER_MINOR >= 2)))
+#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10200)
 const char* cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
   {
