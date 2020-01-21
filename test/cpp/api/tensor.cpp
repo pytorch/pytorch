@@ -286,14 +286,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimIntegralType) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  tensor = torch::tensor({1l, 2l, 3l});
-  ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kLong);
-  ASSERT_TRUE(exactly_equal(tensor[0], 1));
-  ASSERT_TRUE(exactly_equal(tensor[1], 2));
-  ASSERT_TRUE(exactly_equal(tensor[2], 3));
-
   tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
@@ -644,10 +636,6 @@ void test_TorchTensorCtorWithNonDtypeOptions_expected_dtype(c10::ScalarType defa
   ASSERT_EQ(torch::tensor({1, 2, 3}, torch::TensorOptions()).dtype(), torch::kLong);
   ASSERT_EQ(torch::tensor(at::ArrayRef<int>({1, 2, 3}), torch::TensorOptions()).dtype(), torch::kLong);
   ASSERT_EQ(torch::tensor(std::vector<int>({1, 2, 3}), torch::TensorOptions()).dtype(), torch::kLong);
-
-  ASSERT_EQ(torch::tensor({1l, 2l, 3l}, torch::TensorOptions()).dtype(), torch::kLong);
-  ASSERT_EQ(torch::tensor(at::ArrayRef<int64_t>({1l, 2l, 3l}), torch::TensorOptions()).dtype(), torch::kLong);
-  ASSERT_EQ(torch::tensor(std::vector<int64_t>({1l, 2l, 3l}), torch::TensorOptions()).dtype(), torch::kLong);
 
   ASSERT_EQ(torch::tensor({1., 2., 3.}, torch::TensorOptions()).dtype(), default_dtype);
   ASSERT_EQ(torch::tensor(at::ArrayRef<double>({1., 2., 3.}), torch::TensorOptions()).dtype(), default_dtype);
