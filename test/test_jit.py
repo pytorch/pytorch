@@ -4703,6 +4703,22 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
         self.assertEqual(out.pop(), "mom")
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_getstate_setstate(self):
+        def f():
+            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            s = val.__getstate__()
+            # TODO: sort out whether unpickler should call __new__ or __init__
+            val2 = torch.classes._TorchScriptTesting_StackString(["0", "0"])
+            val2.__setstate__(s)
+            return val.pop(), val2.pop()
+        ret = f()
+        self.assertEqual(ret[0], ret[1])
+
+        ret = torch.jit.script(f)()
+        self.assertEqual(ret[0], ret[1])
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
