@@ -7,7 +7,6 @@
 namespace torch {
 namespace jit {
 
-using namespace torch::autograd;
 using namespace torch::jit::script;
 
 void testIValue() {
