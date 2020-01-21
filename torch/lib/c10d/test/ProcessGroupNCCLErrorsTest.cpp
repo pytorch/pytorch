@@ -56,7 +56,13 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   }
 
   size_t getNCCLCommCacheSize() {
+    std::unique_lock<std::mutex> lock(devNCCLCommMapLock_);
     return devNCCLCommMap_.size();
+  }
+
+  size_t getOutstandingWorkSize() {
+    std::unique_lock<std::mutex> lock(outstandingWorkMutex_);
+    return outstandingWork_.size();
   }
 
   void simulate_error() {
@@ -170,6 +176,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Now run all reduce with errors.
   pg.simulate_error();
   work = pg.allreduce(tensors_);
@@ -184,12 +194,20 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
   EXPECT_EQ(0, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Verify we can recover from errors.
   pg.reset_error();
   work = pg.allreduce(tensors_);
   work->wait();
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
 }
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   bool skip;
@@ -208,6 +226,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Now run all reduce with errors.
   pg.set_timedout_error();
   work = pg.allreduce(tensors_);
@@ -217,12 +239,20 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
   EXPECT_EQ(0, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Verify we can recover from errors.
   pg.reset_timedout_error();
   work = pg.allreduce(tensors_);
   work->wait();
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
@@ -241,6 +271,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Now run all reduce with errors.
   pg.simulate_error();
   work = pg.allreduce(tensors_);
@@ -257,10 +291,18 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
   EXPECT_EQ(0, pg.getNCCLCommCacheSize());
 
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
+
   // Verify we can recover from errors.
   pg.reset_error();
   work = pg.allreduce(tensors_);
   pg.barrier()->wait();
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+
+  // Wait for watchdog to clear work.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getOutstandingWorkSize());
 }
