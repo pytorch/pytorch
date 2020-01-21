@@ -123,6 +123,10 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   auto& optim3_2_state = optim3_2.state();
   auto& optim3_state = optim3.state();
 
+  //optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
+  ASSERT_TRUE(optim3_2_param_groups.size() == 1);
+  ASSERT_TRUE(optim3_2_state.size() == 2);
+
   //optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
   ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
@@ -158,7 +162,7 @@ void write_tensors_to_archive(
       key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
   for (size_t index = 0; index < buffers.size(); ++index) {
     archive.write(
-        key + "/" + c10::to_string(index), buffers[index]);
+        key + "/" + c10::to_string(index), buffers[index], /*is_buffer=*/true);
   }
 }
 
