@@ -83,7 +83,7 @@ class _Functional(object):
                 if schema.inf == max_output:
                     raise ValueError(
                         "For operators with max_output == inf,\
-                        user should pass num_output explicity."
+                        user should pass num_output explicitly."
                     )
                 output_names = get_name_list(
                     output_prefix, max_output, max_output

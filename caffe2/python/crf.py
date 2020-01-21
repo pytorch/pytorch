@@ -126,7 +126,7 @@ class CRFWithLoss(object):
             [], value=0, shape=[self.num_classes_padded], dtype=core.DataType.INT32
         )
 
-        # Compute the accumlated total score of all the paths
+        # Compute the accumulated total score of all the paths
         accum_score = self.model.net.SortedSegmentRangeLogSumExp(
             [out_last, zero_segment_id]
         )
