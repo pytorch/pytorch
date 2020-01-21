@@ -84,7 +84,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // against torch.cuda.FloatTensor, this will immediately initialize CUDA.
     // I originally thought that it would not be possible for aten_type_ to
     // be nullptr if you had a tensor of some type, in which case you can
-    // skip initializign aten_type(), but TestAutograd.test_type_conversions
+    // skip initializing aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
     //
     // TODO: Stop using legacyExtractDispatchKey here (probably need to build
