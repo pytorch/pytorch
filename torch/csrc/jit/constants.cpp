@@ -61,13 +61,15 @@ c10::optional<Value*> tryInsertConstant(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntListRef());
+    n->is_(attr::value, val.toIntVector());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
-    n->ts_(attr::value, fmap(val.toTensorListRef(), [](const at::Tensor& t) {
-             AT_ASSERT(!t.requires_grad());
-             return t;
-           }));
+    n->ts_(
+        attr::value,
+        fmap(val.toTensorVector(), [](const at::Tensor& t) {
+          AT_ASSERT(!t.requires_grad());
+          return t;
+        }));
     n->output()->setType(ListType::ofTensors());
   } else if (val.isDoubleList()) {
     auto double_list = val.toDoubleList();
@@ -80,7 +82,7 @@ c10::optional<Value*> tryInsertConstant(
     n->output()->setType(StringType::get());
   } else if (val.type()->isSubtypeOf(ListType::ofStrings())) {
     std::vector<std::string> ss;
-    auto generic_list = val.toGenericListRef();
+    auto generic_list = val.toListRef();
     for (const IValue& ival : generic_list) {
       ss.push_back(ival.toStringRef());
     }
@@ -207,7 +209,7 @@ c10::optional<IValue> toIValue(const Value* v) {
   if (v->node()->kind() != prim::Constant || v->type()->cast<FunctionType>()) {
     return c10::nullopt;
   }
-  // use implemenation of prim::Constant to compute the output IValue
+  // use implementation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;
   op(stack);

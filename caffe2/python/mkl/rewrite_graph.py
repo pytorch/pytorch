@@ -78,7 +78,7 @@ def rewrite_run_net_simple(net):
             core.DeviceOption(device_type=device))
         op.engine = ""
 
-    # Temporarily disbale conv+relu fusion until we verify further
+    # Temporarily disable conv+relu fusion until we verify further
     # net.ParseFromString(
     #     C.transform_optimizeForMKLDNN(net.SerializeToString()))
     fix_BoxWithNMSLimit(net)
@@ -202,7 +202,7 @@ def rewrite_run_net_simple_xrayocr_lstm(net):
                             else cpu_tmp(blob))
                     arg.n.external_input[:] = new_external_input
 
-    # Temporarily disbale conv+relu fusion until we verify further
+    # Temporarily disable conv+relu fusion until we verify further
     # net.ParseFromString(
     #     C.transform_optimizeForMKLDNN(net.SerializeToString()))
     fix_BoxWithNMSLimit(net)

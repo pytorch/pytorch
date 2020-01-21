@@ -72,13 +72,13 @@ class Concat(ModelLayer):
         assert not (axis == 0 and add_axis == 1), \
             "It's not allowed to add axis=0"
         assert isinstance(input_record, schema.Struct),\
-            "Incorrect input type. Excpected Struct, but received: {0}".\
+            "Incorrect input type. Expected Struct, but received: {0}".\
             format(input_record)
 
         shapes = []
         for field_name, field_type in viewitems(input_record.fields):
             assert isinstance(field_type, schema.Scalar),\
-                "Incorrect input type for {}. Excpected Scalar, but got: {}".\
+                "Incorrect input type for {}. Expected Scalar, but got: {}".\
                 format(field_name, field_type)
             # Assume that first dimension is batch, so actual axis in shape is
             # axis - 1
