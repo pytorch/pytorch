@@ -33,8 +33,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   }
   int64_t dimensions = tensor->dim();
   // +1 faster than additional condition check inside loop
-  int64_t *sizes = new int64_t[dimensions+1];
-  int64_t *idx = new int64_t[dimensions+1];
+  std::unique_ptr<int64_t> sizes(new int64_t[dimensions+1]);
+  std::unique_ptr<int64_t> idx(new int64_t[dimensions+1]);
   int64_t *ii;
   int64_t *ss;
   std::fill(idx, idx+dimensions+1, 0);
@@ -56,8 +56,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     }
                     subscript_data += subscript_strides[0];
                   }
-                  ii = idx;
-                  ss = sizes;
+                  ii = idx.release();
+                  ss = sizes.release();
                   ++(*ii);
                   while (*ii == *ss) {
                     *ii = 0;
@@ -66,8 +66,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     ++(*ii);
                   }
                 );
-  delete [] sizes;
-  delete [] idx;
 
 #undef IS_NONZERO
 }
