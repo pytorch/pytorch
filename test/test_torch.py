@@ -2899,10 +2899,11 @@ class _TestTorchMixin(object):
         idx = cast(torch.LongTensor().resize_(*idx_size))
         _TestTorchMixin._fill_indices(self, idx, dim, ([m, n, o])[dim], elems_per_row, m, n, o)
 
+        src_size = [random.randint(1, 5) + s for s in idx_size]
         if is_scalar:
             src = random.random()
         else:
-            src = cast(torch.Tensor(*idx_size).normal_())
+            src = cast(torch.Tensor(*src_size).normal_())
 
         base = cast(torch.randn(m, n, o))
         actual = getattr(base.clone(), method)(dim, idx, src)
@@ -6029,6 +6030,7 @@ def add_neg_dim_tests():
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('cummin', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mean', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('median', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('mode', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -6257,10 +6259,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
-        # cumsum, cumprod, cummax
+        # cumsum, cumprod, cummax, cummin
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
+        self.assertEqual((), torch.cummin(zero_d, 0)[0].shape)
 
         # renorm
         self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
@@ -10572,57 +10575,63 @@ class TestTorchDeviceType(TestCase):
         # Check that output maintained correct shape
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
-    def test_cummax(self, device):
-        x = torch.rand(100, 100, device=device)
-        out1 = torch.cummax(x, 1)
-        res2 = torch.Tensor().to(device)
-        indices2 = torch.LongTensor().to(device)
-        torch.cummax(x, 1, out=(res2, indices2))
-        self.assertEqual(out1[0], res2)
-        self.assertEqual(out1[1], indices2)
+    def test_cummax_cummin(self, device):
+        def test_ops(op, string_of_function_name, expected_output):
+            x = torch.rand(100, 100, device=device)
+            out1 = op(x, 1)
+            res2 = torch.Tensor().to(device)
+            indices2 = torch.LongTensor().to(device)
+            op(x, 1, out=(res2, indices2))
+            self.assertEqual(out1[0], res2)
+            self.assertEqual(out1[1], indices2)
 
-        a = torch.tensor([[True, False, True],
-                         [False, False, False],
-                         [True, True, True]], dtype=torch.bool, device=device)
-        b = a.byte()
-        aRes = torch.cummax(a, 0)
-        bRes = torch.cummax(b, 0)
-        self.assertEqual(aRes[0], bRes[0])
-        self.assertEqual(aRes[0], torch.tensor([[1, 0, 1],
-                                                [1, 0, 1],
-                                                [1, 1, 1]]))
+            a = torch.tensor([[True, False, True],
+                             [False, False, False],
+                             [True, True, True]], dtype=torch.bool, device=device)
+            b = a.byte()
+            aRes = op(a, 0)
+            bRes = op(b, 0)
+            self.assertEqual(aRes[0], bRes[0])
+            self.assertEqual(aRes[0], expected_output)
 
-        # cummax doesn't support values, indices with a dtype, device type or layout
-        # different from that of input tensor
-        t = torch.randn(10)
-        values = torch.ShortTensor()
-        indices = torch.LongTensor()
-        with self.assertRaisesRegex(
-                RuntimeError,
-                'expected scalar_type Float but found Short'):
-            torch.cummax(t, 0, out=(values, indices))
+            # op shouldn't support values, indices with a dtype, device type or layout
+            # different from that of input tensor
+            t = torch.randn(10)
+            values = torch.ShortTensor()
+            indices = torch.LongTensor()
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    'expected scalar_type Float but found Short'):
+                op(t, 0, out=(values, indices))
 
-        # Check that cummulative max over a zero length dimension doesn't crash on backprop.
-        # Also check that cummax over other dimensions in a tensor with a zero-length
-        # dimensiuon also works
-        # Also include a basic suite of similar tests for other bases cases.
-        shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
-        for shape in shapes:
-            for dim in range(len(shape)):
-                raw_tensor = torch.zeros(*shape, requires_grad=True)
-                integrated = raw_tensor.cummax(dim=dim)
-                # Check that backward does not crash
-                integrated[0].sum().backward()
-                # Check that output maintained correct shape
-                self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+            # Check that op over a zero length dimension doesn't crash on backprop.
+            # Also check that op over other dimensions in a tensor with a zero-length
+            # dimension also works
+            # Also include a basic suite of similar tests for other bases cases.
+            shapes = [[2, 0], [2, 1, 4], [0, 2, 3], [1], [5]]
+            for shape in shapes:
+                for dim in range(len(shape)):
+                    raw_tensor = torch.zeros(*shape, requires_grad=True)
+                    integrated = getattr(raw_tensor, string_of_function_name)(dim=dim)
+                    # Check that backward does not crash
+                    integrated[0].sum().backward()
+                    # Check that output maintained correct shape
+                    self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
-        # Check a scalar example
-        raw_tensor = torch.tensor(3., requires_grad=True)
-        integrated = raw_tensor.cummax(dim=-1)
-        # Check that backward does not crash
-        integrated[0].sum().backward()
-        # Check that output maintained correct shape
-        self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+            # Check a scalar example
+            raw_tensor = torch.tensor(3., requires_grad=True)
+            integrated = getattr(raw_tensor, string_of_function_name)(dim=-1)
+            # Check that backward does not crash
+            integrated[0].sum().backward()
+            # Check that output maintained correct shape
+            self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
+
+        test_ops(torch.cummax, "cummax", torch.tensor([[1, 0, 1],
+                                                       [1, 0, 1],
+                                                       [1, 1, 1]]))
+        test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
+                                                       [0, 0, 0],
+                                                       [0, 0, 0]]))
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
@@ -11333,13 +11342,15 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
         self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
-        # cumsum, cumprod, cummax
+        # cumsum, cumprod, cummax, cummin
         self.assertEqual(shape, torch.cumsum(x, 0).shape)
         self.assertEqual(shape, torch.cumsum(x, 2).shape)
         self.assertEqual(shape, torch.cumprod(x, 0).shape)
         self.assertEqual(shape, torch.cumprod(x, 2).shape)
         self.assertEqual(shape, torch.cummax(x, 0)[0].shape)
         self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
+        self.assertEqual(shape, torch.cummin(x, 0)[0].shape)
+        self.assertEqual(shape, torch.cummin(x, 2)[0].shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -14856,6 +14867,8 @@ tensor_op_tests = [
         1e-2, 1e-5, 1e-5, _types, False),
     ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cummin', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cumprod', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-4, _types, False),
     ('cumprod', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-4, _types, False),
     ('cumsum', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),

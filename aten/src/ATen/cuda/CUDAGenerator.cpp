@@ -94,7 +94,7 @@ uint64_t CUDAGenerator::current_seed() const {
 }
 
 /**
- * Gets a nondeterminstic random number from /dev/urandom or time,
+ * Gets a nondeterministic random number from /dev/urandom or time,
  * seeds the CPUGenerator with it and then returns that number.
  * 
  * FIXME: You can move this function to Generator.cpp if the algorithm
