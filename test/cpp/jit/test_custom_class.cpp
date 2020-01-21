@@ -44,6 +44,16 @@ struct Stack : torch::jit::CustomClassHolder {
     stack_.pop_back();
     return val;
   }
+
+  c10::intrusive_ptr<Stack> clone() {
+    return c10::make_intrusive<Stack>(stack_);
+  }
+
+  void merge(const c10::intrusive_ptr<Stack>& c) {
+    for (auto& elem : c->stack_) {
+      push(elem);
+    }
+  }
 };
 
 static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
@@ -58,7 +68,9 @@ static auto testStack =
     torch::jit::class_<Stack<std::string>>("_TorchScriptTesting_StackString")
         .def(torch::jit::init<std::vector<std::string>>())
         .def("push", &Stack<std::string>::push)
-        .def("pop", &Stack<std::string>::pop);
+        .def("pop", &Stack<std::string>::pop)
+        .def("clone", &Stack<std::string>::clone)
+        .def("merge", &Stack<std::string>::merge);
 
 } // namespace
 
