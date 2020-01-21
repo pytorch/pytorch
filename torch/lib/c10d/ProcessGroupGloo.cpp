@@ -1212,11 +1212,11 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
 
-   // Copy outputs back to inputs after synchronization, so that users can 
-   // access all reduce results from input tensors
-   for (size_t i = 0; i < inputs.size(); i++) {
+    // Copy outputs back to inputs after synchronization, so that users can
+    // access all reduce results from input tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
       inputs[i].copy_(outputs[i]);
-   }
+    }
   }
 
   std::vector<at::Tensor> tmp;
