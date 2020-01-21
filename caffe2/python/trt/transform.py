@@ -83,7 +83,7 @@ def transform_caffe2_net(
         debug_builder=False,
         build_serializable_op=True):
     """
-    Transfrom the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
+    Transform the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
     """
     check_gpu_()
 
