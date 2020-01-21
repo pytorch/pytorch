@@ -36,12 +36,12 @@ static inline void adagrad_update_base_inlined(
 // version with prefetching
 // TODO(msmelyan)
 // Crux of the computation is computing a  / (sqrt(b) + epsilon),
-// where a and b are vectors and epislon is very small (eg., 10^-5) and does not
+// where a and b are vectors and epsilon is very small (eg., 10^-5) and does not
 // change. Today it's computed using two vector sqrt and vector divide simd
 // instructions. It is slow. We can take advantage of existing fast vector
 // VRSQRTPS instruction that computes approximate reciprocals of square roots
 // of the vector. It is 6x faster than vsrt and vdiv combinations. Since the
-// addition of epislon is just done to avoid division by zero, we approximate a
+// addition of epsilon is just done to avoid division by zero, we approximate a
 // / (sqrt(b) + epsilon) by a / (sqrt(b + sqrt(epsilon)) If we do that, we can
 // use VRSQRTPS instead now. VRSQRTPS is not very accurate. Specifically, for
 // the test on random numbers between 0.1 and 1 the absolute error was about
@@ -183,12 +183,12 @@ inline void rowwise_adagrad_update_inlined(
 // version with prefetching
 // TODO(msmelyan)
 // Crux of the computation is computing a  / (sqrt(b) + epsilon),
-// where a and b are vectors and epislon is very small (eg., 10^-5) and does not
+// where a and b are vectors and epsilon is very small (eg., 10^-5) and does not
 // change. Today it's computed using two vector sqrt and vector divide simd
 // instructions. It is slow. We can take advantage of existing fast vector
 // VRSQRTPS instruction that computes approximate reciprocals of square roots
 // of the vector. It is 6x faster than vsrt and vdiv combinations. Since the
-// addition of epislon is just done to avoid division by zero, we approximate a
+// addition of epsilon is just done to avoid division by zero, we approximate a
 // / (sqrt(b) + epsilon) by a / (sqrt(b + sqrt(epsilon)) If we do that, we can
 // use VRSQRTPS instead now. VRSQRTPS is not very accurate. Specifically, for
 // the test on random numbers between 0.1 and 1 the absolute error was about
