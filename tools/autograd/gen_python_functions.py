@@ -790,7 +790,7 @@ def is_noarg_binding(overloads):
 
 
 # python binding for all overloads of a particular function/method
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate(f"""\
+PY_VARIABLE_METHOD_VARARGS = CodeTemplate(r"""\
 // ${name}
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
