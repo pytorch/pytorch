@@ -13,7 +13,6 @@
 #include <vector>
 
 using namespace torch::nn;
-using namespace torch::serialize;
 
 namespace {
 Sequential xor_model() {
