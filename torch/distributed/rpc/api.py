@@ -1,3 +1,15 @@
+import contextlib
+import functools
+import logging
+import numbers
+import sys
+import threading
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+from torch._jit_internal import _qualified_name
+
 from . import (
     RpcBackendOptions,
     WorkerInfo,
@@ -5,10 +17,11 @@ from . import (
     _destroy_rref_context,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
+    _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
-    _set_rpc_timeout,
     _invoke_rpc_script,
+    _set_rpc_timeout,
     _start_rpc_agent,
     backend_registry,
 )
@@ -19,16 +32,6 @@ from .internal import (
     _start_record_function,
 )
 
-import contextlib
-from datetime import timedelta
-import functools
-import numbers
-import sys
-import logging
-import threading
-import torch
-import torch.distributed as dist
-from torch._jit_internal import _qualified_name
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
@@ -45,6 +48,7 @@ _agent = None
 # To enable RRef leak checking, set this _ignore_rref_leak to False
 _ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
+
 
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
@@ -68,6 +72,7 @@ def _require_initialized(func):
                 "torch.distributed.rpc.init_rpc first."
             )
         return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -157,8 +162,7 @@ def _wait_all_workers():
             except RuntimeError as ex:
                 logger.error(
                     "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_worker_name,
-                        timeout=timeout,
+                        worker_name=follower_worker_name, timeout=timeout
                     )
                 )
 
@@ -292,6 +296,7 @@ def _to_worker_info(name_or_info):
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
+
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
         backend: backend_registry.BackendType,
@@ -376,13 +381,16 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(
-            _agent, info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
+    elif isinstance(func, torch.jit.ScriptFunction):
+        return _invoke_remote_torchscript(
+            info, torch._jit_internal._qualified_name(func), *args, **kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors, rf)
+            PythonUDF(func, args, kwargs)
+        )
+        return _invoke_remote_python_udf(_agent, info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -406,15 +414,14 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, rf, *args, **kwargs
-        )
+        fut = _invoke_rpc_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors, rf)
+            PythonUDF(func, args, kwargs)
+        )
+        fut = _invoke_rpc_python_udf(_agent, info, pickled_python_udf, tensors, rf)
     return fut
+
 
 @_require_initialized
 def enable_gil_profiling(flag):

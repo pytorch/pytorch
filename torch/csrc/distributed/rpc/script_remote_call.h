@@ -18,9 +18,17 @@ using torch::jit::Operator;
 // caontains the RRefId and the ForkId of the return value RRef.
 class TORCH_API ScriptRemoteCall final : public ScriptCall {
  public:
+  // Constructor for builitin operator call.
   ScriptRemoteCall(
       std::shared_ptr<Operator> op,
-      std::vector<at::IValue>&& args,
+      std::vector<at::IValue>&& stack,
+      const RRefId& retRRefId,
+      const ForkId& retForkId);
+
+  // Constructor for TorchScript function call.
+  ScriptRemoteCall(
+      c10::QualifiedName qualifiedName,
+      std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
       const ForkId& retForkId);
 

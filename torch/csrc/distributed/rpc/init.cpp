@@ -360,6 +360,23 @@ If the future completes with an error, an exception is thrown.
       });
 
   module.def(
+      "_invoke_remote_torchscript",
+      [](const WorkerInfo& dst,
+         const std::string& qualifiedName,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        auto name = c10::QualifiedName(qualifiedName);
+        auto fnSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(name)
+                            .getSchema();
+        auto stack = torch::jit::createStackForSchema(
+            fnSchema, args, kwargs, c10::nullopt);
+        return remoteTorchscript(dst, name, stack);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
       "_invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,

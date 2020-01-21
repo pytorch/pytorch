@@ -20,6 +20,15 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+void remoteCallCallback(
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
+  auto rr = RemoteRet::fromMessage(message);
+  auto& ctx = RRefContext::getInstance();
+  ctx.delPendingUser(rr->forkId());
+}
+
 namespace {
 
 std::shared_ptr<Operator> matchBuiltinOp(
@@ -57,15 +66,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
-}
-
-void finishAcceptUserRRef(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
 }
 
 void finishCreatingOwnerRRef(
@@ -174,7 +174,7 @@ PyRRef pyRemoteBuiltin(
       agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(finishAcceptUserRRef);
+  fm->addCallback(remoteCallCallback);
   return PyRRef(userRRef);
 }
 
@@ -215,7 +215,7 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue(),
         rf);
 
-    fm->addCallback(finishAcceptUserRRef);
+    fm->addCallback(remoteCallCallback);
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef<py::object>();

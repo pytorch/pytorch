@@ -1,6 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/script_remote_call.h>
 
 namespace torch {
 namespace distributed {
@@ -18,6 +23,11 @@ namespace rpc {
 // It returns c10::intrusive_ptr<ivalue::Future>
 c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
     const std::string& dst,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack);
+
+PyRRef remoteTorchscript(
+    const WorkerInfo& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack);
 
