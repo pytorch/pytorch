@@ -509,7 +509,7 @@ std::string generateKernel(
     env.s("RandInit", "");
   }
 
-  // Insantiates the CUDA or CPU-specific templates
+  // Instantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("kernelBody", body.str());
   env.v("formals", formals);
