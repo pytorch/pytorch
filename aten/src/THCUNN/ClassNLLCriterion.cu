@@ -128,7 +128,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
     if (size_average) {
       if (nframe == 0) {
         // Mean reduction on empty tensors produces NaN
-        *output = std::nanf("");
+        *output = 0.0/0.0;
       }
       if (*total_weight != 0) {
         *output = ScalarConvert<Acctype, Dtype>::to(outputAcc / total_weightAcc);
