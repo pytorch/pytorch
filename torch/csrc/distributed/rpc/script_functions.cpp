@@ -50,6 +50,30 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
   return futPtr;
 }
 
+PyRRef remoteTorchscript(
+    const WorkerInfo& dst,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack) {
+  auto& ctx = RRefContext::getInstance();
+  // TODO: support creating RRefs on a local object.
+  TORCH_INTERNAL_ASSERT(
+      ctx.getWorkerId() != dst.id_,
+      "Does not support creating RRef on self yet.");
+  auto userRRef = ctx.createUserRRef<IValue>(dst.id_);
+
+  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+      qualifiedName, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+
+  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+      *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, nullptr);
+
+  ctx.addPendingUser(userRRef->forkId(), userRRef);
+  fm->addCallback(remoteCallCallback);
+
+  return PyRRef(userRRef);
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

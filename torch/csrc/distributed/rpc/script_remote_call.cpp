@@ -9,10 +9,19 @@ namespace rpc {
 
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
-    std::vector<at::IValue>&& args,
+    std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
     const ForkId& retForkId)
-    : ScriptCall(std::move(op), std::move(args)),
+    : ScriptCall(std::move(op), std::move(stack)),
+      retRRefId_(retRRefId),
+      retForkId_(retForkId) {}
+
+ScriptRemoteCall::ScriptRemoteCall(
+    c10::QualifiedName qualifiedName,
+    std::vector<at::IValue>&& stack,
+    const RRefId& retRRefId,
+    const ForkId& retForkId)
+    : ScriptCall(std::move(qualifiedName), std::move(stack)),
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
 

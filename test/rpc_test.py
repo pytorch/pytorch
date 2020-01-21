@@ -1241,6 +1241,18 @@ class RpcTest(RpcAgentTestFixture):
 
         self.assertEqual(result, sum(vals))
 
+    @dist_init
+    def test_remote_torchscript_function(self):
+        @torch.jit.script
+        def no_arg():
+            a = 1
+            return a
+        dst_worker_name = "worker{}".format(
+            (self.rank + 1) % self.world_size
+        )
+        rref = rpc.remote(dst_worker_name, no_arg)
+        self.assertEqual(rref.to_here(), 1)
+
     def _test_rref_leak(self, ignore_leak):
         rpc.init_rpc(
             name="worker{}".format(self.rank),
