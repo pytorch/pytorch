@@ -89,8 +89,18 @@ public:
 
   template<class... Args>
   c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
-    auto key_set = detail::multi_dispatch_key_set(args...);
+    auto key_set = detail::multi_dispatch_key_set(args...) & nonFallthroughKernels_;
     return dispatchKeySetToDispatchKey_(key_set);
+  }
+
+  // Used by DispatchTable to maintain the fallthrough invariant, see
+  // docs on nonFallthroughKernels_
+  void setIsFallthroughKernel(DispatchKey k, bool is_fallthrough) {
+    if (is_fallthrough) {
+      nonFallthroughKernels_ = nonFallthroughKernels_.remove(k);
+    } else {
+      nonFallthroughKernels_ = nonFallthroughKernels_.add(k);
+    }
   }
 
 private:
@@ -103,7 +113,8 @@ private:
   }
 
   explicit DispatchKeyExtractor(size_t num_args)
-  : num_args_(num_args) {}
+  : num_args_(num_args)
+  , nonFallthroughKernels_(DispatchKeySet::FULL) {}
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
@@ -111,6 +122,18 @@ private:
   // fallthrough
   // TODO: a potential optimization is to store a bitfield of arg locations,
   size_t num_args_;
+
+  // Fallthrough kernels should get masked out when we extract dispatch key.
+  // INVARIANT: the set of not-set entries nonFallthroughKernels corresponds exactly
+  // to the corresponding kernels in KernelFunctionTable whose boxed function
+  // is pointer equal to fallthrough_kernel. DispatchTable is responsible maintaining
+  // this invariant.  (TODO: This is a bit spattered about, and a better code
+  // organization that reflects encapsulation would probably just fold
+  // KernelFunctionTable and DispatchKeyExtractor into a single, bigger, class.)
+  //
+  // NB: This is "negated" so that we can simply logical AND this with the
+  // computed dispatch key set.
+  DispatchKeySet nonFallthroughKernels_;
 };
 
 }

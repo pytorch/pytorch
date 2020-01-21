@@ -37,6 +37,10 @@ inline bool KernelFunction::isValid() const {
     return boxed_kernel_func_ != nullptr || unboxed_kernel_func_ != nullptr;
 }
 
+inline bool KernelFunction::isFallthrough() const {
+    return boxed_kernel_func_ == &fallthrough_kernel;
+}
+
 inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
     if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
         if (unboxed_kernel_func_ == nullptr) {

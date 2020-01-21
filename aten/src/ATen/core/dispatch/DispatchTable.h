@@ -96,6 +96,9 @@ class DispatchTable final {
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    // Maintain the fallthrough kernel invariant; see
+    // DispatchKeyExtractor::nonFallthroughKernels_
+    dispatchKeyExtractor_.setIsFallthroughKernel(dispatchKey, kernel.isFallthrough());
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
       TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
