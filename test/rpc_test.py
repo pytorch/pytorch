@@ -972,8 +972,8 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_nested_rref_stress(self):
-        if self.rank != 0:
-            return
+        # if self.rank != 0:
+        #     return
 
         n = self.rank + 1
         dst_rank1 = n % self.world_size
