@@ -275,7 +275,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       }
     }
     if (notifyThread) {
-      // Notify the wathdog thread only after releasing the lock,
+      // Notify the watchdog thread only after releasing the lock,
       // so watchdog can acquire lock on waking up.
       futureTimeoutCV_.notify_one();
     }

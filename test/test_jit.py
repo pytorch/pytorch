@@ -1293,18 +1293,21 @@ graph(%x : Tensor,
             # we need to fix the caching before we can use inplace
             # insert_observers and insert_quant_dequant
             m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            # Make sure we insert 3 observers instead of 6
+            for postfix in ['_0', '_1', '_2']:
+                obs = '_observer' + postfix
+                assert m.conv1._c.hasattr(obs)
+                assert m.conv2._c.hasattr(obs)
+
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
             m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
             m(data)
-            # Make sure inserted attributes are the same
-            # This needs to be refactored after we know how to get
-            # all attributes of a given ScriptModule
-            for v in ['input.2', 'weight.2', '12']:
-                for postfix in ['_scale', '_zero_point', '_scalar_type']:
-                    attr = v + postfix
-                    assert m.conv1._c.hasattr(attr)
-                    assert m.conv2._c.hasattr(attr)
+            assert m.conv1._c._type() == m.conv2._c._type()
+            # Ideally we should check for the quantization parameter
+            # attributes as well, but since the attribute names are
+            # dependent on implementation of the compiler, we will
+            # skip that.
             for postfix in ['_0', '_1', '_2']:
                 obs = '_observer' + postfix
                 assert not m.conv1._c.hasattr(obs)
