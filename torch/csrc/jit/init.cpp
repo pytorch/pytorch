@@ -636,7 +636,7 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
+        // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toTypeInferredIValue(py_func_output);

@@ -137,7 +137,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
     wrappedRpc = deserializeRequest(wrappedMessage);
   } else {
-    wrappedRpc = deserializeResponse(wrappedMessage);
+    wrappedRpc = deserializeResponse(wrappedMessage, wrappedMessageType);
   }
 
   return std::make_unique<RpcWithAutograd>(
@@ -160,6 +160,11 @@ const AutogradMetadata& RpcWithAutograd::autogradMetadata() const {
 RpcCommandBase& RpcWithAutograd::wrappedRpc() {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   return *wrappedRpc_;
+}
+
+std::unique_ptr<RpcCommandBase> RpcWithAutograd::moveWrappedRpc() && {
+  TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
+  return std::move(wrappedRpc_);
 }
 
 MessageType RpcWithAutograd::wrappedMessageType() const {

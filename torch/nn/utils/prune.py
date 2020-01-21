@@ -169,7 +169,7 @@ class BasePruningMethod(ABC):
             del module._parameters[name]
             default_mask = torch.ones_like(orig)  # temp
         # If this is not the first time pruning is applied, all of the above
-        # has been done before in a previos pruning iteration, so we're good
+        # has been done before in a previous pruning iteration, so we're good
         # to go
         else:
             default_mask = getattr(module, name + "_mask").detach().clone(memory_format=torch.contiguous_format)
