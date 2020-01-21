@@ -87,7 +87,7 @@ OPERATOR_SCHEMA(StumpFuncIndex)
         "Index_High",
         "tensor of int64 indices for elements above threshold")
     .SetDoc(R"DOC(
-Split the elemnts and return the indices based on the given threshold.
+Split the elements and return the indices based on the given threshold.
 )DOC");
 
 NO_GRADIENT(StumpFuncIndex);
