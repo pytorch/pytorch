@@ -107,11 +107,11 @@ void Adagrad::add_parameters(const std::vector<Tensor>& parameters) {
 }
 
 const std::vector<Tensor>& Adagrad::parameters() const noexcept {
-  return param_groups_[0].params();
+  return param_groups_.at(0).params();
 }
 
 std::vector<Tensor>& Adagrad::parameters() noexcept {
-  return param_groups_[0].params();
+  return param_groups_.at(0).params();
 }
 
 size_t Adagrad::size() const noexcept {
@@ -129,6 +129,7 @@ void Adagrad::save(serialize::OutputArchive& archive) const {
 void Adagrad::load(serialize::InputArchive& archive) {
   IValue pytorch_version;
   if (archive.try_read("pytorch_version", pytorch_version)) {
+    TORCH_INTERNAL_ASSERT(pytorch_version.toStringRef() == "1.5.0");
     serialize(*this, archive);
   }
   else { // deserializing archives saved in old format (prior to version 1.5.0)
