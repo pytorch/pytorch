@@ -100,6 +100,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "enable_gil_profiling",
+              &RpcAgent::enableGILProfiling,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
