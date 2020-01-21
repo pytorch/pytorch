@@ -1901,7 +1901,7 @@ class TestQNNPackOps(TestCase):
         # Note: In QNNPACK the output scale and zero_point can only be
         #       1.0/256, 0 respectively, as it uses a LUT with 256 bins.
         X, (scale, zero_point, torch_type) = X
-        X = torch.from_numpy(X).astype(torch.float32)
+        X = torch.from_numpy(X).to(torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale,
                                        zero_point=zero_point,
                                        dtype=torch_type)
@@ -1929,7 +1929,7 @@ class TestQNNPackOps(TestCase):
 
         step = scale / 2.0
         x = np.arange(f_min, f_max + step, step)
-        X = torch.from_numpy(x).astype(torch.float32)
+        X = torch.from_numpy(x).to(torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale,
                                        zero_point=zero_point,
                                        dtype=dtype)
