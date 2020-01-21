@@ -117,7 +117,7 @@ script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
   AT_ASSERT(proto_version < 6);
   if (proto_version == 2) {
     const auto& list =
-        LEGACY_loadPickleArchive("attributes.pkl").toGenericList();
+        LEGACY_loadPickleArchive("attributes.pkl").toList();
     LEGACY_pickled_ivalues_.insert(
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {

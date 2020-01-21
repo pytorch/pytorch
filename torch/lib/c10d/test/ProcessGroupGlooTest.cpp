@@ -185,9 +185,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
     auto& tensor = outputs[i][0];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[j], expected);
     }
   }
 }
@@ -238,9 +236,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           auto& tensor = outputs[k][l];
           auto data = tensor.data_ptr<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
-            if (data[n] != expected) {
-              throw std::runtime_error("BOOM!");
-            }
+            EXPECT_EQ(data[n], expected);
           }
         }
       }
@@ -282,7 +278,7 @@ void testSend(const std::string& path) {
   sendWork->abort();
   // Block until the sendWork gets successfully aborted
   waitSendThreadAbort.join();
-  ASSERT_FALSE(sendCompleted);
+  EXPECT_FALSE(sendCompleted);
 
   // Now create a separate sender thread to ensure that future waitsends can
   // complete successfully.
@@ -304,7 +300,7 @@ void testSend(const std::string& path) {
   std::thread sendThread([&]() { sendCompleted = sendWork->wait(); });
   sendThread.join();
   recvThread.join();
-  ASSERT_TRUE(sendCompleted);
+  EXPECT_TRUE(sendCompleted);
 }
 
 void testRecv(const std::string& path) {
@@ -324,7 +320,7 @@ void testRecv(const std::string& path) {
   recvWork->abort();
   // Block until the first recv gets successfully aborted
   waitRecvThreadAbort.join();
-  ASSERT_FALSE(recvCompleted);
+  EXPECT_FALSE(recvCompleted);
 
   // Now create a separate receiver thread to ensure that future waits can
   // complete successfully.
@@ -346,31 +342,37 @@ void testRecv(const std::string& path) {
   std::thread receiverThread([&]() { recvCompleted = recvWork->wait(); });
   senderThread.join();
   receiverThread.join();
-  ASSERT_TRUE(recvCompleted);
+  EXPECT_TRUE(recvCompleted);
 }
 
-TEST(ProcessGroupGlooTest, testExceptionsThrown) {
+TEST(ProcessGroupGlooTest, testSIGSTOPException) {
   // test SIGSTOP
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGSTOP);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
-    }
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
+    return;
   }
 
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGSTOP);
+  EXPECT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+}
+
+TEST(ProcessGroupGlooTest, testSIGKILLException) {
   // test SIGKILL
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGKILL);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
-    }
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
+    return;
   }
+
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGKILL);
+  EXPECT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
 }
 
 TEST(ProcessGroupGlooTest, testAllReduceCPU) {
