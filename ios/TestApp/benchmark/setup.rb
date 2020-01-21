@@ -5,7 +5,7 @@ require 'optparse'
 options = {}
 option_parser = OptionParser.new do |opts|
  opts.banner = 'Script for setting up TestApp.xcodeproj'
- opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+ opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
 end.parse!

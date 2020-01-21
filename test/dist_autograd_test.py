@@ -289,7 +289,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
         # For send function when making nest rpc call,
         # next functions of the send function are two recv functions
-        # for recevied two tensors from previous call
+        # for received two tensors from previous call
         next_funcs = list(send_functions.values())[0].next_functions
         self.assertEqual(2, len(next_funcs))
         self.assertEqual(
