@@ -965,6 +965,7 @@ void initJitScriptBindings(PyObject* module) {
             return self.function_->qualname().qualifiedName();
           });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ScriptCodeObj, StrongFunctionPtr>(m, "ScriptCodeObj");
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
