@@ -124,7 +124,11 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
           T *total_weight,
           int nElement)
 {
-  if ((*total_weight != 0 && output != 0) || nElement == 0) {
+  if (nElement == 0) {
+    // Mean reduction on empty tensors produces NaN
+    *output = std::nan("");
+  }
+  if (*total_weight != 0) {
     *output = THCNumerics<T>::div(*output, *total_weight);
   }
 }

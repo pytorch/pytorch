@@ -125,8 +125,13 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
     }
     *total_weight = ScalarConvert<Acctype, Dtype>::to(total_weightAcc);
     *output = ScalarConvert<Acctype, Dtype>::to(outputAcc);
-    if (size_average && ((*total_weight != 0 && outputAcc != 0) || nframe == 0)) {
-      *output = ScalarConvert<Acctype, Dtype>::to(outputAcc / total_weightAcc);
+    if (size_average) {
+      if (nframe == 0) {
+        *output = std::nan("");
+      }
+      if (*total_weight != 0) {
+        *output = ScalarConvert<Acctype, Dtype>::to(outputAcc / total_weightAcc);
+      }
     }
 
   }
