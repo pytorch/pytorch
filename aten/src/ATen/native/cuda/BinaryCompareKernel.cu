@@ -74,14 +74,7 @@ void max_elementwise_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "max_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        // We avoid using nan or nanf because we want to return the same type as scalar_t.
-        if (::isnan(a)) {
-          return a;
-        } else if (::isnan(b)) {
-          return b;
-        } else {
-          return ::max(a, b);
-        }
+        return ::max(a, b);
       });
     });
   }
@@ -101,14 +94,7 @@ void min_elementwise_kernel_cuda(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "min_elementwise_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        // We avoid using nan or nanf because we want to return the same type as scalar_t.
-        if (::isnan(a)) {
-          return a;
-        } else if (::isnan(b)) {
-          return b;
-        } else {
-          return ::min(a, b);
-        }
+        return ::min(a, b);
       });
     });
   }
