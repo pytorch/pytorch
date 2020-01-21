@@ -105,12 +105,10 @@ endif()
 
 find_package(CUDNN)
 
-if(NOT CUDNN_FOUND)
+if(CAFFE2_USE_CUDNN AND NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
   set(CAFFE2_USE_CUDNN OFF)
-else()
-  set(CAFFE2_USE_CUDNN ON)
 endif()
 
 # Optionally, find TensorRT
