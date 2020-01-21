@@ -16,6 +16,7 @@ namespace optim {
 SGDOptions::SGDOptions(double learning_rate) : learning_rate_(learning_rate) {}
 
 void SGD::step() {
+  // TODO: update step
   for (size_t i = 0; i < parameters_.size(); ++i) {
     Tensor p = parameters_.at(i);
 
