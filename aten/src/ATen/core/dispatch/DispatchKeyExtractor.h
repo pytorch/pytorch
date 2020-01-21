@@ -78,7 +78,7 @@ public:
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
-  c10::optional<DispatchKey> getDispatchKeyBoxed(const torch::jit::Stack* stack) const {
+  c10::optional<DispatchKey> getDispatchKeyBoxed(DispatchKeySet nonFallthroughMask, const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. These should be aligned and do the same thing.
 
@@ -94,31 +94,31 @@ public:
         }
       }
     }
-    return dispatchKeySetToDispatchKey_(ts);
+    return dispatchKeySetToDispatchKey_(nonFallthroughMask, ts);
   }
 
   template<class... Args>
-  c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
+  c10::optional<DispatchKey> getDispatchKeyUnboxed(DispatchKeySet nonFallthroughMask, const Args&... args) const {
     auto key_set = detail::multi_dispatch_key_set(args...);
-    return dispatchKeySetToDispatchKey_(key_set);
+    return dispatchKeySetToDispatchKey_(nonFallthroughMask, key_set);
   }
 
   // Used by DispatchTable to maintain the fallthrough invariant, see
   // docs on nonFallthroughKernels_
-  void setIsFallthroughKernel(DispatchKey k, bool is_fallthrough);
+  void setIsOperatorOverridden(DispatchKey k, bool is_overridden);
 
 private:
-  c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(const DispatchKeySet& keySet) const {
+  c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(DispatchKeySet nonFallthroughMask, const DispatchKeySet& keySet) const {
     if (C10_UNLIKELY(keySet.empty())) {
       return c10::nullopt;
     }
 
-    return impl::dispatchTypeId(keySet, nonFallthroughKernels_);
+    return impl::dispatchTypeId(keySet, nonFallthroughMask | perOperatorOverriddenKernels_);
   }
 
   explicit DispatchKeyExtractor(size_t num_args)
   : num_args_(num_args)
-  , nonFallthroughKernels_(DispatchKeySet::FULL) {}
+  , perOperatorOverriddenKernels_() {}
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
@@ -127,17 +127,19 @@ private:
   // TODO: a potential optimization is to store a bitfield of arg locations,
   size_t num_args_;
 
-  // Fallthrough kernels should get masked out when we extract dispatch key.
-  // INVARIANT: the set of not-set entries nonFallthroughKernels corresponds exactly
-  // to the corresponding kernels in KernelFunctionTable whose boxed function
-  // is pointer equal to fallthrough_kernel. DispatchTable is responsible maintaining
-  // this invariant.  (TODO: This is a bit spattered about, and a better code
-  // organization that reflects encapsulation would probably just fold
-  // KernelFunctionTable and DispatchKeyExtractor into a single, bigger, class.)
+  // We must NOT respect the passed in nonFallthroughMask if an operator has
+  // specifically overridden the backend, since that means we've opted to
+  // not fallthrough and instead apply some specific behavior (which we
+  // must dispatch to).  For now, we assume that operators NEVER are the
+  // fallthrough kernel (see https://github.com/pytorch/pytorch/issues/32454)
+  // which means we can just unconditionally fill in the mask when the
+  // operator tells us to.
   //
-  // NB: This is "negated" so that we can simply logical AND this with the
-  // computed dispatch key set.
-  DispatchKeySet nonFallthroughKernels_;
+  // This scheme doesn't work if you want to also apply fallthrough on a
+  // per-op basis, but while we could fix this by maintaining a second
+  // DispatchKeySet, it doesn't seem that there is any actual use case,
+  // so we are deferring it for 32454.
+  DispatchKeySet perOperatorOverriddenKernels_;
 };
 
 }

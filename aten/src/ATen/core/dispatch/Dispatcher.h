@@ -141,6 +141,8 @@ private:
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   impl::KernelFunctionTable backendFallbackKernels_;
+  // Set of backends which have specified they want fallthrough behavior
+  DispatchKeySet backendFallbackNonFallthroughSet_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -190,7 +192,7 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
+  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendFallbackNonFallthroughSet_, args...);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
   return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
 }
@@ -198,7 +200,7 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(backendFallbackNonFallthroughSet_, stack);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
   kernel.callBoxed(op, stack);
 }
