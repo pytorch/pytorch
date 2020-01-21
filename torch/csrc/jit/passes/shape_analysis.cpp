@@ -727,7 +727,7 @@ class ShapePropagator {
   // a tensor, so we should special-case these ops in the shape propagation.
   // Additionally, passing in a zero representative tensor into an integer
   // division op causes divide-by-zero errors
-  // _Outputs_ must be tensors or primtives
+  // _Outputs_ must be tensors or primitives
   // We will call inferTypeFrom on the tensors, and ignore the primitives.
   // However, we allow primitive returns because we want to support mixed
   // primitive/tensor outputs.

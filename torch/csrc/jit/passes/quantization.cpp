@@ -700,7 +700,7 @@ void InsertQuantDeQuantHelper::removeObservers(
   // Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
-  // O(N) where N is number of observer moduels with this optimization
+  // O(N) where N is number of observer modules with this optimization
   if (observer_modules_to_remove_.count(g)) {
     const auto& observers = observer_modules_to_remove_.at(g);
     for (int64_t i = observers.size() - 1; i >= 0; --i) {

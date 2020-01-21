@@ -343,8 +343,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-    case prim::unchecked_cast:
       return analyzeExtractor(node);
+    case prim::unchecked_cast:
+      return makePointerTo(node->output(), node->input());
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
@@ -689,8 +690,7 @@ void AliasDb::analyzeConservative(Node* node) {
     memoryDAG_->collectAllContainedMemoryLocations(elem, mem_locations);
     for (unsigned loc : mem_locations) {
       auto contained_elem = memoryDAG_->fromIndex(loc);
-      // TODO: @suo what is the restriction here with only adding writers
-      // to memory locations
+      // we only register writes on memory locations
       if (contained_elem->pointsTo.empty()) {
         registerWrite(contained_elem, node);
       }
