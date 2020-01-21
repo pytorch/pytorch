@@ -1,6 +1,7 @@
 FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu16.04
 ARG PYTHON_VERSION=3.7
 ARG WITH_TORCHVISION=1
+ARG WITH_HDF5=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
          build-essential \
          cmake \
@@ -31,5 +32,8 @@ RUN TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX" TORCH_NVCC_FLAGS="-Xfatbin -c
 
 RUN if [ "$WITH_TORCHVISION" = "1" ] ; then git clone https://github.com/pytorch/vision.git && cd vision && pip install -v . ; else echo "building without torchvision" ; fi
 
+# Install HDF5 Python bindings
+RUN if [ "$WITH_HDF5" = "1" ] ;then conda install -y h5py=2.8.0 && conda clean -ya && pip install h5py-cache==1.0 ; else echo "building without h5py" ; fi
+ 
 WORKDIR /workspace
 RUN chmod -R a+w .
