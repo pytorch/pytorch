@@ -149,7 +149,7 @@ void serialize(
     detail::OptimizerBase& optimizer) {
 
     IValue pytorch_version;
-    archive.try_read("pytorch_version", pytorch_version);
+    archive.read("pytorch_version", pytorch_version);
     TORCH_INTERNAL_ASSERT(pytorch_version.toStringRef() == "1.5.0");
     serialize::InputArchive state_archive;
     archive.read("state", state_archive);

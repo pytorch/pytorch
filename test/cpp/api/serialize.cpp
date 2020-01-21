@@ -218,7 +218,7 @@ TEST(SerializeTest, TryReadFunc) {
   torch::serialize::InputArchive input_archive;
   input_archive.load_from(tempfile.name);
   c10::IValue ivalue;
-  ASSERT_TRUE(!input_archive.try_read("1", ivalue));
+  ASSERT_FALSE(input_archive.try_read("1", ivalue));
   ASSERT_TRUE(input_archive.try_read("element/1", ivalue));
   ASSERT_EQ(ivalue.toInt(), 1);
 }
