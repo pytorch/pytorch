@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/core/Variadic.h>
+#include <ATen/core/stack.h>
 
 namespace c10 {
 
@@ -21,9 +22,18 @@ namespace impl {
 // TODO: I'm not sure if this should live in this header or not; the operant
 // question is whether or not we have access to all the relevant TLS at this
 // point.
-static inline DispatchKey dispatchTypeId(DispatchKeySet ts) {
+static inline DispatchKey dispatchTypeId(
+    DispatchKeySet ts,
+    // This argument is used to mask out fallthrough keys, so we don't
+    // consider them for dispatch.  It's taken in the weird "inverted" form so
+    // that we can do it in one instruction (x & y) rather than two (x & ~y).
+    // These exclusions are NOT tracked in the TLS, but must be applied AFTER
+    // TLS, which is why you have to pass them in to this function (as opposed
+    // to just applying it to the input 'ts').
+    DispatchKeySet non_fallthrough_mask
+) {
   c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
-  return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
+  return (((ts | local.included_) - local.excluded_) & non_fallthrough_mask).highestPriorityTypeId();
 }
 
 }
@@ -62,13 +72,13 @@ namespace detail {
  * a certain operator as different operators have different ways to extract
  * the dispatch key (e.g. different numbers of arguments).
  */
-struct DispatchKeyExtractor final {
+struct CAFFE2_API DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
-  c10::optional<DispatchKey> getDispatchKeyBoxed(const Stack* stack) const {
+  c10::optional<DispatchKey> getDispatchKeyBoxed(const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. These should be aligned and do the same thing.
 
@@ -89,27 +99,21 @@ public:
 
   template<class... Args>
   c10::optional<DispatchKey> getDispatchKeyUnboxed(const Args&... args) const {
-    auto key_set = detail::multi_dispatch_key_set(args...) & nonFallthroughKernels_;
+    auto key_set = detail::multi_dispatch_key_set(args...);
     return dispatchKeySetToDispatchKey_(key_set);
   }
 
   // Used by DispatchTable to maintain the fallthrough invariant, see
   // docs on nonFallthroughKernels_
-  void setIsFallthroughKernel(DispatchKey k, bool is_fallthrough) {
-    if (is_fallthrough) {
-      nonFallthroughKernels_ = nonFallthroughKernels_.remove(k);
-    } else {
-      nonFallthroughKernels_ = nonFallthroughKernels_.add(k);
-    }
-  }
+  void setIsFallthroughKernel(DispatchKey k, bool is_fallthrough);
 
 private:
-  static c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(const DispatchKeySet& keySet) {
+  c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(const DispatchKeySet& keySet) const {
     if (C10_UNLIKELY(keySet.empty())) {
       return c10::nullopt;
     }
 
-    return impl::dispatchTypeId(keySet);
+    return impl::dispatchTypeId(keySet, nonFallthroughKernels_);
   }
 
   explicit DispatchKeyExtractor(size_t num_args)

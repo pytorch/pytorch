@@ -15,7 +15,7 @@ class OperatorHandle;
 // no overhead to fallthrough to the next key.  See cpp file for some more
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
-void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
+CAFFE2_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Stack*);
 
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
@@ -195,6 +195,8 @@ public:
 
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
+
+  static KernelFunction makeFallthrough();
 
   /**
    * Create a KernelFunction from an unboxed lambda.

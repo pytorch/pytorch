@@ -114,10 +114,20 @@ struct Environment {
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
 
-  c10::RegistrationHandleRAII registry2 = c10::Dispatcher::singleton().registerBackendFallbackKernel(
+  c10::RegistrationHandleRAII registry2 = c10::Dispatcher::singleton()
+    .registerBackendFallbackKernel(
       DispatchKey::TESTING_ONLY_GenericModeTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
-  );
+    );
+
+  // You can specify that some kernels should fall through, skipping
+  // your generic mode
+  c10::RegistrationHandleRAII registry3 = c10::Dispatcher::singleton()
+   .registerKernel(
+     c10::Dispatcher::singleton().findSchemaOrThrow("aten::mul", "Tensor"),
+     DispatchKey::TESTING_ONLY_GenericModeTensorId,
+     KernelFunction::makeFallthrough()
+   );
 };
 
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
@@ -128,6 +138,8 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   Tensor a = ones({5, 5}, kDouble);
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 2);
+  Tensor c = mul(a, a);
+  ASSERT_EQ(override_call_count, 2); // NOT handled by mode
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {

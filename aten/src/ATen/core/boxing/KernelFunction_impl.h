@@ -80,6 +80,15 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     );
 }
 
+inline KernelFunction KernelFunction::makeFallthrough() {
+    return KernelFunction(
+        nullptr,  // no functorFactory_, this can only be called in a boxed way.
+        nullptr,  // no functor_ object either
+        &fallthrough_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
 template<bool AllowLegacyTypes, class KernelFunctor>
 inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
