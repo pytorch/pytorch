@@ -102,6 +102,7 @@ static void RemoveTupleConstants(Node* n) {
   }
 
   n->replaceAllUsesWith(tuple_construct);
+  n->destroy();
 }
 
 static void VisitNode(Node* n, Node* insert_point) {
