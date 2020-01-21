@@ -228,12 +228,6 @@ TEST(TensorTest, TorchTensorCtorScalarIntegralType) {
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
   ASSERT_EQ(tensor.item<int64_t>(), 123);
-
-  tensor = torch::tensor(123l);
-  ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
-  ASSERT_EQ(tensor.dtype(), at::kLong);
-  ASSERT_EQ(tensor.item<int64_t>(), 123);
 }
 
 void test_TorchTensorCtorScalarFloatingType_expected_dtype(c10::ScalarType default_dtype) {
