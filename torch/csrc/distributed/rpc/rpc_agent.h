@@ -141,16 +141,27 @@ class TORCH_API RpcAgent {
   // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
-  // Retrieve debug info in addition to metrics as KV map
-  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo();
+
+  // Flag to control whether GIL wait times
+  // should be profiled or not.
+  void enableGILProfiling(bool flag);
+
+  // Retrieve wheher we should profile GIL wait times or not.
+  bool isGILProfilingEnabled();
 
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  std::atomic<bool> profilingEnabled_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
+  // Add GIL wait time data point to metrics
+  virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
+  friend class PythonRpcHandler;
 };
 
 } // namespace rpc
