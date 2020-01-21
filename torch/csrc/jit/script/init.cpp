@@ -882,7 +882,7 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
             // [issue 27343]
-            // Modules have 'training' attributes by defualt, but due to
+            // Modules have 'training' attributes by default, but due to
             // https://github.com/pytorch/pytorch/issues/27343, functions end
             // up having a training attribute when they are loaded. This adds
             // a fake 'training' attribute that shouldn't be used, but prevents
