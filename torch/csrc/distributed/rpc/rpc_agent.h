@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -87,9 +86,9 @@ class TORCH_API RpcAgent {
   // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
-  // when the response arrives. For other message types, the Future should be
-  // ignored by the caller.
+  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
+  // completed when the response arrives. For other message types, the Future
+  // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) = 0;
@@ -139,20 +138,30 @@ class TORCH_API RpcAgent {
   // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
 
-  // Retrive metrics as KV map
+  // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
 
   // Retrive debug info in addition to metrics as KV map
-  virtual std::unordered_map<std::string, std::string> getDebugInfo() = 0;
+  virtual std::unordered_map<std::string, std::string> getDebugInfo();
+
+  // Flag to control whether GIL wait times
+  // should be profiled or not.
+  void enableGILProfiling(bool flag);
+
+  // Retrieve wheher we should profile GIL wait times or not.
+  bool isGILProfilingEnabled();
 
  protected:
   const WorkerInfo workerInfo_;
-  const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  std::atomic<bool> profilingEnabled_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;
+  // Add GIL wait time data point to metrics
+  virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
+  friend class PythonRpcHandler;
 };
 
 } // namespace rpc

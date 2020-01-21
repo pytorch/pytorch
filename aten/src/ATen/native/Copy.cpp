@@ -9,7 +9,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 
@@ -121,6 +120,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
                 "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
     self.set_quantizer_(src.quantizer());
+  }
+
+  if (!self.is_quantized() && src.is_quantized()) {
+    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
   auto iter = TensorIterator();

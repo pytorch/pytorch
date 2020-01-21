@@ -93,7 +93,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
                 tags = attr["tags"]
                 continue
 
-            # if 'cuda' is sepcified in input shape but the testing machines doesn't
+            # if 'cuda' is specified in input shape but the testing machines doesn't
             # support, we will skip this input
             if 'cuda' in attr.values():
                 if not torch.cuda.is_available():
@@ -278,10 +278,6 @@ class BenchmarkRunner(object):
         curr_test_total_time = 0
         time_trace = []
         while True:
-            # Wipe cache
-            if self.args.wipe_cache:
-                torch.ops.operator_benchmark._clear_cache()
-
             run_time_sec = launch_test(test_case, iters, print_per_iter)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable

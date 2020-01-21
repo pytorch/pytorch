@@ -303,8 +303,7 @@ matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 supports_named_tensor: True
 ```
 
-Experimental: this option is ignored unless compiling with BUILD_NAMEDTENSOR=1.
-By default, (`supports_named_tensor: True`) ATen code generation will generate a check
+By default, (`supports_named_tensor: False`) ATen code generation will generate a check
 that all tensor inputs to the function are unnamed. This is used to incrementally
 implement named tensors; if a function supports named tensors, then it'll have
 `supports_named_tensor: True`; otherwise, passing it a named tensor will error out.

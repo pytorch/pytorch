@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <pybind11/pybind11.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -70,8 +69,8 @@ variable_list PythonEngine::execute(
   }
 }
 
-variable_list PythonEngine::execute_with_graph_task(
-    std::shared_ptr<GraphTask> graph_task,
+std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+    const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
     return Engine::execute_with_graph_task(graph_task, graph_root);

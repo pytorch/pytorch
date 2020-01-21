@@ -8,7 +8,6 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace {
 template <typename scalar_t>
@@ -85,6 +84,16 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
 Tensor isnan(const Tensor& self) {
   return self != self;
+}
+
+Tensor isinf(const Tensor &self) {
+  // Integral tensor types are always not inf
+  if (isIntegralType(self.scalar_type())) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
+    return self.abs() == std::numeric_limits<scalar_t>::infinity();
+  });
 }
 
 Tensor isfinite(const Tensor& self) {

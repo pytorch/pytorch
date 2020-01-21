@@ -27,7 +27,6 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
@@ -341,6 +340,11 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
   return self.to(self.options().device(device), non_blocking, copy, optional_memory_format);
+}
+
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  AutoNoGIL no_gil;
+  return self.to(self.options(), non_blocking, copy, optional_memory_format);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -682,7 +686,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::legacy_tensor_new(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_new(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -691,7 +695,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -700,7 +704,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_tensor(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -736,9 +740,12 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   if (device && device->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  if (!device && !scalarType && !copy) {
+  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
+  } else if (!device && !scalarType) {
+    return THPVariable_Wrap(
+        dispatch_to(self_, non_blocking, copy, opt_memory_format));
   } else if (!device) {
     return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {

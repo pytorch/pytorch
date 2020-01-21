@@ -13,7 +13,6 @@
 #include <vector>
 
 using namespace torch::nn;
-using namespace torch::serialize;
 
 namespace {
 Sequential xor_model() {
@@ -416,7 +415,7 @@ TEST(SerializeTest, IValue) {
   input_archive.read("value", ivalue_out);
   ASSERT_EQ(ivalue_out.toInt(), 1);
 
-  ASSERT_THROWS_WITH(input_archive.read("bad_key", ivalue_out), "does not have a field with the name");
+  ASSERT_THROWS_WITH(input_archive.read("bad_key", ivalue_out), "does not have a field with name");
 }
 
 // NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),

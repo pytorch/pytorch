@@ -2,6 +2,7 @@ import inspect
 import threading
 from functools import wraps
 import unittest
+import os
 import torch
 from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
@@ -124,7 +125,7 @@ device_type_test_bases = []
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
 
-    # Precision is a thread-local setting since it may be overriden per test
+    # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
     _tls.precision = TestCase.precision
 
@@ -246,6 +247,8 @@ class CUDATestBase(DeviceTypeTestBase):
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
+
+PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.
@@ -457,7 +460,7 @@ class precisionOverride(object):
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
-#   (2) Can be overriden for the CPU or CUDA, respectively, using dtypesIfCPU
+#   (2) Can be overridden for the CPU or CUDA, respectively, using dtypesIfCPU
 #       or dtypesIfCUDA.
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
 class dtypes(object):

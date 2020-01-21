@@ -30,7 +30,7 @@
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
-// suppot backward compatibility in future.
+// support backward compatibility in future.
 
 namespace torch {
 namespace jit {
@@ -187,7 +187,7 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai =
-      caffe2::make_unique<IStreamAdapter>(&in);
+      std::make_unique<IStreamAdapter>(&in);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }
@@ -195,7 +195,7 @@ mobile::Module _load_for_mobile(
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = caffe2::make_unique<FileAdapter>(filename);
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = _load_for_mobile(std::move(rai), device);
   return module;
 }

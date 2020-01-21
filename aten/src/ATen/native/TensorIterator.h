@@ -9,7 +9,6 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisons, and trigonometric functions. It handles
@@ -302,6 +301,16 @@ struct CAFFE2_API TensorIterator {
 
   bool needs_dynamic_casting() const {
     return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
+  }
+
+  bool has_contiguous_first_dim() const {
+    int num_tensors = ntensors();
+    for (int i = 0; i < num_tensors; i++) {
+      if (strides(i)[0] != element_size(i)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {

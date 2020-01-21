@@ -354,6 +354,7 @@ Caffe2Backend::get_special_operators() const {
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
               {"Concat", &Caffe2Backend::CreateConcat},
+              {"Int8Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
               {"Split", &Caffe2Backend::CreateSplit},
@@ -1656,7 +1657,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
     }
   }
 
-  // TODO: avoid extra copy by directly feed initialiers to backend blobs
+  // TODO: avoid extra copy by directly feed initializers to backend blobs
   OnnxToCaffe2(
       &rep->init_net(),
       &rep->pred_net(),

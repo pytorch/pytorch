@@ -27,6 +27,11 @@ from itertools import product
 from copy import deepcopy
 from numbers import Number
 import tempfile
+import json
+if sys.version_info[0] == 2:
+    from urllib2 import urlopen  # noqa f811
+else:
+    from urllib.request import urlopen
 
 import __main__
 import errno
@@ -136,9 +141,6 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
 
 # Used to run the same test with different tensor types
 def repeat_test_for_types(dtypes):
@@ -260,6 +262,9 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
+# Skip the test until issue #28313 gets fixed on Py2.
+TEST_DILL = _check_module_exists('dill') and PY3
+
 # On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
 # see librosa/librosa#729.
 # TODO: allow Py2 when librosa 0.6.2 releases
@@ -283,6 +288,20 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 if TEST_NUMPY:
     import numpy
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# bfloat16 bringup is currently only available on ROCm
+# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
+# when bfloat16 bringup is complete on all platforms
+if TEST_WITH_ROCM:
+    ALL_TENSORTYPES2 = [torch.float,
+                        torch.double,
+                        torch.half,
+                        torch.bfloat16]
+else:
+    ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -336,7 +355,7 @@ def skipIfNotRegistered(op_name, message):
 
     Args:
         op_name: Check if this op is registered in `core._REGISTERED_OPERATORS`.
-        message: mesasge to fail with.
+        message: message to fail with.
 
     Usage:
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
@@ -580,6 +599,34 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+disabled_test_from_issues = None
+def check_disabled(test_name):
+    global disabled_test_from_issues
+    if disabled_test_from_issues is None:
+        disabled_test_from_issues = {}
+
+        def read_and_process():
+            url = 'https://raw.githubusercontent.com/zdevito/pytorch_disabled_tests/master/result.json'
+            contents = urlopen(url, timeout=1).read().decode('utf-8')
+            the_response = json.loads(contents)
+            for item in the_response['items']:
+                title = item['title']
+                key = 'DISABLED '
+                if title.startswith(key):
+                    test_name = title[len(key):].strip()
+                    disabled_test_from_issues[test_name] = item['html_url']
+
+        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
+            try:
+                read_and_process()
+            except Exception:
+                print("Couldn't download test skip set, leaving all tests enabled...")
+
+    if test_name in disabled_test_from_issues:
+        raise unittest.SkipTest(
+            "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
+            " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+
 class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -634,10 +681,14 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
+
     def setUp(self):
+
+
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
                 raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+        check_disabled(str(self))
 
         set_rng_seed(SEED)
 
@@ -932,6 +983,28 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
             self.assertTrue(found, msg)
+
+    @contextmanager
+    def maybeWarnsRegex(self, category, regex=''):
+        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
+
+        This filters expected warnings from the test log and fails the test if
+        any unexpected warnings are caught.
+        """
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            # Ignore expected warnings
+            warnings.filterwarnings("ignore", message=regex, category=category)
+            try:
+                yield
+            finally:
+                if len(ws) != 0:
+                    msg = 'Caught unexpected warnings:\n'
+                    for w in ws:
+                        msg += warnings.formatwarning(
+                            w.message, w.category, w.filename, w.lineno, w.line)
+                        msg += '\n'
+                    self.fail(msg)
 
     @contextmanager
     def _reset_warning_registry(self):

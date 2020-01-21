@@ -9,7 +9,6 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <functional>
@@ -33,6 +32,21 @@ DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
 
+#define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
+{ \
+  TORCH_CHECK(\
+    out.option() == self.option(),\
+    "expected ", #option, " ",\
+    self.option(),\
+    " but found ", out.option())\
+}
+
+static inline void check_scalar_type_device_layout_equal(const Tensor& out, const Tensor& self) {
+  OPTION_TYPE_EQUALITY_CHECK(scalar_type, out, self);
+  OPTION_TYPE_EQUALITY_CHECK(device, out.options(), self.options());
+  OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
+}
+
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
@@ -47,7 +61,9 @@ static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
     mask.flip();
   } else {
     for (int64_t dim : dims) {
-      mask.set(maybe_wrap_dim(dim, ndim));
+      int64_t pos_dim = maybe_wrap_dim(dim, ndim);
+      TORCH_CHECK(pos_dim < 64, "PyTorch doesn't support reduction operations for dim>=64");
+      mask.set(pos_dim);
     }
   }
   return mask;
@@ -169,7 +185,7 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
     NoNamesGuard guard;
     return at::_cumsum(integer_upcast(self, dtype), dim);
   }();
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -186,7 +202,7 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
     NoNamesGuard guard;
     at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
   }
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -195,7 +211,7 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
     NoNamesGuard guard;
     return at::_cumprod(integer_upcast(self, dtype), dim);
   }();
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -212,11 +228,81 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
     NoNamesGuard guard;
     at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
   }
-  namedinference::propagate_names_for_reduction(result, self, dim, /*keepdim=*/true);
+  namedinference::propagate_names(result, self);
   return result;
 }
 
+std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+  check_scalar_type_device_layout_equal(values, self);
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
+  {
+    NoNamesGuard guard;
+    values.resize_(self.sizes());
+    indices.resize_(self.sizes());
+    if(self.dim() == 0) {
+      values.fill_(self.item());
+      indices.fill_(0);
+    }
+    else if(self.numel() != 0) {
+      // update values and indices for the first values along the dimension dim
+      values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
+      indices.narrow(dim, 0, 1).fill_(0);
+      for(int i = 1; i < self.size(dim); i++) {
+        auto res_at_i = at::max(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
+        // values at index i
+        values.narrow(dim, i, 1) = std::get<0>(res_at_i);
+        // indices at index i
+        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
+       }
+    }
+  }
+  namedinference::propagate_names(values, self);
+  namedinference::propagate_names(indices, self);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
 
+std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
+  auto values = at::empty(self.sizes(), self.options());
+  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
+  at::cummax_out(values, indices, self, dim);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
+
+std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+  check_scalar_type_device_layout_equal(values, self);
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
+  {
+    NoNamesGuard guard;
+    values.resize_(self.sizes());
+    indices.resize_(self.sizes());
+    if(self.dim() == 0) {
+      values.fill_(self.item());
+      indices.fill_(0);
+    }
+    else if(self.numel() != 0) {
+      // update values and indices for the first values along the dimension dim
+      values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
+      indices.narrow(dim, 0, 1).fill_(0);
+      for(int i = 1; i < self.size(dim); i++) {
+        auto res_at_i = at::min(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
+        // values at index i
+        values.narrow(dim, i, 1) = std::get<0>(res_at_i);
+        // indices at index i
+        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
+       }
+    }
+  }
+  namedinference::propagate_names(values, self);
+  namedinference::propagate_names(indices, self);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
+
+std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
+  auto values = at::empty(self.sizes(), self.options());
+  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
+  at::cummin_out(values, indices, self, dim);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
 // ALL REDUCE #################################################################
 
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
@@ -869,6 +955,16 @@ Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype)
 Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
 }
-
-
+std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
+  return at::cummax(self, dimname_to_position(self, dim));
+}
+std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
+  return at::cummax_out(values, indices, self, dimname_to_position(self, dim));
+}
+std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
+  return at::cummin(self, dimname_to_position(self, dim));
+}
+std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
+  return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
+}
 }} // namespace at::native

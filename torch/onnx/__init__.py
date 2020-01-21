@@ -9,9 +9,9 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
-ir_version = 4
+ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
-producer_version = "1.3"
+producer_version = _C._onnx.PRODUCER_VERSION
 
 
 class ExportTypes:
@@ -84,12 +84,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): example_outputs must be provided
-            when exporting a ScriptModule or TorchScript Function.
+        example_outputs (tuple of Tensors, default None): Model's example outputs being exported.
+            example_outputs must be provided when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
             trace.
-        example_outputs: example outputs of the model that is being exported.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
             a dictionary to specify dynamic axes of input/output, such that:
             - KEY:  input and/or output names

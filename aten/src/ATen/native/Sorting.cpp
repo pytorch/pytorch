@@ -6,7 +6,6 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
 
 namespace at {
@@ -277,7 +276,7 @@ std::tuple<Tensor, Tensor> kthvalue(
   return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
 }
 
-// this does not reduce to median with dim beause we don't want to copy twice
+// this does not reduce to median with dim because we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
   NoNamesGuard guard;
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");

@@ -569,9 +569,19 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    def test_upsample_nearest(self):
+    def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest', recompute_scale_factor=False), x)
+
+    def test_upsample_nearest_scale_default_scale_factor(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest'), x)
+
+    def test_upsample_nearest_size(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -841,6 +851,10 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    def test_dim(self):
+        x = torch.ones((2, 2), requires_grad=True)
+        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
 
     @skipIfNoLapack
     def test_det(self):

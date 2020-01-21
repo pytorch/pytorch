@@ -291,10 +291,10 @@ class Tensor(torch._C._TensorBase):
 
     def retain_grad(self):
         r"""Enables .grad attribute for non-leaf Tensors."""
-        if self.grad_fn is None:  # no-op for leaves
-            return
         if not self.requires_grad:
             raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
+        if self.is_leaf:  # no-op for leaves
+            return
         if hasattr(self, 'retains_grad'):
             return
         weak_self = weakref.ref(self)
@@ -727,5 +727,29 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).rename_(names)
         else:
             return super(Tensor, self).rename(names)
+
+    @property
+    def grad(self):
+        """
+        This attribute is ``None`` by default and becomes a Tensor the first time a call to
+        :func:`backward` computes gradients for ``self``.
+        The attribute will then contain the gradients computed and future calls to
+        :func:`backward` will accumulate (add) gradients into it.
+        """
+        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
+            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
+                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
+                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
+                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
+                          "github.com/pytorch/pytorch/pull/30531 for more informations.")
+        return self._grad
+
+    @grad.setter
+    def grad(self, new_grad):
+        self._grad = new_grad
+
+    @grad.deleter
+    def grad(self):
+        del self._grad
 
     __module__ = 'torch'

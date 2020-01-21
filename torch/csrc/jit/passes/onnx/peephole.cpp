@@ -540,7 +540,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
         TypePtr elem =
             lc_node->output()->type()->cast<ListType>()->getElementType();
         if (elem->cast<IntType>()) {
-          // ListConstruct Int[] output case, we need to transfrom to ONNX
+          // ListConstruct Int[] output case, we need to transform to ONNX
           // Concat to ensure the output is a single tensor(dynamic) type in
           // order to be consumed as inputs
           std::vector<Value*> unsqueezed;
@@ -742,7 +742,7 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
         Node* split_const_node =
             b->owningGraph()->create(onnx::Constant, 1);
         auto tensor = at::empty(split.size(), c10::kLong);
-        int64_t* data = tensor.data<int64_t>();
+        int64_t* data = tensor.data_ptr<int64_t>();
         for (auto split_size : split) {
           *data++ = split_size;
         }
