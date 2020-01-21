@@ -514,8 +514,9 @@ def gen_pyi(declarations_path, out):
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
-        'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: _bool=False)'
-                 ' -> Union[str, Tensor]: ...'],
+        'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
+                 'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
+                 ],
         'get_device': ['def get_device(self) -> _int: ...'],
         'contiguous': ['def contiguous(self) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
