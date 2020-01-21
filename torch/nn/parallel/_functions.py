@@ -7,25 +7,67 @@ from torch.cuda._utils import _get_device_index
 
 
 class Broadcast(Function):
-
     @staticmethod
-    def forward(ctx, target_gpus, *inputs):
+    def forward_nonsparse(ctx, target_gpus, *inputs, context_update = True):
         if not all(input.is_cuda for input in inputs):
             raise TypeError('Broadcast function not implemented for CPU tensors')
         target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
-        ctx.target_gpus = target_gpus
+        if context_update:
+            ctx.target_gpus = target_gpus
         if len(inputs) == 0:
             return tuple()
-        ctx.num_inputs = len(inputs)
-        ctx.input_device = inputs[0].get_device()
-        outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
+        if context_update:
+            ctx.num_inputs = len(inputs)
+            ctx.input_device = inputs[0].get_device()
+        outputs = comm.broadcast_coalesced(inputs, target_gpus)
         non_differentiables = []
-        for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
-            if not input_requires_grad:
-                for output in outputs:
-                    non_differentiables.append(output[idx])
-        ctx.mark_non_differentiable(*non_differentiables)
+        if context_update:
+            for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
+                if not input_requires_grad:
+                    for output in outputs:
+                        non_differentiables.append(output[idx])
+            ctx.mark_non_differentiable(*non_differentiables)
         return tuple([t for tensors in outputs for t in tensors])
+
+    @staticmethod
+    def forward_sparse(ctx, target_gpus, *inputs):
+        new_input_values = []
+        new_input_indices = []
+        for i in inputs:
+            if i.is_sparse:
+                new_input_values.append(i._values())
+                new_input_indices.append(i._indices())
+            else:
+                new_input_values.append(i)
+        output_values = Broadcast.forward_nonsparse(ctx, target_gpus, *new_input_values)
+        output_indices = Broadcast.forward_nonsparse(ctx, target_gpus, *new_input_indices, context_update=False)
+
+        new_output = []
+
+        output_values_index = 0
+        output_indices_index = 0
+        for gpu in target_gpus:
+            for i, r in enumerate(inputs):
+                if inputs[i].is_sparse:
+                    values = output_values[output_values_index]
+                    indices = output_indices[output_indices_index]
+                    t_add = type(inputs[i])(torch.sparse.FloatTensor(indices, values, inputs[i].shape))
+                    t_add = t_add.coalesce()
+                    output_indices_index += 1
+                else:
+                    t_add = output_values[output_values_index]
+
+                new_output += [t_add]
+                output_values_index += 1
+        return tuple(new_output)
+
+    @staticmethod
+    def forward(ctx, target_gpus, *inputs):
+        contains_sparse = any((i.is_sparse for i in inputs))
+        if contains_sparse:
+            return Broadcast.forward_sparse(ctx, target_gpus, *inputs)
+        else:
+            return Broadcast.forward_nonsparse(ctx, target_gpus, *inputs)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
