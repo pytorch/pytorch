@@ -118,6 +118,43 @@ struct Vec<scalar_t, 4> {
   }
 };
 
+template <
+  typename scalar_t,     // type of data.
+  int num_threads,       // number of threads in a block.
+  int block_work_size    // number of elements each block needs to handle.
+>
+struct checked_unroll {
+
+  static constexpr int thread_work_size = block_work_size / num_threads;
+  static constexpr int loop_size = thread_work_size;
+
+  template<typename accessor_t>
+  __device__ static inline void load(accessor_t to, scalar_t *from, int remaining) {
+    int thread_idx = threadIdx.x;
+    #pragma unroll
+    for (int i = 0; i < loop_size; i++) {
+      if (thread_idx >= remaining) {
+        return;
+      }
+      to(i) = from[thread_idx];
+      thread_idx += num_threads;
+    }
+  }
+
+  template<typename accessor_t>
+  __device__ static inline void store(scalar_t *to, accessor_t from, int remaining) {
+    int thread_idx = threadIdx.x;
+    #pragma unroll
+    for (int i = 0; i < loop_size; i++) {
+      if (thread_idx >= remaining) {
+        return;
+      }
+      to[thread_idx] = from(i);
+      thread_idx += num_threads;
+    }
+  }
+};
+
 // Functions here does not do boundary check. It assumes the whole block
 // has its job to do. So the reminders should be handled by the the caller
 // manually.

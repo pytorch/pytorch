@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 using namespace at::native::memory;
 __managed__ double4 buffer1[1024];
