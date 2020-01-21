@@ -11,6 +11,8 @@ def scatter(inputs, target_gpus, dim=0):
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
+        if isinstance(obj, tuple) and hasattr(obj, '_fields'):  # namedtuple                                                                                                                                                                                                        
+            return list(map(lambda x: type(obj)(*x), zip(*map(scatter_map, obj))))
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
