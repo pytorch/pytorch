@@ -1,6 +1,7 @@
 #include <torch/custom_class.h>
 
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,16 @@ struct Stack : torch::jit::CustomClassHolder {
       push(elem);
     }
   }
+
+  std::string str() {
+    std::stringstream ss;
+    ss << "[";
+    for (auto& item : stack_) {
+      ss << item << ", ";
+    }
+    ss << "]";
+    return ss.str();
+  }
 };
 
 static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
@@ -70,7 +81,8 @@ static auto testStack =
         .def("push", &Stack<std::string>::push)
         .def("pop", &Stack<std::string>::pop)
         .def("clone", &Stack<std::string>::clone)
-        .def("merge", &Stack<std::string>::merge);
+        .def("merge", &Stack<std::string>::merge)
+        .def("__str__", &Stack<std::string>::str);
 
 } // namespace
 

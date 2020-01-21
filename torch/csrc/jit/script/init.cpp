@@ -748,11 +748,20 @@ void initJitScriptBindings(PyObject* module) {
             return bool(self.find_method(name));
           })
       .def(
-          "_method_names", [](Object& self) {
+          "_method_names",
+          [](Object& self) {
             return fmap(self.get_methods(), [](const Method& method) {
               return method.name();
             });
-          });
+          })
+      .def("__str__", [](Object& self) {
+        if (auto method = self.find_method("__str__")) {
+          Stack s;
+          method->run(s);
+          return s.back().toString()->string();
+        }
+        throw std::runtime_error("__str__ is not defined!");
+      });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be

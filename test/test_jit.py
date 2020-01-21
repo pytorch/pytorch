@@ -4719,6 +4719,18 @@ def foo(x):
         self.assertEqual(out.pop(), "hi")
         self.assertEqual(out.pop(), "mom")
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_str(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            return ss, str(ss)
+
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        self.assertEqual(out[1], "[hi, mom, ]")
+        self.assertEqual(str(out[0]), out[1])
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
