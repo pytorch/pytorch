@@ -17,6 +17,7 @@ RMSpropOptions::RMSpropOptions(double learning_rate)
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 void RMSprop::step() {
+  // TODO: update step
   for (size_t i = 0; i < parameters_.size(); ++i) {
     Tensor p = parameters_.at(i);
     if (!p.grad().defined()) {
