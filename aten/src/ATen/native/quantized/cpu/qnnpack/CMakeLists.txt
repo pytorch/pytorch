@@ -141,7 +141,6 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/convolution.c
   src/deconvolution.c
   src/fc-prepack.cc
-  src/fully-connected.c
   src/global-average-pooling.c
   src/leaky-relu.c
   src/max-pooling.c

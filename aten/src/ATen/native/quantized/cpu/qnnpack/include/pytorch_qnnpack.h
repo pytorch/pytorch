@@ -115,30 +115,6 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
     size_t output_stride,
     pthreadpool_t threadpool);
 
-enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
-    size_t input_channels,
-    size_t output_channels,
-    uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
-    const uint8_t* kernel,
-    const int32_t* bias,
-    uint8_t output_zero_point,
-    float output_scale,
-    uint8_t output_min,
-    uint8_t output_max,
-    uint32_t flags,
-    pytorch_qnnp_operator_t* fully_connected);
-
-enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(
-    pytorch_qnnp_operator_t fully_connected,
-    size_t batch_size,
-    const uint8_t* input,
-    size_t input_stride,
-    uint8_t* output,
-    size_t output_stride);
-
 enum pytorch_qnnp_status pytorch_qnnp_create_global_average_pooling_nwc_q8(
     size_t channels,
     uint8_t input_zero_point,
