@@ -167,6 +167,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
+    torch._C._jit_pass_fixup_onnx_conditionals(graph)
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
@@ -838,7 +839,7 @@ def _node_getitem(self, k):
 
 
 def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
-    if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z]+[a-zA-Z0-9-_]*$", symbolic_name)):
+    if not bool(re.match(r"^[a-zA-Z0-9-_]*::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name)):
         raise RuntimeError("Failed to register operator {}. \
                            The symbolic name must match the format Domain::Name, \
                            and sould start with a letter and contain only \

@@ -593,13 +593,7 @@ bool TensorIterator::is_contiguous() const {
   if (ndim() != 1) {
     return false;
   }
-  int num_tensors = ntensors();
-  for (int i = 0; i < num_tensors; i++) {
-    if (strides(i)[0] != element_size(i)) {
-      return false;
-    }
-  }
-  return true;
+  return has_contiguous_first_dim();
 }
 
 

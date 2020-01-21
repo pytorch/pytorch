@@ -76,7 +76,7 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
    * seconds spent during the benchmark. The 0-th item is the time spent per
    * each network run, and if a net instantiation supports run_individual,
    * the remainder of the vector returns the number of milliseconds spent per
-   * opeartor.
+   * operator.
    */
   virtual vector<float> TEST_Benchmark(
       const int /*warmup_runs*/,

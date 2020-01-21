@@ -69,7 +69,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         lens = np.random.randint(low=1, high=5, size=d)
         boundaries = []
         for i in range(d):
-            # add [0, 0] as duplicated bounary for duplicated bucketization
+            # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
                 cur_boundary = np.append(
                     np.random.randn(lens[i] - 2) * 5, [0, 0])
@@ -174,7 +174,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         lens = np.random.randint(low=1, high=5, size=d)
         boundaries = []
         for i in range(d):
-            # add [0, 0] as duplicated bounary for duplicated bucketization
+            # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
                 cur_boundary = np.append(
                     np.random.randn(lens[i] - 2) * 5, [0, 0])
