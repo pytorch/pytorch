@@ -972,6 +972,9 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_nested_rref_stress(self):
+        if self.rank != 0:
+            return
+
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
@@ -991,6 +994,8 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(len(rrefs), 2)
             self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
+
+        print("A got children forks.")
 
     @dist_init
     def test_multi_layer_nested_async_rpc(self):

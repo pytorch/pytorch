@@ -253,11 +253,7 @@ If the future completes with an error, an exception is thrown.
   });
 
   module.def("_delete_all_user_rrefs", []() {
-    LOG(ERROR) << RRefContext::getInstance().agent_->getWorkerInfo().name_
-               << ": Entering binding";
     RRefContext::getInstance().delAllUsers();
-    LOG(ERROR) << RRefContext::getInstance().agent_->getWorkerInfo().name_
-               << "Exiting binding";
   });
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
