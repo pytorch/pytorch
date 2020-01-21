@@ -108,6 +108,14 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
+    // Custom-bound C++ classes have a wrapper analogous to the Python
+    // code object that can be invoked to instantiate the class. e.g.
+    // torch.classes.Foo(). The type of `torch.classes.Foo` is a
+    // StrongTypePtr, which really means that it's a script function
+    // that we generate to instantiate the class. In torch/_classes.py
+    // we stuff away the qualname of the class in this attribute
+    // so that we can look up the proper type ptr later, irrespective of
+    // the actual python name that's referencing it.
     const char* attr_name = "__torchscript_custom_class_qualname";
     if (py::hasattr(obj, attr_name)) {
       auto qualname = py::cast<std::string>(py::getattr(obj, attr_name));
