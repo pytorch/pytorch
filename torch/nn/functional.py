@@ -3088,10 +3088,10 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
                                 operation won't be differentiable.
     """
     if out is None:
-        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
+        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
+        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
