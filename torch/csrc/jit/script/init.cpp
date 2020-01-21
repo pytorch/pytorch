@@ -118,10 +118,21 @@ struct PythonResolver : public Resolver {
     // the actual python name that's referencing it.
     const char* attr_name = "__torchscript_custom_class_qualname";
     if (py::hasattr(obj, attr_name)) {
-      auto qualname = py::cast<std::string>(py::getattr(obj, attr_name));
-      auto custom_class_ptr = getCustomClass(qualname);
-      TORCH_INTERNAL_ASSERT(custom_class_ptr);
-      return custom_class_ptr;
+      try {
+        auto qualname = py::cast<std::string>(py::getattr(obj, attr_name));
+        auto custom_class_ptr = getCustomClass(qualname);
+        TORCH_INTERNAL_ASSERT(custom_class_ptr);
+        return custom_class_ptr;
+      } catch (std::runtime_error) {
+        // Fallthrough
+        //
+        // Some objects that appear here `e.g. torch.ops.xxx` may return true
+        // for the `py::hasattr` check, but when we actually try to access
+        // the value via py::getattr, it returns the wrong type (rather than
+        // throwing an exception for some reason.
+        //
+        // TODO: figure out if pybind11 is broken in this regard.
+      }
     }
 
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
