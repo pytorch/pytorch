@@ -108,31 +108,20 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
-    // Custom-bound C++ classes have a wrapper analogous to the Python
-    // code object that can be invoked to instantiate the class. e.g.
-    // torch.classes.Foo(). The type of `torch.classes.Foo` is a
-    // StrongTypePtr, which really means that it's a script function
-    // that we generate to instantiate the class. In torch/_classes.py
-    // we stuff away the qualname of the class in this attribute
-    // so that we can look up the proper type ptr later, irrespective of
-    // the actual python name that's referencing it.
-    const char* attr_name = "__torchscript_custom_class_qualname";
-    if (py::hasattr(obj, attr_name)) {
-      try {
-        auto qualname = py::cast<std::string>(py::getattr(obj, attr_name));
-        auto custom_class_ptr = getCustomClass(qualname);
-        TORCH_INTERNAL_ASSERT(custom_class_ptr);
-        return custom_class_ptr;
-      } catch (std::runtime_error) {
-        // Fallthrough
-        //
-        // Some objects that appear here `e.g. torch.ops.xxx` may return true
-        // for the `py::hasattr` check, but when we actually try to access
-        // the value via py::getattr, it returns the wrong type (rather than
-        // throwing an exception for some reason.
-        //
-        // TODO: figure out if pybind11 is broken in this regard.
-      }
+    if (py::isinstance<ScriptCodeObj>(obj)) {
+      auto code_obj = py::cast<ScriptCodeObj>(obj);
+      // Custom-bound C++ classes have a wrapper analogous to the Python
+      // code object that can be invoked to instantiate the class. e.g.
+      // torch.classes.Foo(). The type of `torch.classes.Foo` is a
+      // StrongTypePtr, which really means that it's a script function
+      // that we generate to instantiate the class. In torch/_classes.py
+      // we stuff away the qualname of the class in this attribute
+      // so that we can look up the proper type ptr later, irrespective of
+      // the actual python name that's referencing it.
+      auto qualname = code_obj.qualname;
+      auto custom_class_ptr = getCustomClass(qualname);
+      TORCH_INTERNAL_ASSERT(custom_class_ptr);
+      return custom_class_ptr;
     }
 
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
@@ -701,7 +690,6 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -976,6 +964,8 @@ void initJitScriptBindings(PyObject* module) {
           "qualified_name", [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
           });
+
+  py::class_<ScriptCodeObj, StrongFunctionPtr>(m, "ScriptCodeObj");
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
