@@ -18,6 +18,7 @@ from dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch._jit_internal import _qualified_name
 
 
 def requires_process_group_agent(message=""):
@@ -33,6 +34,19 @@ VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
 
 
+class StubRpcAgent:
+    def __init__(self, world_size):
+        self.world_size = world_size
+
+    def get_worker_infos(self):
+        return {
+            rpc.WorkerInfo(
+                name="worker{}".format(rank),
+                id=rank,
+            ) for rank in range(self.world_size)
+        }
+
+
 def _stub_construct_rpc_backend_options_handler(
     **kwargs
 ):
@@ -42,7 +56,7 @@ def _stub_construct_rpc_backend_options_handler(
 def _stub_start_rpc_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
-    return mock.Mock()  # RpcAgent.
+    return StubRpcAgent(world_size=world_size)
 
 
 def set_value(value):
@@ -225,6 +239,23 @@ def clear_global_rref():
     global global_rref
     global_rref = None
 
+
+@torch.jit.script
+class MyScriptClass:
+    def __init__(self):
+        self.a = 10
+
+
+class MyScriptModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.a = 10
+
+    @torch.jit.script_method
+    def my_method(self):
+        self.a = 11
+
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -361,7 +392,6 @@ class RpcTest(RpcAgentTestFixture):
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
-        rpc.shutdown()
 
     @dist_init(setup_rpc=False)
     def test_reinit(self):
@@ -496,8 +526,51 @@ class RpcTest(RpcAgentTestFixture):
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
 
-        # it's safe to call shutdown() multiple times
-        rpc.shutdown()
+    def test_wait_all_workers(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            self.assertTrue(self.world_size >= 3)
+
+            num_repeat = 30
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+        # worker0 calls this at the end after waiting for RPC responses.
+        # worker1/2 calls this immediately and has some works after it.
+        # worker3 calls this immediately and has no more work.
+        rpc.api._wait_all_workers()
+        rpc.shutdown(graceful=False)
 
     @dist_init
     def test_expected_src(self):
@@ -712,6 +785,53 @@ class RpcTest(RpcAgentTestFixture):
             fut.wait()
 
     @dist_init
+    def test_script_function_exception(self):
+        @torch.jit.script
+        def no_args():
+            a = 1
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(Exception, "no_args"):
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
+
+    @dist_init
+    def test_script_functions_not_supported(self):
+        # Right now _rpc_sync_torchscript does not accept annotated torchscript
+        # class name or script module class name or their class method names.
+        # But rpc_sync still accepts script class name and run it in
+        # the same code path as python call.
+        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
+        # accept script module and script module method.
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptClass),
+                args=())
+        ret = rpc.rpc_sync(
+            'worker{}'.format(dst_rank), MyScriptClass, args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule),
+                args=())
+
+        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
+            ret = rpc._rpc_sync_torchscript(
+                'worker{}'.format(dst_rank),
+                _qualified_name(MyScriptModule().my_method),
+                args=())
+        # Python 3.5 and Python 3.6 throw different error message, the only
+        # common word can be greped is "pickle".
+        with self.assertRaisesRegex(Exception, "pickle"):
+            ret = rpc.rpc_sync(
+                'worker{}'.format(dst_rank),
+                MyScriptModule().my_method,
+                args=())
+
+    @dist_init
     def test_nested_rpc(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -768,10 +888,10 @@ class RpcTest(RpcAgentTestFixture):
             assert self.world_size >= 3
 
             num_repeat = 100
-            futs = []
 
             # Phase 1: Only worker1 has workload.
             dst = "worker1"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -784,6 +904,7 @@ class RpcTest(RpcAgentTestFixture):
             # If join is not correctly implemented,
             # worker2 should be closed by now.
             dst = "worker2"
+            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
@@ -1324,9 +1445,7 @@ class RpcTest(RpcAgentTestFixture):
         # without sending any messages.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1396,9 +1515,7 @@ class RpcTest(RpcAgentTestFixture):
         # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1426,7 +1543,7 @@ class RpcTest(RpcAgentTestFixture):
         # multiple times.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[dist_utils.TEST_CONFIG.rpc_backend_name],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options
@@ -1434,7 +1551,7 @@ class RpcTest(RpcAgentTestFixture):
         from torch.distributed.rpc.api import _wait_all_workers
         # intentional call to internal _wait_all_workers.
         _wait_all_workers()
-        rpc.shutdown()
+        rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):

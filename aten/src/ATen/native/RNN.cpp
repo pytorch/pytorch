@@ -295,7 +295,7 @@ static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
   }
   return result;
 #else // USE_FBGEMM
-  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN wihtout FBGEMM!")
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM!")
 #endif // USE_FBGEMM
 }
 
