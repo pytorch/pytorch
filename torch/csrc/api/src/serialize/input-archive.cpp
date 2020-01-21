@@ -24,6 +24,16 @@ void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
 
 bool InputArchive::try_read(
     const std::string& key,
+    c10::IValue& ivalue) {
+  if (!module_.hasattr(key)) {
+    return false;
+  }
+  ivalue = module_.attr(key);
+  return true;
+}
+
+bool InputArchive::try_read(
+    const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
   if (!module_.hasattr(key)) {
@@ -145,6 +155,17 @@ void InputArchive::load_from(
   };
   std::unique_ptr<OurAdapter> adapter(new OurAdapter(read_func, size_func));
   module_ = torch::jit::load(std::move(adapter), std::move(device));
+}
+
+std::vector<std::string> InputArchive::keys() {
+  std::vector<std::string> all_keys;
+  all_keys.reserve(module_.named_attributes(/*recurse=*/false).size());
+
+  for (const torch::jit::script::NameValue& s : module_.named_attributes(/*recurse=*/false)) {
+    all_keys.push_back(s.name);
+  }
+
+  return all_keys;
 }
 
 } // namespace serialize
