@@ -64,9 +64,9 @@ DEFINE_VECTOR_INFO(int16_t,    4,  short4,         8);
 DEFINE_VECTOR_INFO(    int,    2,    int2,         8);
 DEFINE_VECTOR_INFO(    int,    4,    int4,        16);
 
-static_assert(sizeof(long) == 8, "long is assumed to be 64bit");
-DEFINE_VECTOR_INFO(int64_t,    2,   long2,        16);
-DEFINE_VECTOR_INFO(int64_t,    4,   long4,        16);
+static_assert(sizeof(int64_t) == sizeof(long long), "long long is assumed to be 64bit");
+DEFINE_VECTOR_INFO(int64_t,    2,   longlong2,        16);
+DEFINE_VECTOR_INFO(int64_t,    4,   longlong4,        16);
 
 DEFINE_VECTOR_INFO(  float,    2,  float2,         8);
 DEFINE_VECTOR_INFO(  float,    4,  float4,        16);
@@ -79,33 +79,41 @@ DEFINE_VECTOR_INFO( double,    4, double4,        16);
 template <typename scalar_t, int size>
 struct Vec {
   typename Info<scalar_t, size>::vector_type v;
-  static_assert(size == 1 || size == 2 || size == 4);
-  __device__ inline scalar_t &operator[](int i) = delete;
+  static_assert(size == 1 || size == 2 || size == 4, "only vectors of size 1, 2, 4 are supported");
 };
 
 template <typename scalar_t>
 struct Vec<scalar_t, 1> {
   typename Info<scalar_t, 1>::vector_type v;
-  __device__ inline scalar_t &operator[](int i) {
+  __device__ inline scalar_t get(int i) {
     return v;  // no boundary check here
+  }
+  __device__ inline void set(int i, scalar_t value) {
+    v = value;  // no boundary check here
   }
 };
 
 template <typename scalar_t>
 struct Vec<scalar_t, 2> {
   typename Info<scalar_t, 2>::vector_type v;
-  __device__ inline scalar_t &operator[](int i) {
+  __device__ inline scalar_t get(int i) {
     if (i == 0) {
       return v.x;
     }
     return v.y;  // no boundary check here
+  }
+  __device__ inline void set(int i, scalar_t value) {
+    if (i == 0) {
+      v.x = value;
+    }
+    v.y = value;  // no boundary check here
   }
 };
 
 template <typename scalar_t>
 struct Vec<scalar_t, 4> {
   typename Info<scalar_t, 4>::vector_type v;
-  __device__ inline scalar_t &operator[](int i) {
+  __device__ inline scalar_t get(int i) {
     switch (i) {
     case 0:
       return v.x;
@@ -115,6 +123,17 @@ struct Vec<scalar_t, 4> {
       return v.z;
     }
     return v.w; // no boundary check here
+  }
+  __device__ inline void set(int i, scalar_t value) {
+    switch (i) {
+    case 0:
+      v.x = value;
+    case 1:
+      v.y = value;
+    case 2:
+      v.z = value;
+    }
+    v.w = value; // no boundary check here
   }
 };
 
@@ -181,7 +200,7 @@ struct vectorized {
       vec_t vector = from_[index];
       #pragma unroll
       for (int j = 0; j < vec_size; j++) {
-        to(vec_size * i + j) = vector[j];
+        to(vec_size * i + j) = vector.get(j);
       }
     }
   }
@@ -196,7 +215,7 @@ struct vectorized {
       int index = thread_idx + i * num_threads;
       vec_t vector;
       for (int j = 0; j < vec_size; j++) {
-        vector[j] = from(vec_size * i + j);
+        vector.set(j, from(vec_size * i + j));
       }
       to_[index] = vector;
     }
