@@ -705,8 +705,8 @@ class InsertQuantDeQuantHelper {
       observer_modules_to_remove_;
   // We only remove observer module attributes from type in the
   // first encounter of the graph, after that since the attributes
-  // is already removed from the ClassType, we'll use the list of slot index to replay
-  // this removal
+  // is already removed from the ClassType, we'll use the list of slot index to
+  // replay this removal
   std::unordered_map<Graph*, std::vector<int>> removed_observer_slots_;
   std::unordered_map<Graph*, std::vector<Node*>> nodes_to_destroy_;
   // Map from Graph to observer node, we can use observer node to
@@ -765,8 +765,8 @@ void InsertQuantDeQuantHelper::cleanup(script::Module& module, Graph* g) {
     nodes_to_destroy_.at(g).clear();
   }
 
-  // If we have seen this graph before, this means the observer
-  // attributes has been removed from the type, but the slot
+  // 1. If we have seen this graph before, this means the observer
+  // attributes has been removed from the type(see step 2) but the slot
   // index of these attributes are kept in the list, we'll replay the observer
   // slots removal using these slot indexes
   if (removed_observer_slots_.count(g)) {
@@ -775,7 +775,7 @@ void InsertQuantDeQuantHelper::cleanup(script::Module& module, Graph* g) {
     }
   }
 
-  // Remove observer modules from last one to first one in order to
+  // 2. Remove observer modules from last one to first one in order to
   // reduce the time complexity, assuming all the observer modules
   // are added after the existing modules, we'll have complexity of
   // O(N) where N is number of observer modules with this optimization
@@ -785,6 +785,9 @@ void InsertQuantDeQuantHelper::cleanup(script::Module& module, Graph* g) {
       auto observer_name = observers[i];
       GRAPH_DEBUG("Trying to remove: ", observer_name);
       if (module.type()->hasAttribute(observer_name)) {
+        // We record the slot index here in order to replay the
+        // slot removal in other objects that's sharing the ClassType
+        // since we're going to remove attribute in the ClassType here
         removed_observer_slots_[g].push_back(
             module.type()->getAttributeSlot(observer_name));
         module._ivalue()->unsafeRemoveAttr(observer_name);
