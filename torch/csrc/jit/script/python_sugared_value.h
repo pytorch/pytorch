@@ -105,7 +105,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
-// {functions, modules, contants} so this SugaredValue is defined here
+// {functions, modules, constants} so this SugaredValue is defined here
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 

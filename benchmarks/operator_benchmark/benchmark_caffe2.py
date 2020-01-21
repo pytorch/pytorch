@@ -145,7 +145,7 @@ OpMeta = namedtuple("OpMeta", "op_type num_inputs input_dims input_types \
 
 def generate_c2_test_from_ops(ops_metadata, bench_op, tags):
     """
-    This function is used to generate Caffe2 tests based on the meatdata
+    This function is used to generate Caffe2 tests based on the metadata
     of operators. The metadata includes seven fields which are 1) op_type:
     the name of the operator. 2) num_inputs: the number of input blobs.
     3) input_dims: a dictionary which includes the shapes of the input blobs.
