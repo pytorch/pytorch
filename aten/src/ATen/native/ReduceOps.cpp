@@ -234,7 +234,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
   check_scalar_type_device_layout_equal(values, self);
-  check_scalar_type_device_layout_equal(indices, at::empty({}, self.options().dtype(at::kLong)));
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
     values.resize_(self.sizes());
@@ -265,6 +265,42 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
   auto values = at::empty(self.sizes(), self.options());
   auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummax_out(values, indices, self, dim);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
+
+std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+  check_scalar_type_device_layout_equal(values, self);
+  check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
+  {
+    NoNamesGuard guard;
+    values.resize_(self.sizes());
+    indices.resize_(self.sizes());
+    if(self.dim() == 0) {
+      values.fill_(self.item());
+      indices.fill_(0);
+    }
+    else if(self.numel() != 0) {
+      // update values and indices for the first values along the dimension dim
+      values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
+      indices.narrow(dim, 0, 1).fill_(0);
+      for(int i = 1; i < self.size(dim); i++) {
+        auto res_at_i = at::min(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
+        // values at index i
+        values.narrow(dim, i, 1) = std::get<0>(res_at_i);
+        // indices at index i
+        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
+       }
+    }
+  }
+  namedinference::propagate_names(values, self);
+  namedinference::propagate_names(indices, self);
+  return std::tuple<Tensor &,Tensor &>{values, indices};
+}
+
+std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
+  auto values = at::empty(self.sizes(), self.options());
+  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
+  at::cummin_out(values, indices, self, dim);
   return std::tuple<Tensor &,Tensor &>{values, indices};
 }
 // ALL REDUCE #################################################################
@@ -925,5 +961,10 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
 std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
   return at::cummax_out(values, indices, self, dimname_to_position(self, dim));
 }
-
+std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
+  return at::cummin(self, dimname_to_position(self, dim));
+}
+std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
+  return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
+}
 }} // namespace at::native

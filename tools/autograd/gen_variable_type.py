@@ -990,7 +990,7 @@ def unpack_args(env, declaration):
             ))
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
-            # although it's stll getting the non-variable from the variable
+            # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 

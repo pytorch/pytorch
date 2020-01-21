@@ -49,13 +49,15 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Our local tests also caught this segment faults if py::objects are cleaned
   // up at program exit. The explanation is: CPython cleans up most critical
   // utilities before cleaning up PythonRpcHandler singleton, so when
-  // PythonRpcHandler signleton cleans up py::objects and call dec_ref(), it
+  // PythonRpcHandler singleton cleans up py::objects and call dec_ref(), it
   // will crash.
   // The solution is to clean up py::objects earlier when Rpc agent join().
   // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
   // as well, as Rpc agent is global variable and it will have same issue as
   // PythonRpcHandler.
   void cleanup();
+
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
 
  private:
   PythonRpcHandler();
@@ -77,6 +79,13 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
+
+  // Shared ptr to python compilation unit in jit, it is constructed in python
+  // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
+  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
+  // We import the compilation unit here only once for less cost and thread
+  // safety.
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
 };
 
 } // namespace rpc
