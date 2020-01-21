@@ -2541,7 +2541,6 @@ TEST_F(FunctionalTest, isinf_CUDA) {
 }
 
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {
-  using namespace at::Reduction;
   { // test BCE with logits raises if target and input are different size
     {
       const auto target = torch::rand(5);
