@@ -557,7 +557,7 @@ private:
     // TODO: Need to optimize this part.
     switch(qa.scalar_type()) {
       case at::kQInt8:
-        return qa
+        return qa;
       case at::kQUint8:
       case at::kQInt32:
         Tensor dqa = qa.dequantize();
