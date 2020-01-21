@@ -934,5 +934,33 @@ inline py::object invokeOperatorFromPython(
   return createPyObjectForStack(std::move(stack));
 }
 
+inline c10::optional<std::vector<NamedValue>> try_get_inputs_for_op(
+    std::shared_ptr<Operator> op,
+    const std::vector<py::object>& inputs) {
+  auto args = op->schema().arguments();
+  if (args.size() < inputs.size()) {
+    // Too many inputs for this schema, skip it
+    return c10::nullopt;
+  }
+
+  // Loop over the schema args, try to convert each one to the type in
+  // the schema.
+  std::vector<NamedValue> input_values;
+  size_t i = 0;
+  for (auto input : inputs) {
+    IValue input_value;
+    auto arg = args.at(i);
+    try {
+      input_value = toIValue(input, arg.type());
+      input_values.emplace_back(std::move(input_value));
+    } catch (const std::exception& e) {
+      return c10::nullopt;
+    }
+    i++;
+  }
+
+  return input_values;
+}
+
 } // namespace jit
 } // namespace torch

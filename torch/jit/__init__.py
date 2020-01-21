@@ -908,6 +908,15 @@ def trace(func,
         raise AttributeError("trace doesn't support compiling individual module's functions.\n"
                              "Please use trace_module")
 
+    builtin_symbol_name = _find_builtin(func)
+    if builtin_symbol_name is not None:
+        # The object is a builtin torch function (e.g. something bound directly
+        # from C++, like torch.bartlett_window). Since these have no code to
+        # compile, we have to manually make the graph of the function and the
+        # corresponding builtin op.
+        return torch._C._create_graph_from_builtin(builtin_symbol_name, example_inputs)
+        # return torch.jit._recursive.create_graph_for_builtin(builtin_symbol_name, example_inputs)
+
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
@@ -1274,6 +1283,14 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
     if isinstance(obj, torch.nn.Module):
         return torch.jit._recursive.create_script_module(obj, torch.jit._recursive.infer_methods_to_compile)
+
+    builtin_symbol_name = _find_builtin(obj)
+    if builtin_symbol_name is not None:
+        # The object is a builtin torch function (e.g. something bound directly
+        # from C++, like torch.bartlett_window). Since these have no code to
+        # compile, we have to manually make the graph of the function and the
+        # corresponding builtin op.
+        return torch.jit._recursive.create_graph_for_builtin(builtin_symbol_name, obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):

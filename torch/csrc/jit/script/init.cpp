@@ -1183,6 +1183,65 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
+  m.def(
+      "_create_function_from_builtin",
+      [](const std::string& builtin_symbol_name,
+         const std::vector<py::object>& inputs) {
+        // Create a function that contains a single call to an existing `aten::`
+        // op with the call corresponding to `inputs` (to resolve overloads)
+
+        // There's no code to compile so there's no real range to use
+        SourceRange fake_range;
+        auto graph = std::make_shared<Graph>();
+        c10::Symbol symbol = c10::Symbol::fromQualString(builtin_symbol_name);
+
+        // Try to cast the inputs list to the types of the op
+        c10::optional<std::vector<NamedValue>> maybe_inputs;
+        for (auto op : getAllOperatorsFor(symbol)) {
+          maybe_inputs = try_get_inputs_for_op(op, inputs);
+          if (maybe_inputs) {
+            break;
+          }
+        }
+
+        if (!maybe_inputs) {
+          throw std::runtime_error(
+              "Could not find an op that matched the inputs provided");
+        }
+
+        // Insert the call to the builtin in the graph
+        std::vector<Value*> input_values;
+        Value* v = emitBuiltinCall(
+            fake_range,
+            *graph,
+            symbol,
+            maybe_inputs.value(),
+            {},
+            /*self=*/c10::nullopt);
+        graph->registerOutput(v);
+
+        // Remove constant-ified inputs and make them inputs to the graph
+        size_t i = 0;
+        for (auto input : inputs) {
+          auto input_value = v->node()->inputs().at(i);
+          auto graph_input = graph->addInput("");
+          graph_input->setType(input_value->type());
+          input_value->replaceAllUsesWith(graph_input);
+
+          input_value->node()->destroy();
+          i++;
+        }
+
+        auto cu = get_python_cu();
+        auto name =
+            c10::QualifiedName(std::string("torch.") + symbol.toUnqualString());
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
+      });
+
   m.def("_export_opnames",
           [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
 

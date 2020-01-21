@@ -13953,6 +13953,19 @@ a")
 
         self.checkTrace(foo, (torch.rand(3, 4),))
 
+    def test_trace_builtin(self):
+        def mini_trace_check(fn, inputs):
+            # checkTrace but supports all input types
+            traced = torch.jit.trace(fn, inputs)
+            print(traced.graph)
+            eager_out = fn(*inputs)
+            traced_out = traced(*inputs)
+            self.assertEqual(eager_out, traced_out)
+
+        # mini_trace_check(torch.add, [torch.ones(2, 2), torch.ones(2, 2)])
+        # mini_trace_check(torch.add, [torch.ones(2, 2), torch.ones(2, 2)])
+        mini_trace_check(torch.bartlett_window, [2])
+
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
             x.view(-1).add_(-x.view(-1))
