@@ -164,7 +164,7 @@ class RRefContext {
 
   // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
-  // following two conditions is ture:
+  // following two conditions is true:
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //
