@@ -275,7 +275,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_H_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
     )
 
   set(TORCH_GENERATED_CODE
@@ -306,7 +305,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"

@@ -1,11 +1,9 @@
-#include "python_nn_functions.h"
-
 // ${generated_comment}
-
 
 #include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/python_nn_functions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"

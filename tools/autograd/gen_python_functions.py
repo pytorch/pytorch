@@ -85,7 +85,7 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
 ]
 
 def should_generate_python_binding(declaration):
-    name = op_name(declaration)
+    name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
         if re.match('^' + pattern + '$', name):
             return False
@@ -109,11 +109,10 @@ def get_py_variable_methods(declarations):
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                declaration['mode'] != 'NN' and
-                declaration.get('python_module') != 'nn' and
+                not is_nn_module_function(declaration) and
                 is_tensor_method(declaration))
 
-    return group_declarations([d for d in declarations if should_bind(d)])
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
 
 
 def gen_py_variable_methods(out, declarations, template_path):
@@ -135,9 +134,9 @@ def get_py_nn_functions(declarations):
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
+                is_nn_module_function(declaration))
 
-    return group_declarations([d for d in declarations if should_bind(d)])
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
 
 
 def gen_py_nn_functions(out, declarations, template_path):
@@ -145,14 +144,11 @@ def gen_py_nn_functions(out, declarations, template_path):
     Generate functions in the "nn" module.
     """
     PY_NN_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_nn_functions.cpp')
-    # TODO move header out of codegen, has no nontrivial generated content
-    PY_NN_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_nn_functions.h')
 
     py_nn_functions = get_py_nn_functions(declarations)
 
     env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
-    write(out, 'python_nn_functions.h', PY_NN_FUNCTIONS_H, {})
 
 
 def get_py_torch_functions(declarations):
@@ -162,11 +158,10 @@ def get_py_torch_functions(declarations):
     """
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                declaration['mode'] != 'NN' and
-                declaration.get('python_module') != 'nn' and
+                not is_nn_module_function(declaration) and
                 is_torch_function(declaration))
 
-    return group_declarations([d for d in declarations if should_bind(d)])
+    return group_declarations_by_op_name([d for d in declarations if should_bind(d)])
 
 
 def gen_py_torch_functions(out, declarations, template_path):
@@ -181,7 +176,7 @@ def gen_py_torch_functions(out, declarations, template_path):
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 
 
-def group_declarations(declarations):
+def group_declarations_by_op_name(declarations):
     groups = defaultdict(list)
     for d in declarations:
         groups[op_name(d)].append(d)
@@ -246,15 +241,9 @@ UNPACK_WITH_SIZE_METHODS = {
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
-    'IntArrayRef': 'setDefaultIntlist',
-    'Scalar': 'scalarWithDefault',
-    'int64_t': 'toInt64WithDefault',
-    'bool': 'setDefaultBool',
-    'double': 'setDefaultDouble',
     'const Type &': 'scalartypeWithDefault',
     'const THPLayout &': 'layoutWithDefault',
     'const Device &': 'deviceWithDefault',
-    'ScalarType': 'scalartypeWithDefault',
 }
 
 def parsed_arg_expr(arg, arg_index):
@@ -263,6 +252,7 @@ def parsed_arg_expr(arg, arg_index):
 
     default_init = arg.get('python_default_init')
     if default_init is not None:
+        # Note: only introduced by make_python_binding_args
         default_init = arg['python_default_init']
         if typename not in UNPACK_WITH_DEFAULT_METHODS:
             raise RuntimeError(
@@ -329,14 +319,10 @@ TEMP_SAFE_CPP_DECL_TYPE = {
     'Tensor &': 'Tensor',
 }
 
-CPP_DECL_TYPE_CONVERSION_HACKS = {
-    'const Device &': 'c10::optional<int32_t>'
-}
-
 def get_cpp_decl_type(typename, ensure_temp_safe=True):
     if ensure_temp_safe:
         typename = TEMP_SAFE_CPP_DECL_TYPE.get(typename, typename)
-    return CPP_DECL_TYPE_CONVERSION_HACKS.get(typename, typename)
+    return typename
 
 
 def get_cpp_formal(arg, ensure_temp_safe=True):
@@ -449,21 +435,21 @@ check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isN
 # Lambda is so GIL is back on by wrap() time (wrap can allocate)
 PY_VARIABLE_WRAP = CodeTemplate("""\
 ${inits}
-auto _dispatch = [](${lambda_formals}) {
+auto dispatch_${name} = [](${lambda_formals}) {
   ${auto_no_gil}
   return ${dispatch_callee}(${dispatch_args});
 };
-return wrap(${namedtuple_typeref}_dispatch(${lambda_args})${set_requires_grad});
+return wrap(${namedtuple_typeref}dispatch_${name}(${lambda_args})${set_requires_grad});
 """)
 
 # void return variant
 PY_VARIABLE_RETURN_VOID = CodeTemplate("""\
 ${inits}
-auto _dispatch = [](${lambda_formals}) {
+auto dispatch_${name} = [](${lambda_formals}) {
   ${auto_no_gil}
   return ${dispatch_callee}(${dispatch_args});
 };
-_dispatch(${lambda_args})${set_requires_grad};
+dispatch_${name}(${lambda_args})${set_requires_grad};
 Py_RETURN_NONE;
 """)
 
@@ -514,13 +500,13 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     auto_no_gil = [] if declaration['with_gil'] else ['pybind11::gil_scoped_release no_gil;']
 
     simple_return_type = get_simple_return_type(declaration)
-
     if simple_return_type == 'void':
         template = PY_VARIABLE_RETURN_VOID
     else:
         template = PY_VARIABLE_WRAP
 
     return template.substitute(
+        name=declaration['name'],
         inits=inits,
         lambda_formals=lambda_formals,
         lambda_args=lambda_args,
@@ -1456,6 +1442,10 @@ def is_tensor_method(declaration):
 
 def is_torch_function(declaration):
     return 'namespace' in declaration['method_of']
+
+
+def is_nn_module_function(declaration):
+    return declaration.get('python_module') == 'nn'
 
 
 def function_namespace(declaration):

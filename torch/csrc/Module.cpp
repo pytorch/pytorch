@@ -29,7 +29,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
-#include <torch/csrc/autograd/generated/python_nn_functions.h>
+#include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
