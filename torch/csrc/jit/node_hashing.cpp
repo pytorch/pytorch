@@ -90,7 +90,7 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     return true;
   }
   if (a1.isString()) {
-    return attributesEqual(a1.toStringRef(), a2.toStringRef());
+    return a1.toStringRef() == a2.toStringRef();
   }
   if (a1.isList()) {
     return attributesEqual(a1.toListRef(), a2.toListRef());
