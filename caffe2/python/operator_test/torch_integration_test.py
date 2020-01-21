@@ -776,6 +776,16 @@ class TorchIntegration(hu.HypothesisTestCase):
         # y should also change because y is alias of x
         torch.testing.assert_allclose(y, torch.Tensor([3, 6]).to(device))
 
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_copy_between_cpu_and_gpu(self):
+        x_cpu_ref = torch.Tensor([1, 2, 3])
+        x_gpu_ref = x_cpu_ref.to("cuda")
+
+        x_gpu = torch.ops._caffe2.CopyCPUToGPU(x_cpu_ref)
+        torch.testing.assert_allclose(x_gpu, x_gpu_ref)
+        x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
+        torch.testing.assert_allclose(x_cpu, x_cpu_ref)
+
 
 if __name__ == '__main__':
     unittest.main()
