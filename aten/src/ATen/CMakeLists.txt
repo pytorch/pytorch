@@ -24,7 +24,7 @@ else()
   set(CAFFE2_STATIC_LINK_CUDA_INT 0)
 endif()
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
+# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen
 # files, which are compiled even if we are doing a vanilla CUDA build.
 # Once we properly split CUDA and HIP in ATen, we can remove this code.
