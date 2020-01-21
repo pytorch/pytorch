@@ -30,7 +30,7 @@ void RRefContext::handleException(
     const c10::optional<utils::FutureError>& futErr) {
   if (futErr) {
     // TODO: allow users to register an error handler and call it here.
-    VLOG(1) << "Got exception: " << (*futErr).what();
+    LOG(ERROR) << "Got exception: " << (*futErr).what();
     throw std::runtime_error((*futErr).what());
   }
 }
@@ -319,6 +319,9 @@ void RRefContext::notifyOwnerAndParentOfFork(
     fm->addCallback([this, forkId, parent](
                         const Message& /* unused */,
                         const c10::optional<utils::FutureError>& futErr) {
+      if (futErr) {
+        LOG(ERROR) << "UserRRef creationg failed.";
+      }
       handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });
