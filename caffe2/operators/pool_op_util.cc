@@ -9,7 +9,7 @@ namespace {
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
 
-// Vectorizes 4x4p0s0 averge pooling for ARM NEON
+// Vectorizes 4x4p0s0 average pooling for ARM NEON
 void AvgPoolNeon4x4p0s0Plane(
     int inputH,
     int inputW,
@@ -103,7 +103,7 @@ void AvgPoolNeon4x4p0s0Plane(
   }
 }
 
-// Vectorizes 2x2p0s0 averge pooling for ARM NEON
+// Vectorizes 2x2p0s0 average pooling for ARM NEON
 void MaxPoolNeon2x2p0s0Plane(
     int inputH,
     int inputW,
