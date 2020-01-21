@@ -22,27 +22,6 @@ constexpr int PARENT_IDX = 5; // index of parent in the tuple
 
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
-
-template <typename T>
-T& unwrapAutogradMessage(
-    const Message& message,
-    std::unique_ptr<RpcCommandBase>& response) {
-  if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-    auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(*response);
-
-    // Attach 'recv' autograd function.
-    addRecvRpcBackward(
-        rpcWithAutograd.autogradMetadata(),
-        rpcWithAutograd.tensors(),
-        rpcWithAutograd.fromWorkerId());
-
-    auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
-    return static_cast<T&>(wrappedRpc);
-  } else {
-    return static_cast<T&>(*response);
-  }
-}
-
 } // namespace
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
@@ -142,8 +121,13 @@ IValue UserRRef<IValue>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  auto response = deserializeResponse(message);
-  auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  TORCH_INTERNAL_ASSERT(
+      msgType == MessageType::SCRIPT_RREF_FETCH_RET,
+      "Message type should be SCRIPT_RREF_FETCH_RET.");
+  RpcCommandBase& rpc = *response;
+  auto& rfr = static_cast<ScriptRRefFetchRet&>(rpc);
   return rfr.values().front();
 }
 
@@ -161,8 +145,13 @@ py::object UserRRef<py::object>::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  auto response = deserializeResponse(message);
-  auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  TORCH_INTERNAL_ASSERT(
+      msgType == MessageType::PYTHON_RREF_FETCH_RET,
+      "Message type should be PYTHON_RREF_FETCH_RET.");
+  RpcCommandBase& rpc = *response;
+  auto& rfr = static_cast<PythonRRefFetchRet&>(rpc);
   return PythonRpcHandler::getInstance().deserialize(
       SerializedPyObj::fromIValues(rfr.values()));
 }

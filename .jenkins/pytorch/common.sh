@@ -128,9 +128,9 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]] || \
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-macos* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0
@@ -140,7 +140,7 @@ fi
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
-     [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
+     [[ "$BUILD_ENVIRONMENT" == *cuda10.1-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
       exit 1
