@@ -490,19 +490,13 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 }
 
 Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  if (result.defined()) {
-    result.resize_as_(index);
-  }
-  else {
-    result = at::empty(index.sizes(), self.options());
-  }
-
+  result.resize_(index.sizes());
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }
 
 Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result;
+  Tensor result = at::empty({0}, self.options());
   return gather_out_cpu(result, self, dim, index, sparse_grad);
 }
 
