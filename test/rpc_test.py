@@ -1253,7 +1253,7 @@ class RpcTest(RpcAgentTestFixture):
         initialize_pg(self.init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
-
+# foo
         rref = rpc.remote(
             "worker{}".format((self.rank + 1) % self.world_size),
             torch.add,
