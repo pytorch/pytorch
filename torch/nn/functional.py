@@ -3350,14 +3350,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
             if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
-                print("attn_mask.size(), query.size(0), key.size(0)",
-                      attn_mask.size(), query.size(0), key.size(0))
-                raise ValueError('The size of the 2D attn_mask is not correct.')
+                raise RuntimeError('The size of the 2D attn_mask is not correct.')
         elif attn_mask.dim() == 3:
             if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
-                raise ValueError('The size of the 3D attn_mask is not correct.')
+                raise RuntimeError('The size of the 3D attn_mask is not correct.')
         else:
-            raise ValueError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
+            raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
         # attn_mask's dim is 3 now.
 
     if bias_k is not None and bias_v is not None:
