@@ -69,6 +69,7 @@ class TORCH_API DistAutogradContext {
 
  private:
   friend class DistEngine;
+  friend class RecvRpcBackward;
 
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
@@ -82,6 +83,10 @@ class TORCH_API DistAutogradContext {
   // Set the appropriate graph task for the backward pass. Can be called only
   // once.
   void setGraphTask(std::shared_ptr<torch::autograd::GraphTask> graphTask);
+
+  // Resets the graph task to ensure we can run another distributed backward
+  // pass for the same autograd context.
+  void resetGraphTask();
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.

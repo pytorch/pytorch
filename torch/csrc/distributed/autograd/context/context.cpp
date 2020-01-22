@@ -74,7 +74,12 @@ void DistAutogradContext::accumulateGrad(
     it->value().add_(grad);
   } else {
     // First grad for this variable.
-    accumulatedGrads_.insert(variable, grad);
+    if (grad.is_sparse()) {
+      accumulatedGrads_.insert(variable, grad.clone());
+    } else {
+      accumulatedGrads_.insert(
+          variable, grad.clone(at::MemoryFormat::Contiguous));
+    }
   }
 }
 
@@ -92,6 +97,10 @@ void DistAutogradContext::setGraphTask(
       !graphTask_,
       "Cannot set GraphTask multiple times for the same autograd context");
   graphTask_ = std::move(graphTask);
+}
+
+void DistAutogradContext::resetGraphTask() {
+  graphTask_ = nullptr;
 }
 
 void DistAutogradContext::addOutstandingRpc(
