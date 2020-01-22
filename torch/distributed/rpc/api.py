@@ -329,7 +329,8 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): builtin functions (like :meth:`torch.add`).
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -356,6 +357,24 @@ def remote(to, func, args=None, kwargs=None):
         >>> rref1 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote("worker1", torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> rref.to_here()
         >>> rpc.shutdown()
 
         >>> # On worker 1:

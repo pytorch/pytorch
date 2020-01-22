@@ -46,6 +46,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
   switch (messageType) {
     case MessageType::SCRIPT_CALL: {
       auto& scriptCall = static_cast<ScriptCall&>(rpc);
+
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
       if (scriptCall.hasOp()) {
