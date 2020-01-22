@@ -46,15 +46,19 @@ parser.add_argument(
 parser.add_argument(
     '--op_registration_whitelist',
     nargs='*',
-    help='filter op registrations by the whitelist (if set)')
+    help='filter op registrations by the whitelist (if set); '
+         'each item is `namespace`::`operator name` without overload name; '
+         'e.g.: aten::empty aten::conv2d ...')
 parser.add_argument(
-    '--type_whitelist',
+    '--backend_whitelist',
     nargs='*',
-    help='filter types (CPUType, CUDAType, ...) by the whitelist (if set)')
+    help='filter dispatch backend by the whitelist (if set), '
+         'e.g.: CPU CUDA QuantizedCPU ...')
 parser.add_argument(
     '--per_op_registration',
     action='store_true',
-    help='group function registrations by op name and write to separate files')
+    help='group function registrations by op name and write to separate files; '
+         'must also set --op_registration_whitelist param')
 options = parser.parse_args()
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
 # will eventually be ingested by cmake, which does not respect Windows style
@@ -190,8 +194,8 @@ top_env = {
 }
 
 
-def is_whitelisted_type(type):
-    return options.type_whitelist is None or type in options.type_whitelist
+def is_whitelisted_backend(backend):
+    return options.backend_whitelist is None or backend in options.backend_whitelist
 
 
 def dict_representer(dumper, data):
@@ -238,7 +242,9 @@ def format_yaml(data):
 
 
 def add_op_registrations(per_type_registrations, per_op_registrations, op_registrations):
-    for opname, registration in op_registrations:
+    for op_registration in op_registrations:
+        opname = op_registration.operator_name
+        registration = op_registration.registration_code
         # apply whitelist
         if op_registration_whitelist and opname not in op_registration_whitelist:
             continue
@@ -258,10 +264,10 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['Type'] = "{}{}Type".format(density_tag, backend)
-    if not is_whitelisted_type(env['Type']):
-        return
     env['DeviceType'] = backend_to_devicetype(backend)
     env['Backend'] = density_tag + backend
+    if not is_whitelisted_backend(env['Backend']):
+        return
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
         env['storage_tensor_headers'] = ['#include <c10/core/TensorImpl.h>']
@@ -362,6 +368,10 @@ def iterate_types():
         yield (backend, 'Dense')
 
 
+def gen_per_op_registration_filename(opname):
+    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '_'))
+
+
 ###################
 # declare what files will be output _before_ we do any work
 # so that the script runs quickly when we are just querying the
@@ -376,22 +386,27 @@ def declare_outputs():
         file_manager.will_write(f)
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
+        if not is_whitelisted_backend(full_backend):
+            continue
         fm = file_manager
         if backend == 'CUDA':
             fm = cuda_file_manager
-        write_anykind = False
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue
-            if not is_whitelisted_type(full_backend + kind):
-                continue
-            write_anykind = True
             fm.will_write("{}{}.h".format(full_backend, kind))
             fm.will_write("{}{}.cpp".format(full_backend, kind))
-        if write_anykind and (backend == 'CPU' or backend == 'CUDA'):
+        if backend == 'CPU' or backend == 'CUDA':
             fm.will_write("LegacyTHFunctions{}.h".format(backend))
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
+
+    if options.per_op_registration:
+        if not op_registration_whitelist:
+            raise Exception("Must set --op_registration_whitelist for per-op registration.")
+        for whitelisted_op in op_registration_whitelist:
+            fname = gen_per_op_registration_filename(whitelisted_op)
+            file_manager.will_write(fname)
 
 
 def filter_by_extension(files, *extensions):
@@ -415,10 +430,7 @@ def generate_per_op_registration(per_op_registrations):
             per_op_registrations[whitelisted_op] = []
 
     for opname, function_registrations in per_op_registrations.items():
-        fname = 'pt_op_register_%s.cpp' % opname.replace(':', '_')
-        # output_dependencies doesn't seem to be used, otherwise it is probably
-        # too late to declare output here?
-        file_manager.will_write(fname)
+        fname = gen_per_op_registration_filename(opname)
         file_manager.write(fname, PER_OP_REGISTRATION_CPP, {
             'extra_headers': top_env['cpu_type_headers'] + top_env['cuda_type_headers'],
             'function_registrations': function_registrations,
