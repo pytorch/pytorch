@@ -1,5 +1,8 @@
 import contextlib
 import unittest
+from copy import deepcopy
+from collections import OrderedDict
+
 import torch
 from torch import nn
 import torch.nn.parallel as dp
@@ -8,8 +11,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase, skipIfRocm
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
 from torch.testing._internal.common_utils import dtype2prec
 import torch.nn.functional as F
-from copy import deepcopy
-from collections import OrderedDict
 
 class TestDataParallel(TestCase):
 
