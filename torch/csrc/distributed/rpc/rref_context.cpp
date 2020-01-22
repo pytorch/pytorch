@@ -145,7 +145,7 @@ void RRefContext::delUser(
 
     fm->addCallback([](const Message& /* unused */,
                        const c10::optional<utils::FutureError>& futErr) {
-      RRefContext::handleException(futErr);
+      handleException(futErr);
     });
 
     confirmedUsers_.erase(forkId);
@@ -153,6 +153,7 @@ void RRefContext::delUser(
 }
 
 void RRefContext::delAllUsers() {
+  LOG(ERROR) << getWorkerName() << ": Entering delAllUsers()";
   for (const auto& user : confirmedUsers_) {
     auto rref_ptr = user.second.lock();
     if (rref_ptr == nullptr) {
@@ -160,6 +161,7 @@ void RRefContext::delAllUsers() {
     }
     rref_ptr->tryDel();
   }
+  LOG(ERROR) << getWorkerName() << ": Exiting delAllUsers()";
 }
 
 template <typename T>
@@ -319,9 +321,6 @@ void RRefContext::notifyOwnerAndParentOfFork(
     fm->addCallback([this, forkId, parent](
                         const Message& /* unused */,
                         const c10::optional<utils::FutureError>& futErr) {
-      if (futErr) {
-        LOG(ERROR) << "UserRRef creationg failed.";
-      }
       handleException(futErr);
       this->finishForkRequest(forkId, parent);
     });

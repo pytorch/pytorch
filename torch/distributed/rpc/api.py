@@ -211,7 +211,7 @@ def shutdown(graceful=True):
             _wait_all_workers()
             _delete_all_user_rrefs()
         except Exception as e:
-            print("=====", e)
+            print("Exception passed to Python world", e)
         _agent.join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
