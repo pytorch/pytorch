@@ -49,7 +49,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   subscript_strides[0] -= subscript_strides[1] * tensor->dim();
   TH_TENSOR_APPLY(scalar_t, tensor,
                   if IS_NONZERO(*tensor_data) {
-                    ii = idx.release();
+                    ii = idx.release() + dimensions;
                     for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
                       --ii;
                       *subscript_data = *ii;
@@ -57,7 +57,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     }
                     subscript_data += subscript_strides[0];
                   }
-                  ii -= dimensions;
+                  ii -= dimensions; //Restore its value prior to for loop
                   ss = sizes.release();
                   ++(*ii);
                   while (*ii == *ss) {
