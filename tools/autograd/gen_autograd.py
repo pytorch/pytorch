@@ -37,6 +37,8 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
@@ -62,8 +64,23 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow', 'split', 'split_with_sizes'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
 
+# note: some VIEW_FUNCTIONS are returning multiple views. This means that the engine
+# has to forbid inplace operations on their reults. If such function is only doing views
+# and is added to the list below, in the case where an inplace operation is performed on
+# the output, the custom backward defined in derivatives.yaml will be ignored and we
+# will use the view informations to create a valid graph where each output is the output
+# of a separate Node (AsStridedBackward) that has one output each.
+# A function should be added to this list if:
+# - You want to allow inplace modification of the result.
+# - You are aware that inplace modification of the output will change the memory usage of the
+#   backward as the multiple Nodes we create will force the gradient buffer to be created
+#   for each Node, instead of once in the original multi-output Node.
+# A function should NOT be added to this list if:
+# - Your backward function does more than just the backward of the views.
+# If you update this list, please update "test_multi_view_methods" in test_autograd.py
+PURE_VIEW_FUNCTIONS = ['split', 'split_with_sizes', 'unbind']
 
 def format_return_type(returns):
     if len(returns) == 0:
