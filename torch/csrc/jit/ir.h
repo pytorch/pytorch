@@ -727,6 +727,7 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Graphs, gs)
   CREATE_ACCESSOR(Type, ty)
   CREATE_ACCESSOR(Types, tys)
+  CREATE_ACCESSOR(IValue, ival)
 
 #undef CREATE_ACCESSOR
 
