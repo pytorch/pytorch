@@ -9708,7 +9708,7 @@ class TestNNDeviceType(NNTestCase):
                 es(input, offsets, per_sample_weights)
 
     def _embedding_bag_reference_impl(self, input, weight, offsets=None, mode='sum',
-                                      per_sample_weights=None, new_offsets=False):
+                                      per_sample_weights=None, include_last_offset=False):
         assert mode == 'sum'
         assert offsets is not None
         if per_sample_weights is None:
@@ -9717,7 +9717,7 @@ class TestNNDeviceType(NNTestCase):
 
         bags = []
         embeddings = weight.index_select(0, input) * per_sample_weights.unsqueeze(1)
-        if new_offsets:
+        if include_last_offset:
             for index in range(len(offsets) - 1):
                 offset = offsets[index]
                 next_offset = offsets[index + 1]
@@ -9769,15 +9769,15 @@ class TestNNDeviceType(NNTestCase):
         for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
             test_per_sample_weights(mode, dtype, trainable)
 
-    def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device):
-        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, new_offsets):
-            es = nn.EmbeddingBag(5, 2, mode=mode, new_offsets=new_offsets).to(dtype=dtype, device=device)
+    def test_EmbeddingBag_per_sample_weights_and_include_last_offset(self, device):
+        def test_per_sample_weights_include_last_offset(mode, dtype, trainable_scale, include_last_offset):
+            es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtype, device=device)
             es.weight.data.copy_(
                 torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
-            if new_offsets is True and mode == 'sum':
+            if include_last_offset is True and mode == 'sum':
                 offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=torch.long)), 0)
 
             per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
@@ -9787,14 +9787,14 @@ class TestNNDeviceType(NNTestCase):
             reference_weights = es.weight.detach().requires_grad_()
 
             expected = self._embedding_bag_reference_impl(
-                input, reference_weights, offsets, mode, ref_per_sample_weights, new_offsets)
+                input, reference_weights, offsets, mode, ref_per_sample_weights, include_last_offset)
             result = es(input, offsets, per_sample_weights)
             print("expected:")
             print(expected)
             print("result:")
             print(result)
             print("mode: " + str(mode) + "; dtype: " + str(dtype) + "; trainable: "
-                  + str(trainable) + "; new_offsets: " + str(new_offsets))
+                  + str(trainable) + "; include_last_offset: " + str(include_last_offset))
             self.assertEqual(result, expected, prec=dtype2prec[dtype])
 
             grad = torch.randn_like(expected)
@@ -9812,10 +9812,10 @@ class TestNNDeviceType(NNTestCase):
             dtypes = (torch.float, torch.double)
         modes = ('sum',)
         trainable_scale = (True, False)
-        new_offsets = (True, False)
+        include_last_offset = (True, False)
         # print(torch.__config__.parallel_info())
-        for dtype, mode, trainable, new_offsets in itertools.product(dtypes, modes, trainable_scale, new_offsets):
-            test_per_sample_weights_new_offsets(mode, dtype, trainable, new_offsets)
+        for dtype, mode, trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
+            test_per_sample_weights_include_last_offset(mode, dtype, trainable, include_last_offset)
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',

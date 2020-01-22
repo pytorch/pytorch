@@ -1493,7 +1493,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False,
-                  per_sample_weights=None, new_offsets=False):
+                  per_sample_weights=None, include_last_offset=False):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor], bool) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
@@ -1526,7 +1526,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             must have exactly the same shape as input and is treated as having the same
             :attr:`offsets`, if those are not None.
 
-        new_offsets (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
+        include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
         The last element is the size of the input, or the ending index position of the last bag (sequence).
 
 
@@ -1647,7 +1647,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         mode_enum,
         sparse,
         per_sample_weights,
-        new_offsets)
+        include_last_offset)
     return ret
 
 

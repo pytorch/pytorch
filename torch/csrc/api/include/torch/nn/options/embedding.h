@@ -98,7 +98,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// If ``True``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
-  TORCH_ARG(bool, new_offsets) = false;
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 // ============================================================================
@@ -124,7 +124,7 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If ``True``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
-  TORCH_ARG(bool, new_offsets) = false;
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 // ============================================================================
@@ -155,7 +155,7 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If ``True``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.
-  TORCH_ARG(bool, new_offsets) = false;
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 } // namespace functional

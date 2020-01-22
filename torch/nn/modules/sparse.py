@@ -206,7 +206,7 @@ class EmbeddingBag(Module):
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
                                  Notes for more details regarding sparse gradients. Note: this option is not
                                  supported when ``mode="max"``.
-        new_offsets (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+        include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
                                       is equivalent to the size of `indices`. This matches the CSR format. Note:
                                       this option is currently only supported when ``mode="sum"``.
 
@@ -252,11 +252,11 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse', 'new_offsets']
+                     'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False, _weight=None, new_offsets=False):
+                 mode='mean', sparse=False, _weight=None, include_last_offset=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -272,7 +272,7 @@ class EmbeddingBag(Module):
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
-        self.new_offsets = new_offsets
+        self.include_last_offset = include_last_offset
 
     def reset_parameters(self):
         init.normal_(self.weight)
@@ -282,7 +282,7 @@ class EmbeddingBag(Module):
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse,
-                               per_sample_weights, self.new_offsets)
+                               per_sample_weights, self.include_last_offset)
 
     def extra_repr(self):
         s = '{num_embeddings}, {embedding_dim}'
@@ -298,7 +298,7 @@ class EmbeddingBag(Module):
     @classmethod
     def from_pretrained(cls, embeddings, freeze=True, max_norm=None,
                         norm_type=2., scale_grad_by_freq=False,
-                        mode='mean', sparse=False, new_offsets=False):
+                        mode='mean', sparse=False, include_last_offset=False):
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -311,7 +311,7 @@ class EmbeddingBag(Module):
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
             mode (string, optional): See module initialization documentation. Default: ``"mean"``
             sparse (bool, optional): See module initialization documentation. Default: ``False``.
-            new_offsets (bool, optional): See module initialization documentation. Default: ``False``.
+            include_last_offset (bool, optional): See module initialization documentation. Default: ``False``.
 
         Examples::
 
@@ -335,6 +335,6 @@ class EmbeddingBag(Module):
             scale_grad_by_freq=scale_grad_by_freq,
             mode=mode,
             sparse=sparse,
-            new_offsets=new_offsets)
+            include_last_offset=include_last_offset)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag

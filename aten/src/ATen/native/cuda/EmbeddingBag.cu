@@ -254,7 +254,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse,
                    const Tensor& per_sample_weights,
-                   bool new_offsets) {
+                   bool include_last_offset) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag_cuda", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -265,11 +265,13 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
-  if (new_offsets) {
+  if (include_last_offset) {
     // Check https://github.com/pytorch/pytorch/issues/29019
     // We plan to add one more element in offsets, which is equal to the size of
     // indices. Currently for cuda devices, we still use the legacy
     // implementation even this flag is enabled.
+    TORCH_CHECK(
+        numBags >= 1, "include_last_offset: numBags should be at least 1");
     numBags -= 1;
   }
   int64_t featureSize = weight.size(1);

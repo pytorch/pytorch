@@ -67,7 +67,7 @@ inline Tensor embedding_bag(
     EmbeddingBagMode mode,
     bool sparse,
     const Tensor& per_sample_weights,
-    bool new_offsets) {
+    bool include_last_offset) {
   auto input_ = input;
   auto offsets_ = offsets;
   auto per_sample_weights_ = per_sample_weights;
@@ -124,7 +124,7 @@ inline Tensor embedding_bag(
       mode_enum,
       sparse,
       per_sample_weights_,
-      new_offsets));
+      include_last_offset));
 }
 } // namespace detail
 
@@ -139,7 +139,7 @@ inline Tensor embedding_bag(const Tensor& input, const Tensor& weight, const Emb
     options.mode(),
     options.sparse(),
     options.per_sample_weights(),
-    options.new_offsets());
+    options.include_last_offset());
 }
 
 } // namespace functional

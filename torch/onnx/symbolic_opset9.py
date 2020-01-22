@@ -326,7 +326,7 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights,
-                  new_offsets):
+                  include_last_offset):
     if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
@@ -339,7 +339,7 @@ def embedding_bag(g,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
                 sparse_i=sparse,
-                new_offsets_i=new_offsets)
+                include_last_offset_i=include_last_offset)
 
 
 def size(g, self, dim):
