@@ -226,12 +226,16 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
               const Message& m,
               const c10::optional<utils::FutureError>& error) {
-            // Hack since getMessageWithAutograd requires a Message&&
-            auto msg = m;
-            responseFuture->markCompleted(getMessageWithAutograd(
-                fromWorkerId,
-                static_cast<torch::distributed::rpc::Message&&>(msg),
-                MessageType::FORWARD_AUTOGRAD_RESP));
+            if (error) {
+              // Propagate error to responseFuture if we had one.
+              responseFuture->setError(error->what());
+            } else {
+              // Hack since getMessageWithAutograd requires a Message&&
+              responseFuture->markCompleted(getMessageWithAutograd(
+                  fromWorkerId,
+                  std::move(*wrappedRpcResponseFuture).moveValue(),
+                  MessageType::FORWARD_AUTOGRAD_RESP));
+            }
           });
       return responseFuture;
     }
