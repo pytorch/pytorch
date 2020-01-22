@@ -45,44 +45,21 @@ namespace torch { namespace autograd {
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) If var is not a CUDA variable, accumulation happens on var's device.
-  //  (2) If var is a CUDA variable, and opt_producer_stream and opt_consumer_stream
-  //      share its device:
-  //        (2a) if opt_producer_stream != opt_consumer_stream,
-  //             sync opt_consumer_stream with opt_producer_stream.
-  //        (2b) accumulation happens on opt_consumer_stream.
-  //  (3) If var is a CUDA variable, and it's on opt_consumer_stream's device but not
-  //      opt_producer_stream's device:
-  //        (3a) Assume var was populated on its device's current stream.  In this sense,
-  //             var's device's current stream is the "effective producer stream."
-  //             The stream guard in Engine::evaluate_function (which calls InputBuffer::add)
-  //             has set opt_producer_stream on opt_producer_stream's device, but that didn't
-  //             affect var's device.  Therefore, we further assume (and assert) that var's
-  //             device's current stream is its default stream.  Putting the pieces together,
-  //             this tells us var's device's default stream is the "effective producer stream."
-  //             If this "effective producer stream" != opt_consumer_stream,
-  //             sync opt_consumer_stream with effective producer stream.
-  //        (3b) accumulation happens on opt_consumer_stream.
-  //  (4) If var is a CUDA variable, and it's on opt_producer_stream's device but not
-  //      opt_consumer_stream's device:
-  //        (4a) Assume var was populated on opt_producer_stream.
-  //             During the consumer op's evaluation, opt_consumer_stream will be made current
-  //             on the consumer device.  But this won't affect var's device, so at that time
-  //             the current stream on var's device should be its default stream.
-  //             In general, ops that collect grads from other devices (like BroadcastBackward's
-  //             gather) should internally sync with the current streams of those other devices
-  //             before using the gradients.  They would be crazy not to, right?
-  //             In other words, we anticipate the consumer op will sync with the default stream
-  //             of var's device before using var.  var's device's default stream is the
-  //             "effective consumer stream" in the sense that it's the stream the consumer op
-  //             will internally sync on during evaluation.
-  //             If opt_producer_stream != var's device's default stream (aka the producer device's
-  //             default stream), sync var's device's default stream with opt_producer_stream.
-  //        (4b) accumulation happens on var's device's default stream (the "effective consumer stream").
-  //  (5) If var is on neither opt_producer_stream nor opt_consumer_stream's device(s):
-  //        (5a) Assume var was populated on its device's default stream, and that the consumer op
-  //             will sync with var's device's default stream.
-  //        (5b) accumulation happens on var's device's default stream.
+  //  (1) var is not a CUDA variable. Accumulation happens on var's device.
+  //  (2) var is a CUDA variable and it, the consumer, and the producer share the same device:
+  //       (2a) Uses the consumer's stream as the accumulation stream
+  //       (2b) Syncs the accumulation stream with the producer's stream (if different)
+  //       (2c) Accumulates.
+  //  (3) var is a CUDA variable and it shares a device with the consumer but not the producer:
+  //       (3a) Uses the consumer's stream as the accumulation stream
+  //       (3b) Syncs the accumulation stream with the consumer device's default stream
+  //       (3c) Accumulates.
+  //  (4) var is a CUDA variable and it shares a device with the producer but not the consumer:
+  //       (4a) Uses the producer device's default stream as the accumulation stream
+  //       (4b) Syncs the accumulation stream with the the producer's stream
+  //       (4c) Accumulates.
+  //  (5) var is a CUDA variable and it does not share a device with the consumer or producer.
+  //      Accumulation happens on the var device's default stream.
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
@@ -92,46 +69,36 @@ namespace torch { namespace autograd {
     const auto on_consumer = opt_consumer_stream
                         && device_of(var) == opt_consumer_stream->device();
     if (on_producer && on_consumer) {
-      // (2) CUDA variable with producer and consumer sharing a device
+      // (2a)
       opt_accumulate_stream = opt_consumer_stream;
       if (opt_accumulate_stream != opt_producer_stream) {
-        // (2a) Sync accumulate with producer
+        // (2b)
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
         opt_accumulate_stream->wait(event);
       }
     } else {
-      // hack to get var's device's default stream that will compile even for CPU-only builds
+      c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-      const auto var_device_default_stream = guard.getDefaultStream(*device_of(var));
       if (on_consumer && !on_producer) {
-        // (3) CUDA variable, on consumer stream's device but not on producer stream's device
+        // (3a)
         opt_accumulate_stream = opt_consumer_stream;
-        // double check our belief that var's device's current stream is its default stream
-        TORCH_INTERNAL_ASSERT(guard.getStream(*device_of(var)) == var_device_default_stream);
-        if (opt_accumulate_stream != var_device_default_stream) {
-          // (3a) Sync accumulate with var_device_default_stream (the "effective producer")
-          //      For this purpose, we'd like to record an event in var_device_default_stream.
-          //      The cuda api says we must create that event on the same device as the stream.
-          //      However, calling code has made the producer stream (and device) current,
-          //      so we temporarily guard onto var_device_default_stream's device.
-          c10::OptionalDeviceGuard device_guard{var_device_default_stream.device()};
-          auto event = c10::Event{c10::DeviceType::CUDA};
-          event.record(var_device_default_stream);
-          opt_accumulate_stream->wait(event);
-        }
+        opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
+        TORCH_INTERNAL_ASSERT(opt_sync_stream == guard.getStream(*device_of(var)));
       } else if (on_producer && !on_consumer) {
-        // (4) CUDA variable, on producer stream's device but not consumer stream's device
-        opt_accumulate_stream = var_device_default_stream;
-        if (opt_accumulate_stream != opt_producer_stream) {
-          // (4a) Sync accumulate with producer
-          auto event = c10::Event{c10::DeviceType::CUDA};
-          event.record(*opt_producer_stream);
-          opt_accumulate_stream->wait(event);
-        }
+        // (4a)
+        opt_accumulate_stream = guard.getDefaultStream(opt_producer_stream->device());
+        opt_sync_stream = opt_producer_stream;
       } else {
-        // (5) CUDA variable on neither producer stream nor consumer stream's device(s)
-        opt_accumulate_stream = var_device_default_stream;
+        // (5)
+        opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
+      }
+      if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
+        // (3b), (4b)
+        c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(*opt_sync_stream);
+        opt_accumulate_stream->wait(event);
       }
     }
   }
