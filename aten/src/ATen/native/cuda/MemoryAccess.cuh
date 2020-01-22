@@ -49,28 +49,28 @@ struct Info<scalar_t, 1> {
 // Note: alignment data could be found at:
 // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#built-in-vector-types
 
-//                    TYPE, SIZE, VECTYPE, ALIGNMENT
-DEFINE_VECTOR_INFO(uint8_t,    2,  uchar2,         2);
-DEFINE_VECTOR_INFO(uint8_t,    4,  uchar4,         4);
+//                    TYPE, SIZE,     VECTYPE, ALIGNMENT
+DEFINE_VECTOR_INFO(uint8_t,    2,      uchar2,         2);
+DEFINE_VECTOR_INFO(uint8_t,    4,      uchar4,         4);
 
-DEFINE_VECTOR_INFO( int8_t,    2,   char2,         2);
-DEFINE_VECTOR_INFO( int8_t,    4,   char4,         4);
+DEFINE_VECTOR_INFO( int8_t,    2,       char2,         2);
+DEFINE_VECTOR_INFO( int8_t,    4,       char4,         4);
 
-DEFINE_VECTOR_INFO(int16_t,    2,  short2,         4);
-DEFINE_VECTOR_INFO(int16_t,    4,  short4,         8);
+DEFINE_VECTOR_INFO(int16_t,    2,      short2,         4);
+DEFINE_VECTOR_INFO(int16_t,    4,      short4,         8);
 
-DEFINE_VECTOR_INFO(    int,    2,    int2,         8);
-DEFINE_VECTOR_INFO(    int,    4,    int4,        16);
+DEFINE_VECTOR_INFO(    int,    2,        int2,         8);
+DEFINE_VECTOR_INFO(    int,    4,        int4,        16);
 
 static_assert(sizeof(int64_t) == sizeof(long long), "long long is assumed to be 64bit");
 DEFINE_VECTOR_INFO(int64_t,    2,   longlong2,        16);
 DEFINE_VECTOR_INFO(int64_t,    4,   longlong4,        16);
 
-DEFINE_VECTOR_INFO(  float,    2,  float2,         8);
-DEFINE_VECTOR_INFO(  float,    4,  float4,        16);
+DEFINE_VECTOR_INFO(  float,    2,      float2,         8);
+DEFINE_VECTOR_INFO(  float,    4,      float4,        16);
 
-DEFINE_VECTOR_INFO( double,    2, double2,        16);
-DEFINE_VECTOR_INFO( double,    4, double4,        16);
+DEFINE_VECTOR_INFO( double,    2,     double2,        16);
+DEFINE_VECTOR_INFO( double,    4,     double4,        16);
 
 #undef DEFINE_VECTOR_INFO
 
