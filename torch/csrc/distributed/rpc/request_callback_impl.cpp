@@ -227,7 +227,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               const Message& m,
               const c10::optional<utils::FutureError>& error) {
             // Hack since getMessageWithAutograd requires a Message&&
-            auto msg = std::move(m);
+            auto msg = m;
             responseFuture->markCompleted(getMessageWithAutograd(
                 fromWorkerId,
                 static_cast<torch::distributed::rpc::Message&&>(msg),
