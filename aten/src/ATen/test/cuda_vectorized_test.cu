@@ -25,7 +25,7 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
   std::cout << ((uint64_t)ptr) << std::endl;
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 1);
+  ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 4);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr), 4);
   ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr), 4);
   ASSERT_EQ(can_vectorize_up_to<int>(ptr), 4);
@@ -34,16 +34,16 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 1), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 2), 1);
+  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 2), 2);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 2), 2);
   ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 2), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 4), 1);
+  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 4), 4);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 4), 4);
   ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 4), 2);
   ASSERT_EQ(can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 8), 1);
+  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 8), 4);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 8), 4);
   ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 8), 4);
   ASSERT_EQ(can_vectorize_up_to<int>(ptr + 8), 2);
@@ -64,8 +64,6 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   if (!at::cuda::is_available()) return;
   double *b1 = reinterpret_cast<double *>(buffer1);
   double *b2 = reinterpret_cast<double *>(buffer2);
-  std::cout << "buffer1 = " << reinterpret_cast<uint64_t>(buffer1) << std::endl;
-  std::cout << "buffer2 = " << reinterpret_cast<uint64_t>(buffer2) << std::endl;
 
   // vec4 copy
   reset_buffers();

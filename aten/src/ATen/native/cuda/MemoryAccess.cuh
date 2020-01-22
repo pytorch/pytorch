@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <c10/util/Exception.h>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -10,122 +11,143 @@ namespace at { namespace native { namespace memory {
 
 namespace {
 
-template <typename scalar_t>
-struct has_builtin_vector_type : public std::false_type {};
+// The builtin vector types of CUDA are very limited. There are types,
+// for example bool, half, that does not have corresponding vector types.
+// But these types also benefit from vectorized memory access. To make all
+// the types vectorizable, we are not using the corresponding vector type for
+// each scalar type. But instead, we chose an existing builtin vector type
+// of the same size, and reinterpret the memory as the desired type.
 
-template <> struct has_builtin_vector_type<uint8_t> : public std::true_type {};
-template <> struct has_builtin_vector_type<int8_t>  : public std::true_type {};
-template <> struct has_builtin_vector_type<int16_t> : public std::true_type {};
-template <> struct has_builtin_vector_type<int>     : public std::true_type {};
-template <> struct has_builtin_vector_type<int64_t> : public std::true_type {};
-template <> struct has_builtin_vector_type<float>   : public std::true_type {};
-template <> struct has_builtin_vector_type<double>  : public std::true_type {};
+template<int size>
+struct size_to_backing_type;
 
-// for types that does not have corresponding builtin vector type,
-// it is ensured that dynamic dispatch will never use it. But
-// we need to create a stub for it for completeness
-template <typename scalar_t>
-struct fake_vector {  // this is just a placeholder
-  scalar_t x, y, z, w;
+template<>
+struct size_to_backing_type<1> {
+  using type1 = char;
+  using type2 = char2;
+  using type4 = char4;
 };
 
-template <typename scalar_t, int size>
-struct Info {
-  static constexpr int alignment = sizeof(scalar_t);
-  using vector_type = fake_vector<scalar_t>;
+template<>
+struct size_to_backing_type<2> {
+  using type1 = int16_t;
+  using type2 = short2;
+  using type4 = short4;
 };
 
-#define DEFINE_VECTOR_INFO(TYPE, SIZE, VECTYPE, ALIGNMENT)    \
-  template <>                                                 \
-  struct Info<TYPE, SIZE> {                                   \
-    static constexpr int alignment = ALIGNMENT;               \
-    using vector_type = VECTYPE;                              \
-  }
+template<>
+struct size_to_backing_type<4> {
+  using type1 = float;
+  using type2 = float2;
+  using type4 = float4;
+};
 
-// Note: alignment data could be found at:
-// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#built-in-vector-types
+template<>
+struct size_to_backing_type<8> {
+  using type1 = double;
+  using type2 = double2;
+  using type4 = double4;
+};
 
-//                    TYPE, SIZE,     VECTYPE, ALIGNMENT
-DEFINE_VECTOR_INFO(uint8_t,    2,      uchar2,         2);
-DEFINE_VECTOR_INFO(uint8_t,    4,      uchar4,         4);
+template<>
+struct size_to_backing_type<16> {
+  using type1 = double2;
+  struct type2 {
+    double2 x, y;
+  };
+  struct type4 {
+    double2 x, y, z, w;
+  };
+};
 
-DEFINE_VECTOR_INFO( int8_t,    2,       char2,         2);
-DEFINE_VECTOR_INFO( int8_t,    4,       char4,         4);
+// reinterpret_cast does not always succeed. For example, if
+// you want to cast from BFloat16 to int16_t, the compiler would
+// think you are doing stupid thing and reject your code. But
+// by design we need the compiler to completely ignore the type
+// system and do the cast. That's why we have a typeless_cast.
+template<typename to_type, typename from_type>
+__device__ inline to_type typeless_cast(from_type value) {
+  return *reinterpret_cast<to_type *>(&value);
+}
 
-DEFINE_VECTOR_INFO(int16_t,    2,      short2,         4);
-DEFINE_VECTOR_INFO(int16_t,    4,      short4,         8);
+// unfortunately CUDA's builtin vector types are not accessed by
+// v[0], v[1], etc. but by v.x, v.y, etc.. This creates lots of
+// trouble for us because we need to create specialized templates
+// to route, for example, v[3] to v.w
+template<int scalar_size, int vec_size>
+struct vector;
 
-DEFINE_VECTOR_INFO(    int,    2,        int2,         8);
-DEFINE_VECTOR_INFO(    int,    4,        int4,        16);
+template<int scalar_size>
+struct vector<scalar_size, 1> {
+  typename size_to_backing_type<scalar_size>::type1 v;
 
-static_assert(sizeof(int64_t) == sizeof(long long), "long long is assumed to be 64bit");
-DEFINE_VECTOR_INFO(int64_t,    2,   longlong2,        16);
-DEFINE_VECTOR_INFO(int64_t,    4,   longlong4,        16);
-
-DEFINE_VECTOR_INFO(  float,    2,      float2,         8);
-DEFINE_VECTOR_INFO(  float,    4,      float4,        16);
-
-DEFINE_VECTOR_INFO( double,    2,     double2,        16);
-DEFINE_VECTOR_INFO( double,    4,     double4,        16);
-
-#undef DEFINE_VECTOR_INFO
-
-template <typename scalar_t, int size>
-struct Vec;
-
-template <typename scalar_t>
-struct Vec<scalar_t, 1> {
-  scalar_t v;
+  template<typename scalar_t>
   __device__ inline scalar_t get(int i) {
-    return v;  // no boundary check here
+    return typeless_cast<scalar_t>(v);  // no boundary check here
   }
+
+  template<typename scalar_t>
   __device__ inline void set(int i, scalar_t value) {
-    v = value;  // no boundary check here
+    using backing_scalar_t = typename size_to_backing_type<scalar_size>::type1;
+    v = typeless_cast<backing_scalar_t>(value);  // no boundary check here
   }
 };
 
-template <typename scalar_t>
-struct Vec<scalar_t, 2> {
-  typename Info<scalar_t, 2>::vector_type v;
+template<int scalar_size>
+struct vector<scalar_size, 2> {
+  typename size_to_backing_type<scalar_size>::type2 v;
+
+  template<typename scalar_t>
   __device__ inline scalar_t get(int i) {
     if (i == 0) {
-      return v.x;
+      return typeless_cast<scalar_t>(v.x);
     }
-    return v.y;  // no boundary check here
+    return typeless_cast<scalar_t>(v.y);  // no boundary check here
   }
+
+  template<typename scalar_t>
   __device__ inline void set(int i, scalar_t value) {
+    using backing_scalar_t = typename size_to_backing_type<scalar_size>::type1;
     if (i == 0) {
-      v.x = value;
-    } else {
-      v.y = value;
+      v.x = typeless_cast<backing_scalar_t>(value);
+    } else {  // no boundary check here
+      v.y = typeless_cast<backing_scalar_t>(value);
     }
   }
 };
 
-template <typename scalar_t>
-struct Vec<scalar_t, 4> {
-  typename Info<scalar_t, 4>::vector_type v;
+template<int scalar_size>
+struct vector<scalar_size, 4> {
+  typename size_to_backing_type<scalar_size>::type4 v;
+
+  template<typename scalar_t>
   __device__ inline scalar_t get(int i) {
     switch (i) {
     case 0:
-      return v.x;
+      return typeless_cast<scalar_t>(v.x);
     case 1:
-      return v.y;
+      return typeless_cast<scalar_t>(v.y);
     case 2:
-      return v.z;
+      return typeless_cast<scalar_t>(v.z);
     }
-    return v.w; // no boundary check here
+    return typeless_cast<scalar_t>(v.w); // no boundary check here
   }
+
+  template<typename scalar_t>
   __device__ inline void set(int i, scalar_t value) {
+    using backing_scalar_t = typename size_to_backing_type<scalar_size>::type1;
     switch (i) {
     case 0:
-      v.x = value; break;
+      v.x = typeless_cast<backing_scalar_t>(value);
+      break;
     case 1:
-      v.y = value; break;
+      v.y = typeless_cast<backing_scalar_t>(value);
+      break;
     case 2:
-      v.z = value; break;
+      v.z = typeless_cast<backing_scalar_t>(value);
+      break;
     }
-    v.w = value; // no boundary check here
+    v.w = typeless_cast<backing_scalar_t>(value); // no boundary check here
   }
 };
 
@@ -180,39 +202,39 @@ struct policies {
   // has its job to do. So the reminders should be handled by the the caller
   // manually.
 
-  template <int vec_size>  // vec_size: vector size, can be 1, 2, or 3.
+  template <int vec_size>  // vec_size: number of scalars, can be 1, 2, or 3.
   struct vectorized : public common {
     static constexpr int loop_size = thread_work_size_ / vec_size;
 
     template<typename accessor_t, typename scalar_t>
     __device__ inline void load(accessor_t to, scalar_t *from) {
-      using vec_t = Vec<scalar_t, vec_size>;
+      using vec_t = vector<sizeof(scalar_t), vec_size>;
       vec_t *from_ = reinterpret_cast<vec_t *>(from);
       int thread_idx = threadIdx.x;
       #pragma unroll
       for (int i = 0; i < loop_size; i++) {
         int index = thread_idx + i * num_threads_;
-        vec_t vector = from_[index];
+        vec_t v = from_[index];
         #pragma unroll
         for (int j = 0; j < vec_size; j++) {
-          to(vec_size * i + j) = vector.get(j);
+          to(vec_size * i + j) = v.template get<scalar_t>(j);
         }
       }
     }
 
     template<typename accessor_t, typename scalar_t>
     __device__ inline void store(scalar_t *to, accessor_t from) {
-      using vec_t = Vec<scalar_t, vec_size>;
+      using vec_t = vector<sizeof(scalar_t), vec_size>;
       vec_t *to_ = reinterpret_cast<vec_t *>(to);
       int thread_idx = threadIdx.x;
       #pragma unroll
       for (int i = 0; i < loop_size; i++) {
         int index = thread_idx + i * num_threads_;
-        vec_t vector;
+        vec_t v;
         for (int j = 0; j < vec_size; j++) {
-          vector.set(j, from(vec_size * i + j));
+          v.set(j, from(vec_size * i + j));
         }
-        to_[index] = vector;
+        to_[index] = v;
       }
     }
   };
@@ -220,14 +242,16 @@ struct policies {
 
 template<typename scalar_t>
 inline int can_vectorize_up_to(char *pointer) {
-  if (has_builtin_vector_type<scalar_t>::value) {
-    uint64_t address = reinterpret_cast<uint64_t>(pointer);
-    if (address % Info<scalar_t, 4>::alignment == 0) {
-      return 4;
-    } else if (address % Info<scalar_t, 2>::alignment == 0) {
-      return 2;
-    }
+  uint64_t address = reinterpret_cast<uint64_t>(pointer);
+  int vec1_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type1>::value;
+  int vec2_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type2>::value;
+  int vec4_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type4>::value;
+  if (address % vec4_alignment == 0) {
+    return 4;
+  } else if (address % vec2_alignment == 0) {
+    return 2;
   }
+  TORCH_INTERNAL_ASSERT(address % vec1_alignment == 0, "unaligned pointer");
   return 1;
 }
 
