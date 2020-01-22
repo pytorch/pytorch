@@ -192,7 +192,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       return wrap(RRefAck().toMessage());
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      std::cout << "GOT forward autograd req" << std::endl;
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
@@ -234,7 +233,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
                 static_cast<torch::distributed::rpc::Message&&>(msg),
                 MessageType::FORWARD_AUTOGRAD_RESP));
           });
-      LOG(INFO) << "RETURNING RESPONSE FUTURE";
       return responseFuture;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
