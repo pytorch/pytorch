@@ -252,11 +252,11 @@ class BuildExtension(build_ext, object):
             return cls(*args, **kwargs)
         return init_with_options
 
-    def __init__(self, *args, use_ninja=False, **kwargs):
+    def __init__(self, *args, **kwargs):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = use_ninja
+        self.use_ninja = kwargs.get('use_ninja', False)
         if use_ninja and IS_WINDOWS:
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    'we don\'t support this on windows yet. Falling back to '
