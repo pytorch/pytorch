@@ -8,6 +8,8 @@
 
 namespace at { namespace native { namespace memory {
 
+namespace {
+
 template <typename scalar_t>
 struct has_builtin_vector_type : public std::false_type {};
 
@@ -23,20 +25,14 @@ template <> struct has_builtin_vector_type<double>  : public std::true_type {};
 // it is ensured that dynamic dispatch will never use it. But
 // we need to create a stub for it for completeness
 template <typename scalar_t>
-struct fake_vector {
+struct fake_vector {  // this is just a placeholder
   scalar_t x, y, z, w;
 };
 
 template <typename scalar_t, int size>
 struct Info {
-  static constexpr int alignment = 0;
+  static constexpr int alignment = sizeof(scalar_t);
   using vector_type = fake_vector<scalar_t>;
-};
-
-template <typename scalar_t>
-struct Info<scalar_t, 1> {
-  static constexpr int alignment = std::alignment_of<scalar_t>::value;
-  using vector_type = scalar_t;
 };
 
 #define DEFINE_VECTOR_INFO(TYPE, SIZE, VECTYPE, ALIGNMENT)    \
@@ -75,14 +71,11 @@ DEFINE_VECTOR_INFO( double,    4,     double4,        16);
 #undef DEFINE_VECTOR_INFO
 
 template <typename scalar_t, int size>
-struct Vec {
-  typename Info<scalar_t, size>::vector_type v;
-  static_assert(size == 1 || size == 2 || size == 4, "only vectors of size 1, 2, 4 are supported");
-};
+struct Vec;
 
 template <typename scalar_t>
 struct Vec<scalar_t, 1> {
-  typename Info<scalar_t, 1>::vector_type v;
+  scalar_t v;
   __device__ inline scalar_t get(int i) {
     return v;  // no boundary check here
   }
@@ -134,6 +127,8 @@ struct Vec<scalar_t, 4> {
     v.w = value; // no boundary check here
   }
 };
+
+}  // namespace
 
 template <
   int num_threads_,        // number of threads in a block.
@@ -222,32 +217,17 @@ struct policies {
   };
 };
 
-template<typename scalar_t, bool>
-struct can_vectorize_up_to_impl;
-
 template<typename scalar_t>
-struct can_vectorize_up_to_impl<scalar_t, false> {
-  static constexpr inline int get(char *pointer) {
-    return 1;
-  }
-};
-
-template<typename scalar_t>
-struct can_vectorize_up_to_impl<scalar_t, true> {
-  static constexpr inline int get(char *pointer) {
+inline int can_vectorize_up_to(char *pointer) {
+  if (has_builtin_vector_type<scalar_t>::value) {
     uint64_t address = reinterpret_cast<uint64_t>(pointer);
     if (address % Info<scalar_t, 4>::alignment == 0) {
       return 4;
     } else if (address % Info<scalar_t, 2>::alignment == 0) {
       return 2;
     }
-    return 1;
   }
-};
-
-template<typename scalar_t>
-inline int can_vectorize_up_to(char *pointer) {
-  return can_vectorize_up_to_impl<scalar_t, has_builtin_vector_type<scalar_t>::value>::get(pointer);
+  return 1;
 }
 
 }}} // namespace at::native::memory
