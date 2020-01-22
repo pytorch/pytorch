@@ -2194,3 +2194,9 @@ def _weight_norm(g, weight_v, weight_g, dim):
         return g.op("Mul", div, weight_g)
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
+
+def dim(g, self):
+    '''Implement the dim functionality available for a pytorch tensor in ONNX'''
+    # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    shape = g.op('Shape', self)
+    return g.op('Size', shape)

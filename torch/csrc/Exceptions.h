@@ -52,6 +52,11 @@
       PyErr_SetString(PyExc_IndexError, msg.c_str());                \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::ValueError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+      PyErr_SetString(PyExc_ValueError, msg.c_str());                \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
