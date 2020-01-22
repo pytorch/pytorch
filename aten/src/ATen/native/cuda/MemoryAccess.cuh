@@ -2,8 +2,6 @@
 
 #include <cstdint>
 #include <type_traits>
-#include <c10/core/ScalarType.h>
-#include <thrust/complex.h>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
