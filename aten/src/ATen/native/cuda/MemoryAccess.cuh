@@ -96,8 +96,9 @@ struct Vec<scalar_t, 2> {
   __device__ inline void set(int i, scalar_t value) {
     if (i == 0) {
       v.x = value;
+    } else {
+      v.y = value;
     }
-    v.y = value;  // no boundary check here
   }
 };
 
@@ -118,11 +119,11 @@ struct Vec<scalar_t, 4> {
   __device__ inline void set(int i, scalar_t value) {
     switch (i) {
     case 0:
-      v.x = value;
+      v.x = value; break;
     case 1:
-      v.y = value;
+      v.y = value; break;
     case 2:
-      v.z = value;
+      v.z = value; break;
     }
     v.w = value; // no boundary check here
   }
