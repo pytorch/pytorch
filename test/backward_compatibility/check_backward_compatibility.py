@@ -55,7 +55,6 @@ white_list = [
     ('upsample_nearest3d_backward', datetime.date(9999, 1, 1)),
     ('_test_optional_float', datetime.date(9999, 1, 1)),
     ('aten::Int', datetime.date(2020, 1, 30)),
-    ('aten::Int', datetime.date(2020, 1, 30)),
     ('split_with_sizes', datetime.date(2020, 2, 1))
 ]
 

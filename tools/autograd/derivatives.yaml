@@ -793,6 +793,12 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
+- name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+
+- name: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+
 - name: sqrt(Tensor self) -> Tensor
   self: grad / (2 * result)
 
