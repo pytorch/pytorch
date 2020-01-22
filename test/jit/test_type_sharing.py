@@ -444,6 +444,7 @@ class TestTypeSharing(JitTestCase):
                 super(AB, self).__init__()
                 self.a = 1
                 self.b = 1
+
             def forward(self):
                 return self.a + self.b
 
@@ -451,6 +452,7 @@ class TestTypeSharing(JitTestCase):
             def __init__(self):
                 super(A, self).__init__()
                 self.a = 1
+
             def forward(self):
                 return self.a
 
@@ -458,6 +460,7 @@ class TestTypeSharing(JitTestCase):
             def __init__(self, sub):
                 super(Wrapper, self).__init__()
                 self.sub = sub
+
             def forward(self):
                 return self.sub()
 
