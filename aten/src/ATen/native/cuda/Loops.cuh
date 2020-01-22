@@ -232,9 +232,8 @@ inline int can_vectorize_up_to(array_t pointers) {
 
 }  // namespace detail
 
-template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+template<int num_threads, int thread_work_size, typename func_t, typename array_t, typename memory_access_policy_t>
+__device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_policy_t memory_access_policy) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
@@ -250,7 +249,6 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   constexpr int block_work_size = num_threads * thread_work_size;
-  int remaining = N - block_work_size * blockIdx.x;
 
   // compute base pointers for this block
   int idx = block_work_size * blockIdx.x;
@@ -264,36 +262,33 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   return_t results[thread_work_size];
   arg_t args[thread_work_size][nargs];
 
+  // load
+  #pragma unroll
+  for (int i = 0; i < arity; i++) {
+    auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
+    memory_access_policy.load(args_accessor, args_base[i]);
+  }
+  // compute
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+  }
+  // store
+  auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
+  memory_access_policy.template store(result_base, result_accessor);
+}
+
+template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+  using return_t = typename function_traits<func_t>::result_type;
+  constexpr int block_work_size = num_threads * thread_work_size;
+  int remaining = N - block_work_size * blockIdx.x;
+
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    // load
-    #pragma unroll
-    for (int i = 0; i < arity; i++) {
-      auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
-      memory::checked_unroll<arg_t, num_threads, block_work_size>::load(args_accessor, args_base[i], remaining);
-    }
-    // compute
-    #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
-      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
-    }
-    // store
-    auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-    memory::checked_unroll<return_t, num_threads, block_work_size>::store(result_base, result_accessor, remaining);
+    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, memory::checked_unroll<num_threads, block_work_size>(remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    // load
-    #pragma unroll
-    for (int i = 0; i < arity; i++) {
-      auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
-      memory::vectorized<arg_t, num_threads, block_work_size, vec_size>::load(args_accessor, args_base[i]);
-    }
-    // compute
-    #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
-      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
-    }
-    // store
-    auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-    memory::vectorized<return_t, num_threads, block_work_size, vec_size>::store(result_base, result_accessor);
+    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, memory::vectorized<num_threads, block_work_size, vec_size>());
   }
 }
 

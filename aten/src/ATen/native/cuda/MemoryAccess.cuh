@@ -136,7 +136,6 @@ struct Vec<scalar_t, 4> {
 };
 
 template <
-  typename scalar_t,     // type of data.
   int num_threads,       // number of threads in a block.
   int block_work_size    // number of elements each block needs to handle.
 >
@@ -144,9 +143,12 @@ struct checked_unroll {
 
   static constexpr int thread_work_size = block_work_size / num_threads;
   static constexpr int loop_size = thread_work_size;
+  int remaining;
 
-  template<typename accessor_t>
-  __device__ static inline void load(accessor_t to, scalar_t *from, int remaining) {
+  __device__ checked_unroll(int remaining): remaining(remaining) {}
+
+  template<typename accessor_t, typename scalar_t>
+  __device__ inline void load(accessor_t to, scalar_t *from) {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
@@ -158,8 +160,8 @@ struct checked_unroll {
     }
   }
 
-  template<typename accessor_t>
-  __device__ static inline void store(scalar_t *to, accessor_t from, int remaining) {
+  template<typename accessor_t, typename scalar_t>
+  __device__ inline void store(scalar_t *to, accessor_t from) {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
@@ -177,7 +179,6 @@ struct checked_unroll {
 // manually.
 
 template <
-  typename scalar_t,     // type of data.
   int num_threads,       // number of threads in a block.
   int block_work_size,   // number of elements each block needs to handle.
   int vec_size           // vector size, can be 1, 2, or 3.
@@ -187,8 +188,8 @@ struct vectorized {
   static constexpr int thread_work_size = block_work_size / num_threads;
   static constexpr int loop_size = thread_work_size / vec_size;
 
-  template<typename accessor_t>
-  __device__ static inline void load(accessor_t to, scalar_t *from) {
+  template<typename accessor_t, typename scalar_t>
+  __device__ inline void load(accessor_t to, scalar_t *from) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
@@ -203,8 +204,8 @@ struct vectorized {
     }
   }
 
-  template<typename accessor_t>
-  __device__ static inline void store(scalar_t *to, accessor_t from) {
+  template<typename accessor_t, typename scalar_t>
+  __device__ inline void store(scalar_t *to, accessor_t from) {
     using vec_t = Vec<scalar_t, vec_size>;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
