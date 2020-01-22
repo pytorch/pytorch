@@ -110,10 +110,12 @@ Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const
 }
 
 Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss_squeezed = at::squeeze(loss);
+
     auto iter = TensorIterator();
-    iter.add_output(loss);
-    iter.add_input(input);
-    iter.add_input(target);
+    iter.add_output(loss_squeezed);
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
     iter.build();
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(loss.scalar_type(), "binary_cross_entropy", [&] {
@@ -124,6 +126,7 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
                     (input_val >= 0) && (input_val <= 1),
                     "all elements of input should be between 0 and 1"
                 );
+
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
                 return (target_val - scalar_t(1))
@@ -133,11 +136,11 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
         );
     });
     if (weight.defined()) {
-      loss.mul_(weight);
+        loss.mul_(weight);
     }
     if (reduction != at::Reduction::None) {
-      Tensor loss_reduced = apply_loss_reduction(loss, reduction);
-      loss.resize_as_(loss_reduced).copy_(loss_reduced);
+        Tensor loss_reduced = apply_loss_reduction(loss, reduction);
+        loss.resize_as_(loss_reduced).copy_(loss_reduced);
     }
     return loss;
 }
@@ -148,11 +151,13 @@ Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input
 }
 
 Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input_squeezed = at::squeeze(grad_input);
+
     auto iter = TensorIterator();
-    iter.add_output(grad_input);
-    iter.add_input(grad);
-    iter.add_input(input);
-    iter.add_input(target);
+    iter.add_output(grad_input_squeezed);
+    iter.add_input(at::squeeze(grad));
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
     iter.build();
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
@@ -171,7 +176,7 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
         );
     });
     if (weight.defined()) {
-      grad_input.mul_(weight);
+        grad_input.mul_(weight);
     }
     if (reduction == at::Reduction::Mean) {
         grad_input.div_(input.numel());
