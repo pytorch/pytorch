@@ -639,8 +639,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
-  } else if (ivalue.isGenericList()) {
-    auto list = std::move(ivalue).toGenericList();
+  } else if (ivalue.isList()) {
+    auto list = std::move(ivalue).toList();
     py::list t{list.size()};
     for (size_t i = 0; i < list.size(); ++i) {
       t[i] = toPyObject(IValue{list.get(i)});
@@ -681,7 +681,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
+    if (obj->name().find("torch.classes") == 0) {
       return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
