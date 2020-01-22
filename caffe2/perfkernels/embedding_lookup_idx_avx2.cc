@@ -24,7 +24,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
     float* out) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -388,7 +388,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int32_t_float_float_false__avx2_fma(
     const int64_t block_size,
@@ -456,7 +456,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
     float* out) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -820,7 +820,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int64_t_float_float_false__avx2_fma(
     const int64_t block_size,
@@ -888,7 +888,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
     float* out) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1372,7 +1372,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int32_t_half_float_false__avx2_fma(
     const int64_t block_size,
@@ -1440,7 +1440,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
     float* out) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -1924,7 +1924,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int64_t_half_float_false__avx2_fma(
     const int64_t block_size,
@@ -1992,7 +1992,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
     float* out) {
   const int prefdist_T0 = 16;
   const int fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -2489,7 +2489,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int32_t_uint8_t_float_false__avx2_fma(
     const int64_t block_size,
@@ -2557,7 +2557,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     float* out) {
   const int64_t prefdist_T0 = 16;
   const int64_t fused_block_size = block_size + 0;
-  int64_t dataInd = offsets[0];
+  int64_t dataInd = 0;
   if (block_size == 128) {
     // unrolling 16 times
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
@@ -3054,7 +3054,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       }
     }
   }
-  return true;
+  return dataInd == index_size;
 }
 bool EmbeddingLookupIdx_int64_t_uint8_t_float_false__avx2_fma(
     const int64_t block_size,

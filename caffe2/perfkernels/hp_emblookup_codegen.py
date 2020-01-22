@@ -470,7 +470,7 @@ for o in options:
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
     if opts.use_offsets:
-        code.append("  int64_t dataInd = offsets[0];")
+        code.append("  int64_t dataInd = 0;")
     else:
         code.append("  " + IndexType + " dataInd = 0;")
 
@@ -488,10 +488,7 @@ for o in options:
     code.append("    // generic code")
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  }")
-    if opts.use_offsets:
-        code.append("  return true;")
-    else:
-        code.append("  return dataInd == index_size;")
+    code.append("  return dataInd == index_size;")
 
     code.append("}")
 

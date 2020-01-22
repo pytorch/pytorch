@@ -28,7 +28,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out) {
-  int64_t current = offsets[0];
+  int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m]) {
@@ -71,7 +71,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }
     out += block_size;
   }
-  return true;
+  return current == index_size;
 }
 
 // Proxy back to generic implementation
@@ -185,7 +185,7 @@ static bool EmbeddingLookupGenericSlowIdx(
       return;                                                                                         \
     }                                                                                                 \
     int64_t current = 0;                                                                              \
-    for (int m = 0; m < output_size - 1; ++m) {                                                       \
+    for (int m = 0; m < output_size; ++m) {                                                           \
       for (int64_t i = offsets[m]; i < offsets[m + 1]; ++i) {                                         \
         CAFFE_ENFORCE_LT(current, index_size);                                                        \
         IndexType idx = indices[current];                                                             \
@@ -200,6 +200,11 @@ static bool EmbeddingLookupGenericSlowIdx(
         ++current;                                                                                    \
       }                                                                                               \
     }                                                                                                 \
+    CAFFE_ENFORCE_EQ(                                                                                 \
+        current,                                                                                      \
+        index_size,                                                                                   \
+        "Your input seems to be incorrect: the sum of lengths values should be "                      \
+        "the size of the indices tensor, but it appears not.");                                       \
   }
 
 EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);

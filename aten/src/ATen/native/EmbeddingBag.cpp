@@ -90,10 +90,10 @@ void index_select_add<float>(const Tensor &select_indices,
             caffe2::EmbeddingLookupIdx(
                 /*block_size=*/ddim,
                 /*output_size=*/end_idx - start_idx,
-                /*index_size=*/select_indices.numel(),
+                /*index_size=*/offsets.data_ptr<int64_t>()[end_idx] - offsets.data_ptr<int64_t>()[start_idx],
                 /*data_size=*/src.size(0),
                 /*input=*/src_data,
-                /*indices=*/select_indices_data,
+                /*indices=*/select_indices_data + offsets.data_ptr<int64_t>()[start_idx],
                 /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
                 /*weights=*/nullptr,
                 /*scale_bias=*/nullptr,
@@ -257,8 +257,7 @@ static at::Tensor make_bag_size(
     const Tensor& offsets,
     const Tensor& indices,
     const int64_t mode,
-    const bool requires_grad,
-    bool include_last_offset) {
+    const bool requires_grad) {
   at::Tensor bag_size;
   if (mode == MODE_MEAN || mode == MODE_MAX) {
     bag_size = at::zeros(offsets.sizes(), indices.options());
@@ -396,8 +395,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     AT_ASSERT(per_sample_weights.numel() == indices.numel());
   }
 
-  auto bag_size = make_bag_size(
-      offsets, indices, mode, weight.requires_grad(), include_last_offset);
+  auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());
 
   if (include_last_offset) {
     TORCH_CHECK(
