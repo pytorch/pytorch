@@ -16,6 +16,32 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
 }
 } // namespace
 
+bool insertableTensor(const at::Tensor& ten) {
+  return !ten.requires_grad();
+}
+
+bool insertableIValue(const IValue& ivalue) {
+  if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+    return true;
+  }
+  if (ivalue.isTensor()) {
+    return insertableTensor(ivalue.toTensor());
+  }
+  if (ivalue.isList() || ivalue.isTuple()) {
+    c10::ArrayRef<IValue> elems;
+    if (ivalue.isTuple()) {
+      elems = ivalue.toTuple()->elements();
+    } else {
+      elems = ivalue.toListRef();
+    }
+    return std::all_of(elems.begin(), elems.end(), [](const IValue& tup_elem) {
+      return insertableIValue(tup_elem);
+    });
+  }
+  return false;
+}
+
 Value* insertConstant(
     Graph& g,
     const IValue& val,
@@ -95,6 +121,14 @@ c10::optional<Value*> tryInsertConstant(
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
+  } else if (val.isTuple()) {
+    if (insertableIValue(val)) {
+      n->ival_(attr::value, val);
+      n->output()->setType(val.type());
+    } else {
+      n->destroy();
+      return c10::nullopt;
+    };
   } else {
     n->destroy();
     return c10::nullopt;
@@ -143,6 +177,15 @@ RegisterOperators reg({
             auto f = node->f(attr::value);
             return [f](Stack& stack) {
               push(stack, f);
+              return 0;
+            };
+          } else if (
+              type->cast<TupleType>() &&
+              node->kindOf(attr::value) == AttributeKind::ival) {
+            const auto& tup = node->ival(attr::value);
+            TORCH_INTERNAL_ASSERT(tup.isTuple());
+            return [tup](Stack& stack) {
+              push(stack, tup);
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofInts())) {

@@ -3267,26 +3267,78 @@ graph(%Ra, %Rb):
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
 
     def test_constant_insertion(self):
-        def foo():
-            a = [1.0, 2.0, 3.0]
-            b = ["ab", "cd", "ef"]
-            return a, b, a[0], b[0]
+        funcs_template = dedent('''
+        def func():
+            return {constant_constructor}
+        ''')
 
-        scripted_foo = torch.jit.script(foo)
-        graph = scripted_foo.graph
-        FileCheck().check_count("ListConstruct", 2).run(graph)
-        self.run_pass('constant_propagation', graph)
-        FileCheck().check_not("ListConstruct").run(graph)
-        FileCheck().check_dag("float[] =").check_dag("str[] =").run(graph)
-        imported = self.getExportImportCopy(scripted_foo)
-        self.assertEqual(foo(), scripted_foo())
-        self.assertEqual(imported(), scripted_foo())
+        # constants: primitives: int, double, bool, str, lists of primitives,
+        # and tuples
+        def check_constant(constant_constructor):
+            scope = {}
+            funcs_str = funcs_template.format(constant_constructor=constant_constructor)
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            self.run_pass('constant_propagation', f_script.graph)
+            FileCheck().check_count("prim::Constant", 1, exactly=True).run(f_script.graph)
+            self.assertEqual(scope['func'](), f_script())
+            imported = self.getExportImportCopy(f_script)
+            self.assertEqual(imported(), f_script())
 
-        @torch.jit.script
-        def test_empty():
-            return torch.jit.annotate(List[str], [])
-        imported = self.getExportImportCopy(test_empty)
-        FileCheck().check("str[]").run(imported.graph)
+        constants = ["None", "-.5", "0", "1", "True", "False", "''", "'a'", "'b'", "torch.tensor(1)",
+                     "[True, False]", "[0., .5]", "[torch.tensor(4), torch.tensor(2)]", "[0, 1]", "['0', '1']"]
+
+        for type in ["Tensor", "str", "int", "float", "bool"]:
+            constants.append("torch.jit.annotate(List[ " + type + "], [])")
+
+        for constant in constants:
+            check_constant(constant)
+
+        for i in range(len(constants)):
+            for j in range(i + 1, len(constants)):
+                tup_constant = constants[i] + ", " + constants[j]
+                check_constant(tup_constant)
+
+        # testing node hashing
+        funcs_template = dedent('''
+        def func():
+            print({constant_constructor})
+        ''')
+        single_elem_tuples = map(lambda x: "(" + x + ",)", constants)
+        input_arg = ", ".join(single_elem_tuples)
+        scope = {}
+        funcs_str = funcs_template.format(constant_constructor=input_arg)
+        execWrapper(funcs_str, globals(), scope)
+        cu = torch.jit.CompilationUnit(funcs_str)
+        f_script = cu.func
+        self.run_pass('constant_propagation', f_script.graph)
+        # prim::None return adds one constant
+        self.assertEqual(len(constants) + 1, str(f_script.graph).count("prim::Constant"))
+        self.run_pass('cse', f_script.graph)
+        # node hashing correctly working, no CSE occurs
+        self.assertEqual(len(constants) + 1, str(f_script.graph).count("prim::Constant"))
+
+        funcs_template = dedent('''
+        def func():
+            a = {constant_constructor}
+            print(a)
+            b = {constant_constructor}
+            print(b)
+        ''')
+
+        # test that equal tuples correctly work with node hashing
+        for tup in map(lambda x: "(" + x + ",)", constants):
+            funcs_str = funcs_template.format(constant_constructor=tup)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            self.run_pass('constant_propagation', f_script.graph)
+            num_constants = 3  # input constant twice, None once
+            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
+            self.run_pass('cse', f_script.graph)
+            FileCheck().check_count("prim::Constant", num_constants - 1, exactly=True).run(f_script.graph)
 
     def test_trace_detach(self):
         def foo(x, w):
@@ -5958,13 +6010,14 @@ a")
         @torch.jit.script
         def foo():
             a = torch.tensor(1)
-            b = torch.tensor(2)
+            b = torch.tensor(1)
             return a, b
 
         self.run_pass('constant_propagation', foo.graph)
         self.run_pass('constant_pooling', foo.graph)
         # dont pool constants bc it would introduce observable alias relationship changing
-        FileCheck().check_count("prim::Constant", 2, exactly=True).run(foo.graph)
+        a, b = foo()
+        self.assertIsNot(a, b)
 
     def test_literal(self):
         def func1(a, b):
@@ -13579,6 +13632,16 @@ a")
             return c[2:10]
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
+
+    def test_lower_nested_tuples(self):
+        @torch.jit.script
+        def test():
+            return ((1, 2), 3)
+
+        self.run_pass('constant_propagation', test.graph)
+        FileCheck().check("prim::Constant").check_not("TupleConstruct").run(test.graph)
+        # fails if a tuple can't be lowered
+        self.run_pass('lower_all_tuples', test.graph)
 
     def test_unwrap_optional_builtin(self):
         def test(x):
