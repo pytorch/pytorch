@@ -5,9 +5,6 @@ namespace rocm { namespace workaround {
 template<typename T>
 struct enable_default_constructor {
   struct { char bytes[sizeof(T)]; } value;
-  operator T() {
-    return *reinterpret_cast<T *>(&value);
-  }
   operator T&() {
     return *reinterpret_cast<T *>(&value);
   }
