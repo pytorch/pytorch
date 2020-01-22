@@ -31,6 +31,8 @@ void RRefContext::handleException(
   if (futErr) {
     // TODO: allow users to register an error handler and call it here.
     LOG(ERROR) << "Got exception: " << (*futErr).what();
+    std::cout << "Got exception: " << (*futErr).what() << std::endl;
+    std::cerr << "Got exception: " << (*futErr).what() << std::endl;
     throw std::runtime_error((*futErr).what());
   }
 }
