@@ -3350,6 +3350,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
             if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
+                print("attn_mask.size(), query.size(0), key.size(0)",
+                      attn_mask.size(), query.size(0), key.size(0))
                 raise ValueError('The size of the 2D attn_mask is not correct.')
         elif attn_mask.dim() == 3:
             if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
