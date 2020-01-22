@@ -175,7 +175,7 @@ void scalar_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows p
 }
 
 template<typename Vals, typename Pows>
-void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows pows, c10::ScalarType pows_dtype) {
+void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c10::ScalarType pows_dtype) {
   using T = typename Vals::value_type;
 
   typedef std::numeric_limits< double > dbl;
