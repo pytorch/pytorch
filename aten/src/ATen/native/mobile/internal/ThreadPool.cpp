@@ -33,6 +33,8 @@ void ThreadPool::run(
       fn,
   };
 
+// TODO (Ashkan): Disabled until integration complete.
+#if 0
   pthreadpool_parallelize_1d(
       pthreadpool_,
       [](void* const context, const size_t item) {
@@ -48,6 +50,7 @@ void ThreadPool::run(
       &context,
       range,
       0u);
+#endif
 }
 
 pthreadpool_t ThreadPool::handle() const {

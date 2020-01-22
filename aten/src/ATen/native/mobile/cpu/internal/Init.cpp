@@ -1,6 +1,6 @@
 #include <ATen/native/mobile/cpu/Engine.h>
 
-// #ifdef C10_MOBILE
+#ifdef USE_XNNPACK
 
 #include <ATen/native/mobile/cpu/internal/Common.h>
 
@@ -78,4 +78,4 @@ bool deinitialize() {
 } // namespace native
 } // namespace at
 
-// #endif /* C10_MOBILE */
+#endif /* USE_XNNPACK */

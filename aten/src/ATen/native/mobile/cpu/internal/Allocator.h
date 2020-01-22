@@ -2,7 +2,7 @@
 
 #include <ATen/native/mobile/cpu/internal/Common.h>
 
-// #ifdef C10_MOBILE
+#ifdef USE_XNNPACK
 
 namespace at {
 namespace native {
@@ -35,4 +35,4 @@ at::Tensor new_tensor(
 } // namespace native
 } // namespace at
 
-// #endif /* C10_MOBILE */
+#endif /* USE_XNNPACK */

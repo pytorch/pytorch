@@ -180,11 +180,17 @@ if (NOT INTERN_BUILD_MOBILE)
 endif()
 
 # ---[ Dependencies
-# To avoid version mismatch, explicitly declare our intent to use the exact same
-# source dependencies under third_party for NNPACK, QNNPACK, PYTORCH_QNNPACK, and XNNPACK.
+# NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
+# compile their dependencies in isolation as part of their build.  These dependencies
+# are then linked statically with PyTorch.  To avoid the possibility of a version
+# mismatch between these shared dependencies, explicitly declare our intent to these
+# libraries that we are interested in using the exact same source dependencies for all.
 
 if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
+
+  # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
+  # Disable them and warn the user if not.
 
   if (IOS)
     list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
@@ -362,7 +368,6 @@ if(USE_XNNPACK)
     set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
   endif()
 
-  # TODO: What's the cannonical way to do this in CMAKE?  Isn't the library CMAKE supposed to define a variable?
   if (NOT DEFINED XNNPACK_INCLUDE_DIR)
     set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
   endif()

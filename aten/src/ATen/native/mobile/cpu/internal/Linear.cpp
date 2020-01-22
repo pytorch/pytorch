@@ -1,6 +1,6 @@
 #include <ATen/native/mobile/cpu/Engine.h>
 
-// #ifdef C10_MOBILE
+#ifdef USE_XNNPACK
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
@@ -220,4 +220,4 @@ CAFFE_KNOWN_TYPE(at::native::mobile::cpu::internal::linear::Context);
 
 } // namespace caffe2
 
-// #endif /* C10_MOBILE */
+#endif /* USE_XNNPACK */

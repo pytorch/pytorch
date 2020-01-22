@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 
-// #ifdef C10_MOBILE
+#ifdef USE_XNNPACK
 
 #include <xnnpack.h>
 
@@ -77,4 +77,4 @@ using Operator = std::unique_ptr<xnn_operator, Deleter>;
 } // namespace native
 } // namespace at
 
-// #endif /* C10_MOBILE */
+#endif /* USE_XNNPACK */
