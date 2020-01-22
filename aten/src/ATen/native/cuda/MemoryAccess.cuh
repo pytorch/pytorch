@@ -146,8 +146,9 @@ struct vector<scalar_size, 4> {
     case 2:
       v.z = typeless_cast<backing_scalar_t>(value);
       break;
+    default:  // no boundary check here
+      v.w = typeless_cast<backing_scalar_t>(value);
     }
-    v.w = typeless_cast<backing_scalar_t>(value); // no boundary check here
   }
 };
 
