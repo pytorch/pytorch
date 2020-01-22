@@ -11,15 +11,16 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/python_custom_class.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -544,6 +545,9 @@ inline IValue toIValue(
     case TypeKind::FutureType:
     case TypeKind::QSchemeType:
       break;
+    case TypeKind::PyObjectType:
+      // convert a py::handle to the IValue that holds the py::object
+      return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
     case TypeKind::CapsuleType:
@@ -698,6 +702,9 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isPyObject()) {
+    // return borrowed reference to ensure it correctly incref the underlying PyObject
+    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

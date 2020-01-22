@@ -58,6 +58,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
+      case PyObjectType::Kind:
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
