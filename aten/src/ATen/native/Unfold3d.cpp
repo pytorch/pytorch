@@ -85,7 +85,7 @@ static void unfolded3d_copy(
     const int64_t input_hw = input_height * input_width;
     const int64_t input_dhw = input_hw * input_depth;
 
-    // the following variables are updated ouside the most inner loop
+    // the following variables are updated outside the most inner loop
     int64_t d = d_out * dT - pT + i;
     int64_t h = h_out * dH - pH + j;
     int64_t ofs = nip * input_dhw + d * input_hw + h * input_width;

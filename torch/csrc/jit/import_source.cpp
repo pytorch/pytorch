@@ -297,7 +297,7 @@ struct SourceImporterImpl : public Resolver,
                 continue;
               } else {
                 if (assign.rhs().present()) {
-                  // This is a constant assignemnt, of the form:
+                  // This is a constant assignment, of the form:
                   // foo : Final[int] = 3
                   constants.push_back(assign);
                 } else {

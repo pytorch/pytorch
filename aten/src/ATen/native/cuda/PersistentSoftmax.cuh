@@ -51,7 +51,7 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // A "WARP" contains "C10_WARPS_SIZE" threads, these treads are guaranteed to belong to the same warp.
 // This is important because it means only __shfl_ instructions are required for reductions.
 // Note that this means WARP_SIZE must be a power of two and <= architecture warp size.
-// CUDA warp size is 32 for all existing GPU architecures, but there is no guarantee this will not change for future arch.
+// CUDA warp size is 32 for all existing GPU architectures, but there is no guarantee this will not change for future arch.
 // ROCm warp size is 64 for all currently ROCm-supported GPU architectures, but this may change for future archs.
 // is_log_softmax is a flag indicating whether SoftMax or LogSoftMax should be computed.
 // The template can be instantiated with any floating point type for the type arguments input_t, output_t and acc_t.
