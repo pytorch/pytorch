@@ -24,27 +24,6 @@ constexpr int TYPE_IDX = 6; // index of parent in the tuple
 
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-
-template <typename T>
-T& unwrapAutogradMessage(
-    const Message& message,
-    std::unique_ptr<RpcCommandBase>& response) {
-  if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-    auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(*response);
-
-    // Attach 'recv' autograd function.
-    addRecvRpcBackward(
-        rpcWithAutograd.autogradMetadata(),
-        rpcWithAutograd.tensors(),
-        rpcWithAutograd.fromWorkerId());
-
-    auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
-    return static_cast<T&>(wrappedRpc);
-  } else {
-    return static_cast<T&>(*response);
-  }
-}
-
 } // namespace
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
@@ -56,12 +35,12 @@ RRefForkData::RRefForkData(
     const RRefId& rrefId,
     const ForkId& forkId,
     worker_id_t parent,
-    const std::string& type_str)
+    std::string type_str)
     : ownerId_(ownerId),
       rrefId_(rrefId),
       forkId_(forkId),
       parent_(parent),
-      type_str_(type_str) {}
+      type_str_(std::move(type_str)) {}
 
 py::tuple RRefForkData::toPyTuple() const {
   return py::make_tuple(
@@ -95,7 +74,7 @@ RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
 
 //////////////////////////////  RRef  /////////////////////////////////////
 
-RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type)
+RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
     : RRefInterface(),
       ownerId_(ownerId),
       rrefId_(rrefId),
@@ -117,8 +96,8 @@ UserRRef::UserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId,
-    const TypePtr type)
-    : RRef(ownerId, rrefId, type), forkId_(forkId) {
+    TypePtr type)
+    : RRef(ownerId, rrefId, std::move(type)), forkId_(forkId) {
   // Do nothing,
   // (1) If this UserRRef is a fork of an existing RRef, RRefContext will send
   //     a RREF_FORK_REQUEST message to the owner.
@@ -165,14 +144,22 @@ IValue UserRRef::toHere() {
       true /* forceGradRecording */);
 
   const Message& message = futureResponse->wait();
-  auto response = deserializeResponse(message);
-  auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+  MessageType msgType = message.type();
+  auto response = deserializeResponse(message, msgType);
+  TORCH_INTERNAL_ASSERT(
+      msgType == MessageType::SCRIPT_RREF_FETCH_RET
+      || msgType == MessageType::PYTHON_RREF_FETCH_RET,
+      "Message type should either be SCRIPT_RREF_FETCH_RET "
+      "or PYTHON_RREF_FETCH_RET");
+  RpcCommandBase& rpc = *response;
   if (isPyObj()) {
+    auto& rfr = static_cast<PythonRRefFetchRet&>(rpc);
     return jit::toIValue(
         PythonRpcHandler::getInstance().deserialize(
             SerializedPyObj::fromIValues(rfr.values())),
         PyObjectType::get());
   } else {
+    auto& rfr = static_cast<ScriptRRefFetchRet&>(rpc);
     return rfr.values().front();
   }
 }

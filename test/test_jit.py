@@ -1186,15 +1186,20 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+        m = wrap_cpp_module(m._c)
         # conv1 and conv2 shares the same type, we need to
         # make sure we didn't quantize the type twice
-        assert len([x for x, _ in m.conv1._modules._c.items()
-                    if x.startswith('_observer_')]) == 3, \
+        conv1_observers = [x for x, _ in m.conv1._modules._c.items()
+                           if x.startswith('_observer_')]
+        conv2_observers = [x for x, _ in m.conv2._modules._c.items()
+                           if x.startswith('_observer_')]
+        assert len(conv1_observers) == 3, \
             'Expected to have 3 observer submodules'
-        assert len([x for x, _ in m.conv2._modules._c.items()
-                    if x.startswith('_observer_')]) == 3, \
+        assert len(conv2_observers) == 3, \
             'Expected to have 3 observer submodules'
+        assert conv1_observers == conv2_observers, \
+            'Expect conv1 and conv2 to have same observers since the class type is shared'
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1263,6 +1268,64 @@ graph(%x : Tensor,
         # is sharded as multi uses
         FileCheck().check_count("aten::dequantize", 8, exactly=True) \
                    .run(str(get_forward_graph(m._c)))
+
+    def test_insert_quant_dequant_shared_class_type(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv2(self.conv1(x))
+
+        for is_per_channel in [True, False]:
+            m = torch.jit.script(M())
+            observer = default_per_channel_weight_observer.with_args(ch_axis=1) \
+                if is_per_channel else default_observer
+            qconfig = QConfig(activation=observer, weight=observer)
+            qconfig_dict = {
+                '': script_qconfig(qconfig)
+            }
+            # TODO: Here we have a temporary workaround to use
+            # non-inplace insert_observers and insert_quant_dequant because
+            # interpreter instructions seem to be cached,
+            # we need to fix the caching before we can use inplace
+            # insert_observers and insert_quant_dequant
+            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            # Make sure we insert 3 observers instead of 6
+            for postfix in ['_0', '_1', '_2']:
+                obs = '_observer' + postfix
+                assert m.conv1._c.hasattr(obs)
+                assert m.conv2._c.hasattr(obs)
+
+            data = torch.randn(1, 3, 10, 10, dtype=torch.float)
+            m(data)
+            m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
+            m(data)
+            assert m.conv1._c._type() == m.conv2._c._type()
+            # Ideally we should check for the quantization parameter
+            # attributes as well, but since the attribute names are
+            # dependent on implementation of the compiler, we will
+            # skip that.
+            for postfix in ['_0', '_1', '_2']:
+                obs = '_observer' + postfix
+                assert not m.conv1._c.hasattr(obs)
+                assert not m.conv2._c.hasattr(obs)
+            quant_func = "aten::quantize_per_channel" if is_per_channel \
+                else "aten::quantize_per_tensor"
+            FileCheck().check_not(quant_func) \
+                       .check("prim::CallMethod[name=\"forward\"]") \
+                       .check_not(quant_func) \
+                       .check("return") \
+                       .run(str(get_forward_graph(m._c)))
+            FileCheck().check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("aten::conv2d") \
+                       .check(quant_func) \
+                       .check_next("aten::dequantize") \
+                       .check("return") \
+                       .run(m.conv1._c._get_method('_conv_forward').graph)
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
@@ -3129,6 +3192,21 @@ graph(%Ra, %Rb):
         self.run_pass('peephole', graph)
         FileCheck().check("prim::unchecked_cast").run(graph)
 
+    def test_unchecked_cast(self):
+        def test(cond):
+            # type: (bool)
+            a = torch.tensor([10])
+            if cond:
+                b = None
+            else:
+                b = a
+            if b is not None:
+                b[0] = 5
+            return a.int()
+
+        self.checkScript(test, (True,))
+        self.checkScript(test, (False,))
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
@@ -4679,6 +4757,47 @@ def foo(x):
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_return_instance(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            return ss
+
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        self.assertEqual(out.pop(), "mom")
+        self.assertEqual(out.pop(), "hi")
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_return_instance_from_method(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
+            clone = ss.clone()
+            ss.pop()
+            return ss, clone
+
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        self.assertEqual(out[0].pop(), "hi")
+        self.assertEqual(out[1].pop(), "mom")
+        self.assertEqual(out[1].pop(), "hi")
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_take_instance_as_method_arg(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss.merge(ss2)
+            return ss
+
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        self.assertEqual(out.pop(), "hi")
+        self.assertEqual(out.pop(), "mom")
 
     def test_jitter_bug(self):
         @torch.jit.script

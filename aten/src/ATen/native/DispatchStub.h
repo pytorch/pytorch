@@ -66,8 +66,12 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
   template <typename... ArgTypes>
   rT operator()(DeviceType device_type, ArgTypes&&... args) {
     if (device_type == DeviceType::CPU) {
-      if (!cpu_dispatch_ptr) {
-        cpu_dispatch_ptr = choose_cpu_impl();
+      // Use memory_order_relaxed here since even if two threads race,
+      // they will still compute the same value for cpu_dispatch_ptr.
+      if (!cpu_dispatch_ptr.load(std::memory_order_relaxed)) {
+        FnPtr tmp_cpu_dispatch_ptr = nullptr;
+        cpu_dispatch_ptr.compare_exchange_weak(
+            tmp_cpu_dispatch_ptr, choose_cpu_impl(), std::memory_order_relaxed);
       }
       return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
@@ -103,11 +107,11 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 // Fixing dispatch error in Windows debug builds.
 // See https://github.com/pytorch/pytorch/issues/22681 for more details.
 #if defined(_MSC_VER) && defined(_DEBUG)
-  FnPtr cpu_dispatch_ptr;
+  std::atomic<FnPtr> cpu_dispatch_ptr;
   FnPtr cuda_dispatch_ptr;
   FnPtr hip_dispatch_ptr;
 #else
-  FnPtr cpu_dispatch_ptr = nullptr;
+  std::atomic<FnPtr> cpu_dispatch_ptr{nullptr};
   FnPtr cuda_dispatch_ptr = nullptr;
   FnPtr hip_dispatch_ptr = nullptr;
 #endif
