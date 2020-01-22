@@ -156,6 +156,19 @@ def pca(A, q=None, center=True, niter=2):
     nearly optimal approximation of a singular value decomposition of
     a centered matrix :attr:`A` such that :math:`A = U diag(S) V^T`.
 
+    .. note:: The relation of ``(U, S, V)`` to PCA is as follows:
+
+                - ``A`` is the data matrix with ``m`` samples and
+                  ``n`` features
+
+                - the ``V`` columns represent the principal directions
+
+                - ``S**2/(m-1)`` are the eigenvalues of covariance
+                  matrix ``A^T A/(m-1)``
+
+                - ``A V[:,:k]`` projects data to the first k principal
+                  components
+
     .. note:: Different from the standard SVD, the size of returned
               matrices depend on the specified rank and q
               values as follows:
