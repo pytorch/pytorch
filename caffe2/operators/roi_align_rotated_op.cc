@@ -403,3 +403,22 @@ Based on https://arxiv.org/abs/1703.01086.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+using RoIAlignRotatedOpFloatCPU =
+    caffe2::RoIAlignRotatedOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    RoIAlignRotated,
+    "_caffe2::RoIAlignRotated("
+      "Tensor features, "
+      "Tensor rois, "
+      "str order, "
+      "float spatial_scale, "
+      "int pooled_h, "
+      "int pooled_w, "
+      "int sampling_ratio, "
+      "bool aligned"
+    ") -> Tensor",
+    RoIAlignRotatedOpFloatCPU);
+// clang-format on

@@ -273,7 +273,7 @@ struct CAFFE2_API IValue final {
   bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  std::vector<int64_t> toIntListRef() const;
+  std::vector<int64_t> toIntVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -288,7 +288,7 @@ struct CAFFE2_API IValue final {
   bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  std::vector<double> toDoubleListRef() const;
+  std::vector<double> toDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -299,14 +299,14 @@ struct CAFFE2_API IValue final {
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  std::vector<at::Tensor> toTensorListRef() const;
+  std::vector<at::Tensor> toTensorVector() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
-  bool isGenericList() const { return Tag::GenericList == tag; }
-  c10::List<IValue> toGenericList() &&;
-  c10::List<IValue> toGenericList() const &;
-  c10::ArrayRef<IValue> toGenericListRef() const;
+  bool isList() const { return Tag::GenericList == tag; }
+  c10::List<IValue> toList() &&;
+  c10::List<IValue> toList() const &;
+  c10::ArrayRef<IValue> toListRef() const;
 
   template<class T>
   IValue(c10::List<T> v);
@@ -456,6 +456,26 @@ struct CAFFE2_API IValue final {
   /// this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(const IValue& rhs) const;
 
+  // Computes the "official" string representation of an IValue. This produces a
+  // TorchScript expression that can be used to recreate an IValue with the same
+  // value (e.g. when we are printing constants in the serializer).
+  //
+  // Callers can use `customFormatter` to override how `repr()` prints out an
+  // IValue. This is useful if you have some other environment where you can
+  // look up values, and you want to print a reference to that environment (like
+  // the serializer's constant table).
+  //
+  // repr() is not necessarily defined on all objects!
+  std::ostream& repr(
+      std::ostream& stream,
+      std::function<bool(std::ostream&, const IValue& v)> customFormatter)
+      const;
+
+  // Computes an "informal" string representation of an IValue. This should be
+  // used for debugging, or servicing `print()`-like functions.
+  // This is different from `repr()` in that there is no expectation that we can
+  // exactly reconstruct an IValue from the output; feel free to use a
+  // concise/pretty form
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
