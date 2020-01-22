@@ -107,6 +107,23 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+
+    if (py::isinstance<ScriptCodeObj>(obj)) {
+      auto code_obj = py::cast<ScriptCodeObj>(obj);
+      // Custom-bound C++ classes have a wrapper analogous to the Python
+      // code object that can be invoked to instantiate the class. e.g.
+      // torch.classes.Foo(). The type of `torch.classes.Foo` is a
+      // StrongTypePtr, which really means that it's a script function
+      // that we generate to instantiate the class. In torch/_classes.py
+      // we stuff away the qualname of the class in this attribute
+      // so that we can look up the proper type ptr later, irrespective of
+      // the actual python name that's referencing it.
+      auto qualname = code_obj.qualname;
+      auto custom_class_ptr = getCustomClass(qualname);
+      TORCH_INTERNAL_ASSERT(custom_class_ptr);
+      return custom_class_ptr;
+    }
+
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
     if (!py::cast<bool>(isClass)) {
       return nullptr;
@@ -673,13 +690,15 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // STL containers are not mutable by default and hence we need to bind as
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
   py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
@@ -936,6 +955,9 @@ void initJitScriptBindings(PyObject* module) {
           "qualified_name", [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
           });
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<ScriptCodeObj, StrongFunctionPtr>(m, "ScriptCodeObj");
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(

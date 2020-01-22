@@ -14,7 +14,7 @@ from datetime import timedelta
 from sys import platform
 
 from itertools import groupby
-from functools import partial, reduce
+from functools import reduce
 import operator
 
 import torch
@@ -28,7 +28,8 @@ from torch.nn.parallel import DistributedDataParallel
 
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
-    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm
+    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm, \
+    simple_sparse_reduce_tests
 from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -182,49 +183,6 @@ def simple_multi_input_reduce_tests(rank, world_size):
             [torch.tensor([2 * rank + 1.0]), torch.tensor([2 * rank + 2.0])],
             torch.tensor([2 * world_size]),
         ),
-    ]
-
-
-def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
-    """
-    Generate a number of basic test cases for sparse reduction.
-    These cover tensors with a varying number of sparse dimensions and a varying
-    number of dense dimensions. The only reduction operation we support is sum.
-    """
-    def generate(rank, world_size, sparse_dims=1, dense_dims=0):
-        # First sparse dimension is [0..rank].
-        # Subsequent dimensions are always 0, so we know there is
-        # a non-empty intersection between any two sparse tensors.
-        indices = [range(rank + 1)]
-        shape = [world_size] + [2 for _ in range(dense_dims)]
-        for _ in range(sparse_dims - 1):
-            indices.append([0] * (rank + 1))
-            shape.append(world_size)
-        values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
-        return torch.sparse_coo_tensor(indices, values, shape)
-
-    def compute_sum(fn, world_size):
-        return reduce(lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)])
-
-    return [
-        (
-            [
-                fn(num_inputs * rank + i, num_inputs * world_size)
-                for i in range(num_inputs)
-            ],
-            [
-                compute_sum(fn, num_inputs * world_size)
-                for i in range(num_inputs)
-            ],
-        )
-        for fn in [
-            partial(generate, sparse_dims=1),
-            partial(generate, sparse_dims=2),
-            partial(generate, sparse_dims=3),
-            partial(generate, dense_dims=1),
-            partial(generate, dense_dims=2),
-            partial(generate, dense_dims=3),
-        ]
     ]
 
 
@@ -944,8 +902,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.world_size,
                 num_inputs=num_inputs_per_rank)
             for (inputs, outputs) in tests:
-                work = pg.allreduce([fn(input) for input in inputs])
+                tensors = [fn(input) for input in inputs]
+                work = pg.allreduce(tensors)
                 work.wait()
+                self.assertEqual(tensors, outputs)
                 self.assertEqual(work.result(), outputs)
 
     def test_sparse_allreduce_basics(self):
