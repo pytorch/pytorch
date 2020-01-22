@@ -248,9 +248,8 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
   // an array of size 1 and just don't use it.
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
-  constexpr int block_work_size = num_threads * thread_work_size;
-
   // compute base pointers for this block
+  constexpr int block_work_size = num_threads * thread_work_size;
   int idx = block_work_size * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   arg_t *args_base[nargs];
@@ -268,11 +267,13 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
     auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
     policy.load(args_accessor, args_base[i]);
   }
+
   // compute
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
   }
+
   // store
   auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
   policy.store(result_base, result_accessor);
