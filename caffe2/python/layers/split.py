@@ -23,7 +23,7 @@ class Split(ModelLayer):
         assert axis >= 0
 
         assert isinstance(input_record, schema.Scalar),\
-            "Incorrect input type. Excpected Scalar, but received: {0}".\
+            "Incorrect input type. Expected Scalar, but received: {0}".\
             format(input_record)
 
         input_shape = input_record.field_type().shape

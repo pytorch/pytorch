@@ -224,7 +224,8 @@ struct TORCH_API Module : public Object {
 
   // Clones both the underlying `ClassType` and the module instance(data), this function
   // creates a new `ClassType` and returns a new instance that has the same data
-  // as the current instance but with the new type
+  // as the current instance but with the new type, shared ClassType will be
+  // preserved as well
   Module clone() const;
 
   // Clones the module instance but shares the underlying type with the
@@ -341,7 +342,7 @@ struct slot_iterator_impl {
     }
     // the last traversal action advanced beyond the number of slots in the
     // module so continue the iteration in the parent.
-    if (top().i_ >= int64_t(top().module_.num_slots())) {
+    if (top().i_ >= int64_t(top().module_._ivalue()->type()->numAttributes())) {
       cursors_.pop_back();
       if (!cursors_.empty()) {
         ++top().i_;
@@ -361,7 +362,7 @@ struct slot_iterator_impl {
   // is the current position of the iterator a valid one?
   // otherwise, we have to continue advancing.
   bool valid() const {
-    return top().i_ < int64_t(top().module_.num_slots()) &&
+    return top().i_ < int64_t(top().module_._ivalue()->type()->numAttributes()) &&
         Policy::valid(top().module_._ivalue()->type(), top().i_);
   }
   void while_not_valid_next() {

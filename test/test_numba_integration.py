@@ -299,7 +299,7 @@ class TestNumbaIntegration(common.TestCase):
                 torch_ary += 42
                 self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary) + 42)
 
-            # Explict-copy when using `torch.tensor()`
+            # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.tensor(numba_ary, device="cuda")

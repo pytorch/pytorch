@@ -19,6 +19,7 @@ class BatchNormalization(ModelLayer):
         bias_optim=None,
         momentum=0.9,
         order='NCHW',
+        scale_init_value=1.0,
         **kwargs
     ):
         super(BatchNormalization, self).__init__(
@@ -37,7 +38,7 @@ class BatchNormalization(ModelLayer):
                 raise ValueError("Please specify a correct order")
         else:
             assert len(self.input_shape) == 1, (
-                "This layer supports only 4D or 2D tesnors")
+                "This layer supports only 4D or 2D tensors")
             input_dims = self.input_shape[0]
 
         self.output_schema = schema.Scalar(
@@ -50,7 +51,7 @@ class BatchNormalization(ModelLayer):
 
         self.scale = self.create_param(param_name='scale',
                                        shape=[input_dims],
-                                       initializer=('ConstantFill', {'value': 1.0}),
+                                       initializer=('ConstantFill', {'value': scale_init_value}),
                                        optimizer=scale_optim)
         self.bias = self.create_param(param_name='bias',
                                        shape=[input_dims],
