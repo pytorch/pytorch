@@ -109,6 +109,20 @@ static void printPrimList(std::ostream& out, const std::vector<T>& items) {
   out << "]";
 }
 
+static void printPrimList(std::ostream& out, const std::vector<double>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0) {
+      out << ", ";
+    }
+    // use ivalue printing so that it will correctly format floats with
+    // no decimal
+    out << IValue(item);
+  }
+  out << "]";
+}
+
 static void printStrList(
     std::ostream& out,
     const std::vector<std::string>& items) {
