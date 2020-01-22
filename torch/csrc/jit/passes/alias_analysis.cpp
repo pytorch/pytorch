@@ -336,8 +336,9 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-    case prim::unchecked_cast:
       return analyzeExtractor(node);
+    case prim::unchecked_cast:
+      return makePointerTo(node->output(), node->input());
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
@@ -660,7 +661,7 @@ void AliasDb::analyzeWait(Node* node) {
 
 void AliasDb::analyzeTupleConstruct(Node* node) {
   // Because we currently mark all Tuples as needing annotation
-  // (even those containing just prmitive types), an element needs to be created
+  // (even those containing just primitive types), an element needs to be created
   // for TupleConstruct. When that changes we can create an element
   // only if it contains elements which need annotation
   getOrCreateElement(node->output());
@@ -854,27 +855,40 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   std::vector<Element*> a_elements;
+  bool a_cannot_check_containment = false;
   for (const auto& val : a) {
     if (cannotCheckAliasContainment(val)) {
-      return true;
+      a_cannot_check_containment = true;
+      break;
     }
     if (mutableType(val)) {
       a_elements.push_back(elementMap_.at(val));
     }
   }
 
-  if (a_elements.size() == 0) {
-    return false;
-  }
-
   std::vector<Element*> b_elements;
+  bool b_cannot_check_containment = false;
   for (const auto& val : b) {
     if (cannotCheckAliasContainment(val)) {
-      return true;
+      b_cannot_check_containment = true;
+      break;
     }
     if (mutableType(val)) {
       b_elements.push_back(elementMap_.at(val));
     }
+  }
+  // if we can check all elements of one value set and it doesn't contain any
+  // mutable types, then we can safely return false
+  if (!a_cannot_check_containment && a_elements.size() == 0) {
+    return false;
+  }
+  if (!b_cannot_check_containment && b_elements.size() == 0) {
+    return false;
+  }
+  // now both elements must contain mutable elements, so if we cannot check
+  // containment we must return true
+  if (a_cannot_check_containment || b_cannot_check_containment) {
+    return true;
   }
   return memoryDAG_->mayContainAlias(a_elements, b_elements);
 }

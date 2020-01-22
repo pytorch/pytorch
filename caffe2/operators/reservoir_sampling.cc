@@ -261,7 +261,7 @@ This operator is thread-safe.
     .Input(
         5,
         "OBJECT_TO_POS_MAP_IN",
-        "(Optional) Auxillary bookkeeping map. This should be created from "
+        "(Optional) Auxiliary bookkeeping map. This should be created from "
         " `CreateMap` with keys of type int64 and values of type int32")
     .Input(
         6,

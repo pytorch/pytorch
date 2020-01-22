@@ -439,7 +439,7 @@ def Train(args):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
 
         if args.float16_compute:
-            # TODO: merge with multi-prceision optimizer
+            # TODO: merge with multi-precision optimizer
             opt = optimizer.build_fp16_sgd(
                 model,
                 args.base_learning_rate,

@@ -37,7 +37,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     // if none of the pads are positive we can optimize and just return the result
     // of calling .narrow() on the input
     if (all_pads_non_positive) {
-        return c_input;
+        return c_input.clone();
     }
 
 
