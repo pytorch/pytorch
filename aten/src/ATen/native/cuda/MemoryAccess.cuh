@@ -113,6 +113,7 @@ struct policies {
       for (int i = 0; i < loop_size; i++) {
         int index = thread_idx + i * num_threads_;
         union U { vec_t vector; scalar_t scalars[vec_size]; __device__ U(){}; } u;
+        #pragma unroll
         for (int j = 0; j < vec_size; j++) {
           u.scalars[j] = from(vec_size * i + j);
         }
