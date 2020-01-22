@@ -1063,10 +1063,8 @@ class TestDynamicQuantizedLinear(TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            '''
             if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
-            '''
             use_channelwise = False
             use_multi_dim_input = False
             use_relu = False
