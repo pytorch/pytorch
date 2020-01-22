@@ -3795,6 +3795,7 @@ for shape in [(1,), ()]:
 
         for fn, arg in fn_to_test.items():
             inp = torch.rand(3, dtype=torch.double, requires_grad=True)
+
             def foo(inp, inplace=False):
                 x = inp * 2
                 x = getattr(x, fn)(*arg)

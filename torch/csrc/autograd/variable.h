@@ -296,8 +296,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     called after every in-place op in VariableType.cpp, the grad_fn of base
 ///     is updated.
 ///   + if a single autograd Node returns multiple differentiable views, the
-///     rebase_history function cannot handle it and so the DifferentiableView
-///     must be created with allow_rebase_history=false.
+///     autograd engine will make an equivalent graph (corresponding to the
+///     view operations) without using the user-provided grad_fn if any output
+///     is modified by an inplace operation. If the provided grad_fn does more
+///     than the backward of the view, then the DifferentiableViewMeta must be
+///     created with allow_rebase_history=false to prevent the engine from
+///     ignoring the provided grad_fn.
 ///
 ///
 /// Non-Differentiable Views
