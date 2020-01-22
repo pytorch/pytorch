@@ -148,6 +148,10 @@ ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
   return value;
 }
+ListTypePtr ListType::ofStrings() {
+  static auto value = ListType::create(StringType::get());
+  return value;
+}
 
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
