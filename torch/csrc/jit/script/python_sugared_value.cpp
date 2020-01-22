@@ -530,7 +530,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (auto callee = as_function(obj)) {
+  auto callee = as_function(obj);
+  if (callee && !py::isinstance<ScriptCodeObj>(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
@@ -562,6 +563,16 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
+  }
+
+  // Resolve custom-bound C++ classes here.
+  if (py::isinstance<ScriptCodeObj>(obj)) {
+    auto code_obj = py::cast<ScriptCodeObj>(obj);
+    auto qualname = code_obj.qualname;
+    auto custom_class_ptr =
+        std::dynamic_pointer_cast<ClassType>(getCustomClass(qualname));
+    TORCH_INTERNAL_ASSERT(custom_class_ptr);
+    return std::make_shared<PythonClassValue>(custom_class_ptr, obj);
   }
 
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
