@@ -257,7 +257,7 @@ class BuildExtension(build_ext, object):
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
         self.use_ninja = kwargs.get('use_ninja', False)
-        if use_ninja and IS_WINDOWS:
+        if self.use_ninja and IS_WINDOWS:
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    'we don\'t support this on windows yet. Falling back to '
                    'using the slow distutils backend.')
