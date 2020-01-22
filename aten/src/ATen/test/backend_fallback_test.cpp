@@ -124,7 +124,7 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
-  auto c10::Dispatcher::singleton().registerBackendFallbackKernel(
+  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
       DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
@@ -137,24 +137,25 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   // By default fallthrough
-  auto c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
+  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
+      DispatchKey::TESTING_ONLY_GenericModeTensorId,
       KernelFunction::makeFallthrough()
   );
   c10::RegistrationHandleRAII registry3 = c10::Dispatcher::singleton()
    .registerKernel(
-     c10::Dispatcher::singleton().findSchemaOrThrow("aten::batch_norm", ""),
+     c10::Dispatcher::singleton().findSchemaOrThrow("aten::mul", "Tensor"),
      DispatchKey::TESTING_ONLY_GenericModeTensorId,
-     KernelFunction::makeFromBoxedFunction(&generic_wrapper_fallback)
+     KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
    );
+  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
+
   override_call_count = 0;
   // Doesn't trigger, as we fallthrough
-  Tensor a = empty({5, 5}, kDouble);
+  Tensor a = zeros({5, 5}, kDouble);
   ASSERT_EQ(override_call_count, 0);
   // Does trigger, because we explicitly set it
-  Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
+  Tensor b = mul(a, a);
   ASSERT_EQ(override_call_count, 1);
-};
 }
 
 }
