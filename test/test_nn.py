@@ -9769,8 +9769,8 @@ class TestNNDeviceType(NNTestCase):
         for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
             test_per_sample_weights(mode, dtype, trainable)
 
-    def test_EmbeddingBag_per_sample_weights_and_include_last_offset(self, device):
-        def test_per_sample_weights_include_last_offset(mode, dtype, trainable_scale, include_last_offset):
+    def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device):
+        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, include_last_offset):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtype, device=device)
             es.weight.data.copy_(
                 torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
@@ -9815,7 +9815,7 @@ class TestNNDeviceType(NNTestCase):
         include_last_offset = (True, False)
         # print(torch.__config__.parallel_info())
         for dtype, mode, trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
-            test_per_sample_weights_include_last_offset(mode, dtype, trainable, include_last_offset)
+            test_per_sample_weights_new_offsets(mode, dtype, trainable, include_last_offset)
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
