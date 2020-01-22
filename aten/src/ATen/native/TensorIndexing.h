@@ -23,16 +23,21 @@ struct CAFFE2_API Slice final {
     int64_t start,
     int64_t stop,
     int64_t step,
-    Tensor start_tensor = {},
-    Tensor stop_tensor = {},
-    Tensor step_tensor = {});
+    const Tensor& start_tensor,
+    const Tensor& stop_tensor,
+    const Tensor& step_tensor);
 
   int64_t start() const;
   int64_t stop() const;
   int64_t step() const;
+
   const Tensor& start_tensor() const;
   const Tensor& stop_tensor() const;
   const Tensor& step_tensor() const;
+
+  bool has_start_tensor() const;
+  bool has_stop_tensor() const;
+  bool has_step_tensor() const;
 
  private:
   int64_t start_;
@@ -92,7 +97,7 @@ struct CAFFE2_API TensorIndex final {
   // The tensor form can optionally be provided.
   TensorIndex(
     std::initializer_list<c10::optional<int64_t>> slice,
-    std::initializer_list<Tensor> slice_tensors = {});
+    at::ArrayRef<Tensor> slice_tensors = {});
 
   // Case 5: Tensor value
   TensorIndex(Tensor tensor);
@@ -101,6 +106,7 @@ struct CAFFE2_API TensorIndex final {
   bool is_ellipsis() const;
 
   bool is_integer() const;
+  bool is_integer_with_tensor() const;
   int64_t integer() const;
 
   bool is_boolean() const;

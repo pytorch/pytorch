@@ -99,7 +99,7 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
         }
       }
       // TODO: implement abs on CharTensor (int8)
-      if (diff.is_signed() && diff.dtype() != torch::kInt8) {
+      if (diff.is_signed() && diff.scalar_type() != torch::kInt8) {
         diff = diff.abs();
       }
       auto max_err = diff.max().item<double>();

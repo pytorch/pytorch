@@ -50,8 +50,8 @@ static void invalid_index(PyObject* obj) {
     "Variables are valid indices (got %s)", Py_TYPE(obj)->tp_name);
 }
 
-static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
+static Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
 static bool treatSequenceAsTuple(PyObject* index) {
@@ -105,7 +105,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   return res;
 }
 
-static std::vector<TensorIndex> indexToTensorIndexList(PyObject* index) {
+static std::vector<TensorIndex> indexToTensorIndexList(const Variable& self, PyObject* index) {
   THPObjectPtr holder = wrapTuple(index);
   int64_t size = PyTuple_GET_SIZE(holder.get());
 
@@ -113,7 +113,7 @@ static std::vector<TensorIndex> indexToTensorIndexList(PyObject* index) {
   tensor_index_list.reserve(size);
 
   for (int64_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(index, i);
+    PyObject* obj = PyTuple_GET_ITEM(holder.get(), i);
     if (THPUtils_checkLong(obj)) {
       if (THPVariable_Check(obj)) {
         tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(obj), THPVariable_Unpack(obj)));
@@ -150,29 +150,31 @@ static std::vector<TensorIndex> indexToTensorIndexList(PyObject* index) {
     } else if (PySequence_Check(obj)) {
       // TODO: Naughty naughty get out of jail free
       // (Fixing this means I have to fix the call chain though :/)
-      tensor_index_list.push_back(TensorIndex(sequenceToVariable(legacyExtractTypeId(self), obj)));
+      tensor_index_list.push_back(TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj)));
     } else {
-      auto index = THPObjectPtr(PyNumber_Index(obj));
-      if (!index) {
+      auto ind = THPObjectPtr(PyNumber_Index(obj));
+      if (!ind) {
         PyErr_Clear();
         invalid_index(obj);
       }
-      if (THPVariable_Check(index)) {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(index), THPVariable_Unpack(index)));
+      if (THPVariable_Check(ind)) {
+        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(ind), THPVariable_Unpack(ind)));
       } else {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(index)));
+        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(ind)));
       }
     }
   }
+  return tensor_index_list;
 }
 
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  pybind11::gil_scoped_release no_gil;
-
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(index);
+  std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(self_, index);
+
+  pybind11::gil_scoped_release no_gil;
   return wrap(self_.index(tensor_index_list));
+
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -182,11 +184,10 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  pybind11::gil_scoped_release no_gil;
-
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(index);
+  std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(self_, index);
 
+  pybind11::gil_scoped_release no_gil;
   if (THPVariable_Check(py_value)) {
     self_.index_put_(tensor_index_list, reinterpret_cast<THPVariable*>(py_value)->cdata);
     return 0;
@@ -201,8 +202,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   } else {
     throw TypeError(
       "can't assign a %s to a %s",
-      Py_TYPE(value)->tp_name,
-      torch::utils::options_to_string(options).c_str());
+      Py_TYPE(py_value)->tp_name,
+      torch::utils::options_to_string(self_.options()).c_str());
   }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
