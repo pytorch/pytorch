@@ -668,6 +668,7 @@ struct CAFFE2_API ListType
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
+  static ListTypePtr ofStrings();
 
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}
