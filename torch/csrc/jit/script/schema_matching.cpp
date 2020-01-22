@@ -256,7 +256,7 @@ static bool varargsCanBeUsedAsList(
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list &&
+  return is_last_argument && argument_is_list && !arg_is_broadcasting_list &&
       !typevar_list;
 }
 
