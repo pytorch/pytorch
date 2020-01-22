@@ -41,7 +41,7 @@
 #include <c10/util/TypeCast.h>
 
 #ifdef __HIP_PLATFORM_HCC__
-#include <ATen/native/ROCmWorkaround.cuh>
+#include <ATen/native/cuda/ROCmWorkaround.cuh>
 #endif
 
 // Marks a lambda as executable on both the host and device. The __host__
