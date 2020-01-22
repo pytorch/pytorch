@@ -64,7 +64,7 @@ struct Stack : torch::jit::CustomClassHolder {
   }
 
   std::tuple<double, int64_t> return_a_tuple() const {
-    return {1337.0f, 123};
+    return std::make_tuple(1337.0f, 123);
   }
 };
 
