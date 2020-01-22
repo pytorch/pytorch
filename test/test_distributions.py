@@ -1626,8 +1626,10 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_normal_shape_gpu(self):
-        tensor23 = torch.rand(2, 3, device='cuda')
+        tensor12 = torch.rand(1, 2, device='cuda')
         tensor21 = torch.rand(2, 1, device='cuda')
+        tensor22 = torch.rand(2, 2, device='cuda')
+        tensor23 = torch.rand(2, 3, device='cuda')
         tensor6 = torch.rand(6, device='cuda')
         tensor4 = torch.rand(4, device='cuda')
         tensor3 = torch.rand(3, device='cuda')
@@ -1638,6 +1640,7 @@ class TestDistributions(TestCase):
         self.assertEqual(torch.normal(tensor23, tensor21).size(), (2, 3))
         self.assertEqual(torch.normal(tensor23, tensor3).size(), (2, 3))
         self.assertEqual(torch.normal(tensor23, tensor1).size(), (2, 3))
+        self.assertEqual(torch.normal(tensor21, tensor12).size(), (2, 2))
         self.assertEqual(torch.normal(tensor23, 2).size(), (2, 3))
         self.assertEqual(torch.normal(2, tensor23).size(), (2, 3))
         # non expandable but std and mean have same elements case
@@ -1646,6 +1649,11 @@ class TestDistributions(TestCase):
         # non expandable and std and mean have different number of element
         with self.assertRaises(RuntimeError):
             torch.normal(tensor23, tensor4)
+        # out version works if the output tensor doesn't need resize
+        self.assertEqual(torch.normal(tensor21, tensor12, out=tensor22).size(), (2, 2))
+        # out version does not allow output tensor resize
+        with self.assertRaises(RuntimeError):
+            torch.normal(tensor21, tensor12, out=tensor1)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):

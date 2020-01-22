@@ -724,15 +724,29 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  bool expandable = are_expandable(mean.sizes(), std.sizes());
+  // allow resize if output is an empty tensor
+  if (output.sizes().equals({0})) {
+    if (expandable) {
+      auto shape = at::infer_size(mean.sizes(), std.sizes());
+      at::native::resize_(output, shape, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    else {
+      at::native::resize_(output, mean.sizes(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+  }
   normal_cuda_(output, 0, 1, gen);
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  if (mean.numel() == std.numel() && !at::is_expandable_to(std.sizes(), mean.sizes())) {
-    TORCH_WARN_ONCE("Reshape std to the same shape of mean due to not broadcastable");
-    //Reshape std to the same shape mean if they have same number of element but not broadcastable
+  if (mean.numel() == std.numel() && !expandable) {
+    TORCH_WARN_ONCE(
+        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
+        "supported mode of operation, but is now deprecated and the support will be removed in a later release. "
+        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
+        "Please ensure that std and mean are broadcastable to avoid these issues.");
     output.mul_(std.reshape(mean.sizes())).add_(mean);
   }
   else {
@@ -754,7 +768,7 @@ Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ret = at::empty({0}, mean.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
 }
