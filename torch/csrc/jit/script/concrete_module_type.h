@@ -76,8 +76,13 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
 
-  std::shared_ptr<ConcreteModuleType> buildShared() const;
-  std::shared_ptr<ConcreteModuleType> buildUnshared() const;
+  // If a ConcreteModuleType is poisoned, it will never compare equal to any other
+  // concrete type
+  void setPoisoned();
+
+  std::shared_ptr<ConcreteModuleType> build() const {
+    return std::make_shared<ConcreteModuleType>(*this);
+  }
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
@@ -136,6 +141,11 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   ConcreteModuleTypeBuilder() {}
   ClassTypePtr createTypeFromThis() const;
 
+  // If true, this type will never compare equally to anything else. This is
+  // used if we want to ensure that this type is not shared (for example, if it
+  // came from a traced module)
+  bool isPoisoned_ = false;
+
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
   // The types of any attributes
@@ -172,7 +182,10 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 // during method compilation.
 class VISIBILITY_HIDDEN ConcreteModuleType {
  public:
+  explicit ConcreteModuleType(ConcreteModuleTypeBuilder data);
+
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
+
   TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
@@ -193,29 +206,25 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   getModulesPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
-    if (jitType_ != other.jitType_) {
-      return false;
+    if (jitType_ == other.jitType_) {
+      // If the computed types are the same, these modules can (obviously) share
+      // a type.
+      return true;
     }
-    if (data_.has_value() && other.data_.has_value()) {
-      return data_->equals(*other.data_);
-    }
-    return !data_ && !other.data_;
-  }
 
+    return data_.equals(other.data_);
+  }
   bool equals(const ConcreteModuleTypeBuilder& other) const {
-    return data_.has_value() && data_->equals(other);
+    return data_.equals(other);
   }
 
   void dump() const;
 
  private:
   ConcreteModuleType() {}
-  const ConcreteModuleTypeBuilder& data() const {
-    return data_.value();
-  }
-  friend class ConcreteModuleTypeBuilder;
+
   // The JIT type derived from this ConcreteModuleType.
-  c10::optional<ConcreteModuleTypeBuilder> data_;
+  ConcreteModuleTypeBuilder data_;
   TypePtr jitType_;
 };
 

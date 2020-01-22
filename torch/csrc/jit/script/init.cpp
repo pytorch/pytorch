@@ -1199,14 +1199,14 @@ void initJitScriptBindings(PyObject* module) {
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
+      .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
       .def("add_failed_attribute", &ConcreteModuleTypeBuilder::addFailedAttribute)
       .def(
           "set_module_dict",
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::DICT);
           })
-      .def("build_shared", &ConcreteModuleTypeBuilder::buildShared)
-      .def("build_unshared", &ConcreteModuleTypeBuilder::buildUnshared)
+      .def("build", &ConcreteModuleTypeBuilder::build)
       .def(
           "equals",
           [](const ConcreteModuleTypeBuilder& self,

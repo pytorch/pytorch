@@ -59,20 +59,15 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
   }
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
+  ret->data_.setPoisoned();
   return ret;
 }
 
-std::shared_ptr<ConcreteModuleType> ConcreteModuleTypeBuilder::buildUnshared() const {
-  std::shared_ptr<ConcreteModuleType> result(new ConcreteModuleType());
-  result->jitType_ = createTypeFromThis();
-  return result;
+ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
+    : data_(std::move(data)) {
+  jitType_ = data_.createTypeFromThis();
 }
 
-std::shared_ptr<ConcreteModuleType> ConcreteModuleTypeBuilder::buildShared() const {
-  auto result = buildUnshared();
-  result->data_ = *this;
-  return result;
-}
 
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
@@ -82,6 +77,10 @@ bool operator==(
 
 bool ConcreteModuleTypeBuilder::equals(
     const ConcreteModuleTypeBuilder& other) const {
+  if (isPoisoned_ || other.isPoisoned_) {
+    return false;
+  }
+
   // clang-format off
     // These are vaguely ordered so that cheap, discriminating checks happen first.
     bool equal =
@@ -125,13 +124,13 @@ TypePtr ConcreteModuleType::getJitType() const {
 }
 
 py::object ConcreteModuleType::getPyClass() const {
-  return data().pyClass_;
+  return data_.pyClass_;
 }
 
 c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
     const std::string& name) const {
-  const auto it = data().overloads_.find(name);
-  if (it != data().overloads_.end()) {
+  const auto it = data_.overloads_.find(name);
+  if (it != data_.overloads_.end()) {
     return it->second;
   }
   return c10::nullopt;
@@ -139,8 +138,8 @@ c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
 
 c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
     const std::string& name) const {
-  const auto it = data().functionAttributes_.find(name);
-  if (it != data().functionAttributes_.end()) {
+  const auto it = data_.functionAttributes_.find(name);
+  if (it != data_.functionAttributes_.end()) {
     return it->second.function_->function();
   }
   return c10::nullopt;
@@ -148,8 +147,8 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
 
 c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
     const std::string& name) const {
-  const auto it = data().builtinFunctions_.find(name);
-  if (it != data().builtinFunctions_.end()) {
+  const auto it = data_.builtinFunctions_.find(name);
+  if (it != data_.builtinFunctions_.end()) {
     return it->second;
   }
   return c10::nullopt;
@@ -157,8 +156,8 @@ c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
 
 c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
     const std::string& name) const {
-  const auto it = data().failedAttributes_.find(name);
-  if (it != data().failedAttributes_.end()) {
+  const auto it = data_.failedAttributes_.find(name);
+  if (it != data_.failedAttributes_.end()) {
     return it->second;
   }
   return c10::nullopt;
@@ -167,12 +166,12 @@ c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
     findSubmoduleConcreteType(const std::string& name) const {
   const auto it = std::find_if(
-      data().modules_.cbegin(),
-      data().modules_.cend(),
+      data_.modules_.cbegin(),
+      data_.modules_.cend(),
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  if (it == data().modules_.end()) {
+  if (it == data_.modules_.end()) {
     return nullptr;
   }
   return it->meta_;
@@ -183,7 +182,11 @@ void ConcreteModuleTypeBuilder::setIterableModuleKind(IterableModuleKind kind) {
 }
 
 IterableModuleKind ConcreteModuleType::getIterableModuleKind() const {
-  return data().iterableModuleKind_;
+  return data_.iterableModuleKind_;
+}
+
+void ConcreteModuleTypeBuilder::setPoisoned() {
+  isPoisoned_ = true;
 }
 
 void ConcreteModuleTypeBuilder::addConstant(std::string name, py::object value) {
@@ -240,25 +243,27 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
 }
 
 void ConcreteModuleType::dump() const {
-  std::cout << "ConcreteModuleType for: " << py::getattr(data().pyClass_, "__name__") << "\n";
+  std::cout << "ConcreteModuleType for: " << py::getattr(data_.pyClass_, "__name__") << "\n";
   std::cout << "Constants: \n";
-  for (const auto& pr : data().constants_) {
+  for (const auto& pr : data_.constants_) {
     std::cout << "\t" << pr.first << ": " << pr.second.v_ << "\n";
   }
   std::cout << "\nAttributes: \n";
-  for (const auto& pr : data().attributes_) {
+  for (const auto& pr : data_.attributes_) {
     std::cout << "\t" << pr.first << ": " << pr.second.type_->python_str()
               << "\n";
   }
   std::cout << "\nSubmodules: \n";
-  for (const auto& info : data().modules_) {
+  for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
               << info.meta_->getJitType()->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
-  for (const auto& pr : data().overloads_) {
+  for (const auto& pr : data_.overloads_) {
     std::cout << "\t" << pr.first << ": " << pr.second << "\n";
   }
+  std::string isPoisoned = data_.isPoisoned_ ? "true" : "false";
+  std::cout << "isPoisoned: " << isPoisoned << "\n";
   if (jitType_) {
     std::cout << "jit type: " << jitType_->python_str() << "\n";
   }
@@ -269,7 +274,7 @@ std::unordered_map<std::string, py::object> ConcreteModuleType::getConstantsPy()
   // Convert to a more pybind-friendly representation, so we don't
   // need to bind ConcreteModuleType::Constant as well.
   std::unordered_map<std::string, py::object> ret;
-  for (const auto& pr : data().constants_) {
+  for (const auto& pr : data_.constants_) {
     ret.emplace(pr.first, pr.second.v_);
   }
   return ret;
@@ -280,7 +285,7 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   // Convert to a more pybind-friendly representation, so we don't
   // need to bind ConcreteModuleType::Attribute as well.
   std::unordered_map<std::string, std::pair<TypePtr, bool>> ret;
-  for (auto& pr : data().attributes_) {
+  for (auto& pr : data_.attributes_) {
     ret.emplace(
         pr.first,
         std::pair<TypePtr, bool>(pr.second.type_, pr.second.isParam_));
@@ -292,7 +297,7 @@ std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
 ConcreteModuleType::getModulesPy() const {
   std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
-  for (const auto& info : data().modules_) {
+  for (const auto& info : data_.modules_) {
     ret.emplace_back(std::make_pair(info.name_, info.meta_));
   }
   return ret;

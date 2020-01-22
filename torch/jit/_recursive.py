@@ -253,7 +253,7 @@ class ConcreteTypeStore(object):
                 return known_type
 
         # We didn't find anything; generate a new JIT type from this concrete type
-        concrete_type = concrete_type_builder.build_shared()
+        concrete_type = concrete_type_builder.build()
         self.type_store[nn_module_type].append(concrete_type)
         return concrete_type
 
@@ -286,7 +286,8 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         # Get a concrete type directly, without trying to re-use an existing JIT
         # type from the type store.
         concrete_type_builder = infer_concrete_type_builder(nn_module)
-        concrete_type = concrete_type_builder.build_unshared()
+        concrete_type_builder.set_poisoned()
+        concrete_type = concrete_type_builder.build()
 
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
