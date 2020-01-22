@@ -285,9 +285,9 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   int remaining = N - policies::common::block_work_size * blockIdx.x;
 
   if (remaining < policies::common::block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, data, typename policies::checked_unroll(remaining));
+    elementwise_kernel_helper<func_t, array_t, typename policies::checked_unroll>(f, data, typename policies::checked_unroll(remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper(f, data, typename policies::template vectorized<vec_size>());
+    elementwise_kernel_helper<func_t, array_t, typename policies::template vectorized<vec_size>>(f, data, typename policies::template vectorized<vec_size>());
   }
 }
 
