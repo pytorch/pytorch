@@ -628,7 +628,20 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_replicate_sparse_parameter(self):
+        import torch.sparse
 
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                indices = torch.LongTensor([[0,1,2],[0,0,0]])
+                values = torch.tensor([0.0,0.0,0.0])
+                t = torch.sparse.FloatTensor(indices, values, [3,3])
+                self.p = torch.nn.Parameter(t)
+
+        m = TestModule().cuda()
+        dp.replicate(m, [0,1])
 
 if __name__ == '__main__':
     run_tests()
