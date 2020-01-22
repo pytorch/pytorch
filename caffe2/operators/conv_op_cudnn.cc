@@ -97,7 +97,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  // A helper function to set up the tensor Nd desriptor, depending on the order
+  // A helper function to set up the tensor Nd descriptor, depending on the order
   // the group and the type given.
   template <typename T>
   void SetTensorNdDescriptorWithGroup(
