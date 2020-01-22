@@ -102,7 +102,6 @@ static void RemoveTupleConstants(Node* n) {
   }
 
   n->replaceAllUsesWith(tuple_construct);
-  n->destroy();
 }
 
 static void VisitNode(Node* n, Node* insert_point) {
@@ -153,6 +152,10 @@ static void VisitNode(Node* n, Node* insert_point) {
   // flatten the outputs list
   for (size_t i = 0; i < n->outputs().size();) {
     Value* output = n->outputs()[i];
+    if (!output->hasUses()) {
+      return;
+    }
+
     // (a, b, tup, c) -> (a, b, t0, t1, c)
     // and:
     //    tup = (t0, t1)
