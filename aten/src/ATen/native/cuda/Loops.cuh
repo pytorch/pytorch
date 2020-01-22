@@ -256,8 +256,8 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, policy_t polic
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  return_t results[policy_t::thread_work_size];
-  arg_t args[policy_t::thread_work_size][nargs];
+  return_t results[policy_t::thread_work_size] = { 0 };
+  arg_t args[policy_t::thread_work_size][nargs] = { 0 };
 
   // load
   #pragma unroll
