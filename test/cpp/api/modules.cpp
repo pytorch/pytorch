@@ -2888,7 +2888,6 @@ TEST_F(ModulesTest, MarginRankingLoss) {
 }
 
 TEST_F(ModulesTest, BCEWithLogitsLoss) {
-  using namespace at::Reduction;
   { // test BCE with logits raises if target and input are different size
     {
       const auto target = torch::rand(5);
