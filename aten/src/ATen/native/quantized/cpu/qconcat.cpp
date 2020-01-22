@@ -9,10 +9,11 @@
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qcat_nhwc_stub);
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
+
+namespace {
 
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
@@ -106,19 +107,19 @@ static auto registry =
         .op("quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCat<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCat<true>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_out(Tensor[] qx, int dim, Tensor out)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCatOut<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor out)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCatOut<true>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

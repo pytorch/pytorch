@@ -126,7 +126,7 @@ class CRFWithLoss(object):
             [], value=0, shape=[self.num_classes_padded], dtype=core.DataType.INT32
         )
 
-        # Compute the accumlated total score of all the paths
+        # Compute the accumulated total score of all the paths
         accum_score = self.model.net.SortedSegmentRangeLogSumExp(
             [out_last, zero_segment_id]
         )
@@ -141,7 +141,7 @@ class CRFWithLoss(object):
             to
 
             input_blob: the input sequence in a format T x N x D
-            where T is sequence size, N - batch size and D - input dimention
+            where T is sequence size, N - batch size and D - input dimension
             ##Only supports batch-size 1##
 
             seq_lengths: blob containing sequence lengths (unused)

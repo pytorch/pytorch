@@ -49,7 +49,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-// Applies implict conversion from value trying to turn it into type
+// Applies implicit conversion from value trying to turn it into type
 // concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
@@ -438,6 +438,17 @@ MatchedSchema matchSchema(
     return *result;
   }
   throw ErrorReport(loc) << failure_messages.str();
+}
+
+MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<Value*> args,
+    at::ArrayRef<NamedValue> kwargs) {
+  std::vector<NamedValue> named_args =
+      fmap(args, [](Value* v) { return NamedValue(v); });
+  return matchSchema(schema, loc, graph, named_args, kwargs);
 }
 
 static std::string prefixLine(

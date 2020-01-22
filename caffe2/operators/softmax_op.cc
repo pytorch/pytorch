@@ -14,7 +14,7 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
-  if (N == 0) {
+  if (N == 0 || D == 0) {
     return true;
   }
   if (!scale_.defined()) {
@@ -57,7 +57,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
-  if (N == 0) {
+  if (N == 0 || D == 0) {
     return true;
   }
   context_.CopySameDevice<float>(Y.numel(), dYdata, dXdata);

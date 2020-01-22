@@ -126,7 +126,7 @@ class Field(object):
     def field_blobs(self):
         """Return the list of blobs with contents for this Field.
         Values can either be all numpy.ndarray or BlobReference.
-        If any of the fields doens't have a blob, throws.
+        If any of the fields doesn't have a blob, throws.
         """
         raise NotImplementedError('Field is an abstract class.')
 
@@ -185,7 +185,7 @@ class Field(object):
         )
 
     def _pprint_impl(self, indent, str_buffer):
-        raise NotImplementedError('Field is an abstrct class.')
+        raise NotImplementedError('Field is an abstract class.')
 
     def __repr__(self):
         str_buffer = StringIO()

@@ -231,7 +231,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
       : task_(nullptr),
         state_(State::ThreadStartup),
         counter_to_decrement_when_ready_(counter_to_decrement_when_ready) {
-    thread_ = caffe2::make_unique<std::thread>([this]() { this->ThreadFunc(); });
+    thread_ = std::make_unique<std::thread>([this]() { this->ThreadFunc(); });
   }
 
   ~Worker() {
@@ -300,7 +300,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
     return nullptr;
   }
 
-  // Called by the master thead to give this worker work to do.
+  // Called by the master thread to give this worker work to do.
   // It is only legal to call this if the worker
   void StartWork(Task* task) {
     DCHECK(!task_.load());

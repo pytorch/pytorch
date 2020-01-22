@@ -138,10 +138,14 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
-                    group=group,
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
                     preserve_weight_sparsity=preserve_weight_sparsity,
-                    in_scale=x_q_param.scale,
                     engine=engine,
+                    group=group,
+                    in_scale=x_q_param.scale,
                 )
                 init_net.Proto().op.extend([pack])
 
@@ -382,9 +386,13 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    strides=[stride] * ndim,
+                    kernels=kernels,
+                    dilations=[dilation] * ndim,
+                    pads=[pad] * (ndim * 2),
+                    engine=engine,
                     group=group,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 

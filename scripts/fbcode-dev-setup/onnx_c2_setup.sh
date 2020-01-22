@@ -3,7 +3,7 @@
 # This script helps developers set up the ONNX Caffe2 and PyTorch develop environment on devgpu.
 # It creates an virtualenv instance, and installs all the dependencies in this environment.
 # The script will creates a folder called onnx-dev folder under the $HOME directory.
-# onnx, pytorch and caffe2 are installed seperately.
+# onnx, pytorch and caffe2 are installed separately.
 # Please source $HOME/onnx-dev/.onnx_env_init to initialize the development before starting developing.
 
 

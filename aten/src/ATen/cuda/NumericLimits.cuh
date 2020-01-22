@@ -95,6 +95,14 @@ struct numeric_limits<at::Half> {
 };
 
 template <>
+struct numeric_limits<at::BFloat16> {
+  static inline __host__ __device__ at::BFloat16 lowest() { return at::BFloat16(0xFF7F, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 max() { return at::BFloat16(0x7F7F, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 lower_bound() { return at::BFloat16(0xFF80, at::BFloat16::from_bits()); }
+  static inline __host__ __device__ at::BFloat16 upper_bound() { return at::BFloat16(0x7F80, at::BFloat16::from_bits()); }
+};
+
+template <>
 struct numeric_limits<float> {
   static inline __host__ __device__ float lowest() { return -FLT_MAX; }
   static inline __host__ __device__ float max() { return FLT_MAX; }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -10,11 +11,11 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
   static constexpr char* ANOMALY_TRACE_KEY = "traceback_";
 
   PyAnomalyMetadata() {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     dict_ = PyDict_New();
   }
   ~PyAnomalyMetadata() override {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_DECREF(dict_);
   }
   void store_stack() override;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -9,6 +9,7 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+// Forward declarations.
 class DistAutogradContext;
 
 // As part of our distributed autograd implementation, whenever we receive an
@@ -20,7 +21,7 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
  public:
   explicit RecvRpcBackward(
       const AutogradMetadata& autogradMetadata,
-      DistAutogradContext& autogradContext,
+      std::shared_ptr<DistAutogradContext> autogradContext,
       rpc::worker_id_t fromWorkerId);
 
   torch::autograd::variable_list apply(
@@ -29,8 +30,10 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
  private:
   const AutogradMetadata autogradMetadata_;
 
-  // Hold a reference to the autograd context.
-  DistAutogradContext& autogradContext_;
+  // Hold a weak reference to the autograd context to avoid circular
+  // dependencies with the context (since it holds a reference to
+  // RecvRpcBackward).
+  std::weak_ptr<DistAutogradContext> autogradContext_;
 
   // The worker id from which the RPC was received. During the backward pass,
   // we need to propagate the gradients to this workerId.

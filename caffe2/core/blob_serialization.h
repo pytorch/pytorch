@@ -38,7 +38,7 @@ CAFFE2_API void SerializeBlob(
 /**
  * @brief Convenience function to serialize a blob to a string.
  *
- * This is a conveinence function to serialize small Blobs that produce
+ * This is a convenience function to serialize small Blobs that produce
  * manageable serialized strings. To serialize big blobs such as
  * large sparse tensors, use the fully-functional interface in
  * blob_serializer_base.h.
@@ -133,7 +133,7 @@ class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
    * we have to call Deserialize multiple times to get the complete deserialized
    * Tensor, each call will fill part of the Tensor given the segment begin and
    * end information in proto, therefore we have to pass in the Tensor pointer
-   * rather than create a new Tensor everytime.
+   * rather than create a new Tensor every time.
    *
    * Precondition: Tensor must be initialized
    */

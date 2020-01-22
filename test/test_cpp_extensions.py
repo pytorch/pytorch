@@ -59,6 +59,15 @@ class TestCppExtension(common.TestCase):
         if os.path.exists(default_build_root):
             shutil.rmtree(default_build_root)
 
+    @classmethod
+    def tearDownClass(cls):
+        if sys.platform == "win32":
+            print("Not wiping extensions build folder because Windows")
+            return
+        default_build_root = torch.utils.cpp_extension.get_default_build_root()
+        if os.path.exists(default_build_root):
+            shutil.rmtree(default_build_root)
+
     def test_extension_function(self):
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -727,6 +736,111 @@ class TestCppExtension(common.TestCase):
         pattern = r'.*(\\n|\\r).*'
         self.assertNotRegex(str(e), pattern)
 
+    def test_warning(self):
+        # Note: the module created from this source will include the py::key_error
+        # symbol. But because of visibility and the fact that it lives in a
+        # different compilation unit than pybind, this trips up ubsan even though
+        # it is fine. "ubsan.supp" thus needs to contain "vptr:warn_mod.so".
+        source = '''
+        // error_type:
+        // 0: no error
+        // 1: torch::TypeError
+        // 2: python_error()
+        // 3: py::error_already_set
+        at::Tensor foo(at::Tensor x, int error_type) {
+            std::ostringstream err_stream;
+            err_stream << "Error with "  << x.type();
+
+            TORCH_WARN(err_stream.str());
+            if(error_type == 1) {
+                throw torch::TypeError(err_stream.str().c_str());
+            }
+            if(error_type == 2) {
+                PyObject* obj = PyTuple_New(-1);
+                TORCH_CHECK(!obj);
+                // Pretend it was caught in a different thread and restored here
+                auto e = python_error();
+                e.persist();
+                e.restore();
+                throw e;
+            }
+            if(error_type == 3) {
+                throw py::key_error(err_stream.str());
+            }
+            return x.cos();
+        }
+        '''
+
+        # Ensure double type for hard-coded c name below
+        t = torch.rand(2).double()
+        cpp_tensor_name = r"CPUDoubleType"
+
+        # Without error handling, the warnings cannot be catched
+        # and the Tensor type names are not cleaned
+        warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # pybind translate all our errors to RuntimeError
+            with self.assertRaisesRegex(RuntimeError, cpp_tensor_name):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(RuntimeError, "bad argument to internal function|python_error"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 0)
+
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 0)
+
+
+        warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=True)
+
+
+        with warnings.catch_warnings(record=True) as w:
+            # Catched with no error should be detected
+            warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 1)
+
+            # Catched with cpp error should not be detected
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 1)
+
+            # Catched with python error should not be detected
+            with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
+                warn_mod.foo(t, 2)
+            self.assertEqual(len(w), 1)
+
+            # Catched with pybind error should not be detected
+            # Note that there is no type name translation for pybind errors
+            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
+                warn_mod.foo(t, 3)
+            self.assertEqual(len(w), 1)
+
+        # Make sure raising warnings are handled properly
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("error")
+
+            # No error, the warning should raise
+            with self.assertRaisesRegex(UserWarning, t.type()):
+                warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # Another error happened, the warning is ignored
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
@@ -735,7 +849,7 @@ class TestMSNPUTensor(common.TestCase):
 
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
-        with self.assertRaisesRegex(RuntimeError, "Didn't find kernel to dispatch to for operator"):
+        with self.assertRaisesRegex(RuntimeError, "Could not run"):
             b = torch.arange(0, 10, device='msnpu')
 
     def test_zeros(self):
@@ -768,13 +882,13 @@ class TestMSNPUTensor(common.TestCase):
         weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
         bias = torch.empty(6, device='msnpu')
 
-        # Make sure forward is overriden
+        # Make sure forward is overridden
         out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(msnpu_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])
 
-        # Make sure backward is overriden
+        # Make sure backward is overridden
         # Double backward is dispatched to _convolution_double_backward.
         # It is not tested here as it involves more computation/overrides.
         grad = torch.autograd.grad(out, input, out, create_graph=True)

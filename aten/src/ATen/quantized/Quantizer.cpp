@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
@@ -110,8 +111,6 @@ void quantize_vec(double scale, int64_t zero_point, const float *src, T *dst, si
     fbgemm::TensorQuantizationParams{(float)scale, (int32_t)zero_point, precision}
   );
 }
-
-// TODO: dequantize_val?
 
 template <typename T>
 Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point) {
@@ -474,13 +473,53 @@ QuantizerPtr make_per_channel_affine_quantizer(
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
-  // TODO: remove this when Variable and Tensor are merged
-  TORCH_INTERNAL_ASSERT(
-      !self.is_variable(),
-      "_internal_get_QTensorImpl: should not be a variable");
+  TORCH_CHECK(
+      !self.requires_grad(),
+      "quantized tensors do not support autograd");
   TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
+
+#ifdef USE_PYTORCH_QNNPACK
+
+// QNNPACK can access up to 8 bytes beyond the beginning of the tensor's storage
+// boundary which does trigger ASAN, and can result in a segfault if the memory falls
+// on a different page out of the process's address space.
+// Here we define a custom allocator that allocates the extra storage required to keep
+// this behavior safe.  This same allocator can be used for FBGEMM as well.
+struct QAllocator final : at::Allocator {
+public:
+  virtual ~QAllocator() override = default;
+
+  virtual at::DataPtr allocate(size_t nbytes) const override {
+    Cast memory{c10::alloc_cpu(kGuard + nbytes)};
+    memory.as_byte_ptr += kGuard;
+    return {
+      memory.as_void_ptr,
+      memory.as_void_ptr,
+      &deleter,
+      at::Device(at::DeviceType::CPU)};
+  }
+
+  virtual at::DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+
+  static void deleter(void * const pointer) {
+    const Cast memory{pointer};
+    c10::free_cpu(memory.as_byte_ptr - kGuard);
+  }
+
+ private:
+  static constexpr uint32_t kGuard = 8u;
+
+  union Cast final {
+    void * const as_void_ptr;
+    uint8_t * as_byte_ptr;
+  };
+};
+
+#endif
 
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
@@ -489,8 +528,16 @@ inline Tensor new_qtensor_cpu(
     MemoryFormat memory_format=MemoryFormat::Contiguous) {
   AT_ASSERT(options.device().is_cpu());
 
+  at::Allocator* allocator = at::getCPUAllocator();
+
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    static QAllocator qallocator;
+    allocator = &qallocator;
+  }
+#endif
+
   native::check_size_nonnegative(sizes);
-  auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
@@ -502,7 +549,7 @@ inline Tensor new_qtensor_cpu(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::TensorTypeSet(at::TensorTypeId::QuantizedCPUTensorId), quantizer);
+      storage, at::DispatchKeySet(at::DispatchKey::QuantizedCPUTensorId), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;

@@ -39,14 +39,17 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Deserialize a string into a py::object
   py::object deserialize(const SerializedPyObj& serializedObj);
 
+  // Check if obj is RemoteException, then throw it
+  void handleException(const py::object& obj);
+
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
   // See similar issues reported https://github.com/pybind/pybind11/issues/1598
   // and https://github.com/pybind/pybind11/issues/1493
   // Our local tests also caught this segment faults if py::objects are cleaned
-  // up at program exit. The explaination is: CPython cleans up most critical
+  // up at program exit. The explanation is: CPython cleans up most critical
   // utilities before cleaning up PythonRpcHandler singleton, so when
-  // PythonRpcHandler signleton cleans up py::objects and call dec_ref(), it
+  // PythonRpcHandler singleton cleans up py::objects and call dec_ref(), it
   // will crash.
   // The solution is to clean up py::objects earlier when Rpc agent join().
   // Be note that py::objects can not be cleaned up when Rpc agent is destroyed
@@ -54,9 +57,27 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // PythonRpcHandler.
   void cleanup();
 
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
+
+// A macro that grabs the GIL, profiling the acquisition time. The average GIL
+// acquisition time will be recorded in RpcAgent's getMetrics().
+#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
+  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
+  auto shouldProfileGIL =                                                \
+      RpcAgent::getDefaultRpcAgent()->isGILProfilingEnabled();           \
+  if (shouldProfileGIL) {                                                \
+    startTime = std::chrono::high_resolution_clock::now();               \
+  }                                                                      \
+  pybind11::gil_scoped_acquire ag;                                       \
+  if (shouldProfileGIL) {                                                \
+    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
+        std::chrono::high_resolution_clock::now() - startTime);          \
+    RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);                 \
+  }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
@@ -71,6 +92,16 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
+
+  // Ref to 'torch.distributed.rpc.internal._handle_exception'
+  py::object pyHandleException_;
+
+  // Shared ptr to python compilation unit in jit, it is constructed in python
+  // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
+  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
+  // We import the compilation unit here only once for less cost and thread
+  // safety.
+  std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
 };
 
 } // namespace rpc

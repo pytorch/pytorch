@@ -5,14 +5,14 @@
 #include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
-#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
-using c10::guts::make_unique;
+using at::namedinference::TensorName;
+using at::namedinference::TensorNames;
+using std::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
   int num_names = 4;
@@ -137,7 +137,7 @@ static std::vector<Dimname> tensornames_unify_from_right(
     DimnameList other_names) {
   auto names_wrapper = at::namedinference::TensorNames(names);
   auto other_wrapper = at::namedinference::TensorNames(other_names);
-  return names_wrapper.unifyFromRight(other_wrapper, "unify").toDimnameVec();
+  return names_wrapper.unifyFromRightInplace(other_wrapper).toDimnameVec();
 }
 
 static void check_unify(
@@ -209,5 +209,41 @@ TEST(NamedTensorTest, NoNamesGuard) {
   ASSERT_TRUE(at::NamesMode::is_enabled());
 }
 
+static std::vector<Dimname> nchw() {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
+  return { N, C, H, W };
+}
 
-#endif
+TEST(NamedTensorTest, TensorNamePrint) {
+  auto names = nchw();
+  {
+    auto N = TensorName(names, 0);
+    ASSERT_EQ(
+        c10::str(N),
+        "'N' (index 0 of ['N', 'C', 'H', 'W'])");
+  }
+  {
+    auto H = TensorName(names, 2);
+    ASSERT_EQ(
+        c10::str(H),
+        "'H' (index 2 of ['N', 'C', 'H', 'W'])");
+  }
+}
+
+TEST(NamedTensorTest, TensorNamesCheckUnique) {
+  auto names = nchw();
+  {
+    // smoke test to check that this doesn't throw
+    TensorNames(names).checkUnique("op_name");
+  }
+  {
+    std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
+    auto tensornames = TensorNames(nchh);
+    ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
+  }
+}
+
+

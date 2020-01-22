@@ -1,14 +1,12 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any
+from typing import NamedTuple, List, Optional, Any, Dict
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
-import torch.nn as nn
 import jit_utils
-
-from torch import Tensor
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -34,6 +32,25 @@ class TestScriptPy3(JitTestCase):
 
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    def test_kwarg_support(self):
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
+            class M(torch.nn.Module):
+                def forward(self, *, n_tokens: int, device_name: str = 2):
+                    pass
+            torch.jit.script(M())
+
+        class M(torch.nn.Module):
+            def forward(self, *, n_tokens: int, device_name: str):
+                return n_tokens, device_name
+
+        sm = torch.jit.script(M())
+
+        with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
+            sm()
+
+        input = (3, 'hello')
+        self.assertEqual(sm(*input), input)
 
     def test_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -67,6 +84,13 @@ class TestScriptPy3(JitTestCase):
             key, value = res[i]
             self.assertTrue(key == i and value == i + 1)
 
+    def test_list_unification_hint(self):
+        with self.assertRaisesRegex(RuntimeError, "Expected a List type hint"):
+            @torch.jit.script
+            def x():
+                b : int = [2, 3]
+                return b
+
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
             float_features: float
@@ -83,6 +107,53 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.float_features, 3.0)
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
+
+    def test_ignore_with_types(self):
+        @torch.jit.ignore
+        def fn(x: Dict[str, Optional[torch.Tensor]]):
+            return x + 10
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
+                self.dropout_modality(in_batch)
+                fn(in_batch)
+                return torch.tensor(1)
+
+            @torch.jit.ignore
+            def dropout_modality(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> Dict[str, Optional[torch.Tensor]]:
+                return in_batch
+
+        sm = torch.jit.script(M())
+        FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
+
+    def test_python_callable(self):
+        class MyPythonClass(object):
+            @torch.jit.ignore
+            def __call__(self, *args) -> str:
+                return str(type(args[0]))
+
+        the_class = MyPythonClass()
+        @torch.jit.script
+        def fn(x):
+            return the_class(x)
+
+        # This doesn't involve the string frontend, so don't use checkScript
+        x = torch.ones(2)
+        self.assertEqual(fn(x), the_class(x))
+
+    def test_bad_types(self):
+        @torch.jit.ignore
+        def fn(my_arg):
+            return my_arg + 10
+
+        with self.assertRaisesRegex(RuntimeError, "argument 'my_arg'"):
+            @torch.jit.script
+            def other_fn(x):
+                return fn('2')
+
 
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
@@ -232,7 +303,6 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
-
     def test_any_in_class_fails(self):
         class MyCoolNamedTuple(NamedTuple):
             a : Any
@@ -243,137 +313,6 @@ class TestScriptPy3(JitTestCase):
             def foo():
                 return MyCoolNamedTuple(4, 5.5, [3])
             print(foo.graph)
-
-    def test_module_interface(self):
-        global OneTwo, OneTwoClass, Foo
-        @torch.jit.interface
-        class OneTwo(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                pass
-
-            def two(self, x):
-                # type: (Tensor) -> Tensor
-                pass
-
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
-                pass
-
-        @torch.jit.interface
-        class OneTwoClass(object):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                pass
-
-            def two(self, x):
-                # type: (Tensor) -> Tensor
-                pass
-
-        class FooMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                return x + y
-
-            def two(self, x):
-                # type: (Tensor) -> Tensor
-                return 2 * x
-
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
-                return self.one(self.two(x), x)
-
-        class BarMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                return x * y
-
-            def two(self, x):
-                # type: (Tensor) -> Tensor
-                return 2 / x
-
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
-                return self.two(self.one(x, x))
-
-            @torch.jit.export
-            def forward2(self, x):
-                # type: (Tensor) -> Tensor
-                return self.two(self.one(x, x)) + 1
-
-        def use_module_interface(mod_list, x):
-            # type: (List[OneTwo], Tensor) -> Tensor
-            return mod_list[0].forward(x) + mod_list[1].forward(x)
-
-        def use_class_interface(mod_list, x):
-            # type: (List[OneTwoClass], Tensor) -> Tensor
-            return mod_list[0].two(x) + mod_list[1].one(x, x)
-
-        scripted_foo_mod = torch.jit.script(FooMod())
-        scripted_bar_mod = torch.jit.script(BarMod())
-        self.checkScript(use_module_interface,
-                         ([scripted_foo_mod, scripted_bar_mod], torch.rand(3, 4),))
-        self.checkScript(use_class_interface,
-                         ([scripted_foo_mod, scripted_bar_mod], torch.rand(3, 4),))
-
-        @torch.jit.script
-        def as_module_interface(x):
-            # type: (OneTwo) -> OneTwo
-            return x
-
-        @torch.jit.script
-        def as_class_interface(x):
-            # type: (OneTwoClass) -> OneTwoClass
-            return x
-
-        @torch.jit.script
-        class Foo(object):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
-                return x + y
-
-            def two(self, x):
-                # type: (Tensor) -> Tensor
-                return 2 * x
-
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
-                return self.one(self.two(x), x)
-
-        # check class object is not a subtype of module interface
-        with self.assertRaisesRegex(RuntimeError, "ScriptModule class can be subtype of module interface"):
-            as_module_interface(Foo())
-
-        def call_module_interface_on_other_method(mod_interface, x):
-            # type: (OneTwo, Tensor) -> Tensor
-            return mod_interface.forward2(x)
-
-        # ensure error out when we call the module on the method other than the interface specified.
-        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
-            self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
-
-        class WrongMod(nn.Module):
-            def two(self, x):
-                # type: (int) -> int
-                return 2 * x
-
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
-                return x + torch.randn(3, self.two(3))
-
-        scripted_wrong_mod = torch.jit.script(WrongMod())
-
-        # wrong module that is not compatible with module interface
-        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
-            as_module_interface(scripted_wrong_mod)
-
-        with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):
-            @torch.jit.interface
-            class InheritMod(FooMod):
-                def three(self, x):
-                    # type: (Tensor) -> Tensor
-                    return 3 * x
-
 
 if __name__ == '__main__':
     run_tests()

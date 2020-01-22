@@ -18,7 +18,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 
 // Returns the address of the first element of a tensor
 // or nullptr if the tensor is undefined.
-template<typename scalar_t>
+template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
   return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
@@ -49,8 +49,6 @@ static void nll_loss_out_frame(
     auto target_acc = target.accessor<int64_t, 1>();
     auto output_acc = output.accessor<scalar_t, 1>();
 
-    std::atomic<int> invalid_target(
-        -1); // We cannot throw an exception inside parallel section
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (auto i = start; i < end; i++) {
         const auto cur_target = target_acc[i];
@@ -59,23 +57,18 @@ static void nll_loss_out_frame(
           output_acc[i] = 0;
           continue;
         }
-        if (cur_target >= 0 && cur_target < n_classes) {
-          scalar_t cur_weight = weight_data != nullptr
-              ? weight_data[cur_target]
-              : static_cast<scalar_t>(1);
-          output_acc[i] = -input_acc[i][cur_target] * cur_weight;
-        } else {
-          int tmp = -1;
-          invalid_target.compare_exchange_strong(tmp, cur_target);
-        }
+
+        TORCH_CHECK_INDEX(
+            cur_target >= 0 && cur_target < n_classes,
+            "Target ",
+            cur_target,
+            " is out of bounds.");
+
+        scalar_t cur_weight = weight_data != nullptr ? weight_data[cur_target]
+                                                     : static_cast<scalar_t>(1);
+        output_acc[i] = -input_acc[i][cur_target] * cur_weight;
       }
     });
-
-    TORCH_CHECK(
-        invalid_target.load() < 0,
-        "Target ",
-        invalid_target.load(),
-        " out of bounds");
 
     return;
   }
@@ -95,7 +88,11 @@ static void nll_loss_out_frame(
   if (input.dim() == 1) {
     const auto cur_target = target_data[0];
     if (cur_target != ignore_index) {
-      TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+      TORCH_CHECK_INDEX(
+          cur_target >= 0 && cur_target < n_classes,
+          "Target ",
+          cur_target,
+          " is out of bounds.");
       total_weight_val =
           weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
       output_val = -input_data[cur_target] * total_weight_val;
@@ -108,7 +105,11 @@ static void nll_loss_out_frame(
     for (int64_t i = 0; i < batch_size; i++) {
       const auto cur_target = target_data[i];
       if (cur_target != ignore_index) {
-        TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+        TORCH_CHECK_INDEX(
+            cur_target >= 0 && cur_target < n_classes,
+            "Target ",
+            cur_target,
+            " is out of bounds.");
 
         scalar_t cur_weight =
             weight_data ? weight_data[cur_target] : static_cast<scalar_t>(1);
@@ -228,7 +229,11 @@ static void nll_loss_backward_out_frame(
 
     const auto cur_target = target_acc[0];
     if (cur_target != ignore_index) {
-      TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+      TORCH_CHECK_INDEX(
+          cur_target >= 0 && cur_target < n_classes,
+          "Target ",
+          cur_target,
+          " is out of bounds.");
 
       grad_input_acc[cur_target] =
           (reduction != Reduction::Mean && weight_data != nullptr)
@@ -246,7 +251,11 @@ static void nll_loss_backward_out_frame(
       const auto cur_target = target_acc[i];
 
       if (cur_target != ignore_index) {
-        TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
+        TORCH_CHECK_INDEX(
+            cur_target >= 0 && cur_target < n_classes,
+            "Target ",
+            cur_target,
+            " is out of bounds.");
 
         const scalar_t w = weight_data != nullptr ? weight_data[cur_target]
                                                   : static_cast<scalar_t>(1);
@@ -371,7 +380,7 @@ Tensor nll_loss_backward_cpu(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  auto grad_input = at::zeros_like(self);
+  auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   nll_loss_backward_out_cpu(
       grad_input,
       grad_output,

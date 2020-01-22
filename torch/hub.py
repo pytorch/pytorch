@@ -399,7 +399,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
-    # being overriden by a broken download.
+    # being overridden by a broken download.
     dst = os.path.expanduser(dst)
     dst_dir = os.path.dirname(dst)
     f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)

@@ -163,12 +163,11 @@ class ShapePropagator {
         auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
                                                : at::CUDA(*type->scalarType());
         at::DeviceGuard device_guard(*type->device());
-        auto t = at::empty_strided(
+        return at::empty_strided(
                      *type->sizes().concrete_sizes(),
                      *type->strides().concrete_sizes(),
                      attype.options())
                      .zero_();
-        return autograd::make_variable(t, /*requires_grad=*/false);
       }
       // fallthrough
     } else if (type_->isSubtypeOf(FloatType::get())) {
@@ -304,7 +303,7 @@ class ShapePropagator {
                          ->create(
                              aten::expand,
                              {node->inputs().at(input_idx),
-                              graph->insertConstant(c10::impl::toList(expected_size)),
+                              graph->insertConstant(expected_size),
                               graph->insertConstant(false)})
                          ->insertBefore(node);
       PropagateShapeOnNode(expand);
@@ -728,7 +727,7 @@ class ShapePropagator {
   // a tensor, so we should special-case these ops in the shape propagation.
   // Additionally, passing in a zero representative tensor into an integer
   // division op causes divide-by-zero errors
-  // _Outputs_ must be tensors or primtives
+  // _Outputs_ must be tensors or primitives
   // We will call inferTypeFrom on the tensors, and ignore the primitives.
   // However, we allow primitive returns because we want to support mixed
   // primitive/tensor outputs.
@@ -1125,12 +1124,12 @@ class ShapePropagator {
             "aten::replication_pad1d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
             "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
-            "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
-            "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
-            "aten::upsample_nearest1d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_nearest2d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_nearest3d(Tensor self, int[] output_size) -> Tensor",
-            "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
+            "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners, float? scales_h, float? scales_w) -> Tensor",
+            "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners, float? scales) -> Tensor",
+            "aten::upsample_nearest1d(Tensor self, int[] output_size, float? scales) -> Tensor",
+            "aten::upsample_nearest2d(Tensor self, int[] output_size, float? scales_h, float? scales_w) -> Tensor",
+            "aten::upsample_nearest3d(Tensor self, int[] output_size, float? scales_d, float? scales_h, float? scales_w) -> Tensor",
+            "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners, float? scales_d, float? scales_h, float? scales_w) -> Tensor",
             "aten::prelu(Tensor self, Tensor weight) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -1998,7 +1997,7 @@ class ShapePropagator {
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;
       }
-      node->output()->setType(tensor_types.at(0)->withSizes(c10::impl::toVector(std::move(sizes))));
+      node->output()->setType(tensor_types.at(0)->withSizes(sizes.vec()));
       return true;
     } else if (node->matches(
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
@@ -2020,8 +2019,7 @@ class ShapePropagator {
       std::tie(sizes, strides) = at::inferExpandGeometry(
           tp->sizes().concrete_sizes().value(),
           tp->strides().concrete_sizes().value(),
-          c10::impl::toVector(
-              node->get<c10::List<int64_t>>(attr::size).value()));
+          node->get<c10::List<int64_t>>(attr::size).value().vec());
       node->output()->setType(tp->withSizesStrides(sizes, strides));
       return true;
     } else if (

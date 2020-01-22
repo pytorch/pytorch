@@ -201,6 +201,18 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
       auto currentTimepoint = std::chrono::steady_clock::now();
       if (std::chrono::duration_cast<std::chrono::milliseconds>(
               currentTimepoint - workStartTime_) > opTimeout_) {
+        // When operation times out due to some errors that are not
+        // detected by nccl communicators, ncclCommWatchdog can not check this
+        // time out error and thus can not abort ncclComms accordingly.
+        // So explicitly abort ncclComms here before throwing this timed out
+        // exception to users, after this, ncclCommWatchdog can detect nccl
+        // communicators are aborted and clean up devNCCLCommMap_ accordingly.
+        // if throwing timed out excepiton without aborting nccl communicators
+        // here, it was observed that CUDA GPU will have 100% utilization and
+        // can not run new events successfully.
+        for (const auto& ncclComm : ncclComms_) {
+          ncclComm->ncclCommAbort();
+        }
         throw std::runtime_error("Operation timed out!");
       }
       // Check for errors and throw appropriate exception.
@@ -213,8 +225,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 // Same as calling synchronize().
-void ProcessGroupNCCL::WorkNCCL::wait() {
+bool ProcessGroupNCCL::WorkNCCL::wait() {
   synchronize();
+  // Always return true, because abort API is not implemented.
+  return true;
+}
+
+void ProcessGroupNCCL::WorkNCCL::abort() {
+  TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -263,15 +281,22 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 void ProcessGroupNCCL::ncclCommWatchdog() {
   while (!terminateWatchdog_.load()) {
     {
-      // Loop through the cache of communicators for NCCL errors.
-      std::lock_guard<std::mutex> lock(devNCCLCommMapLock_);
-      for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end();) {
-        auto& ncclComms = it->second;
-        if (checkForNCCLErrors(ncclComms)) {
-          LOG(INFO) << "Received NCCL errors for communicators in the cache, "
+      // Loop through all outstanding work and clean any work that has timed
+      // out or received any errors.
+      std::lock_guard<std::mutex> lock(outstandingWorkMutex_);
+      for (auto it = outstandingWork_.begin(); it != outstandingWork_.end();
+           it++) {
+        auto work = *it;
+        auto currentTime = std::chrono::steady_clock::now();
+        bool timedOutOp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              currentTime - work->workStartTime_) > opTimeout_;
+
+        // Abort communicators if the op timed out or received errors.
+        if (timedOutOp || checkForNCCLErrors(work->ncclComms_)) {
+          LOG(INFO) << "Received NCCL " << (timedOutOp ? "timeout" : "errors")
+                    << " for communicators in the cache, "
                        "removing communicators from the cache and aborting the "
                        "communicators.";
-
           if (blockingWait_) {
             // We should not abort the communicators if we are performing a
             // non-blocking wait(). The reason for this is that if we abort the
@@ -280,16 +305,25 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
             // The current model is that when we call wait(), subsequent
             // operations only run after this work is done or we hang forever
             // waiting for the operation to complete.
-            for (const auto& ncclComm : ncclComms) {
+            // Now abort all the communicators.
+            for (auto& ncclComm : work->ncclComms_) {
               ncclComm->ncclCommAbort();
             }
           }
 
-          // Remove communicators from the cache.
-          it = devNCCLCommMap_.erase(it);
+          // Remove the communicators from the cache.
+          const auto key = getKeyFromDevices(work->devices_);
+          std::lock_guard<std::mutex> ncclCacheLock(devNCCLCommMapLock_);
+          if (devNCCLCommMap_.find(key) != devNCCLCommMap_.end()) {
+            devNCCLCommMap_.erase(key);
+          }
+        }
 
-        } else {
-          it++;
+        // Remove any work that has already completed (includes successfully
+        // completed or had any errors).
+        if (work->isCompleted() || timedOutOp) {
+          it = outstandingWork_.erase(it);
+          it--;
         }
       }
     }
@@ -544,7 +578,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-        inputs[i].storage().data(), ncclStream);
+        inputs[i].storage().data_ptr(), ncclStream);
   }
 
   {
@@ -568,6 +602,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->opTimeout_ = opTimeout_;
   }
 
+  std::lock_guard<std::mutex> lock(outstandingWorkMutex_);
+  outstandingWork_.emplace_back(work);
   return work;
 }
 
@@ -680,7 +716,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data(), stream);
+            output.storage().data_ptr(), stream);
         return ncclAllGather(
             input.data_ptr(),
             output.data_ptr(),
@@ -697,7 +733,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
           for (size_t j = 0; j < outputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
-                outputTensors[i][j].storage().data(), ncclStreams[i]);
+                outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
 
             outputTensors[i][j].copy_(outputFlattened[i][j], true);
           }
@@ -731,7 +767,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            output.storage().data(), stream);
+            output.storage().data_ptr(), stream);
         return ncclReduceScatter(
             input.data_ptr(),
             output.data_ptr(),
@@ -748,7 +784,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
           for (size_t j = 0; j < inputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
-                inputTensors[i][j].storage().data(), ncclStreams[i]);
+                inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
 
             inputFlattened[i][j].copy_(inputTensors[i][j], true);
           }
@@ -829,6 +865,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in NCCL process group");
 }
 
 } // namespace c10d

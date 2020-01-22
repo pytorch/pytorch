@@ -50,7 +50,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
           kSpatialDim == 2,
-          "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv2d "
+          "quantized::conv2d_prepack (qnnpack): QNNPACK only supports Conv2d "
           "now.");
       return qnnpack_conv_prepack(
           weight, bias, stride, padding, dilation, groups);
@@ -59,7 +59,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
     TORCH_CHECK(
         false,
-        "Didn't find engine for operation quantized::conv_prepack ",
+        "Didn't find engine for operation quantized::conv2d_prepack ",
         toString(ctx.qEngine()));
   }
 
@@ -187,9 +187,9 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       bias_contig = bias->contiguous();
     }
 
-    auto ret_ptr = guts::make_unique<PackedConvWeight<kSpatialDim>>(
+    auto ret_ptr = std::make_unique<PackedConvWeight<kSpatialDim>>(
         PackedConvWeight<kSpatialDim>{
-            guts::make_unique<fbgemm::PackWeightsForConv<kSpatialDim>>(
+            std::make_unique<fbgemm::PackWeightsForConv<kSpatialDim>>(
                 conv_p, weight_data_int8),
             bias_contig,
             col_offsets,
@@ -216,23 +216,23 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
       int64_t groups) {
     TORCH_CHECK(
         weight.ndimension() == 4,
-        "quantized::conv_prepack (qnnpack): Weights are expected to have 4 "
+        "quantized::conv2d_prepack (qnnpack): Weights are expected to have 4 "
         "dimensions");
     const auto qtype = weight.qscheme();
     TORCH_CHECK(
         weight.qscheme() == kPerTensorAffine,
-        "quantized::conv_prepack (qnnpack): only supports Per Tensor "
+        "quantized::conv2d_prepack (qnnpack): only supports Per Tensor "
         "Quantization Scheme")
     TORCH_CHECK(
         stride.size() == 2,
-        "quantized::conv_prepack (qnnpack): 2D convolution only");
+        "quantized::conv2d_prepack (qnnpack): 2D convolution only");
     TORCH_CHECK(
         padding.size() == 2,
-        "quantized::conv_prepack (qnnpack): Specify top/left padding only. "
+        "quantized::conv2d_prepack (qnnpack): Specify top/left padding only. "
         "bottom/right padding assumed to be equal to top/left");
     TORCH_CHECK(
         dilation.size() == 2,
-        " quantized::conv_prepack (qnnpack): 2D convolution only");
+        " quantized::conv2d_prepack (qnnpack): 2D convolution only");
 
     initQNNPACK();
 
@@ -252,7 +252,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(
         !bias_fp32.defined() ||
             (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
-        "quantized::conv_prepack (qnnpack): expected bias to be 1-dimensional "
+        "quantized::conv2d_prepack (qnnpack): expected bias to be 1-dimensional "
         "with ",
         out_ch,
         " elements",
@@ -281,24 +281,13 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         std::numeric_limits<uint8_t>::max());
 
     auto weight_contig = weight.contiguous(MemoryFormat::ChannelsLast);
-    auto weight_zp = weight.q_zero_point() + 128;
+    auto weight_zp = weight.q_zero_point();
 
-    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
-    Tensor qnnp_weight = at::_empty_affine_quantized(
-        weight_contig.sizes(),
-        at::device(kCPU).dtype(kQUInt8),
-        weight.q_scale(),
-        weight_zp);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
-      qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
-    }
     // We set the pre-packed conv weights to nullptr below as we call pre-pack
     // during the first invocation of operator run. Refer to qconv.cpp for more
     // details. TODO Update to actually call pre-pack here once bias is removed
     // from pre-packing step.
-    auto wt_ptr = guts::make_unique<PackedConvWeightsQnnp>(
+    auto wt_ptr = std::make_unique<PackedConvWeightsQnnp>(
         PackedConvWeightsQnnp{nullptr, /* PrePackConvWeights */
                               weight_contig, /* int8_t weight */
                               bias_fp32.contiguous(), /* fp32 bias */
@@ -314,12 +303,17 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry =
     c10::RegisterOperators()
-        .op("quantized::conv_prepack",
+        .op("quantized::conv_prepack", // conv_prepack is deprecated, please use
+                                       // conv2d_prepack for 2D conv.
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
+        .op("quantized::conv2d_prepack", // We use  conv2d_prepack to be
+                                         // consistent with conv3d_prepack
+            c10::RegisterOperators::options().kernel<QConvPackWeightInt8<2>>(
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d_prepack",
             c10::RegisterOperators::options().kernel<QConvPackWeightInt8<3>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

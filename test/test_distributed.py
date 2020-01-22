@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from common_utils import TestCase, run_tests, skipIfRocm
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from common_distributed import simple_sparse_reduce_tests, skip_if_rocm
 
 try:
     import torchvision
@@ -1013,6 +1014,30 @@ class _DistTestBase(object):
             group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10
         )
 
+    # SPARSE ALL REDUCE
+    def _test_sparse_all_reduce_sum(self, fn):
+        group, group_id, rank = self._init_global_test()
+
+        tests = simple_sparse_reduce_tests(
+            rank,
+            dist.get_world_size(),
+            num_inputs=1)
+        for (inputs, outputs) in tests:
+            tensors = [fn(input) for input in inputs]
+            dist.all_reduce(tensors[0], dist.ReduceOp.SUM, group_id)
+            self.assertEqual(tensors[0], outputs[0])
+
+    @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
+    def test_sparse_all_reduce_sum(self):
+        self._test_sparse_all_reduce_sum(lambda t: t)
+
+    @unittest.skipIf(BACKEND != "gloo", "Only Gloo backend support sparse all reduce")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    @skip_if_rocm
+    def test_sparse_all_reduce_sum_cuda(self):
+        self._test_sparse_all_reduce_sum(lambda t: t.clone().cuda())
+
     # ALL REDUCE - COALESCED
     @staticmethod
     def _all_reduce_coalesced_sum_test_cases(group_size):
@@ -1915,6 +1940,54 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        # DDP does not support replicating BN layers within a process, hence
+        # testing with one module replica per process
+        gpus = [rank]
+
+        model = nn.BatchNorm1d(2)
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpus[0])
+
+        # DDP training setup
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpus[0])
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=gpus
+        )
+
+        local_bs = len(gpus) * 2
+        global_bs = int(WORLD_SIZE) * local_bs
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 2)
+        loss = nn.MSELoss()
+
+        # disabling cudnn.
+        # SyncBatchNorm goes through native_batch_norm kernel, this avoids the
+        # numerical issue created by the divergent code path.
+        with torch.backends.cudnn.flags(False):
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_cpu.cuda(gpus[0]),
+                target.cuda(gpus[0]),
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True
+            )
+            self._barrier()
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
