@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/native/MemoryAccess.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 
 namespace rocm { namespace workaround {
 
