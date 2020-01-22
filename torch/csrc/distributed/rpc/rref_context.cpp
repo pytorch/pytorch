@@ -145,7 +145,7 @@ void RRefContext::delUser(
 
     fm->addCallback([](const Message& /* unused */,
                        const c10::optional<utils::FutureError>& futErr) {
-      RRefContext::handleException(futErr);
+      handleException(futErr);
     });
 
     confirmedUsers_.erase(forkId);
