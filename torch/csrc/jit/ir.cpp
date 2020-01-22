@@ -96,44 +96,42 @@ std::ostream& operator<<(
   return out;
 }
 
-template <typename T>
-static void printPrimList(std::ostream& out, const std::vector<T>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0) {
-      out << ", ";
+static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
+  // 1-elem tensors are usually boxed scalars, so print them like it
+  if (tensor.numel() == 1) {
+    auto scalar_tensor = tensor.view({}).item();
+    out << "{";
+    if (scalar_tensor.isFloatingPoint()) {
+      out << scalar_tensor.toDouble();
+    } else {
+      out << scalar_tensor.toLong();
     }
-    out << item;
+    out << "}";
+  } else if (tensor.numel() <= max_tensor_display_size) {
+    // TODO: This is awful code.  Also it doesn't work on Windows.
+    std::ostringstream tensor_ss;
+    tensor_ss << tensor;
+    std::string tensor_s{tensor_ss.str()};
+    // Remove newlines
+    std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+    out << tensor_s;
+  } else {
+    out << "<Tensor>";
   }
-  out << "]";
 }
 
-static void printPrimList(std::ostream& out, const std::vector<double>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0) {
-      out << ", ";
+static void printAttribute(std::ostream& out, const IValue& ival) {
+  const auto customFormatter = [](std::ostream& ss, const IValue& input) {
+    if (input.isTensor()) {
+      printAttribute(ss, input.toTensor());
+      return true;
+    } else if (input.isTensorList()) {
+      ss << "[<Tensors>]";
+      return true;
     }
-    // use ivalue printing so that it will correctly format floats with
-    // no decimal
-    out << IValue(item);
-  }
-  out << "]";
-}
-
-static void printStrList(
-    std::ostream& out,
-    const std::vector<std::string>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0)
-      out << ", ";
-    c10::printQuotedString(out, item);
-  }
-  out << "]";
+    return false;
+  };
+  ival.repr(out, customFormatter);
 }
 
 static void printTypeList(
@@ -152,50 +150,31 @@ static void printTypeList(
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
-      out << f(name);
+      printAttribute(out, f(name));
       break;
     case AttributeKind::fs:
-      printPrimList(out, fs(name));
+      printAttribute(out, fs(name));
       break;
     case AttributeKind::i:
-      out << i(name);
+      printAttribute(out, i(name));
       break;
     case AttributeKind::is:
-      printPrimList(out, is(name));
+      printAttribute(out, is(name));
       break;
     case AttributeKind::s:
-      c10::printQuotedString(out, s(name));
+      printAttribute(out, s(name));
       break;
     case AttributeKind::ss:
-      printStrList(out, ss(name));
+      printAttribute(out, ss(name));
       break;
-    case AttributeKind::t: {
-      at::Tensor tensor = t(name);
-      // 1-elem tensors are usually boxed scalars, so print them like it
-      if (tensor.numel() == 1) {
-        auto scalar_tensor = tensor.view({}).item();
-        out << "{";
-        if (scalar_tensor.isFloatingPoint()) {
-          out << scalar_tensor.toDouble();
-        } else {
-          out << scalar_tensor.toLong();
-        }
-        out << "}";
-      } else if (tensor.numel() <= max_tensor_display_size) {
-        // TODO: This is awful code.  Also it doesn't work on Windows.
-        std::ostringstream tensor_ss;
-        tensor_ss << tensor;
-        std::string tensor_s{tensor_ss.str()};
-        // Remove newlines
-        std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-        out << tensor_s;
-      } else {
-        out << "<Tensor>";
-      }
+    case AttributeKind::t:
+      printAttribute(out, t(name));
       break;
-    }
     case AttributeKind::ts:
       out << "[<Tensors>]";
+      break;
+    case AttributeKind::ival:
+      printAttribute(out, ival(name));
       break;
     case AttributeKind::g:
       out << "<Graph>";
@@ -212,8 +191,8 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void Node::printAttributes(std::ostream &out,
-                           bool ignore_subgraph = false) const {
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -249,10 +228,14 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream &Node::print(std::ostream &out, size_t level,
-                          std::vector<const Node *> *groups,
-                          bool print_source_locations, bool print_attributes,
-                          bool print_scopes, bool print_body) const {
+std::ostream& Node::print(
+    std::ostream& out,
+    size_t level,
+    std::vector<const Node*>* groups,
+    bool print_source_locations,
+    bool print_attributes,
+    bool print_scopes,
+    bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -835,16 +818,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
 }
 
 void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
-  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
     if (u.user->isAfter(node)) {
       u.user->inputs_[u.offset] = newValue;
       newValue->uses_.push_back(u);
     }
   });
 
-  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
-    return u.user->isAfter(node);
-  }), uses_.end());
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
 }
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -1484,6 +1470,7 @@ Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
     tuple_type = TupleType::create(std::move(types));
   }
   auto n = create(prim::TupleConstruct, values);
+
   n->output()->setType(tuple_type);
   return n;
 }
