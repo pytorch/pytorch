@@ -32,7 +32,7 @@
 #define CAFFE_SDT_ARGSIZE(x)  (CAFFE_SDT_ISARRAY(x) ? sizeof(void*) : sizeof(x))
 
 // Format of each probe arguments as operand.
-// Size of the arugment tagged with CAFFE_SDT_Sn, with "n" constraint.
+// Size of the argument tagged with CAFFE_SDT_Sn, with "n" constraint.
 // Value of the argument tagged with CAFFE_SDT_An, with configured constraint.
 #define CAFFE_SDT_ARG(n, x)                                                    \
   [CAFFE_SDT_S##n] "n"                ((size_t)CAFFE_SDT_ARGSIZE(x)),          \

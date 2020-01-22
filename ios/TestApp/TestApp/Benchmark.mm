@@ -70,6 +70,7 @@ static int iter = 10;
     at::globalContext().setQEngine(at::QEngine::QNNPACK);
   }
   torch::autograd::AutoGradMode guard(false);
+  torch::jit::GraphOptimizerEnabledGuard opguard(false);
   auto module = torch::jit::load(model);
 
   at::AutoNonVariableTypeMode non_var_type_mode(true);
