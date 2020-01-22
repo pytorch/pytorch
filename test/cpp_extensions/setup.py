@@ -1,6 +1,5 @@
 import sys
 import torch.cuda
-from functools import partial
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME
