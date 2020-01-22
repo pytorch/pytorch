@@ -155,8 +155,15 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
         print(CPP_EXTENSIONS_ERROR)
         return 1
     cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
+    cpp_extensions_with_ninja_dir = os.path.join(cpp_extensions_test_dir, 'ninja_test')
+
+    # Build cpp extension modules that get tested in test_cpp_extensions.py
     return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
                         cwd=cpp_extensions_test_dir)
+    if return_code != 0:
+        return return_code
+    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
+                        cwd=cpp_extensions_with_ninja_dir)
     if return_code != 0:
         return return_code
     if sys.platform != 'win32':
@@ -165,18 +172,22 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
         if return_code != 0:
             return return_code
 
-    python_path = os.environ.get('PYTHONPATH', '')
-    try:
-        cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
+    def install_extension(extension_dir):
+        # Find the site-packages folder, add it to the python path
+        python_path = os.environ.get('PYTHONPATH', '')
         install_directory = ''
-        # install directory is the one that is named site-packages
-        for root, directories, _ in os.walk(os.path.join(cpp_extensions, 'install')):
+        for root, directories, _ in os.walk(os.path.join(extension_dir, 'install')):
             for directory in directories:
                 if '-packages' in directory:
                     install_directory = os.path.join(root, directory)
 
         assert install_directory, 'install_directory must not be empty'
         os.environ['PYTHONPATH'] = os.pathsep.join([install_directory, python_path])
+
+    python_path = os.environ.get('PYTHONPATH', '')
+    try:
+        install_extension(cpp_extensions_test_dir)
+        install_extension(cpp_extensions_with_ninja_dir)
         return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path

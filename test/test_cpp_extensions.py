@@ -18,6 +18,7 @@ from torch.utils.cpp_extension import CUDA_HOME
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
+    import torch_test_cpp_extension_with_ninja.cpp as cpp_extension_with_ninja
 except ImportError:
     warnings.warn(
         "test_cpp_extensions.py cannot be invoked directly. Run "
@@ -68,21 +69,33 @@ class TestCppExtension(common.TestCase):
         if os.path.exists(default_build_root):
             shutil.rmtree(default_build_root)
 
-    def test_extension_function(self):
+    def _test_extension_function(self, extension_module):
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
-        z = cpp_extension.sigmoid_add(x, y)
+        z = extension_module.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
 
-    def test_extension_module(self):
-        mm = cpp_extension.MatrixMultiplier(4, 8)
+    def test_extension_function(self):
+        self._test_extension_function(cpp_extension)
+
+    def test_extension_function_with_ninja(self):
+        self._test_extension_function(cpp_extension_with_ninja)
+
+    def _test_extension_module(self, extension_module):
+        mm = extension_module.MatrixMultiplier(4, 8)
         weights = torch.rand(8, 4, dtype=torch.double)
         expected = mm.get().mm(weights)
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
-    def test_backward(self):
-        mm = cpp_extension.MatrixMultiplier(4, 8)
+    def test_extension_module(self):
+        self._test_extension_module(cpp_extension)
+
+    def test_extension_module_with_ninja(self):
+        self._test_extension_module(cpp_extension_with_ninja)
+
+    def _test_backward(self, extension_module):
+        mm = extension_module.MatrixMultiplier(4, 8)
         weights = torch.rand(8, 4, dtype=torch.double, requires_grad=True)
         result = mm.forward(weights)
         result.sum().backward()
@@ -93,6 +106,12 @@ class TestCppExtension(common.TestCase):
 
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
+
+    def test_backward(self):
+        self._test_backward(cpp_extension)
+
+    def test_backward_with_ninja(self):
+        self._test_backward(cpp_extension_with_ninja)
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -121,17 +140,24 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_extension(self):
-        import torch_test_cpp_extension.cuda as cuda_extension
-
+    def _test_cuda_extension(self, extension_module):
         x = torch.zeros(100, device="cuda", dtype=torch.float32)
         y = torch.zeros(100, device="cuda", dtype=torch.float32)
 
-        z = cuda_extension.sigmoid_add(x, y).cpu()
+        z = extension_module.sigmoid_add(x, y).cpu()
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_extension(self):
+        import torch_test_cpp_extension.cuda as cuda_extension
+        self._test_cuda_extension(cuda_extension)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_extension_with_ninja(self):
+        import torch_test_cpp_extension_with_ninja.cuda as cuda_extension
+        self._test_cuda_extension(cuda_extension)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_jit_cuda_extension(self):
@@ -894,6 +920,7 @@ class TestMSNPUTensor(common.TestCase):
         grad = torch.autograd.grad(out, input, out, create_graph=True)
         self.assertEqual(msnpu_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
+
 
 if __name__ == "__main__":
     common.run_tests()
