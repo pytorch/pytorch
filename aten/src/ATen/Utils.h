@@ -92,8 +92,11 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
   unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
-    if (dispatchKeyToBackend(c10::impl::dispatchTypeId(expr.key_set())) != backend) {
-      AT_ERROR("Expected object of backend ", backend, " but got backend ", dispatchKeyToBackend(c10::impl::dispatchTypeId(expr.key_set())),
+    // TODO: Stop using dispatchTypeId here, it's totally wrong way to do this
+    // type test
+    auto key = c10::impl::dispatchTypeId(expr.key_set(), c10::DispatchKeySet(c10::DispatchKeySet::FULL));
+    if (dispatchKeyToBackend(key) != backend) {
+      AT_ERROR("Expected object of backend ", backend, " but got backend ", dispatchKeyToBackend(key),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.scalar_type() != scalar_type) {
