@@ -17,11 +17,11 @@ ScriptRemoteCall::ScriptRemoteCall(
       retForkId_(retForkId) {}
 
 ScriptRemoteCall::ScriptRemoteCall(
-    c10::QualifiedName qualifiedName,
+    const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
     const ForkId& retForkId)
-    : ScriptCall(std::move(qualifiedName), std::move(stack)),
+    : ScriptCall(qualifiedName, std::move(stack)),
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
 

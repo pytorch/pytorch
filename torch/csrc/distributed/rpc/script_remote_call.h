@@ -27,7 +27,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
 
   // Constructor for TorchScript function call.
   ScriptRemoteCall(
-      c10::QualifiedName qualifiedName,
+      const c10::QualifiedName& qualifiedName,
       std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
       const ForkId& retForkId);
