@@ -146,7 +146,7 @@ template <>
 bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);         // Logits
   auto& T = Input(1);         // Labels
-  auto& wp = Input(2);        // num of foregound
+  auto& wp = Input(2);        // num of foreground
    // average loss as output
           // softmax probability, going to be re-used in gradient
 

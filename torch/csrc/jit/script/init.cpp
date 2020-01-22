@@ -554,9 +554,9 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       for (size_t i = 0; i < at->elements().size(); ++i) {
         work.emplace_back(Work{at->elements().at(i), bt->elements().at(i)});
       }
-    } else if (item.a.isGenericList()) {
-      auto al = item.a.toGenericList();
-      auto bl = item.b.toGenericList();
+    } else if (item.a.isList()) {
+      auto al = item.a.toList();
+      auto bl = item.b.toList();
       for (size_t i = 0; i < al.size(); ++i) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }
@@ -882,7 +882,7 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
             // [issue 27343]
-            // Modules have 'training' attributes by defualt, but due to
+            // Modules have 'training' attributes by default, but due to
             // https://github.com/pytorch/pytorch/issues/27343, functions end
             // up having a training attribute when they are loaded. This adds
             // a fake 'training' attribute that shouldn't be used, but prevents
