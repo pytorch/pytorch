@@ -87,7 +87,8 @@ static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const a
   }
   long cudnn_version = detail::getCUDAHooks().versionCuDNN();
   return (cudnn_version >= 7603) &&
-      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+      ((input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
+      (weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast));
 }
 
 }} // namespace at::native

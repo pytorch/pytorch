@@ -10508,10 +10508,18 @@ class TestNNDeviceType(NNTestCase):
         for w_f in [torch.contiguous_format, torch.channels_last]:
             for g_f in [torch.contiguous_format, torch.channels_last]:
                 for input_format in [torch.contiguous_format, torch.channels_last]:
-                    output_format = input_format
+                    output_format = torch.contiguous_format
                     # Older versions of CudNN have Channels Last support disabled
-                    if torch.backends.cudnn.version() < 7603:
-                        output_format = torch.contiguous_format
+                    if torch.backends.cudnn.version() >= 7603:
+                        if input_format == torch.channels_last:
+                            output_format = torch.channels_last
+                        # This is because we have N111 weight that cannot handle
+                        # the ambiguous memory_format
+                        if w_f == torch.channels_last:
+                            if layer == nn.Conv2d and filter_size * c != 1:
+                                output_format = torch.channels_last
+                            if layer == nn.ConvTranspose2d and filter_size * k != 1:
+                                output_format = torch.channels_last
                     self._run_conv(layer, device, data, grad, ref_conv, ref_input,
                                    ref_out, input_format, w_f, g_f, output_format)
 
@@ -10531,6 +10539,27 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(7603)
+    def test_convert_conv2d_weight_memory_layout(self, device):
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
+        model = nn.Sequential(
+            nn.Conv2d(8, 4, 3),
+            nn.BatchNorm2d(4)).to(device).float()
+        for layout in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+            out = model(input)
+            self.assertTrue(out.is_contiguous(memory_format=layout))
+
+        model = nn.Sequential(
+            nn.ConvTranspose2d(8, 4, 3),
+            nn.BatchNorm2d(4)).to(device).float()
+        for layout in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+            out = model(input)
+            self.assertTrue(out.is_contiguous(memory_format=layout))
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
