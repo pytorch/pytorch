@@ -51,6 +51,8 @@ TypePtr IValue::type() const {
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
+    case Tag::PyObject:
+      return PyObjectType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
@@ -229,11 +231,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
-    case IValue::Tag::Object:
+    case IValue::Tag::PyObject: {
+      auto py_obj = v.toPyObject();
+      return out << "<PyObject at" << py_obj << ">";
+    }
+    case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
+    }
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
