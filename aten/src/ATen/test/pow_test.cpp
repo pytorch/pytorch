@@ -263,8 +263,8 @@ TEST(PowTest, LongScalarPowAllTensors) {
 }
 
 TEST(PowTest, FloatScalarPowAllTensors) {
-  scalar_pow_tensor(floats, c10::kFLoat, floats, c10::kFloat);
-  scalar_pow_tensor(floats, c10::kFLoat, doubles, c10::kDouble);
+  scalar_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
+  scalar_pow_tensor(floats, c10::kFloat, doubles, c10::kDouble);
 }
 
 TEST(PowTest, DoubleScalarPowAllTensors) {
@@ -280,7 +280,7 @@ TEST(PowTest, LongTensorPowLongTensor) {
 }
 
 TEST(PowTest, FloatTensorPowFloatTensor) {
-  tensor_pow_tensor(floats, c10::kFloat, floats, c10::kFLoat);
+  tensor_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
 }
 
 TEST(PowTest, DoubleTensorPowDoubleTensor) {
