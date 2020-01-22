@@ -3784,6 +3784,19 @@ for shape in [(1,), ()]:
         # Case where original==True
         MyFunction.apply(inp).sum().backward(create_graph=True)
 
+    def test_power_function(self):
+        a = torch.tensor([0., 0., 0.])
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(a**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(s**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
     def test_multi_view_methods(self):
         # This list should math the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
         # It maps a function its arguments for an input of size [3,]
@@ -3809,7 +3822,6 @@ for shape in [(1,), ()]:
             self.assertTrue(gradgradcheck(foo, (inp,)))
             self.assertTrue(gradcheck(foo, (inp, True)))
             self.assertTrue(gradgradcheck(foo, (inp, True)))
-
 
 
 def index_variable(shape, max_indices):

@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -282,7 +283,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
-#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -294,6 +295,16 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() {
+        return true;
+      })
+#else
+      .def("_jit_run_cpp_tests", []() {
+        throw std::exception();
+      })
+      .def("_jit_has_cpp_tests", []() {
+        return false;
+      })
 #endif
       .def(
           "_jit_flatten",
@@ -309,6 +320,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -624,7 +636,7 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
+        // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toTypeInferredIValue(py_func_output);

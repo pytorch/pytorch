@@ -374,7 +374,7 @@ class ProcessingReader(Reader):
         # from it.
         with NetBuilder() as nb:
             # Current NetBuilder is optionally used inside the processor,
-            # then its children are retrived inside of
+            # then its children are retrieved inside of
             # normalize_processor_output.
             # Once readers and writers also use NetBuilder,
             # this logic will be more natural.

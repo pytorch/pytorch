@@ -47,9 +47,9 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   auto retRRefId = ForkId::fromIValue(values.back());
   values.pop_back();
 
-  auto op = ScriptCall::fromIValues(values);
+  auto scriptCallPtr = ScriptCall::fromIValues(values);
   return std::make_unique<ScriptRemoteCall>(
-      op, std::move(values), std::move(retRRefId), std::move(retForkId));
+      scriptCallPtr->op(), std::move(values), retRRefId, retForkId);
 }
 
 } // namespace rpc
