@@ -39,7 +39,7 @@ struct RRefForkData {
       const RRefId& rrefId_,
       const ForkId& forkId_,
       worker_id_t parent,
-      const std::string& type_str);
+      std::string type_str);
 
 };
 
@@ -215,7 +215,7 @@ class RRef : public RRefInterface {
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type);
+  RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
 
   RRefForkData fork() const;
 
@@ -255,7 +255,7 @@ class UserRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, const TypePtr type);
+  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, TypePtr type);
 
   const ForkId forkId_;
 };
@@ -290,11 +290,11 @@ class OwnerRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type)
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
       : OwnerRRef(ownerId, rrefId, type, {}) {}
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, const TypePtr type, c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, type) {
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type, c10::optional<IValue> value)
+      : RRef(ownerId, rrefId, std::move(type)) {
     value_ = std::move(value);
   }
 

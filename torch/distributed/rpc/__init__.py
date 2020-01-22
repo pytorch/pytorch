@@ -19,6 +19,7 @@ if is_available() and not torch._C._rpc_init():
 
 if is_available():
     from .api import _init_rpc_backend, _require_initialized
+    from .api import _rpc_sync_torchscript, _rpc_async_torchscript
     from .api import *  # noqa: F401
     import torch.distributed.autograd as dist_autograd
 
@@ -49,7 +50,7 @@ if is_available():
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions): The options passed to
-                RpcAgent consturctor. It contains RpcAgent specific
+                RpcAgent constructor. It contains RpcAgent specific
                 initialization configurations. By default, it contains
                 ``rpc_timeout = timedelta(seconds=60)``,
                 ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
