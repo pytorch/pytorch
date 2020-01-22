@@ -136,15 +136,18 @@ struct Vec<scalar_t, 4> {
 };
 
 template <
-  int num_threads,        // number of threads in a block.
-  int thread_work_size    // number of elements each block needs to handle.
+  int num_threads_,        // number of threads in a block.
+  int thread_work_size_    // number of elements each block needs to handle.
 >
 struct policies {
 
-  static constexpr int block_work_size = thread_work_size * num_threads;
+  struct common {
+    static constexpr int num_threads = num_threads_;
+    static constexpr int thread_work_size = thread_work_size_;
+    static constexpr int block_work_size = thread_work_size_ * num_threads_;
+  };
 
-  struct checked_unroll {
-    static constexpr int loop_size = thread_work_size;
+  struct checked_unroll : public common {
 
     int remaining;
 
@@ -154,12 +157,12 @@ struct policies {
     __device__ inline void load(accessor_t to, scalar_t *from) {
       int thread_idx = threadIdx.x;
       #pragma unroll
-      for (int i = 0; i < loop_size; i++) {
+      for (int i = 0; i < thread_work_size_; i++) {
         if (thread_idx >= remaining) {
           return;
         }
         to(i) = from[thread_idx];
-        thread_idx += num_threads;
+        thread_idx += num_threads_;
       }
     }
 
@@ -167,12 +170,12 @@ struct policies {
     __device__ inline void store(scalar_t *to, accessor_t from) {
       int thread_idx = threadIdx.x;
       #pragma unroll
-      for (int i = 0; i < loop_size; i++) {
+      for (int i = 0; i < thread_work_size_; i++) {
         if (thread_idx >= remaining) {
           return;
         }
         to[thread_idx] = from(i);
-        thread_idx += num_threads;
+        thread_idx += num_threads_;
       }
     }
   };
@@ -181,11 +184,9 @@ struct policies {
   // has its job to do. So the reminders should be handled by the the caller
   // manually.
 
-  template <
-    int vec_size           // vector size, can be 1, 2, or 3.
-  >
-  struct vectorized {
-    static constexpr int loop_size = thread_work_size / vec_size;
+  template <int vec_size>  // vec_size: vector size, can be 1, 2, or 3.
+  struct vectorized : public common {
+    static constexpr int loop_size = thread_work_size_ / vec_size;
 
     template<typename accessor_t, typename scalar_t>
     __device__ inline void load(accessor_t to, scalar_t *from) {
@@ -194,7 +195,7 @@ struct policies {
       int thread_idx = threadIdx.x;
       #pragma unroll
       for (int i = 0; i < loop_size; i++) {
-        int index = thread_idx + i * num_threads;
+        int index = thread_idx + i * num_threads_;
         vec_t vector = from_[index];
         #pragma unroll
         for (int j = 0; j < vec_size; j++) {
@@ -210,7 +211,7 @@ struct policies {
       int thread_idx = threadIdx.x;
       #pragma unroll
       for (int i = 0; i < loop_size; i++) {
-        int index = thread_idx + i * num_threads;
+        int index = thread_idx + i * num_threads_;
         vec_t vector;
         for (int j = 0; j < vec_size; j++) {
           vector.set(j, from(vec_size * i + j));

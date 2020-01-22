@@ -52,7 +52,7 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
-  using vectorized = vectorized<scalar_t, 64, 256, vec_size>;
+  using vectorized = policies<64, 4>::vectorized<vec_size>;
   scalar_t buf[vectorized::thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   vectorized::load(accessor, src + 256 * blockIdx.x);

@@ -232,12 +232,11 @@ inline int can_vectorize_up_to(array_t pointers) {
 
 }  // namespace detail
 
-template<int num_threads, int thread_work_size, typename func_t, typename array_t, typename memory_access_policy_t>
-__device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_policy_t policy) {
+template<typename func_t, typename array_t, typename policy_t>
+__device__ void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using arg_t = detail::arg_type::type<func_t>;
@@ -249,8 +248,7 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   // compute base pointers for this block
-  constexpr int block_work_size = num_threads * thread_work_size;
-  int idx = block_work_size * blockIdx.x;
+  int idx = policy_t::block_work_size * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   arg_t *args_base[nargs];
   #pragma unroll
@@ -258,8 +256,8 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  return_t results[thread_work_size];
-  arg_t args[thread_work_size][nargs];
+  return_t results[policy_t::thread_work_size];
+  arg_t args[policy_t::thread_work_size][nargs];
 
   // load
   #pragma unroll
@@ -270,8 +268,8 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+  for (int i = 0; i < policy_t::thread_work_size; i++) {
+    results[i] = detail::invoke_with_array(f, args[i]);
   }
 
   // store
@@ -284,13 +282,12 @@ C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using return_t = typename function_traits<func_t>::result_type;
   using policies = memory::policies<num_threads, thread_work_size>;
-  constexpr int block_work_size = num_threads * thread_work_size;
-  int remaining = N - block_work_size * blockIdx.x;
+  int remaining = N - policies::common::block_work_size * blockIdx.x;
 
-  if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, typename policies::checked_unroll(remaining));
+  if (remaining < policies::common::block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
+    elementwise_kernel_helper(f, data, typename policies::checked_unroll(remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, typename policies::vectorized<vec_size>());
+    elementwise_kernel_helper(f, data, typename policies::vectorized<vec_size>());
   }
 }
 
