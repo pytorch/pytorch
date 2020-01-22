@@ -136,89 +136,89 @@ struct Vec<scalar_t, 4> {
 };
 
 template <
-  int num_threads,       // number of threads in a block.
-  int block_work_size    // number of elements each block needs to handle.
+  int num_threads,        // number of threads in a block.
+  int thread_work_size    // number of elements each block needs to handle.
 >
-struct checked_unroll {
+struct policies {
 
-  static constexpr int thread_work_size = block_work_size / num_threads;
-  static constexpr int loop_size = thread_work_size;
-  int remaining;
+  static constexpr int block_work_size = thread_work_size * num_threads;
 
-  __device__ checked_unroll(int remaining): remaining(remaining) {}
+  struct checked_unroll {
+    static constexpr int loop_size = thread_work_size;
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void load(accessor_t to, scalar_t *from) {
-    int thread_idx = threadIdx.x;
-    #pragma unroll
-    for (int i = 0; i < loop_size; i++) {
-      if (thread_idx >= remaining) {
-        return;
-      }
-      to(i) = from[thread_idx];
-      thread_idx += num_threads;
-    }
-  }
+    int remaining;
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void store(scalar_t *to, accessor_t from) {
-    int thread_idx = threadIdx.x;
-    #pragma unroll
-    for (int i = 0; i < loop_size; i++) {
-      if (thread_idx >= remaining) {
-        return;
-      }
-      to[thread_idx] = from(i);
-      thread_idx += num_threads;
-    }
-  }
-};
+    __device__ checked_unroll(int remaining): remaining(remaining) {}
 
-// Functions here does not do boundary check. It assumes the whole block
-// has its job to do. So the reminders should be handled by the the caller
-// manually.
-
-template <
-  int num_threads,       // number of threads in a block.
-  int block_work_size,   // number of elements each block needs to handle.
-  int vec_size           // vector size, can be 1, 2, or 3.
->
-struct vectorized {
-
-  static constexpr int thread_work_size = block_work_size / num_threads;
-  static constexpr int loop_size = thread_work_size / vec_size;
-
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void load(accessor_t to, scalar_t *from) {
-    using vec_t = Vec<scalar_t, vec_size>;
-    vec_t *from_ = reinterpret_cast<vec_t *>(from);
-    int thread_idx = threadIdx.x;
-    #pragma unroll
-    for (int i = 0; i < loop_size; i++) {
-      int index = thread_idx + i * num_threads;
-      vec_t vector = from_[index];
+    template<typename accessor_t, typename scalar_t>
+    __device__ inline void load(accessor_t to, scalar_t *from) {
+      int thread_idx = threadIdx.x;
       #pragma unroll
-      for (int j = 0; j < vec_size; j++) {
-        to(vec_size * i + j) = vector.get(j);
+      for (int i = 0; i < loop_size; i++) {
+        if (thread_idx >= remaining) {
+          return;
+        }
+        to(i) = from[thread_idx];
+        thread_idx += num_threads;
       }
     }
-  }
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void store(scalar_t *to, accessor_t from) {
-    using vec_t = Vec<scalar_t, vec_size>;
-    vec_t *to_ = reinterpret_cast<vec_t *>(to);
-    int thread_idx = threadIdx.x;
-    #pragma unroll
-    for (int i = 0; i < loop_size; i++) {
-      int index = thread_idx + i * num_threads;
-      vec_t vector;
-      for (int j = 0; j < vec_size; j++) {
-        vector.set(j, from(vec_size * i + j));
+    template<typename accessor_t, typename scalar_t>
+    __device__ inline void store(scalar_t *to, accessor_t from) {
+      int thread_idx = threadIdx.x;
+      #pragma unroll
+      for (int i = 0; i < loop_size; i++) {
+        if (thread_idx >= remaining) {
+          return;
+        }
+        to[thread_idx] = from(i);
+        thread_idx += num_threads;
       }
-      to_[index] = vector;
     }
-  }
+  };
+
+  // Functions here does not do boundary check. It assumes the whole block
+  // has its job to do. So the reminders should be handled by the the caller
+  // manually.
+
+  template <
+    int vec_size           // vector size, can be 1, 2, or 3.
+  >
+  struct vectorized {
+    static constexpr int loop_size = thread_work_size / vec_size;
+
+    template<typename accessor_t, typename scalar_t>
+    __device__ inline void load(accessor_t to, scalar_t *from) {
+      using vec_t = Vec<scalar_t, vec_size>;
+      vec_t *from_ = reinterpret_cast<vec_t *>(from);
+      int thread_idx = threadIdx.x;
+      #pragma unroll
+      for (int i = 0; i < loop_size; i++) {
+        int index = thread_idx + i * num_threads;
+        vec_t vector = from_[index];
+        #pragma unroll
+        for (int j = 0; j < vec_size; j++) {
+          to(vec_size * i + j) = vector.get(j);
+        }
+      }
+    }
+
+    template<typename accessor_t, typename scalar_t>
+    __device__ inline void store(scalar_t *to, accessor_t from) {
+      using vec_t = Vec<scalar_t, vec_size>;
+      vec_t *to_ = reinterpret_cast<vec_t *>(to);
+      int thread_idx = threadIdx.x;
+      #pragma unroll
+      for (int i = 0; i < loop_size; i++) {
+        int index = thread_idx + i * num_threads;
+        vec_t vector;
+        for (int j = 0; j < vec_size; j++) {
+          vector.set(j, from(vec_size * i + j));
+        }
+        to_[index] = vector;
+      }
+    }
+  };
 };
 
 template<typename scalar_t, bool>

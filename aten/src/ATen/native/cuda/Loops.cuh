@@ -233,7 +233,7 @@ inline int can_vectorize_up_to(array_t pointers) {
 }  // namespace detail
 
 template<int num_threads, int thread_work_size, typename func_t, typename array_t, typename memory_access_policy_t>
-__device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_policy_t memory_access_policy) {
+__device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_policy_t policy) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
@@ -266,7 +266,7 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
   #pragma unroll
   for (int i = 0; i < arity; i++) {
     auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
-    memory_access_policy.load(args_accessor, args_base[i]);
+    policy.load(args_accessor, args_base[i]);
   }
   // compute
   #pragma unroll
@@ -275,20 +275,21 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, memory_access_
   }
   // store
   auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-  memory_access_policy.template store(result_base, result_accessor);
+  policy.store(result_base, result_accessor);
 }
 
 template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using return_t = typename function_traits<func_t>::result_type;
+  using policies = memory::policies<num_threads, thread_work_size>;
   constexpr int block_work_size = num_threads * thread_work_size;
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, memory::checked_unroll<num_threads, block_work_size>(remaining));
+    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, typename policies::checked_unroll(remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, memory::vectorized<num_threads, block_work_size, vec_size>());
+    elementwise_kernel_helper<num_threads, thread_work_size>(f, data, typename policies::vectorized<vec_size>());
   }
 }
 
