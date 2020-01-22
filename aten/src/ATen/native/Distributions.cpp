@@ -116,6 +116,7 @@ DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
+DEFINE_DISPATCH(log_normal_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -184,6 +185,12 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+Tensor& log_normal_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_stub(iter.device_type(), iter, mean, std, gen);
+  return self;
+}
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
