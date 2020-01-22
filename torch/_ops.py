@@ -66,6 +66,7 @@ class _OpNamespace(types.ModuleType):
         op.__module__ = self.__module__ + "." + self.name
         return op
 
+
 class _Ops(types.ModuleType):
     __file__ = os.path.join(os.path.dirname(__file__), '_ops.py')
 
