@@ -83,6 +83,7 @@ if (ANDROID_ABI)
   import_static_lib(libtorch_cpu)
   import_static_lib(libc10)
   import_static_lib(libnnpack)
+  import_static_lib(libXNNPACK)
   import_static_lib(libpytorch_qnnpack)
   import_static_lib(libeigen_blas)
   import_static_lib(libcpuinfo)
@@ -98,6 +99,7 @@ if (ANDROID_ABI)
       -Wl,--no-whole-archive
       libc10
       libnnpack
+      libXNNPACK
       libpytorch_qnnpack
       libeigen_blas
       libcpuinfo
@@ -113,6 +115,7 @@ else()
       torch_cpu
       c10
       nnpack
+      XNNPACK
       pytorch_qnnpack
       cpuinfo
       clog

@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
@@ -487,37 +488,8 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 // on a different page out of the process's address space.
 // Here we define a custom allocator that allocates the extra storage required to keep
 // this behavior safe.  This same allocator can be used for FBGEMM as well.
-struct QAllocator final : at::Allocator {
-public:
-  virtual ~QAllocator() override = default;
 
-  virtual at::DataPtr allocate(size_t nbytes) const override {
-    Cast memory{c10::alloc_cpu(kGuard + nbytes)};
-    memory.as_byte_ptr += kGuard;
-    return {
-      memory.as_void_ptr,
-      memory.as_void_ptr,
-      &deleter,
-      at::Device(at::DeviceType::CPU)};
-  }
-
-  virtual at::DeleterFnPtr raw_deleter() const override {
-    return deleter;
-  }
-
-  static void deleter(void * const pointer) {
-    const Cast memory{pointer};
-    c10::free_cpu(memory.as_byte_ptr - kGuard);
-  }
-
- private:
-  static constexpr uint32_t kGuard = 8u;
-
-  union Cast final {
-    void * const as_void_ptr;
-    uint8_t * as_byte_ptr;
-  };
-};
+using QAllocator = native::GuardingAllocator<8u, 0u>;
 
 #endif
 
