@@ -340,32 +340,38 @@ class BuildExtension(build_ext, object):
                                              depends, extra_postargs)
             common_cflags = self.compiler._get_cc_args(pp_opts, debug, extra_preargs)
             extra_cc_cflags = self.compiler.compiler_so[1:]
+            with_cuda = any(map(_is_cuda_file, sources))
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
             # - a list of extra flags.
             if isinstance(extra_postargs, dict):
                 post_cflags = extra_postargs['cxx']
-                cuda_post_cflags = extra_postargs['nvcc']
             else:
-                post_cflags = extra_postargs
-                cuda_post_cflags = extra_postargs
-
+                post_cflags = list(extra_postargs)
             append_std14_if_no_std_present(post_cflags)
 
-            cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
-            append_std14_if_no_std_present(cuda_post_cflags)
+            cuda_post_cflags = None
+            cuda_cflags = None
+            if with_cuda:
+                cuda_cflags = common_cflags
+                if isinstance(extra_postargs, dict):
+                    cuda_post_cflags = extra_postargs['nvcc']
+                else:
+                    cuda_post_cflags = list(extra_postargs)
+                cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
+                append_std14_if_no_std_present(cuda_post_cflags)
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
                 objects=objects,
                 cflags=extra_cc_cflags + common_cflags,
                 post_cflags=post_cflags,
-                cuda_cflags=common_cflags,
+                cuda_cflags=cuda_cflags,
                 cuda_post_cflags=cuda_post_cflags,
                 build_directory=output_dir,
                 verbose=True,
-                with_cuda=any(map(_is_cuda_file, sources)))
+                with_cuda=with_cuda)
 
             # Return *all* object filenames, not just the ones we just built.
             return objects
