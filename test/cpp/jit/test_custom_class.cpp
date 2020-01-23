@@ -45,7 +45,7 @@ struct Stack : torch::jit::CustomClassHolder {
     return val;
   }
 
-  c10::intrusive_ptr<Stack> clone() {
+  c10::intrusive_ptr<Stack> clone() const {
     return c10::make_intrusive<Stack>(stack_);
   }
 
@@ -55,7 +55,7 @@ struct Stack : torch::jit::CustomClassHolder {
     }
   }
 
-  std::vector<std::string> __getstate__() {
+  std::vector<std::string> __getstate__() const {
     return stack_;
   }
 
