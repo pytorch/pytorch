@@ -4924,6 +4924,17 @@ def foo(x):
         ret = torch.jit.script(f)()
         self.assertEqual(ret[0], ret[1])
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_return_tuple(self):
+        def f():
+            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            return val.return_a_tuple()
+
+        scripted = torch.jit.script(f)
+        tup = scripted()
+        self.assertEqual(tup, (1337.0, 123))
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
