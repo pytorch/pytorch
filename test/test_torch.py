@@ -10052,8 +10052,8 @@ class TestTorchDeviceType(TestCase):
         def test_ops(op, string_of_function_name, expected_output):
             x = torch.rand(100, 100, device=device)
             out1 = op(x, 1)
-            res2 = torch.Tensor().to(device)
-            indices2 = torch.LongTensor().to(device)
+            res2 = torch.empty(0, device=device)
+            indices2 = torch.empty(0, dtype=torch.int64, device=device)
             op(x, 1, out=(res2, indices2))
             self.assertEqual(out1[0], res2)
             self.assertEqual(out1[1], indices2)
@@ -10070,8 +10070,8 @@ class TestTorchDeviceType(TestCase):
             # op shouldn't support values, indices with a dtype, device type or layout
             # different from that of input tensor
             t = torch.randn(10)
-            values = torch.ShortTensor()
-            indices = torch.LongTensor()
+            values = torch.empty(0, dtype=torch.int16)
+            indices = torch.empty(0, dtype=torch.int64)
             with self.assertRaisesRegex(
                     RuntimeError,
                     'expected scalar_type Float but found Short'):

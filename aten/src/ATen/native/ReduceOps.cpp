@@ -240,7 +240,7 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const T
     values.resize_(self.sizes());
     indices.resize_(self.sizes());
     if(self.dim() == 0) {
-      values.fill_(self.item());
+      values.fill_(self);
       indices.fill_(0);
     }
     else if(self.numel() != 0) {
@@ -258,14 +258,14 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const T
   }
   namedinference::propagate_names(values, self);
   namedinference::propagate_names(indices, self);
-  return std::tuple<Tensor &,Tensor &>{values, indices};
+  return std::forward_as_tuple(values, indices);
 }
 
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
   auto values = at::empty(self.sizes(), self.options());
   auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummax_out(values, indices, self, dim);
-  return std::tuple<Tensor &,Tensor &>{values, indices};
+  return std::make_tuple(values, indices);
 }
 
 std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
@@ -276,7 +276,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
     values.resize_(self.sizes());
     indices.resize_(self.sizes());
     if(self.dim() == 0) {
-      values.fill_(self.item());
+      values.fill_(self);
       indices.fill_(0);
     }
     else if(self.numel() != 0) {
@@ -294,14 +294,14 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
   }
   namedinference::propagate_names(values, self);
   namedinference::propagate_names(indices, self);
-  return std::tuple<Tensor &,Tensor &>{values, indices};
+  return std::forward_as_tuple(values, indices);
 }
 
 std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
   auto values = at::empty(self.sizes(), self.options());
   auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
   at::cummin_out(values, indices, self, dim);
-  return std::tuple<Tensor &,Tensor &>{values, indices};
+  return std::make_tuple(values, indices);
 }
 // ALL REDUCE #################################################################
 
