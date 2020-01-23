@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 
 #include <stdexcept>
@@ -17,7 +17,7 @@ namespace c10 {
  *
  * The reason we are sunsetting this enum class is because it doesn't allow for
  * open registration; e.g., if you want to add SparseXLA, you'd have to
- * edit this enum; you wouldn't be able to do it out of tree.  TensorTypeId is
+ * edit this enum; you wouldn't be able to do it out of tree.  DispatchKey is
  * the replacement for Backend which supports open registration.
  *
  * NB: The concept of 'Backend' here disagrees with the notion of backend
@@ -75,66 +75,66 @@ static inline Backend toDense(Backend b) {
   }
 }
 
-static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
-  if (t == TensorTypeId::CPUTensorId) {
+static inline Backend dispatchKeyToBackend(DispatchKey t) {
+  if (t == DispatchKey::CPUTensorId) {
     return Backend::CPU;
-  } else if (t == TensorTypeId::CUDATensorId) {
+  } else if (t == DispatchKey::CUDATensorId) {
     return Backend::CUDA;
-  } else if (t == TensorTypeId::HIPTensorId) {
+  } else if (t == DispatchKey::HIPTensorId) {
     return Backend::HIP;
-  } else if (t == TensorTypeId::MSNPUTensorId) {
+  } else if (t == DispatchKey::MSNPUTensorId) {
     return Backend::MSNPU;
-  } else if (t == TensorTypeId::XLATensorId) {
+  } else if (t == DispatchKey::XLATensorId) {
     return Backend::XLA;
-  } else if (t == TensorTypeId::SparseCPUTensorId) {
+  } else if (t == DispatchKey::SparseCPUTensorId) {
     return Backend::SparseCPU;
-  } else if (t == TensorTypeId::SparseCUDATensorId) {
+  } else if (t == DispatchKey::SparseCUDATensorId) {
     return Backend::SparseCUDA;
-  } else if (t == TensorTypeId::SparseHIPTensorId) {
+  } else if (t == DispatchKey::SparseHIPTensorId) {
     return Backend::SparseHIP;
-  } else if (t == TensorTypeId::MkldnnCPUTensorId) {
+  } else if (t == DispatchKey::MkldnnCPUTensorId) {
     return Backend::MkldnnCPU;
-  } else if (t == TensorTypeId::QuantizedCPUTensorId) {
+  } else if (t == DispatchKey::QuantizedCPUTensorId) {
     return Backend::QuantizedCPU;
-  } else if (t == TensorTypeId::ComplexCPUTensorId) {
+  } else if (t == DispatchKey::ComplexCPUTensorId) {
     return Backend::ComplexCPU;
-  } else if (t == TensorTypeId::ComplexCUDATensorId) {
+  } else if (t == DispatchKey::ComplexCUDATensorId) {
     return Backend::ComplexCUDA;
-  } else if (t == TensorTypeId::UndefinedTensorId) {
+  } else if (t == DispatchKey::UndefinedTensorId) {
     return Backend::Undefined;
   } else {
     AT_ERROR("Unrecognized tensor type ID: ", t);
   }
 }
 
-static inline TensorTypeId backendToTensorTypeId(Backend b) {
+static inline DispatchKey backendToDispatchKey(Backend b) {
   switch (b) {
     case Backend::CPU:
-      return TensorTypeId::CPUTensorId;
+      return DispatchKey::CPUTensorId;
     case Backend::CUDA:
-      return TensorTypeId::CUDATensorId;
+      return DispatchKey::CUDATensorId;
     case Backend::HIP:
-      return TensorTypeId::HIPTensorId;
+      return DispatchKey::HIPTensorId;
     case Backend::MSNPU:
-      return TensorTypeId::MSNPUTensorId;
+      return DispatchKey::MSNPUTensorId;
     case Backend::XLA:
-      return TensorTypeId::XLATensorId;
+      return DispatchKey::XLATensorId;
     case Backend::SparseCPU:
-      return TensorTypeId::SparseCPUTensorId;
+      return DispatchKey::SparseCPUTensorId;
     case Backend::SparseCUDA:
-      return TensorTypeId::SparseCUDATensorId;
+      return DispatchKey::SparseCUDATensorId;
     case Backend::SparseHIP:
-      return TensorTypeId::SparseHIPTensorId;
+      return DispatchKey::SparseHIPTensorId;
     case Backend::MkldnnCPU:
-      return TensorTypeId::MkldnnCPUTensorId;
+      return DispatchKey::MkldnnCPUTensorId;
     case Backend::QuantizedCPU:
-      return TensorTypeId::QuantizedCPUTensorId;
+      return DispatchKey::QuantizedCPUTensorId;
     case Backend::ComplexCPU:
-      return TensorTypeId::ComplexCPUTensorId;
+      return DispatchKey::ComplexCPUTensorId;
     case Backend::ComplexCUDA:
-      return TensorTypeId::ComplexCUDATensorId;
+      return DispatchKey::ComplexCUDATensorId;
     case Backend::Undefined:
-      return TensorTypeId::UndefinedTensorId;
+      return DispatchKey::UndefinedTensorId;
     default:
       throw std::runtime_error("Unknown backend");
   }

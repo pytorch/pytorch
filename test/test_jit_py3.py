@@ -1,12 +1,12 @@
-from common_utils import run_tests
-from jit_utils import JitTestCase
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional, Any, Dict
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
-import jit_utils
+import torch.testing._internal.jit_utils
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -32,6 +32,25 @@ class TestScriptPy3(JitTestCase):
 
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    def test_kwarg_support(self):
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
+            class M(torch.nn.Module):
+                def forward(self, *, n_tokens: int, device_name: str = 2):
+                    pass
+            torch.jit.script(M())
+
+        class M(torch.nn.Module):
+            def forward(self, *, n_tokens: int, device_name: str):
+                return n_tokens, device_name
+
+        sm = torch.jit.script(M())
+
+        with self.assertRaisesRegex(RuntimeError, "missing value for argument 'n_tokens'"):
+            sm()
+
+        input = (3, 'hello')
+        self.assertEqual(sm(*input), input)
 
     def test_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -235,7 +254,7 @@ class TestScriptPy3(JitTestCase):
 
         mm = MyMod()
         mm.save('foo.zip')
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
         loaded = torch.jit.load('foo.zip')
 
         out = mm()

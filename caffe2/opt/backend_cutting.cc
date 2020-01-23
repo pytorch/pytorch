@@ -389,7 +389,7 @@ caffe2::NetDef OptimizeForBackend(
     }
   }
 
-  // Find unsupported and supported groups of nodes alernatively
+  // Find unsupported and supported groups of nodes alternatively
   context.frontier.clear();
   context.current_group.clear();
   context.find_supported = false;

@@ -140,14 +140,8 @@ jobs:
         path: test-reports
 
   pytorch_windows_build:
+    << *pytorch_windows_params
     executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      VC_VERSION: "14.11"
-      USE_CUDA: "1"
-      TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
       - run:
@@ -179,15 +173,7 @@ jobs:
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
     executor: windows-with-nvidia-gpu
-    parameters:
-      test_name:
-        type: string
-        default: ""
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      JOB_BASE_NAME: <<parameters.test_name>>
+    << *pytorch_windows_params
     steps:
       - checkout
       - run:

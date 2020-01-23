@@ -633,7 +633,7 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_outputs.isNone()) {
-             for (const IValue& v : grad_outputs.toGenericListRef()) {
+             for (const IValue& v : grad_outputs.toListRef()) {
                gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
              }
            }
@@ -670,7 +670,7 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> gradients;
 
            if (!grad_tensors.isNone()) {
-             for (const IValue& v : grad_tensors.toGenericListRef()) {
+             for (const IValue& v : grad_tensors.toListRef()) {
                gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
              }
            }
@@ -757,10 +757,10 @@ RegisterOperators reg(
              size.reserve(8);
              for (size_t i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntListRef());
+                   size, peek(stack, i, num_inputs).toIntVector());
              }
              drop(stack, num_inputs);
-             push(stack, c10::impl::toList(std::move(size)));
+             push(stack, IValue(std::move(size)));
              return 0;
            };
          },
@@ -904,7 +904,7 @@ RegisterOperators reg(
                    break;
                  }
                } else if (v.isTensorList()) {
-                 for (const at::Tensor& t : v.toTensorListRef()) {
+                 for (const at::Tensor& t : v.toTensorVector()) {
                    if (t.defined()) {
                      result = true;
                    }
@@ -953,7 +953,7 @@ RegisterOperators reg(
            } else {
              push(
                  stack,
-                 at::sum_to(self.toTensor(), size.toIntListRef()));
+                 at::sum_to(self.toTensor(), size.toIntVector()));
            }
            return 0;
          },
@@ -963,8 +963,9 @@ RegisterOperators reg(
          [](Stack& stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
-           auto s = self_size.toIntListRef();
-           if (s.equals(other_size.toIntListRef())) {
+           auto s = self_size.toIntVector();
+           auto o = other_size.toIntVector();
+           if (s == o) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -1120,7 +1121,7 @@ RegisterOperators reg(
              };
            } else {
              return [=](Stack& stack) {
-               auto list = pop(stack).toGenericList();
+               auto list = pop(stack).toList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
@@ -2060,13 +2061,14 @@ int listCopyAndSort(Stack& stack) {
 template <>
 int listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
+  auto list_copied = list.copy();
   std::sort(
-      list.begin(),
-      list.end(),
+      list_copied.begin(),
+      list_copied.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
         return a.lt(b).is_nonzero();
       });
-  push(stack, list);
+  push(stack, list_copied);
   return 0;
 }
 
@@ -2301,7 +2303,7 @@ Operation dictConstructFromList(const Node* node) {
       static_cast<const DictType*>(output_type.get())->getValueType();
   return [key_type, value_type](Stack& stack) {
     auto input_list = pop(stack);
-    auto list_ref = input_list.toGenericListRef();
+    auto list_ref = input_list.toListRef();
     auto dict = c10::impl::GenericDict(key_type, value_type);
     dict.reserve(list_ref.size());
     for (const auto& input : list_ref) {
@@ -3090,12 +3092,12 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::setdefault(Dict(" key_type ", t)(a!) self, " key_type        \
-          " key, t default_value) -> t(*)",                                   \
+          "(b -> *) key, t(c -> *) default_value) -> t(*)",                   \
           dictSetDefault,                                                     \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::Delete(Dict(" key_type ", t)(a!) self, " key_type            \
-          " key) -> ()",                                                    \
+          " key) -> ()",                                                      \
           dictDelete,                                                         \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -3138,7 +3140,7 @@ RegisterOperators reg2({
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
-          " idx, t(b -> *) v) -> ()",                                         \
+          "(b -> *) idx, t(c -> *) v) -> ()",                                 \
           dictSetItem,                                                        \
           aliasAnalysisFromSchema()),                                         \
       Operator(                                                               \
@@ -3267,7 +3269,7 @@ Operation sort_op(
     bool copy_return_list) {
   return [lt_func, has_reverse_arg, copy_return_list](Stack& stack) {
     bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
-    auto g_list = pop(stack).toGenericList();
+    auto g_list = pop(stack).toList();
     if (copy_return_list) {
       g_list = g_list.copy();
     }
@@ -3334,14 +3336,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntListRef().vec();
+      return size.toIntVector();
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = scale_factors.toDoubleListRef().vec();
+    scale_repeated = scale_factors.toDoubleVector();
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
@@ -3524,9 +3526,9 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
   } else if (int_ivalue.isIntList()) {
-    auto int_list = int_ivalue.toIntListRef();
+    auto int_list = int_ivalue.toIntVector();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
-    scale_factor_double = c10::impl::toList(double_vec);
+    scale_factor_double = double_vec;
   } else if (int_ivalue.isNone()) {
     return IValue();
   } else {
@@ -3635,7 +3637,7 @@ at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
 at::Tensor cat(const c10::List<at::Tensor>& tensors) {
-  return at::cat(c10::impl::toVector(tensors));
+  return at::cat(tensors.vec());
 }
 
 std::string get_first(const c10::List<c10::List<std::string>>& strings) {
