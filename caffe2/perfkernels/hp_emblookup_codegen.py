@@ -460,8 +460,6 @@ for o in options:
     args.append("    " + OutType + "* out) {")
     code += args
 
-    # code.append("  std::cout << \"" + fn_base + "\" << std::endl;")
-
     code.append("  const " + IndexType + " prefdist_T0 = 16;")
     # block_size is the number of elements and fused_block_size is the size of
     # an entire row, including scale and bias.
