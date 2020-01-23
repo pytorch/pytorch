@@ -90,9 +90,11 @@ static auto testStack =
             "top",
             [](const c10::intrusive_ptr<Stack<std::string>>& self)
                 -> std::string { return self->stack_.back(); });
-// The following will fail with a static assert telling you you have to
-// take an intrusive_ptr<Stack> as the first argument.
-// .def("foo", [](int64_t a) -> int64_t{ return 3;});
+// clang-format off
+        // The following will fail with a static assert telling you you have to
+        // take an intrusive_ptr<Stack> as the first argument.
+        // .def("foo", [](int64_t a) -> int64_t{ return 3;});
+// clang-format on
 } // namespace
 
 } // namespace jit
