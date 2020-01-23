@@ -402,8 +402,8 @@ def remote(to, func, args=None, kwargs=None):
     if qualified_name is not None:
         return _invoke_remote_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        return _invoke_remote_torchscript(
-            info, torch._jit_internal._qualified_name(func), *args, **kwargs
+        return _remote_torchscript(
+            info, torch._jit_internal._qualified_name(func), args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
@@ -706,3 +706,60 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
     fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
     return fut
+
+
+@_require_initialized
+def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
+    r"""
+    Make a remote call to run ``func`` on worker ``to`` and return an
+    :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+    Worker ``to`` will be the owner of the returned
+    :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
+    a user. The owner manages the global reference count of its
+    :class:`~torch.distributed.rpc.RRef`, and the owner
+    :class:`~torch.distributed.rpc.RRef` is only destructed when globally there
+    are no living references to it.
+
+    Arguments:
+        to (str or WorkerInfo): id or name of the destination worker.
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        A user :class:`~torch.distributed.rpc.RRef` instance to the result
+        value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
+        to retrieve the result value locally.
+
+    Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
+
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> rref = rpc._remote_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> rref.to_here()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+    """
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+    return _invoke_remote_torchscript(
+        to, qualified_name, *args, **kwargs
+    )

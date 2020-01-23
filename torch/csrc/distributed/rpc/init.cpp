@@ -343,7 +343,7 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto fut = rpcTorchscriptCall(dst, name, stack);
+        auto fut = rpcTorchscript(dst, name, stack);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -372,7 +372,8 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        return remoteTorchscript(dst, name, stack);
+        auto userRRefPtr = remoteTorchscript(dst, name, stack);
+        return PyRRef(userRRefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
 

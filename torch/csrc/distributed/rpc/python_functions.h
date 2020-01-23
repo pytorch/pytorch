@@ -41,10 +41,6 @@ PyRRef pyRemotePythonUdf(
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
-void remoteCallCallback(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr);
-
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

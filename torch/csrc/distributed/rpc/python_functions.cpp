@@ -20,15 +20,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-void remoteCallCallback(
-    const rpc::Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  auto& ctx = RRefContext::getInstance();
-  ctx.delPendingUser(rr->forkId());
-}
-
 namespace {
 
 std::shared_ptr<Operator> matchBuiltinOp(
@@ -174,7 +165,7 @@ PyRRef pyRemoteBuiltin(
       agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
-  fm->addCallback(remoteCallCallback);
+  fm->addCallback(callback::confirmPendingUser);
   return PyRRef(userRRef);
 }
 
@@ -215,7 +206,7 @@ PyRRef pyRemotePythonUdf(
         userRRef->forkId().toIValue(),
         rf);
 
-    fm->addCallback(remoteCallCallback);
+    fm->addCallback(callback::confirmPendingUser);
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef<py::object>();
