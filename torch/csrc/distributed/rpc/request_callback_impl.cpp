@@ -14,8 +14,8 @@
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
@@ -240,10 +240,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       execFuture->addCallback(
           [responseFuture, messageId](
               const Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            Message m = std::move(PropagateGradientsResp()).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(std::move(m));
+              const c10::optional<utils::FutureError>& error) {
+            if (!error) {
+              Message m = std::move(PropagateGradientsResp()).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(error->what());
+            }
           });
       return responseFuture;
     };

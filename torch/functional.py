@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from torch._six import inf
 from itertools import product
 
 from ._overrides import torch_function_dispatch
@@ -12,7 +11,6 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
-    'isinf',
     'lu',
     'lu_unpack',
     'norm',
@@ -256,32 +254,6 @@ Examples::
         # the old interface of passing the operands as one list argument
         operands = operands[0]
     return torch._C._VariableFunctions.einsum(equation, operands)
-
-
-def _isinf_dispatcher(tensor):
-    return (tensor,)
-
-
-@torch_function_dispatch(_isinf_dispatcher)
-def isinf(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
-
-    Arguments:
-        tensor (Tensor): A tensor to check
-
-    Returns:
-        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
-
-    Example::
-
-        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([False,  True,  False,  True,  False])
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
-    if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-        return torch.zeros_like(tensor, dtype=torch.bool, memory_format=torch.legacy_contiguous_format)
-    return tensor.abs() == inf
 
 
 def _meshgrid_dispatcher(*tensors, **kwargs):
@@ -600,9 +572,9 @@ def tensordot(a, b, dims=2):
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
-    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
-    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
-    it computes
+    When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
+    the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
+    respectively, :func:`~torch.tensordot` computes
 
     .. math::
         r_{i_0,...,i_{m-d}, i_d,...,i_n}
@@ -610,7 +582,7 @@ def tensordot(a, b, dims=2):
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
-    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
+    in these dimensions must match, but :func:`~torch.tensordot` will deal with broadcasted
     dimensions.
 
     Examples::
@@ -638,6 +610,8 @@ def tensordot(a, b, dims=2):
     else:
         if isinstance(dims, torch.Tensor):
             dims = dims.item()
+        if dims < 0:
+            raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
     return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
