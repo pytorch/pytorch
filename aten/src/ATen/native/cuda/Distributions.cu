@@ -453,7 +453,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
    });
 }
 
-void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
+void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
@@ -669,35 +669,6 @@ Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   return self;
 }
 
-Tensor& random_cuda_(Tensor& self, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  uint64_t range;
-  auto iter_scalar_type = iter.dtype();
-  if (isFloatingType(iter_scalar_type)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter_scalar_type, "random_cuda_range_calc", [&] {
-      range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_cuda_range_calc", [&] {
-      range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
-    });
-  }
-  random_kernel_cuda(iter, range, 0, gen);
-  return self;
-}
-
-Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
-  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
-  auto iter = TensorIterator::nullary_op(self);
-  uint64_t range = to - from;
-  random_kernel_cuda(iter, range, from, gen);
-  return self;
-}
-
-Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
-  return clamped_random_cuda_(self, 0, to, gen);
-}
-
 Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::nullary_op(self);
@@ -768,5 +739,6 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel_cuda);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(random_stub, &random_kernel);
 
 }} // namespace at::native

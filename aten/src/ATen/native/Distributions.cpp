@@ -117,6 +117,7 @@ DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(random_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -203,6 +204,38 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   geometric_stub(iter.device_type(), iter, p, gen);
   return self;
+}
+
+Tensor& random_(Tensor& self, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  uint64_t range;
+  auto iter_scalar_type = iter.dtype();
+  if (isFloatingType(iter_scalar_type)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter_scalar_type, "random_cuda_range_calc", [&] {
+      range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+    });
+  } else if (iter.dtype() == ScalarType::Bool) {
+    range = 2;
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_cuda_range_calc", [&] {
+      range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
+    });
+  }
+  random_stub(iter.device_type(), iter, range, 0, gen);
+  return self;
+}
+
+Tensor& random_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
+  TORCH_CHECK(self.scalar_type() != ScalarType::Bool, "random_ can not accept 'from' and 'to' on boolean tensors");
+  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
+  auto iter = TensorIterator::nullary_op(self);
+  uint64_t range = to - from;
+  random_stub(iter.device_type(), iter, range, from, gen);
+  return self;
+}
+
+Tensor& random_(Tensor& self, int64_t to, Generator* gen) {
+  return random_(self, 0, to, gen);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {

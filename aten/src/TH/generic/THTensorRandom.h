@@ -5,10 +5,6 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 
-TH_API void THTensor_(random)(THTensor *self, at::Generator *_generator);
-TH_API void THTensor_(clampedRandom)(THTensor *self, int64_t min, int64_t max, at::Generator *_generator);
-TH_API void THTensor_(cappedRandom)(THTensor *self, int64_t max, at::Generator *_generator);
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_generator);
 TH_API void THTensor_(normal)(THTensor *self, double mean, double stdv, at::Generator *_generator);
