@@ -203,8 +203,10 @@ struct policies {
   // has its job to do. So the reminders should be handled by the the caller
   // manually.
 
-  template <int vec_size>  // vec_size: number of scalars, can be 1, 2, or 3.
+  template <int vec_size>  // vec_size: number of scalars, can be 1, 2, or 4.
   struct vectorized : public common {
+
+    static_assert(thread_work_size_ % vec_size == 0, "The workload per thread must be a multiple of vec_size");
     static constexpr int loop_size = thread_work_size_ / vec_size;
 
     template<typename accessor_t, typename scalar_t>
@@ -242,17 +244,15 @@ struct policies {
 };
 
 template<typename scalar_t>
-inline int can_vectorize_up_to(char *pointer) {
+constexpr inline int can_vectorize_up_to(char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
-  int vec1_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type1>::value;
-  int vec2_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type2>::value;
-  int vec4_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type4>::value;
+  constexpr int vec2_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type2>::value;
+  constexpr int vec4_alignment = std::alignment_of<typename size_to_backing_type<sizeof(scalar_t)>::type4>::value;
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
-  TORCH_INTERNAL_ASSERT(address % vec1_alignment == 0, "unaligned pointer");
   return 1;
 }
 
