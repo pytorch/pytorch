@@ -33,6 +33,8 @@ template <class Sig>
 struct args;
 template <class R, class CurClass, class... Args>
 struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
+template <class R, class CurClass, class... Args>
+struct args<R (CurClass::*)(Args...) const> : types<R, Args...> {};
 template <class Sig>
 using args_t = typename args<Sig>::type;
 } // namespace detail
