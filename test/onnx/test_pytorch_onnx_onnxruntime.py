@@ -314,6 +314,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_mask(self):
         self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.uint8)])
         self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.bool)])
