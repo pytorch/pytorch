@@ -28,7 +28,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
   }
 
-  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
+  if (n_dims != 1 && n_dims != 2) {
+    THError("input tensor should be 1D or 2D");
+  }
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, input, 0);
   int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
@@ -44,6 +46,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   if (reduction == at::Reduction::None && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
+    if (batch_size == 0) {
+      // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
+      return;
+    }
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
     }
@@ -59,7 +65,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         ignore_index);
 
     THCudaCheck(cudaGetLastError());
-
     if (weights) {
       THCTensor_(free)(state, weights);
     }
@@ -148,7 +153,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   }
 
-  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
+  if (n_dims != 1 && n_dims != 2) {
+    THError("input tensor should be 1D or 2D");
+  }
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
   int64_t num_targets = THCudaLongTensor_sizeLegacyNoScalars(state, target, 0);
@@ -162,6 +169,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   if (reduction == at::Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
+    if (batch_size == 0) {
+      // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
+      return;
+    }
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
     }
