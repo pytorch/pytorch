@@ -33,6 +33,9 @@ from .utils import YamlLoader, split_name_params
 # A map: function name => two options:
 #      1. name of the argument that all outputs are view of
 #      2. map: output idx => name of the argument that this result is view of
+# If you update the list below, you MUST also update the public list of view ops accordingly
+# in https://github.com/pytorch/pytorch/blob/master/docs/source/tensors.rst#L107. Note not all
+# ATen functions are exposed to public, e.g alias & sparse_coo_tensor_with_dims_and_tensors.
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
