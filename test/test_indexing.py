@@ -1,5 +1,5 @@
-from common_utils import TestCase, run_tests
-from common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA
 import torch
 from torch import tensor
 import unittest
