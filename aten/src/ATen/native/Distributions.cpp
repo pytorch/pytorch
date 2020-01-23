@@ -226,7 +226,6 @@ Tensor& random_(Tensor& self, Generator* gen) {
 }
 
 Tensor& random_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Bool, "random_ can not accept 'from' and 'to' on boolean tensors");
   TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
   auto iter = TensorIterator::nullary_op(self);
   uint64_t range = to - from;
