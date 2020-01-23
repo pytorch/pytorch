@@ -1519,6 +1519,9 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
+                # to make sure new bias is not zero
+                self.bn.eps = 0.0027
+                self.bn.bias = torch.nn.Parameter(torch.rand([20]))
 
             def forward(self, x):
                 x = self.conv(x)
