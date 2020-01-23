@@ -14,15 +14,15 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
+from torch.testing._internal.common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -334,7 +334,7 @@ class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
         import subprocess
-        from common_utils import PY3
+        from torch.testing._internal.common_utils import PY3
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
