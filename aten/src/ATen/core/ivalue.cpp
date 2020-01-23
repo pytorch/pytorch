@@ -270,6 +270,9 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 }
 
 void ivalue::Object::resizeObject(size_t slot) {
+  if (slot >= type()->numAttributes()) {
+    std::cout << slot << " < " << type()->numAttributes() << std::endl;
+  }
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
 }
