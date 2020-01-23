@@ -155,12 +155,18 @@ void RRefContext::delUser(
 }
 
 void RRefContext::delAllUsers() {
-  LOG(ERROR) << getWorkerName() << ": Entering delAllUsers()";
+  LOG(ERROR) << getWorkerName() << ": Entering delAllUsers(). "
+             << confirmedUsers_.size();
+  auto count = 0;
   for (const auto& user : confirmedUsers_) {
+    ++count;
     auto rref_ptr = user.second.lock();
     if (rref_ptr == nullptr) {
+      LOG(ERROR) << getWorkerName() << ":  No. " << count << " deleted by GC.";
       continue;
     }
+    LOG(ERROR) << getWorkerName() << ":  No. " << count
+               << " deleted proactively. ForkID: " << rref_ptr->forkId();
     rref_ptr->tryDel();
   }
   LOG(ERROR) << getWorkerName() << ": Exiting delAllUsers()";
