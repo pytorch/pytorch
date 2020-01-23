@@ -222,18 +222,23 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
       float max,
       int32_t qmin,
       int32_t qmax) {
-    double scale =
-        (std::max(max, 0.f) - std::min(min, 0.f)) / ((double)qmax - qmin);
-    if (scale == 0) {
-      scale = 0.1;
-    }
-    // If scale is 0, we arbitrary adjust the scale to 0.1
-    assert(scale > 0);
+    TORCH_CHECK(min <= max);
+    TORCH_CHECK(qmin < qmax);
+
     // We extend the [min, max] interval to ensure that it contains 0.
     // Otherwise, we would not meet the requirement that 0 be an exactly
     // representable value.
     min = std::min(min, 0.f);
     max = std::max(max, 0.f);
+
+    double scale = (max - min) / ((double)qmax - qmin);
+
+    // If scale is 0, we arbitrary adjust the scale to 0.1
+    if (scale == 0) {
+      scale = 0.1;
+    }
+
+    TORCH_CHECK(scale > 0);
 
     double zero_point_from_min = qmin - min / scale;
     double zero_point_from_max = qmax - max / scale;
@@ -263,7 +268,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         input.dim() >= 2,
         "The dimension of input tensor should be larger than or equal to 2");
     auto input_contig = input.contiguous();
-    const auto* input_ptr = input_contig.data_ptr<float>();
     // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
     // matrices, respectively.
 
@@ -285,23 +289,14 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 
     // Calculate statistics for quantization of input Tensor
     // TODO: optimized kernel
-    float x_min = std::numeric_limits<float>::infinity(),
-          x_max = -std::numeric_limits<float>::infinity();
-    auto input_numel = input_contig.numel();
-    for (int64_t i = 0; i < input_numel; ++i) {
-      auto curr = input_ptr[i];
-      if (curr < x_min) {
-        x_min = curr;
-      }
-      if (curr > x_max) {
-        x_max = curr;
-      }
-    }
+    float x_min = input_contig.min().item<float>();
+    float x_max = input_contig.max().item<float>();
+
     auto q_params = chooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
-        0,
-        255);
+        /*qmin=*/0,
+        /*qmax=*/255);
     if (!pack_ptr.input_scale.has_value()) {
       // Get the original weight and adjust it to uint8 from int8
       auto weight_contig = pack_ptr.orig_weight;
