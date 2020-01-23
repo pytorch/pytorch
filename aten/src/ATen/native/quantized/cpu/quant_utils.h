@@ -62,9 +62,9 @@ inline TensorQuantizationParams ChooseQuantizationParams(
 
   if (force_scale_power_of_two) {
     if (scale < 1) {
-      scale = 1.0 / (1 << static_cast<int>(floor(log2(1.0 / scale))));
+      scale = 1.0 / (1 << static_cast<int>(floor(log(1.0 / scale) / log(2))));
     } else {
-      scale = 1 << static_cast<int>(ceil(log2(scale)));
+      scale = 1 << static_cast<int>(ceil(log(scale) / log(2)));
     }
   }
 
