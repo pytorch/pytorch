@@ -1,5 +1,6 @@
 import os
 import sys
+import io
 
 import torch
 
@@ -436,3 +437,41 @@ class TestTypeSharing(JitTestCase):
         a = M((torch.ones(1), ))
         b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
+
+    def test_loaded_modules_work(self):
+        class AB(torch.nn.Module):
+            def __init__(self):
+                super(AB, self).__init__()
+                self.a = 1
+                self.b = 1
+
+            def forward(self):
+                return self.a + self.b
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+                self.a = 1
+
+            def forward(self):
+                return self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, sub):
+                super(Wrapper, self).__init__()
+                self.sub = sub
+
+            def forward(self):
+                return self.sub()
+
+        def package(x):
+            buffer = io.BytesIO()
+            torch.jit.save(torch.jit.script(x), buffer)
+            buffer.seek(0)
+            return torch.jit.script(Wrapper(torch.jit.load(buffer)))
+
+
+        a = package(AB())
+        a()
+        b = package(A())
+        b()
