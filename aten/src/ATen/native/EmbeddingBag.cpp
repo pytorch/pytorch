@@ -52,10 +52,10 @@ void index_select_add(const Tensor &select_indices,
                              const Tensor& /*offsets*/,
                              bool /*include_last_offset*/) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
-  auto add_indices_data = add_indices.data_ptr<int64_t>();
-  auto select_indices_data = select_indices.data_ptr<int64_t>();
-  auto src_data = src.data_ptr<T>();
-  auto output_data = output.data_ptr<T>();
+  auto* add_indices_data = add_indices.data_ptr<int64_t>();
+  auto* select_indices_data = select_indices.data_ptr<int64_t>();
+  auto* src_data = src.data_ptr<T>();
+  auto* output_data = output.data_ptr<T>();
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
   auto src_stride0 = src.stride(0);
@@ -78,13 +78,13 @@ void index_select_add<float>(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset) {
   int64_t ddim = src.size(1);
-  auto src_data = src.data_ptr<float>();
-  auto select_indices_data = select_indices.data_ptr<int64_t>();
-  auto output_data = output.data_ptr<float>();
+  auto* src_data = src.data_ptr<float>();
+  auto* select_indices_data = select_indices.data_ptr<int64_t>();
+  auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
     int64_t output_size = offsets.numel() - 1;
-    auto offsets_data = offsets.data_ptr<int64_t>();
+    auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -117,7 +117,7 @@ void index_select_add<float>(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto add_indices_data = add_indices.data_ptr<int64_t>();
+    auto* add_indices_data = add_indices.data_ptr<int64_t>();
     auto src_stride0 = src.stride(0);
     auto src_stride1 = src.stride(1);
     auto output_stride0 = output.stride(0);
@@ -148,10 +148,10 @@ static void index_select_scale_add(const Tensor &select_indices,
                                    const Tensor& /*offsets*/,
                                    bool /*include_last_offset*/) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
-  auto add_indices_data = add_indices.data_ptr<int64_t>();
-  auto select_indices_data = select_indices.data_ptr<int64_t>();
-  auto src_data = src.data_ptr<T>();
-  auto output_data = output.data_ptr<T>();
+  auto* add_indices_data = add_indices.data_ptr<int64_t>();
+  auto* select_indices_data = select_indices.data_ptr<int64_t>();
+  auto* src_data = src.data_ptr<T>();
+  auto* output_data = output.data_ptr<T>();
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
   auto src_stride0 = src.stride(0);
@@ -182,13 +182,13 @@ void index_select_scale_add<float>(const Tensor &select_indices,
                                           bool include_last_offset) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
-  auto select_indices_data = select_indices.data_ptr<int64_t>();
-  auto src_data = src.data_ptr<float>();
-  auto output_data = output.data_ptr<float>();
+  auto* select_indices_data = select_indices.data_ptr<int64_t>();
+  auto* src_data = src.data_ptr<float>();
+  auto* output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
     int64_t output_size = offsets.numel() - 1;
-    auto offsets_data = offsets.data_ptr<int64_t>();
+    auto* offsets_data = offsets.data_ptr<int64_t>();
     std::vector<int64_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -579,8 +579,8 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     per_sample_weights_stride = per_sample_weights->stride(0);
   }
 
-  auto indices_data = indices.data_ptr<int64_t>();
-  auto offsets_data = offsets_.data_ptr<int64_t>();
+  auto* indices_data = indices.data_ptr<int64_t>();
+  auto* offsets_data = offsets_.data_ptr<int64_t>();
   auto offset2bag_data = offset2bag.data_ptr<int64_t>();
   int64_t numel = indices.numel();
 
@@ -703,7 +703,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     offset2bag_ = offset2bag;
   }
 
-  auto grad_data = grad.data_ptr<scalar_t>();
+  auto* grad_data = grad.data_ptr<scalar_t>();
   auto grad_stride0 = grad.stride(0);
   auto grad_stride1 = grad.stride(1);
 
