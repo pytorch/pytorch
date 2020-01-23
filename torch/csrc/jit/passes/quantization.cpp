@@ -189,6 +189,7 @@ class ModuleCloneHelper {
   /** Clone according to module qconfig map, this is for handling the case
    *  where we have two module instances sharing the same ClassType
    *  but configured with different QConfig
+   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/script/module.cpp
    */
   script::Module clone(
       const script::Module& module,
@@ -340,16 +341,6 @@ class ModuleCloneHelper {
       const Function& method,
       const ModuleQConfigMap& module_qconfig_map,
       const std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
-    // type remapping - when we copy method implementations from one module
-    // singleton to another, we need to update the types of the self arguments
-    // to match the new module.
-    // XXX - this only handles modules that occur as variables, not modules
-    // that appear in aggregate types. Currently this works fine because
-    // we restrict how modules can be used during the lowering step. Eventually,
-    // we will need to decide what it means for us to 'copy' a module.
-    // For instance, we can copy just the state (parameters, attributes),
-    // but share the code. Or we can copy the code. If we choose to copy the
-    // code, what should we do about aggregate types that contain a module?
     auto type_remap_fn = [&](TypePtr type_ptr,
                              const c10::optional<QConfig>& qconfig) {
       if (type_remap.find(type_ptr) != type_remap.end()) {
