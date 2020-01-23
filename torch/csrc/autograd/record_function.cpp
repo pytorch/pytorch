@@ -189,14 +189,28 @@ void RecordFunction::before(Node* fn, int64_t sequence_nr) {
 }
 
 void RecordFunction::processCallbacks() {
+  auto nameStr = std::string(name_.str());
+
   parent_ = thread_local_func_;
   thread_local_func_ = this;
+  {
+    std::lock_guard<std::mutex> guard(original_mutex);
+    // remember thread_local_func
+    original_thread_local_func = &thread_local_func_;
+  }
+  std::cout << "processing call backs start for " << name_ << std::endl;
 
   for (size_t idx = 0; idx < manager().start_callbacks.size(); ++idx) {
     if (!manager().is_callback_sampled[idx] || run_sampled_) {
       manager().start_callbacks[idx](*this);
     }
   }
+
+  // hack for RPC
+  // if (nameStr.find("rpc_") != std::string::npos) {
+  //   std::cout << "RPC profiling thing" << std::endl;
+  //   thread_local_func_ = parent_;
+  // }
 }
 
 void RecordFunction::setThreadId() {
@@ -210,7 +224,7 @@ void RecordFunction::setThreadId() {
 RecordFunction::~RecordFunction() {
   try {
     end();
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
   }
 }
@@ -233,7 +247,19 @@ void RecordFunction::end() {
         ": must be top of stack. If you are calling RecordFunction::end in a"
         "separate thread, call RecordFunction::setThreadId() in the creating"
         "thread.");
-    thread_local_func_ = parent_;
+
+    // For nested RecordFunction scopes to work when calling
+    // RecordFunction::end() from a different thread, we access a pointer to the
+    // thread_local_func belonging to the thread that started this
+    // RecordFunction.
+    if (threadId_ != 0) {
+      {
+        std::lock_guard<std::mutex> fehrouhou(original_mutex);
+        *original_thread_local_func = parent_;
+      }
+    } else {
+      thread_local_func_ = parent_;
+    }
     initialized_ = false;
   }
 }

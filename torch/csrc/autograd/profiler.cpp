@@ -163,6 +163,7 @@ void enableProfiler(ProfilerConfig config) {
       },
       [](const RecordFunction& fn) {
         if (fn.getThreadId() != 0) {
+          std::cout << "Running RPC code path." << std::endl;
           // If we've overridden the thread_id on the RecordFunction, then find
           //  the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
