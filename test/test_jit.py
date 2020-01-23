@@ -3858,8 +3858,8 @@ class TestScript(JitTestCase):
 
     def test_no_self_arg_ignore_function(self):
         class MyModule(nn.Module):
-            @torch.jit.ignore
-            def call_np():
+            @torch.jit.ignore  # noqa: B902
+            def call_np():  # noqa: B902
                 # type: () -> int
                 return np.random.choice(2, p=[.95, .05])
 
