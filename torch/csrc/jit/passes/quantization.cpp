@@ -189,6 +189,7 @@ class ModuleCloneHelper {
   /** Clone according to module qconfig map, this is for handling the case
    *  where we have two module instances sharing the same ClassType
    *  but configured with different QConfig
+   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/script/module.cpp
    */
   script::Module clone(
       const script::Module& module,
@@ -340,16 +341,6 @@ class ModuleCloneHelper {
       const Function& method,
       const ModuleQConfigMap& module_qconfig_map,
       const std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap) {
-    // type remapping - when we copy method implementations from one module
-    // singleton to another, we need to update the types of the self arguments
-    // to match the new module.
-    // XXX - this only handles modules that occur as variables, not modules
-    // that appear in aggregate types. Currently this works fine because
-    // we restrict how modules can be used during the lowering step. Eventually,
-    // we will need to decide what it means for us to 'copy' a module.
-    // For instance, we can copy just the state (parameters, attributes),
-    // but share the code. Or we can copy the code. If we choose to copy the
-    // code, what should we do about aggregate types that contain a module?
     auto type_remap_fn = [&](TypePtr type_ptr,
                              const c10::optional<QConfig>& qconfig) {
       if (type_remap.find(type_ptr) != type_remap.end()) {
@@ -1458,7 +1449,6 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
       !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
       !hastensor(bn, "running_var") || !bn.hasattr("eps")) {
-    GRAPH_DEBUG("has eps:", bn.hasattr("eps"));
     return false;
   }
 
@@ -1508,92 +1498,97 @@ graph(%self, %x):
       worklist.push(submodule);
     }
 
-    // Process forward method of the current module
-    script::Method method = current.get_method("forward");
-    GRAPH_DUMP(
-        current.type()->name()->name() +
-            "::forward() before Conv2d-BatchNorm2d folding",
-        method.graph());
-    const auto& matches = findPatternMatches(pattern_graph, *method.graph());
+    // Process all method of the current module
+    for (auto& method : current.get_methods()) {
+      GRAPH_DUMP(
+          current.type()->name()->name() + "::" + method.name() +
+          "() before Conv2d-BatchNorm2d folding",
+          method.graph());
+      const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
-    GRAPH_DEBUG("match? ", matches.size());
-    Graph* g = method.graph().get();
-    bool is_folded_graph = folded_graph_.find(g) != folded_graph_.end();
-    folded_graph_.insert(g);;
-    for (const Match& match : matches) {
-      GRAPH_DEBUG("Checking next match...");
-      Node* matched_conv = match.nodes_map.at(pattern_conv);
-      Node* matched_bn = match.nodes_map.at(pattern_bn);
-      Node* matched_conv_submodule =
+      GRAPH_DEBUG("type name:", current.type()->name()->qualifiedName());
+      GRAPH_DEBUG("match? ", matches.size());
+      Graph* g = method.graph().get();
+      bool is_folded_graph = folded_graph_.find(g) != folded_graph_.end();
+      folded_graph_.insert(g);
+      for (const Match& match : matches) {
+        GRAPH_DEBUG("Checking next match...");
+        Node* matched_conv = match.nodes_map.at(pattern_conv);
+        Node* matched_bn = match.nodes_map.at(pattern_bn);
+        Node* matched_conv_submodule =
           match.values_map.at(pattern_conv_submodule)->node();
-      Node* matched_bn_submodule =
+        Node* matched_bn_submodule =
           match.values_map.at(pattern_bn_submodule)->node();
 
-      TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
-      TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
+        TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
+        TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
 
-      script::Module conv_submodule =
+        script::Module conv_submodule =
           current.attr(matched_conv_submodule->s(Symbol::attr("name")))
-              .toModule();
-      script::Module bn_submodule =
+          .toModule();
+        script::Module bn_submodule =
           current.attr(matched_bn_submodule->s(Symbol::attr("name")))
-              .toModule();
+          .toModule();
 
-      ConvBNParameters params;
-      if (!tryExtractingConvBNParameters(
-              conv_submodule, bn_submodule, params)) {
-        GRAPH_DEBUG(
-            "Conv and BN modules didn't have all required parameters or attributes...");
-        continue;
-      }
-      auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
+        ConvBNParameters params;
+        if (!tryExtractingConvBNParameters(
+                conv_submodule, bn_submodule, params)) {
+          GRAPH_DEBUG(
+              "Conv and BN modules didn't have all required parameters or attributes...");
+          continue;
+        }
+        auto new_w_b = computeUpdatedConvWeightAndBias(params);
+        conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
 
-      if (is_folded_graph) {
-        GRAPH_DEBUG("ConvBn in the graph is already folded, skipping modifications on"
-                    " graph and type");
-        continue;
-      }
-      // We are using a separate vector for saving Values we want to rewrite to
-      // make sure that the order in which we perform these transformations is
-      // deterministic. Iterating through keys of rewrite_map would result in
-      // non-determinism that might not manifest as a bug now, but can bite us
-      // later.
-      values_to_rewrite_.push_back(matched_bn->output());
-      rewrite_map_[matched_bn->output()] = matched_conv->output();
-      GRAPH_UPDATE(
-          "Rewriting %",
-          matched_bn->output()->debugName(),
-          " with %",
-          matched_conv->output()->debugName());
+        if (is_folded_graph) {
+          GRAPH_DEBUG("ConvBn in the graph is already folded, skipping modifications on"
+                      " graph and type");
+          continue;
+        }
+        // We are using a separate vector for saving Values we want to rewrite to
+        // make sure that the order in which we perform these transformations is
+        // deterministic. Iterating through keys of rewrite_map would result in
+        // non-determinism that might not manifest as a bug now, but can bite us
+        // later.
+        values_to_rewrite_.push_back(matched_bn->output());
+        rewrite_map_[matched_bn->output()] = matched_conv->output();
+        GRAPH_UPDATE(
+            "Rewriting %",
+            matched_bn->output()->debugName(),
+            " with %",
+            matched_conv->output()->debugName());
 
-      nodes_to_delete_.insert(matched_bn);
-      GRAPH_UPDATE("Deleting ", *matched_bn);
+        nodes_to_delete_.insert(matched_bn);
+        GRAPH_UPDATE("Deleting ", *matched_bn);
 
-      // If conv submodule has bias as attribute/constant
-      // we want to remove the constant
-      if (conv_submodule.hasattr("bias")) {
-        // conv module has an existing non-Tensor bias
-        if (conv_submodule.type()->hasConstant("bias")) {
-          if (conv_submodule.type()->getConstant("bias").isNone()) {
-            conv_submodule.type()->unsafeRemoveConstant("bias");
-            GRAPH_UPDATE("Removing bias None from conv module");
-          } else {
-            TORCH_CHECK(false, "We don't support folding Conv"
-                        " module with non-None bias constants");
+        // If conv submodule has bias as attribute/constant
+        // we want to remove the constant
+        if (conv_submodule.hasattr("bias")) {
+          // conv module has an existing non-Tensor bias
+          if (conv_submodule.type()->hasConstant("bias")) {
+            if (conv_submodule.type()->getConstant("bias").isNone()) {
+              conv_submodule.type()->unsafeRemoveConstant("bias");
+              GRAPH_UPDATE("Removing bias None from conv module");
+            } else {
+              TORCH_CHECK(false, "We don't support folding Conv"
+                          " module with non-None bias constants");
+            }
           }
         }
-      }
-
-    } // matches
+      } // matches
+    } // methods
   } // while
 }
 
 void FoldConvBatchNorm2dHelper::transform() {
-  for (auto item : conv_module_and_params_) {
+  for (const auto& item : conv_module_and_params_) {
     script::Module conv(item.first);
     auto w_b = item.second;
     GRAPH_DEBUG("setting weight and bias for conv");
+    GRAPH_DEBUG("type name:", conv.type()->name()->qualifiedName());
+    GRAPH_DEBUG("instance:", conv._ivalue());
+    GRAPH_DEBUG("transform conv original weight:", conv.attr("weight"));
+    GRAPH_DEBUG("transform conv new weight:", std::get<0>(w_b));
     conv.setattr("weight", std::get<0>(w_b));
     conv.register_parameter("bias", std::get<1>(w_b), false);
   }

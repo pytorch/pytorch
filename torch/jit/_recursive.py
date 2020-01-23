@@ -17,7 +17,7 @@ ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callb
 # TODO: there should be a more principled way of doing this.
 blacklist = [
     "_version",
-    "_parameters",
+    # "_parameters",
     "_buffers",
     "_modules",
     "_initializing",
