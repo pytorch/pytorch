@@ -350,9 +350,9 @@ static void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Ge
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
       if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
-        return generator->random64() % range + base;
+        return static_cast<scalar_t>(static_cast<int64_t>((generator->random64() % range) + base));;
       } else {
-        return generator->random() % range + base;
+        return static_cast<scalar_t>(static_cast<int64_t>((generator->random() % range) + base));
       }
     });
   });
