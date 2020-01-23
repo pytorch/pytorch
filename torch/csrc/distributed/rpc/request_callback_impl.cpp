@@ -224,16 +224,18 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // one completes, with the autograd context information wrapped.
       wrappedRpcResponseFuture->addCallback(
           [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
-              const Message& m,
+              const Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
             if (error) {
               // Propagate error to responseFuture if we had one.
               responseFuture->setError(error->what());
             } else {
-              responseFuture->markCompleted(getMessageWithAutograd(
+              auto msg = std::move(getMessageWithAutograd(
                   fromWorkerId,
                   std::move(*wrappedRpcResponseFuture).moveValue(),
                   MessageType::FORWARD_AUTOGRAD_RESP));
+              msg.setId(messageId);
+              responseFuture->markCompleted(msg);
             }
           });
       return responseFuture;
