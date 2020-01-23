@@ -13,40 +13,82 @@
 
 namespace torch {
 namespace optim {
-SGDOptions::SGDOptions(double learning_rate) : learning_rate_(learning_rate) {}
+
+SGDOptions::SGDOptions(double lr) : lr_(lr) {}
+
+bool operator==(const SGDOptions& lhs, const SGDOptions& rhs) {
+  return (lhs.lr() == rhs.lr()) &&
+          (lhs.momentum() == rhs.momentum()) &&
+          (lhs.dampening() == rhs.dampening()) &&
+          (lhs.weight_decay() == rhs.weight_decay()) &&
+          (lhs.nesterov() == rhs.nesterov());
+}
+
+void SGDOptions::serialize(torch::serialize::OutputArchive& archive) const {
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(momentum);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(dampening);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(weight_decay);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(nesterov);
+}
+
+void SGDOptions::serialize(torch::serialize::InputArchive& archive) {
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, lr);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, momentum);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, dampening);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(double, weight_decay);
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(bool, nesterov);
+}
+
+bool operator==(const SGDParamState& lhs, const SGDParamState& rhs) {
+  return torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer());
+}
+
+void SGDParamState::serialize(torch::serialize::OutputArchive& archive) const {
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(momentum_buffer);
+}
+
+void SGDParamState::serialize(torch::serialize::InputArchive& archive) {
+  _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, momentum_buffer);
+}
 
 void SGD::step() {
-  for (size_t i = 0; i < parameters_.size(); ++i) {
-    Tensor p = parameters_.at(i);
+  for (auto& group : param_groups_) {
+    auto& options = static_cast<SGDOptions&>(group.options());
+    auto weight_decay = options.weight_decay();
+    auto momentum = options.momentum();
+    auto dampening = options.dampening();
+    auto nesterov = options.nesterov();
 
-    if (!p.grad().defined()) {
-      continue;
-    }
-
-    auto update = p.grad();
-
-    if (options.weight_decay() > 0) {
-      NoGradGuard guard;
-      update += options.weight_decay() * p;
-    }
-
-    if (options.momentum() != 0) {
-      const auto dampening = iteration_ == 0 ? 1 : 1 - options.dampening();
-      auto& momentum = buffer_at(momentum_buffers, i);
-      momentum = (options.momentum() * momentum) + (dampening * update);
-      if (options.nesterov()) {
-        // See github.com/lisa-lab/pylearn2/pull/136#issuecomment-10381617
-        // for notes on this implementation of nesterov momentum.
-        update += options.momentum() * momentum;
-      } else {
-        update = momentum;
+    for (auto& p : group.params()) {
+      if (!p.grad().defined()) {
+        continue;
       }
+      auto d_p = p.grad().data();
+      if (weight_decay != 0) {
+        NoGradGuard guard;
+        d_p = d_p.add(p.data(), weight_decay);
+      }
+      if (momentum != 0) {
+        auto& param_state = static_cast<SGDParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+        Tensor buf;
+        if (param_state.momentum_buffer().defined()) {
+          buf = torch::clone(d_p).detach();
+          param_state.momentum_buffer(buf);
+        } else {
+          buf = param_state.momentum_buffer();
+          buf.mul_(momentum).add_(d_p, 1 - dampening);
+        }
+        if (nesterov) {
+          d_p = d_p.add(buf, momentum);
+        } else {
+          d_p = buf;
+        }
+      }
+      NoGradGuard guard;
+      p.data().add_(d_p, -1 * options.lr());
     }
-
-    NoGradGuard guard;
-    p.add_(-options.learning_rate() * update);
   }
-  iteration_ += 1;
 }
 
 void SGD::save(serialize::OutputArchive& archive) const {
@@ -55,10 +97,6 @@ void SGD::save(serialize::OutputArchive& archive) const {
 
 void SGD::load(serialize::InputArchive& archive) {
   serialize(*this, archive);
-}
-
-int64_t SGD::iteration() const {
-  return iteration_;
 }
 } // namespace optim
 } // namespace torch

@@ -501,26 +501,26 @@ TEST(SerializeTest, Optim_Adagrad) {
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
-TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {
-  std::vector<torch::Tensor> parameters = {
-      torch::randn({2, 2}), torch::randn({3, 3})};
-
-  torch::optim::SGD optimizer(parameters, 1.0);
-
-  optimizer.step();
-  optimizer.step();
-
-  ASSERT_EQ(optimizer.iteration(), 2);
-
-  auto tempfile = c10::make_tempfile();
-  torch::save(optimizer, tempfile.name);
-
-  torch::optim::SGD optimizer_out(parameters, 1.0);
-  ASSERT_EQ(optimizer_out.iteration(), 0);
-
-  torch::load(optimizer_out, tempfile.name);
-  ASSERT_EQ(optimizer_out.iteration(), 2);
-}
+// TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {
+//   std::vector<torch::Tensor> parameters = {
+//       torch::randn({2, 2}), torch::randn({3, 3})};
+//
+//   torch::optim::SGD optimizer(parameters, 1.0);
+//
+//   optimizer.step();
+//   optimizer.step();
+//
+//   ASSERT_EQ(optimizer.iteration(), 2);
+//
+//   auto tempfile = c10::make_tempfile();
+//   torch::save(optimizer, tempfile.name);
+//
+//   torch::optim::SGD optimizer_out(parameters, 1.0);
+//   ASSERT_EQ(optimizer_out.iteration(), 0);
+//
+//   torch::load(optimizer_out, tempfile.name);
+//   ASSERT_EQ(optimizer_out.iteration(), 2);
+// }
 
 TEST(SerializeTest, XOR_CUDA) {
   torch::manual_seed(0);
