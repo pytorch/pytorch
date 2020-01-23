@@ -31,7 +31,7 @@ static bool EmbeddingLookupGenericSlowIdx(
   int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
-    if (current != offsets[m]) {
+    if (current != offsets[m] - offsets[0]) {
       return false;
     }
     int64_t start_offset = offsets[m];
