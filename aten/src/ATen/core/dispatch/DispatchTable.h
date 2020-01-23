@@ -96,7 +96,7 @@ class DispatchTable final {
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
-    dispatchKeyExtractor_.setIsOperatorOverridden(dispatchKey, true);
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
       TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
@@ -109,7 +109,7 @@ class DispatchTable final {
    */
   void removeKernelIfExists(DispatchKey dispatchKey) {
     kernels_.removeKernelIfExists(dispatchKey);
-    dispatchKeyExtractor_.setIsOperatorOverridden(dispatchKey, false);
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
   }
 
   /**
