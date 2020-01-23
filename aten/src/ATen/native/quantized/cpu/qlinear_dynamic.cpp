@@ -3,8 +3,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include <algorithm>
@@ -67,7 +67,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     static constexpr bool is_signed = false;
 
     // Calculate scale and zero point for quantization of input tensor
-    auto q_params = fbgemm::ChooseQuantizationParams(
+    auto q_params = quant_utils::ChooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
         /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
@@ -212,57 +212,6 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
 
-  struct qparams {
-    float scale;
-    std::int32_t zero_point;
-  };
-
-  qparams chooseQuantizationParams(
-      float min,
-      float max,
-      int32_t qmin,
-      int32_t qmax) {
-    TORCH_CHECK(min <= max);
-    TORCH_CHECK(qmin < qmax);
-
-    // We extend the [min, max] interval to ensure that it contains 0.
-    // Otherwise, we would not meet the requirement that 0 be an exactly
-    // representable value.
-    min = std::min(min, 0.f);
-    max = std::max(max, 0.f);
-
-    double scale = (max - min) / ((double)qmax - qmin);
-
-    // If scale is 0, we arbitrary adjust the scale to 0.1
-    if (scale == 0) {
-      scale = 0.1;
-    }
-
-    TORCH_CHECK(scale > 0);
-
-    double zero_point_from_min = qmin - min / scale;
-    double zero_point_from_max = qmax - max / scale;
-    double zero_point_from_min_error = std::abs(qmin) + std::abs(min / scale);
-    double zero_point_from_max_error = std::abs(qmax) + std::abs(max / scale);
-    double initial_zero_point =
-        zero_point_from_min_error < zero_point_from_max_error
-        ? zero_point_from_min
-        : zero_point_from_max;
-
-    int32_t nudged_zero_point = 0;
-    if (initial_zero_point < qmin) {
-      nudged_zero_point = qmin;
-    } else if (initial_zero_point > qmax) {
-      nudged_zero_point = qmax;
-    } else {
-      nudged_zero_point = nearbyint(initial_zero_point);
-    }
-    qparams result;
-    result.scale = scale;
-    result.zero_point = nudged_zero_point;
-    return result;
-  }
-
   at::Tensor qnnpack_linear(at::Tensor input, at::Tensor packed_weight) {
     TORCH_CHECK(
         input.dim() >= 2,
@@ -292,7 +241,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     float x_min = input_contig.min().item<float>();
     float x_max = input_contig.max().item<float>();
 
-    auto q_params = chooseQuantizationParams(
+    auto q_params = quant_utils::ChooseQuantizationParams(
         /*min=*/x_min,
         /*max=*/x_max,
         /*qmin=*/0,
