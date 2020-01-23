@@ -4,8 +4,8 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common_utils import TestCase, run_tests, IS_WINDOWS, load_tests
-from common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, load_tests
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
