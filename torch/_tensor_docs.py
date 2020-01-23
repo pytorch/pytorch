@@ -571,6 +571,20 @@ bitwise_and_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_and`
 """)
 
+add_docstr_all('bitwise_or',
+               r"""
+bitwise_or() -> Tensor
+
+See :func:`torch.bitwise_or`
+""")
+
+add_docstr_all('bitwise_or_',
+               r"""
+bitwise_or_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_or`
+""")
+
 add_docstr_all('bitwise_xor',
                r"""
 bitwise_xor() -> Tensor
@@ -815,6 +829,20 @@ Args:
     non_blocking (bool): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
+""")
+
+add_docstr_all('cummax',
+               r"""
+cummax(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummax`
+""")
+
+add_docstr_all('cummin',
+               r"""
+cummin(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummin`
 """)
 
 add_docstr_all('cumprod',
@@ -3511,6 +3539,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_quantized',
+               r"""
+Is ``True`` if the Tensor is quantized, ``False`` otherwise.
 """)
 
 add_docstr_all('device',
