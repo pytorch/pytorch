@@ -2223,8 +2223,8 @@ t2.start()
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # AmpScaler should transparently handle losses and gradients on multiple devices.
-        # This test could be combined with the test above, but maybe we don't want to test
-        # multi-GPU features unless the entire test is guarded by the skipIf.
+        # This test could be combined with the test above, but I think it makes sense to treat
+        # multi-GPU operations separately.
         dev0 = torch.device("cuda:0")
         dev1 = torch.device("cuda:1")
 
