@@ -62,6 +62,10 @@ struct Stack : torch::jit::CustomClassHolder {
   void __setstate__(std::vector<std::string> state) {
     stack_ = std::move(state);
   }
+
+  std::tuple<double, int64_t> return_a_tuple() const {
+    return std::make_tuple(1337.0f, 123);
+  }
 };
 
 static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
@@ -80,7 +84,8 @@ static auto testStack =
         .def("clone", &Stack<std::string>::clone)
         .def("merge", &Stack<std::string>::merge)
         .def("__getstate__", &Stack<std::string>::__getstate__)
-        .def("__setstate__", &Stack<std::string>::__setstate__);
+        .def("__setstate__", &Stack<std::string>::__setstate__)
+        .def("return_a_tuple", &Stack<std::string>::return_a_tuple);
 
 } // namespace
 
