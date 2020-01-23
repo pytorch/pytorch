@@ -132,6 +132,13 @@ def from_ivalue(arg, value):
     return FROM_IVALUE[typ].format(value)
 
 
+CALL_UNBOXED_KERNEL = CodeTemplate("""\
+using FuncType = ${return_type} (${formals_types});
+auto* typedUnboxedKernel = static_cast<c10::detail::WrapRuntimeKernelFunctor<FuncType*>*>(unboxedKernel);
+auto result_ =  (*typedUnboxedKernel)(
+    ${args}
+);
+""")
 CALL_NAMESPACE = CodeTemplate("""\
 auto result_ = at::${name}(
     ${args}
@@ -159,12 +166,13 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device})
-        .pinned_memory(${pin_memory});;
+        .pinned_memory(${pin_memory});
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-[](OperatorKernel*, const OperatorHandle&, Stack* stack) {
+[](OperatorKernel* unboxedKernel, const OperatorHandle&, Stack* stack) {
+    using namespace at;
     ${lvalues}
     ${call}
     drop(*stack, ${num_inputs});
@@ -313,7 +321,24 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                     device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+            if len(decl['returns']) == 0:
+                return_type = "void"
+            elif len(decl['returns']) == 1:
+                return_type = decl['returns'][0]['type']
+            else:
+                return_type = "std::tuple<" + ", ".join([r['type'] for r in decl['returns']]) + ">"
+            for a in decl['arguments']:
+                if 'type' not in a:
+                    raise Exception(decl)
+            argument_types = ", ".join([a['type'] for a in decl['arguments']])
+            return CALL_UNBOXED_KERNEL.substitute(name=decl['name'],
+                                                  args=pack_arguments(args),
+                                                  num_inputs=num_inputs,
+                                                  return_type=return_type,
+                                                  formals_types=argument_types)
         else:
+            assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),

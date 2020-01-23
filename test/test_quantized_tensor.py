@@ -4,7 +4,7 @@ import torch
 import io
 from copy import deepcopy
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 
 class Foo(torch.nn.Module):
