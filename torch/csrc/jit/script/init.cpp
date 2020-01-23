@@ -108,20 +108,9 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
-    if (py::isinstance<ScriptCodeObj>(obj)) {
-      auto code_obj = py::cast<ScriptCodeObj>(obj);
-      // Custom-bound C++ classes have a wrapper analogous to the Python
-      // code object that can be invoked to instantiate the class. e.g.
-      // torch.classes.Foo(). The type of `torch.classes.Foo` is a
-      // StrongTypePtr, which really means that it's a script function
-      // that we generate to instantiate the class. In torch/_classes.py
-      // we stuff away the qualname of the class in this attribute
-      // so that we can look up the proper type ptr later, irrespective of
-      // the actual python name that's referencing it.
-      auto qualname = code_obj.qualname;
-      auto custom_class_ptr = getCustomClass(qualname);
-      TORCH_INTERNAL_ASSERT(custom_class_ptr);
-      return custom_class_ptr;
+    if (py::isinstance<ScriptClass>(obj)) {
+      auto script_class = py::cast<ScriptClass>(obj);
+      return script_class.class_type_.type_;
     }
 
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
@@ -955,9 +944,6 @@ void initJitScriptBindings(PyObject* module) {
           "qualified_name", [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
           });
-
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<ScriptCodeObj, StrongFunctionPtr>(m, "ScriptCodeObj");
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
