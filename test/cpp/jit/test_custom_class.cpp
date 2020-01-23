@@ -54,6 +54,14 @@ struct Stack : torch::jit::CustomClassHolder {
       push(elem);
     }
   }
+
+  std::vector<std::string> __getstate__() {
+    return stack_;
+  }
+
+  void __setstate__(std::vector<std::string> state) {
+    stack_ = std::move(state);
+  }
 };
 
 static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
@@ -70,7 +78,9 @@ static auto testStack =
         .def("push", &Stack<std::string>::push)
         .def("pop", &Stack<std::string>::pop)
         .def("clone", &Stack<std::string>::clone)
-        .def("merge", &Stack<std::string>::merge);
+        .def("merge", &Stack<std::string>::merge)
+        .def("__getstate__", &Stack<std::string>::__getstate__)
+        .def("__setstate__", &Stack<std::string>::__setstate__);
 
 } // namespace
 
