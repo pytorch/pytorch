@@ -154,27 +154,30 @@ def pca(A, q=None, center=True, niter=2):
 
     This function returns a namedtuple ``(U, S, V)`` which is the
     nearly optimal approximation of a singular value decomposition of
-    a centered matrix :attr:`A` such that :math:`A = U diag(S) V^T`.
+    a centered matrix :math:`A` such that :math:`A = U diag(S) V^T`.
 
     .. note:: The relation of ``(U, S, V)`` to PCA is as follows:
 
-                - ``A`` is the data matrix with ``m`` samples and
+                - :math:`A` is a data matrix with ``m`` samples and
                   ``n`` features
 
-                - the ``V`` columns represent the principal directions
+                - the :math:`V` columns represent the principal directions
 
-                - ``S**2/(m-1)`` are the eigenvalues of covariance
-                  matrix ``A^T A/(m-1)``
+                - :math:`S ** 2 / (m - 1)` are the eigenvalues of
+                  covariance matrix :math:`A^T A / (m - 1)`
 
-                - ``A V[:,:k]`` projects data to the first k principal
-                  components
+                - ``matmul(A, V[:, :k])`` projects data to the first k
+                  principal components
 
     .. note:: Different from the standard SVD, the size of returned
               matrices depend on the specified rank and q
               values as follows:
-                - U is m x q matrix
-                - S is q-vector
-                - V is n x q matrix
+
+                - :math:`U` is m x q matrix
+
+                - :math:`S` is q-vector
+
+                - :math:`V` is n x q matrix
 
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
@@ -183,8 +186,9 @@ def pca(A, q=None, center=True, niter=2):
 
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
-        q (int, optional): a slightly overestimated rank of A. By
-                           default, q = min(6, m, n).
+        q (int, optional): a slightly overestimated rank of
+                           :math:`A`. By default, ``q = min(6, m,
+                           n)``.
 
         center (bool, optional): if True, center the input tensor,
                                  otherwise, assume that the input is
@@ -192,7 +196,7 @@ def pca(A, q=None, center=True, niter=2):
 
         niter (int, optional): the number of subspace iterations to
                                conduct; niter must be a nonnegative
-                               integer, and defaults to 2
+                               integer, and defaults to 2.
 
     References::
 
