@@ -20,12 +20,12 @@
     return __VA_ARGS__();                                               \
   }
 
-// BFLOAT16_DISPATCH() macro dispatches bfloat16 datatype
+// BFLOAT16_DISPATCH_ROCM() macro dispatches bfloat16 datatype
 // on only ROCm platform.
 #ifdef __HIP_PLATFORM_HCC__
-#define BFLOAT16_DISPATCH(...)  AT_PRIVATE_CASE_TYPE(at::ScalarType::BFloat16, at::BFloat16, __VA_ARGS__)
+#define BFLOAT16_DISPATCH_ROCM(...)  AT_PRIVATE_CASE_TYPE(at::ScalarType::BFloat16, at::BFloat16, __VA_ARGS__)
 #else
-#define BFLOAT16_DISPATCH(...)
+#define BFLOAT16_DISPATCH_ROCM(...)
 #endif
 
 namespace detail {
@@ -175,7 +175,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                     \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE,                                                                    \
           decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t), __VA_ARGS__)                           \
-      BFLOAT16_DISPATCH(__VA_ARGS__)                                                                                 \
+      BFLOAT16_DISPATCH_ROCM(__VA_ARGS__)                                                                                 \
       default:                                                                                            \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                   \
     }                                                                                                     \
@@ -323,7 +323,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)                                         \
     AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)                                        \
     AT_PRIVATE_CASE_TYPE(SCALARTYPE, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t), __VA_ARGS__)   \
-    BFLOAT16_DISPATCH(__VA_ARGS__)                                                                                      \
+    BFLOAT16_DISPATCH_ROCM(__VA_ARGS__)                                                                                      \
     default:                                                                                                 \
       AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                        \
   }                                                                                                          \
