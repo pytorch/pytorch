@@ -20,9 +20,9 @@ from torch._six import inf, nan
 
 from test_torch import _TestTorchMixin
 
-from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
+from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
     load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
 
@@ -30,8 +30,8 @@ from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
-# because if we do that, the TEST_CUDNN line from common_cuda will be executed
+# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
+# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
 # multiple times as well during the execution of this test suite, and it will
 # cause CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()

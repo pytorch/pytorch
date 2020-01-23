@@ -14,7 +14,7 @@ import zipfile
 import functools
 
 # Testing utils
-from common_utils import TestCase, IS_WINDOWS, \
+from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode
 
 # Standard library

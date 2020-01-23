@@ -15,7 +15,7 @@ import torch
 import torch.distributed as c10d
 
 from functools import partial, reduce
-from common_utils import TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
 

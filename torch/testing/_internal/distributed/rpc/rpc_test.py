@@ -11,20 +11,20 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from common_utils import load_tests, IS_MACOS
+from torch.testing._internal.common_utils import load_tests, IS_MACOS
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-import dist_utils
-from dist_utils import dist_init, wait_until_node_failure, initialize_pg
+import torch.testing._internal.dist_utils
+from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
-from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 from torch._jit_internal import _qualified_name
 
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -1501,7 +1501,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
-                dist_utils.TEST_CONFIG.rpc_backend_name
+                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
             ],
             rank=self.rank,
             world_size=self.world_size,
@@ -1627,7 +1627,7 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
+        if torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):

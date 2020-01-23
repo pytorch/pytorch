@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 import glob
 
-import common_utils as common
+import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension

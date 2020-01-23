@@ -8,12 +8,12 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized.functional as qF
 import torch.quantization
 
-from common_quantization import QuantizationTestCase, prepare_dynamic
-from common_quantized import _calculate_dynamic_qparams, override_quantized_engine
-from common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
+from torch.testing._internal.common_quantization import QuantizationTestCase, prepare_dynamic
+from torch.testing._internal.common_quantized import _calculate_dynamic_qparams, override_quantized_engine
+from torch.testing._internal.common_utils import run_tests, IS_PPC, TEST_WITH_UBSAN
 from hypothesis import assume, given
 from hypothesis import strategies as st
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 import io
