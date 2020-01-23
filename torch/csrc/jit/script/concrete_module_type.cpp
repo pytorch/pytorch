@@ -59,6 +59,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
   }
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
+  ret->data_.setPoisoned();
   return ret;
 }
 
