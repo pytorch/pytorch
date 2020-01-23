@@ -4750,6 +4750,11 @@ def foo(x):
             return ss
 
         scripted = torch.jit.script(foo)
+        # Ensure we are creating the object and calling __init__
+        # rather than calling the __init__wrapper nonsense
+        fc = FileCheck().check('prim::CreateObject()')\
+                        .check('prim::CallMethod[name="__init__"]')
+        fc.run(str(scripted.graph))
         out = scripted()
         self.assertEqual(out.pop(), "mom")
         self.assertEqual(out.pop(), "hi")
