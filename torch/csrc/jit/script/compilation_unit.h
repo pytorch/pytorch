@@ -283,5 +283,6 @@ struct StrongFunctionPtr {
   std::shared_ptr<script::CompilationUnit> cu_;
   Function* function_;
 };
+
 } // namespace jit
 } // namespace torch
