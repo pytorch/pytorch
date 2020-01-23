@@ -30,7 +30,7 @@ void initPythonCustomClassBindings(PyObject* module) {
   // rather than the None return value from __init__
   m.def("_get_custom_class_python_wrapper", [](const std::string& qualname) {
     auto cu = classCU();
-    std::string full_qualname = "torch.classes." + qualname;
+    std::string full_qualname = "__torch__.torch.classes." + qualname;
     c10::NamedTypePtr named_type = cu->get_type(full_qualname);
     if (!named_type || !named_type->cast<ClassType>()) {
       std::stringstream err;
