@@ -150,18 +150,6 @@ def skip_if_small_worldsize(func):
     return wrapper
 
 
-def skip_if_rocm(func):
-    func.skip_if_rocm = True
-    """Skips a test for ROCm"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not TEST_WITH_ROCM:
-            return func(*args, **kwargs)
-        sys.exit(SKIP_IF_ROCM_EXIT_CODE)
-
-    return wrapper
-
-
 def require_backend(backends):
     if BACKEND not in backends:
         return unittest.skip("Test requires backend to be one of %s" % backends)
@@ -2142,7 +2130,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             skip_ok = (
                 getattr(fn, "skip_if_no_cuda_distributed", False) or
                 getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False)
+                getattr(fn, "skip_if_small_worldsize", False) or
+                getattr(fn, "skip_if_rocm", False)
             )
             join_timeout = get_timeout(self.id())
             for rank, process in enumerate(self.processes):
@@ -2165,7 +2154,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == 0 or
                     first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
+                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
                 )
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
@@ -2176,6 +2166,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     )
                 if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
                     raise unittest.SkipTest("worldsize is too small to run group tests")
+                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
+                    raise unittest.SkipTest("Test skipped for ROCm")
 
             self.assertEqual(first_process.exitcode, 0)
 
