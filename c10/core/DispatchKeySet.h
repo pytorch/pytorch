@@ -122,7 +122,7 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // NB: If you add other non-VariableTensorId other keys to this set, you'll
 // have to adjust this some more (sorry.)
 static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
-  return s.remove(DispatchKey::VariableTensorId).highestPriorityTypeId();
+  return s.remove(DispatchKey::VariableTensorId).remove(DispatchKey::BackendSelectId).highestPriorityTypeId();
 }
 
 }

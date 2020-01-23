@@ -51,7 +51,7 @@ enum class DispatchKey : uint8_t {
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust
   // legacyExtractDispatchKey in c10/core/DispatchKeySet.h to mask them out.
-
+  BackendSelectId,
   VariableTensorId,
 
   // TESTING: This is intended to be a generic testing tensor type id.

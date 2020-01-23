@@ -168,6 +168,12 @@ class _TestTorchMixin(object):
     def test_dir(self):
         dir(torch)
 
+    def test_foo(self):
+        print(os.getpid())
+        input()
+        a = torch.empty(2, 2)
+        self.assertEqual(1, 2)
+
     def test_type_conversion_via_dtype_name(self):
         x = torch.tensor([1])
         self.assertEqual(x.byte().dtype, torch.uint8)
