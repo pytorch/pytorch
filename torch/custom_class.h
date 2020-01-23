@@ -9,6 +9,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
+#include <c10/util/TypeTraits.h>
 #include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -101,9 +102,22 @@ class class_ {
     defineMethod<void>("__init__", std::move(func));
     return *this;
   }
-  template <typename Func>
+  template <
+      typename Method,
+      std::enable_if_t<
+          !c10::guts::is_stateless_lambda<std::decay_t<Method>>::value,
+          bool> = false>
+  class_& def(std::string name, Method m) {
+    auto res = def_(name, m, detail::args_t<decltype(m)>{});
+    return *this;
+  }
+  template <
+      typename Func,
+      std::enable_if_t<
+          c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          bool> = false>
   class_& def(std::string name, Func f) {
-    auto res = def_(name, f, detail::args_t<decltype(f)>{});
+    auto res = def_(name, f, detail::args_t<decltype(&Func::operator())>{});
     return *this;
   }
 
@@ -145,12 +159,39 @@ class class_ {
     auto method = classCU()->create_function(qualClassName + "." + name, graph);
     classTypePtr->addMethod(method);
   }
-  template <typename Func, typename R, typename... Types>
+
+  template <
+      typename Func,
+      typename R,
+      typename... Types,
+      std::enable_if_t<
+          !c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          bool> = false>
   class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
     auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
       return at::guts::invoke(f, *cur, args...);
     };
     defineMethod<R>(name, std::move(func));
+    return *this;
+  }
+
+  template <typename R, typename Head, typename... Tail>
+  void assert_self_type(detail::types<R, Head, Tail...> funcInfo) {
+    static_assert(
+        std::is_same<std::decay_t<Head>, c10::intrusive_ptr<CurClass>>::value,
+        "First argument of a registered lambda method must be an intrusive_ptr<> of the corresponding class.");
+  }
+
+  template <
+      typename Func,
+      typename R,
+      typename... Types,
+      std::enable_if_t<
+          c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          bool> = false>
+  class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
+    assert_self_type(funcInfo);
+    defineMethod<R>(name, f);
     return *this;
   }
 };

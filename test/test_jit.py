@@ -4934,6 +4934,16 @@ def foo(x):
         scripted = torch.jit.script(foo)
         self.getExportImportCopy(scripted)
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_lambda_method(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            return ss.top()
+
+        scripted = torch.jit.script(foo)
+        self.assertEqual(scripted(), "mom")
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
