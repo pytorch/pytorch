@@ -106,46 +106,8 @@ Each tensor has an associated :class:`torch.Storage`, which holds its data.
 The tensor class also provides multi-dimensional, `strided <https://en.wikipedia.org/wiki/Stride_of_an_array>`_
 view of a storage and defines numeric operations on it.
 
-In general there're 3 kinds of PyTorch ops:
-
-- out-place ops: output is a new tensor with brand new storage.
-- in-place ops: output is the input tensor with modified content, in other words `id(output) == id(input)`.
-- view ops: output is a new tensor which is a view of input tensor storage.
-
-Different tensor views on the same storage allows us to do the following things:
-
-- Fast and memory efficient reshaping. For example to view any tensor a single 1D buffer, you can do `t.view(-1)`.
-- Fast and memory efficient slicing. For example to access the 2nd channel of any 3D Tensor representing an image you can do `t.select(0, 1)`.
-- Fast element-wise operations of unrelated values. If you have 20 parameters that are scalars. You can create a single Tensor that hold all of them, and each parameter is just a view into this Tensor. When you need to perform an operation on all of these, you can replace the for-loop by simply doing the operation on the full Tensor and all the scalar parameters will be updated automatically.
-
-But it can give surprising results if you are expecting a brand new Tensor. User should understand and use view ops as needed.
-
-For reference, here’s a list of all view ops in PyTorch:
-
-- :meth:`transpose`
-- :meth:`as_strided`
-- :meth:`diagonal`
-- :meth:`expand`
-- :meth:`narrow`
-- :meth:`permute`
-- :meth:`select`
-- :meth:`slice` #FIXME: where to link this tensor[0]?
-- :meth:`squeeze`
-- :meth:`t`
-- :meth:`unfold`
-- :meth:`unsqueeze`
-- :meth:`indices`
-- :meth:`values`
-- :meth:`narrow`
-- :meth:`view`
-- :meth:`view_as`
-- :meth:`unbind`
-
-The following ops can return either a view of existing storage or new storage,
-user code shouldn't rely on whether it's view or not.
-
-- :meth:`reshape`
-- :meth:`reshape_as`
+.. note::
+   For more information on tensor views, see :ref:`tensor-view-doc`.
 
 .. note::
    For more information on the :class:`torch.dtype`, :class:`torch.device`, and

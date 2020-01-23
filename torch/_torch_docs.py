@@ -1905,8 +1905,8 @@ Returns:
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[ True, False],
+            [False, True]])
 """.format(**common_args))
 
 add_docstr(torch.equal,
