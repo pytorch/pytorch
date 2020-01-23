@@ -11,20 +11,20 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from common_utils import load_tests, IS_MACOS
+from torch.testing._internal.common_utils import load_tests, IS_MACOS
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-import dist_utils
-from dist_utils import dist_init, wait_until_node_failure, initialize_pg
+import torch.testing._internal.dist_utils
+from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
-from rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 from torch._jit_internal import _qualified_name
 
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator

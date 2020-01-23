@@ -45,16 +45,21 @@ namespace torch { namespace autograd {
 
   // Switches to accumulate device
   // The device (and stream) chosen for accumulation is:
-  //  (1) If the variable is not a CUDA variable, accumulation happens on the
-  //      device of the variable.
-  //  (2) If the variable is a CUDA variable, and the producer and consumer
-  //      share its device, then:
-  //        (2a) if the producer and consumer do not share a stream,
-  //             the consumer is synced with the producer.
-  //        (2b) accumulation happens on the consumer's stream
-  //  (3) If the variable is a CUDA variable but it, the producer, and the
-  //      consumer are on multiple devices, then accumulation happens on
-  //      the default stream of the variable's device.
+  //  (1) var is not a CUDA variable. Accumulation happens on var's device.
+  //  (2) var is a CUDA variable and it, the consumer, and the producer share the same device:
+  //       (2a) Uses the consumer's stream as the accumulation stream
+  //       (2b) Syncs the accumulation stream with the producer's stream (if different)
+  //       (2c) Accumulates.
+  //  (3) var is a CUDA variable and it shares a device with the consumer but not the producer:
+  //       (3a) Uses the consumer's stream as the accumulation stream
+  //       (3b) Syncs the accumulation stream with the consumer device's default stream
+  //       (3c) Accumulates.
+  //  (4) var is a CUDA variable and it shares a device with the producer but not the consumer:
+  //       (4a) Uses the producer device's default stream as the accumulation stream
+  //       (4b) Syncs the accumulation stream with the the producer's stream
+  //       (4c) Accumulates.
+  //  (5) var is a CUDA variable and it does not share a device with the consumer or producer.
+  //      Accumulation happens on the var device's default stream.
 
   TORCH_INTERNAL_ASSERT(device_of(var));
   c10::optional<c10::Stream> opt_accumulate_stream = c10::nullopt;
@@ -64,21 +69,37 @@ namespace torch { namespace autograd {
     const auto on_consumer = opt_consumer_stream
                         && device_of(var) == opt_consumer_stream->device();
     if (on_producer && on_consumer) {
-      // (2) CUDA variable with producer and consumer sharing a device
-      //     Accumulation happens on consumer's stream
+      // (2a)
       opt_accumulate_stream = opt_consumer_stream;
-      if (opt_producer_stream != opt_consumer_stream) {
-        // (2a) Syncs consumer with producer
+      if (opt_accumulate_stream != opt_producer_stream) {
+        // (2b)
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(*opt_producer_stream);
-        opt_consumer_stream->wait(event);
+        opt_accumulate_stream->wait(event);
       }
     } else {
-      // (3) CUDA variable with multiple devices
-      //     Accumulation happens on variable's device's default stream
+      c10::optional<c10::Stream> opt_sync_stream = c10::nullopt;
       const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-      const auto default_stream = guard.getDefaultStream(*device_of(var));
-      opt_accumulate_stream = default_stream;
+      if (on_consumer && !on_producer) {
+        // (3a)
+        opt_accumulate_stream = opt_consumer_stream;
+        opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
+        TORCH_INTERNAL_ASSERT(opt_sync_stream == guard.getStream(*device_of(var)));
+      } else if (on_producer && !on_consumer) {
+        // (4a)
+        opt_accumulate_stream = guard.getDefaultStream(opt_producer_stream->device());
+        opt_sync_stream = opt_producer_stream;
+      } else {
+        // (5)
+        opt_accumulate_stream = guard.getDefaultStream(*device_of(var));
+      }
+      if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
+        // (3b), (4b)
+        c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(*opt_sync_stream);
+        opt_accumulate_stream->wait(event);
+      }
     }
   }
 
