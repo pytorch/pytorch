@@ -1046,9 +1046,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
+
             if (frames.back().function->bailout_requests_.count(inst.X) != 0) {
               GRAPH_DEBUG(
-                "Bailout ", inst.X, " triggered via bailout_requests_!");
+                  "Bailout ", inst.X, " triggered via bailout_requests_!");
               frames.back().function->bailout_requests_.erase(inst.X);
               push(stack, false);
             } else {
