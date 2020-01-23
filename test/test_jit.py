@@ -4935,6 +4935,18 @@ def foo(x):
         tup = scripted()
         self.assertEqual(tup, (1337.0, 123))
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_save_load(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss.merge(ss2)
+            return ss
+
+        scripted = torch.jit.script(foo)
+        self.getExportImportCopy(scripted)
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
