@@ -2,7 +2,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 
 import torch
 import torch.cuda
-from common_utils import TEST_WITH_ROCM, TEST_NUMBA
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, TEST_NUMBA
 
 
 TEST_CUDA = torch.cuda.is_available()
