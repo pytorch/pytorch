@@ -27,6 +27,7 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
+    'data_parallel',
     'distributed',
     'distributions',
     'docs_coverage',

@@ -52,7 +52,7 @@ class Unpickler {
   IValue parse_ivalue();
 
  private:
-  // No arguments ensures that a template arugment must be specified
+  // No arguments ensures that a template argument must be specified
   // so that the number of bytes read / type read is explicit
   template <typename T>
   T read() {
