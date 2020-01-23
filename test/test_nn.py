@@ -62,8 +62,11 @@ from torch.testing._internal.common_utils import dtype2prec
 load_tests = load_tests
 
 TEST_LARGE_TENSOR = TEST_CUDA
+TEST_32GB_TENSOR = TEST_CUDA
 if TEST_CUDA:
-    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+    total_memory_in_gb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024 * 1024)
+    TEST_LARGE_TENSOR = (total_memory_in_gb >= 12)
+    TEST_32GB_TENSOR = (total_memory_in_gb > 31)
 
 if TEST_SCIPY:
     from scipy import stats
@@ -9337,8 +9340,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
-    @unittest.skipIf(sys.platform == "win32", "See https://github.com/pytorch/pytorch/issues/31650")
+    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -9355,7 +9357,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff3, 0)
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
