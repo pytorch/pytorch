@@ -82,7 +82,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
         code.append(
             "      for ("
             + "int64_t"
-            + " start = dataInd; dataInd < end_offset - offsets[0]; ++dataInd) {"  # noqa
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
         )
     else:
         code.append(
@@ -269,7 +269,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
         code.append(
             "      for ("
             + "int64_t"
-            + " start = dataInd; dataInd < end_offset - offsets[0]; ++dataInd) {"  # noqa
+            + " start = dataInd; dataInd < end_offset - offsets[0];\n           ++dataInd) {"  # noqa
         )
     else:
         code.append(

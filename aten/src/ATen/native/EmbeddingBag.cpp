@@ -83,43 +83,38 @@ void index_select_add<float>(const Tensor &select_indices,
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
+    int64_t output_size = offsets.numel() - 1;
+    auto offsets_data = offsets.data_ptr<int64_t>();
+    std::vector<int64_t> offsets_include_last;
+
     if (include_last_offset) {
-      auto output_size = offsets.numel() - 1;
-      at::parallel_for(
-          0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-            caffe2::EmbeddingLookupIdx(
-                /*block_size=*/ddim,
-                /*output_size=*/end_idx - start_idx,
-                /*index_size=*/offsets.data_ptr<int64_t>()[end_idx] - offsets.data_ptr<int64_t>()[start_idx],
-                /*data_size=*/src.size(0),
-                /*input=*/src_data,
-                /*indices=*/select_indices_data + offsets.data_ptr<int64_t>()[start_idx],
-                /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
-                /*weights=*/nullptr,
-                /*scale_bias=*/nullptr,
-                /*normalize_by_lengths=*/false,
-                /*out=*/output_data + start_idx * ddim);
-          });
+      output_size = offsets.numel() - 1;
     } else {
-      std::vector<int64_t> offsets_new(offsets.numel() + 1);
+      output_size = offsets.numel();
+      offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
-          offsets_new.data(),
+          offsets_include_last.data(),
           offsets.data_ptr<int64_t>(),
           sizeof(int64_t) * offsets.numel());
-      offsets_new[offsets.numel()] = select_indices.numel();
-      caffe2::EmbeddingLookupIdx(
-          /*block_size=*/ddim,
-          /*output_size=*/offsets.numel(),
-          /*index_size=*/select_indices.numel(),
-          /*data_size=*/src.size(0),
-          /*input=*/src_data,
-          /*indices=*/select_indices_data,
-          /*offsets=*/offsets_new.data(),
-          /*weights=*/nullptr,
-          /*scale_bias=*/nullptr,
-          /*normalize_by_lengths=*/false,
-          /*out=*/output_data);
+      offsets_include_last[offsets.numel()] = select_indices.numel();
+      offsets_data = offsets_include_last.data();
     }
+
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          caffe2::EmbeddingLookupIdx(
+              /*block_size=*/ddim,
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/src.size(0),
+              /*input=*/src_data,
+              /*indices=*/select_indices_data + offsets_data[start_idx],
+              /*offsets=*/offsets_data + start_idx,
+              /*weights=*/nullptr,
+              /*scale_bias=*/nullptr,
+              /*normalize_by_lengths=*/false,
+              /*out=*/output_data + start_idx * ddim);
+        });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
@@ -192,43 +187,38 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
+    int64_t output_size = offsets.numel() - 1;
+    auto offsets_data = offsets.data_ptr<int64_t>();
+    std::vector<int64_t> offsets_include_last;
+
     if (include_last_offset) {
-      auto output_size = offsets.numel() - 1;
-      at::parallel_for(
-          0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-            caffe2::EmbeddingLookupIdx(
-                /*block_size=*/ddim,
-                /*output_size=*/end_idx - start_idx,
-                /*index_size=*/offsets.data_ptr<int64_t>()[end_idx] - offsets.data_ptr<int64_t>()[start_idx],
-                /*data_size=*/src.size(0),
-                /*input=*/src_data,
-                /*indices=*/select_indices_data + offsets.data_ptr<int64_t>()[start_idx],
-                /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
-                /*weights=*/scale_data + offsets.data_ptr<int64_t>()[start_idx],
-                /*scale_bias=*/nullptr,
-                /*normalize_by_lengths=*/false,
-                /*out=*/output_data + start_idx * ddim);
-          });
+      output_size = offsets.numel() - 1;
     } else {
-      std::vector<int64_t> offsets_new(offsets.numel() + 1);
+      output_size = offsets.numel();
+      offsets_include_last.resize(offsets.numel() + 1);
       std::memcpy(
-          offsets_new.data(),
+          offsets_include_last.data(),
           offsets.data_ptr<int64_t>(),
           sizeof(int64_t) * offsets.numel());
-      offsets_new[offsets.numel()] = select_indices.numel();
-      caffe2::EmbeddingLookupIdx(
-          /*block_size=*/ddim,
-          /*output_size=*/offsets.numel(),
-          /*index_size=*/select_indices.numel(),
-          /*data_size=*/src.size(0),
-          /*input=*/src_data,
-          /*indices=*/select_indices_data,
-          /*offsets=*/offsets_new.data(),
-          /*weights=*/scale_data,
-          /*scale_bias=*/nullptr,
-          /*normalize_by_lengths=*/false,
-          /*out=*/output_data);
+      offsets_include_last[offsets.numel()] = select_indices.numel();
+      offsets_data = offsets_include_last.data();
     }
+
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          caffe2::EmbeddingLookupIdx(
+              /*block_size=*/ddim,
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/src.size(0),
+              /*input=*/src_data,
+              /*indices=*/select_indices_data + offsets_data[start_idx],
+              /*offsets=*/offsets_data + start_idx,
+              /*weights=*/scale_data + offsets_data[start_idx],
+              /*scale_bias=*/nullptr,
+              /*normalize_by_lengths=*/false,
+              /*out=*/output_data + start_idx * ddim);
+        });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
