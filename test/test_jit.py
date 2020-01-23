@@ -4916,7 +4916,6 @@ def foo(x):
     def test_torchbind_return_tuple(self):
         def f():
             val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
-            print(val.return_a_tuple())
             return val.return_a_tuple()
 
         scripted = torch.jit.script(f)
