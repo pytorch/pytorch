@@ -8,11 +8,10 @@ struct CustomMethodProxy;
 struct CustomObjectProxy;
 
 py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
-  auto instance = at::ivalue::Object::create(class_type_, /*numSlots=*/1);
-  script::Method init_method(
-      instance, class_type_.type_->getMethod("__init__"));
-  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
-  return py::cast(script::Object(instance));
+  auto instance =
+      script::Object(at::ivalue::Object::create(class_type_, /*numSlots=*/1));
+  return invokeScriptMethodFromPython(
+      instance, "__init__", std::move(args), std::move(kwargs));
 }
 
 void initPythonCustomClassBindings(PyObject* module) {
