@@ -166,7 +166,7 @@ void RRefContext::delAllUsers() {
       continue;
     }
     LOG(ERROR) << getWorkerName() << ":  No. " << count
-               << " deleted proactively. ForkID: " << rref_ptr->forkId();
+               << " deleted proactively. RRefID: " << rref_ptr->rrefId();
     rref_ptr->tryDel();
   }
   LOG(ERROR) << getWorkerName() << ": Exiting delAllUsers()";
