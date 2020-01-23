@@ -128,6 +128,10 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
+PyObjectTypePtr PyObjectType::get() {
+  static auto value = PyObjectType::create();
+  return value;
+}
 CapsuleTypePtr CapsuleType::get() {
   static auto value = CapsuleType::create();
   return value;
@@ -146,6 +150,10 @@ ListTypePtr ListType::ofFloats() {
 }
 ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
+  return value;
+}
+ListTypePtr ListType::ofStrings() {
+  static auto value = ListType::create(StringType::get());
   return value;
 }
 
