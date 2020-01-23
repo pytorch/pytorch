@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/script/function_schema_parser.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
@@ -44,6 +45,11 @@ using at::MemoryFormat;
 
 using ::c10::fmap;
 using ::c10::filter;
+using c10::OperatorKernel;
+using c10::OperatorHandle;
+using c10::KernelFunction;
+using c10::RegistrationHandleRAII;
+using c10::Stack;
 
 namespace {
 
@@ -91,43 +97,70 @@ int (*DUMMY_OPERATION)(Stack&) = [](Stack& stack) -> int {
   return 0;
 };
 
-RegisterOperators reg(
-    {Operator(
-         "aten::get_device(Tensor self) -> int",
-         [](Stack& stack) {
-           RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
-           auto result =
-               at::get_device((std::move(peek(stack, 0, 1))).toTensor());
-           drop(stack, 1);
-           pack(stack, std::move(result));
-           return 0;
-         },
-         atenOperatorOptions()),
-     Operator(
-         "aten::storage_offset(Tensor self) -> int",
-         [](Stack& stack) {
-           RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
-           auto result =
-               ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
-           drop(stack, 1);
-           pack(stack, std::move(result));
-           return 0;
-         },
-         atenOperatorOptions()),
-     Operator(
-         "aten::is_contiguous(Tensor self) -> bool",
-         [](Stack& stack) {
-           RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
-           auto result =
-               ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
-           drop(stack, 1);
-           pack(stack, std::move(result));
-           return 0;
-         },
-         atenOperatorOptions()),
+class Registerer final {
+public:
+  Registerer&& op(const std::string& schema, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
+    static auto& dispatcher = c10::Dispatcher::singleton();
+    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(parseSchema(schema), atenOperatorOptions());
+    registrationHandles_.push_back(std::move(registration.first));
+    dispatcher.setManuallyBoxedKernelFor_(registration.second, boxed_kernel_wrapper);
+    return std::move(*this);
+  }
 
-     // Generated operators
-     ${constructors}});
+  Registerer&& jitOnlyOp(const std::string& schema, std::function<int (Stack*)> boxed_kernel_wrapper) && {
+    torch::jit::registerOperator(
+      torch::jit::Operator(
+        schema,
+        Operation([boxed_kernel_wrapper = std::move(boxed_kernel_wrapper)] (Stack& stack) -> int {
+          return boxed_kernel_wrapper(&stack);
+        }),
+        atenOperatorOptions()
+      )
+    );
+    return std::move(*this);
+  }
+
+  Registerer() = default;
+  Registerer(const Registerer&) = delete;
+  Registerer& operator=(const Registerer&) = delete;
+  Registerer(Registerer&&) noexcept = default;
+  Registerer& operator=(Registerer&&) noexcept = default;
+private:
+  std::vector<RegistrationHandleRAII> registrationHandles_;
+};
+
+static auto registry = Registerer()
+  .jitOnlyOp("aten::get_device(Tensor self) -> int",
+    [](Stack* stack) {
+      RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+      auto result =
+          at::get_device((std::move(peek(*stack, 0, 1))).toTensor());
+      drop(*stack, 1);
+      pack(*stack, std::move(result));
+      return 0;
+    })
+  .jitOnlyOp("aten::storage_offset(Tensor self) -> int",
+    [](Stack* stack) {
+      RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
+      auto result =
+          ((std::move(peek(*stack, 0, 1))).toTensor()).storage_offset();
+      drop(*stack, 1);
+      pack(*stack, std::move(result));
+       return 0;
+    })
+  .jitOnlyOp("aten::is_contiguous(Tensor self) -> bool",
+    [](Stack* stack) {
+      RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+      auto result =
+          ((std::move(peek(*stack, 0, 1))).toTensor()).is_contiguous();
+      drop(*stack, 1);
+      pack(*stack, std::move(result));
+      return 0;
+    })
+
+  // Generated operators
+  ${constructors}
+  ;
 
 } // anon namespace
 

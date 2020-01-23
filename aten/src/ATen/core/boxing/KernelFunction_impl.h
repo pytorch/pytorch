@@ -187,4 +187,10 @@ inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
     );
 }
 
+inline void KernelFunction::setManuallyBoxedKernel_(InternalBoxedKernelFunction* func) {
+    TORCH_INTERNAL_ASSERT(boxed_kernel_func_ == nullptr, "Tried to set a manually boxed kernel for a kernel that already has a boxed kernel set.");
+    TORCH_INTERNAL_ASSERT(unboxed_kernel_func_ != nullptr, "Tried to set a manually boxed kernel for an invalid KernelFunction.");
+    boxed_kernel_func_ = func;
+}
+
 }

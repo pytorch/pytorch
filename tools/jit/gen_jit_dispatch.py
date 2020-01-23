@@ -164,21 +164,32 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-[](Stack & stack) {
+[](OperatorKernel*, const OperatorHandle&, Stack* stack) {
     ${lvalues}
     ${call}
-    drop(stack, ${num_inputs});
-    pack(stack, std::move(result_));
+    drop(*stack, ${num_inputs});
+    pack(*stack, std::move(result_));
+}
+""")
+
+CONSTRUCTOR_JITONLY = CodeTemplate("""\
+[](Stack* stack) {
+    ${lvalues}
+    ${call}
+    drop(*stack, ${num_inputs});
+    pack(*stack, std::move(result_));
     return 0;
 }
 """)
 
 OPERATOR = CodeTemplate("""\
-Operator(
-    "${signature}",
-    ${op},
-    atenOperatorOptions()
-),
+  .op("${signature}",
+    ${op})
+""")
+
+OPERATOR_JITONLY = CodeTemplate("""\
+  .jitOnlyOp("${signature}",
+    ${op})
 """)
 
 
@@ -330,7 +341,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         op_capture = ''
         order = argument_order(decl)
         for i, arg in enumerate(decl['arguments']):
-            value = from_ivalue(arg, '(std::move(peek(stack, {}, {})))'.format(order[i], num_inputs))
+            value = from_ivalue(arg, '(std::move(peek(*stack, {}, {})))'.format(order[i], num_inputs))
             if requires_lvalue(arg):
                 lvalues.append('auto {} = {};\n'.format(arg['name'], value))
                 value = arg['name']
@@ -340,12 +351,23 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
         returns = decl['returns']
 
-        constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=call,
-                                             kw_assignments=kw_assignments,
-                                             num_inputs=num_inputs,
-                                             op_capture=op_capture,
-                                             lvalues=lvalues)
+        if decl['use_c10_dispatcher'] == 'unboxed_only':
+            constructor = CONSTRUCTOR_JITONLY.substitute(name=decl['name'],
+                                                         call=call,
+                                                         kw_assignments=kw_assignments,
+                                                         num_inputs=num_inputs,
+                                                         op_capture=op_capture,
+                                                         lvalues=lvalues)
+        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+            constructor = CONSTRUCTOR.substitute(name=decl['name'],
+                                                 call=call,
+                                                 kw_assignments=kw_assignments,
+                                                 num_inputs=num_inputs,
+                                                 op_capture=op_capture,
+                                                 lvalues=lvalues)
+        else:
+            assert decl['use_c10_dispatcher'] == 'full'
+
         return constructor
 
     def filter_decls(jit_decls, disable_autograd, selected_op_list):
@@ -391,6 +413,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
+        'use_c10_dispatcher': 'unboxed_only',
     } for name in ['sizes', 'strides', 'dim', 'numel']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
@@ -441,6 +464,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
                 arg['is_nullable'] = False
                 decl_copy['should_match_schema'] = False
+                decl_copy['overload_name'] = decl_copy['overload_name'] + "_copy"
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
@@ -464,8 +488,14 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
-                                                 op=emit_decl_variant(decl)))
+            if decl['use_c10_dispatcher'] == 'unboxed_only':
+                shards[x].append(OPERATOR_JITONLY.substitute(signature=signature(decl, decl['should_match_schema']),
+                                                             op=emit_decl_variant(decl)))
+            elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
+                shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+                                                     op=emit_decl_variant(decl)))
+            else:
+                assert decl['use_c10_dispatcher'] == 'full'
 
     for i, shard in enumerate(shards):
         env = {

@@ -180,4 +180,8 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
           dispatchTable.listAllDispatchKeys(), ".");
 }
 
+void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
+  op.operatorIterator_->op.setManuallyBoxedKernel_(func);
+}
+
 }
