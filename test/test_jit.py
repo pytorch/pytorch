@@ -50,31 +50,31 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_qconfig
 
 from torch.quantization import quantize
-from common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
-from common_quantization import ConvModel, AnnotatedConvModel
-from common_quantization import test_only_eval_fn as _test_only_eval_fn
+from torch.testing._internal.common_quantization import SingleLayerLinearModel, AnnotatedSingleLayerLinearModel
+from torch.testing._internal.common_quantization import ConvModel, AnnotatedConvModel
+from torch.testing._internal.common_quantization import test_only_eval_fn as _test_only_eval_fn
 
 
 # Testing utils
-import jit_utils
-from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
+from torch.testing._internal import jit_utils
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode
-from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
+from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
-from common_nn import module_tests, new_module_tests, criterion_tests
-from common_methods_invocations import method_tests as autograd_method_tests
-from common_methods_invocations import create_input, unpack_variables, \
+from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_methods_invocations import method_tests as autograd_method_tests
+from torch.testing._internal.common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
-from common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # For testing truediv in python 2
-from test_module.future_div import div_int_future, div_float_future
-from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
+from torch.testing._internal.test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
 from collections import namedtuple, OrderedDict
@@ -2731,7 +2731,7 @@ graph(%Ra, %Rb):
 
         @torch.jit.script
         def func4(x, a):
-            # type: (Tensor, List[str]) -> Tensor
+            # type: (Tensor, List[Optional[str]]) -> Tensor
             if len(a) == 2:
                 return x + 2
             else:
@@ -2876,6 +2876,39 @@ graph(%Ra, %Rb):
         y = torch.randn(2, 2, requires_grad=True)
         fn(x)
         fn(y)
+
+    def test_python_ivalue(self):
+        # Test if pure python object can be hold as IValue and conversion
+        # between IValue and PyObject are correct
+        # test for numpy object
+        py_array = np.arange(15)
+        ret_py_obj = torch._C._ivalue_debug_python_object(py_array)
+        self.assertEqual(py_array, ret_py_obj)
+
+        # test for function object
+        ret_py_obj = torch._C._ivalue_debug_python_object(F.relu)
+        self.assertEqual(F.relu, ret_py_obj)
+
+        # test for memory management
+        # we need to ensure IValue correctly call incref/decref to avoid
+        # dangling behavior and potential memory leaks during conversions
+        def test_func_scope_helper(inp):
+            # create a scope and do the conversion -> ivalue -> pyobject
+            # this func return a new pyobject that refcount + 1
+            inp_refcount = sys.getrefcount(inp)
+            ivalue_holder = torch._C._ivalue_debug_python_object(inp)
+            self.assertEqual(inp_refcount + 1, sys.getrefcount(ivalue_holder))
+            return ivalue_holder + 1
+
+        test_input = 2200
+        before_count = sys.getrefcount(test_input)
+        test_func_scope_helper(test_input)
+        after_count = sys.getrefcount(test_input)
+
+        # after the test_func_scope_helper_call, the refcount of
+        # test_input should be equal to the original refcount
+        # otherwise we get either dangling pointer or memory leak!
+        self.assertEqual(before_count, after_count)
 
     def test_decompose_addmm(self):
         def does_decompose():
@@ -3265,6 +3298,80 @@ graph(%Ra, %Rb):
         graph = constant_prop.graph
         self.run_pass('constant_propagation', graph)
         self.assertTrue(graph.findNode("prim::Loop").outputsSize() == 2)
+
+    def test_constant_insertion(self):
+        funcs_template = dedent('''
+        def func():
+            return {constant_constructor}
+        ''')
+
+        # constants: primitives: int, double, bool, str, lists of primitives,
+        # and tuples
+        def check_constant(constant_constructor):
+            scope = {}
+            funcs_str = funcs_template.format(constant_constructor=constant_constructor)
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            self.run_pass('constant_propagation', f_script.graph)
+            FileCheck().check_count("prim::Constant", 1, exactly=True).run(f_script.graph)
+            self.assertEqual(scope['func'](), f_script())
+            imported = self.getExportImportCopy(f_script)
+            self.assertEqual(imported(), f_script())
+
+        constants = ["None", "-.5", "0", "1", "True", "False", "''", "'a'", "'b'", "torch.tensor(1)",
+                     "[True, False]", "[0., .5]", "[torch.tensor(4), torch.tensor(2)]", "[0, 1]", "['0', '1']"]
+
+        for type in ["Tensor", "str", "int", "float", "bool"]:
+            constants.append("torch.jit.annotate(List[ " + type + "], [])")
+
+        for constant in constants:
+            check_constant(constant)
+
+        for i in range(len(constants)):
+            for j in range(i + 1, len(constants)):
+                tup_constant = constants[i] + ", " + constants[j]
+                check_constant(tup_constant)
+
+        # testing node hashing
+        funcs_template = dedent('''
+        def func():
+            print({constant_constructor})
+        ''')
+        single_elem_tuples = map(lambda x: "(" + x + ",)", constants)
+        input_arg = ", ".join(single_elem_tuples)
+        scope = {}
+        funcs_str = funcs_template.format(constant_constructor=input_arg)
+        execWrapper(funcs_str, globals(), scope)
+        cu = torch.jit.CompilationUnit(funcs_str)
+        f_script = cu.func
+        self.run_pass('constant_propagation', f_script.graph)
+        # prim::None return adds one constant
+        self.assertEqual(len(constants) + 1, str(f_script.graph).count("prim::Constant"))
+        self.run_pass('cse', f_script.graph)
+        # node hashing correctly working, no CSE occurs
+        self.assertEqual(len(constants) + 1, str(f_script.graph).count("prim::Constant"))
+
+        funcs_template = dedent('''
+        def func():
+            a = {constant_constructor}
+            print(a)
+            b = {constant_constructor}
+            print(b)
+        ''')
+
+        # test that equal tuples correctly work with node hashing
+        for tup in map(lambda x: "(" + x + ",)", constants):
+            funcs_str = funcs_template.format(constant_constructor=tup)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            self.run_pass('constant_propagation', f_script.graph)
+            num_constants = 3  # input constant twice, None once
+            FileCheck().check_count("prim::Constant", num_constants, exactly=True).run(f_script.graph)
+            self.run_pass('cse', f_script.graph)
+            FileCheck().check_count("prim::Constant", num_constants - 1, exactly=True).run(f_script.graph)
 
     def test_trace_detach(self):
         def foo(x, w):
@@ -4369,6 +4476,7 @@ def foo(x):
 
         self.checkModule(Add(), [torch.randn(2, 2)])
 
+    @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
         message2 = re.escape("""
@@ -5935,13 +6043,14 @@ a")
         @torch.jit.script
         def foo():
             a = torch.tensor(1)
-            b = torch.tensor(2)
+            b = torch.tensor(1)
             return a, b
 
         self.run_pass('constant_propagation', foo.graph)
         self.run_pass('constant_pooling', foo.graph)
         # dont pool constants bc it would introduce observable alias relationship changing
-        FileCheck().check_count("prim::Constant", 2, exactly=True).run(foo.graph)
+        a, b = foo()
+        self.assertIsNot(a, b)
 
     def test_literal(self):
         def func1(a, b):
@@ -13556,6 +13665,16 @@ a")
             return c[2:10]
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
+
+    def test_lower_nested_tuples(self):
+        @torch.jit.script
+        def test():
+            return ((1, 2), 3)
+
+        self.run_pass('constant_propagation', test.graph)
+        FileCheck().check("prim::Constant").check_not("TupleConstruct").run(test.graph)
+        # fails if a tuple can't be lowered
+        self.run_pass('lower_all_tuples', test.graph)
 
     def test_unwrap_optional_builtin(self):
         def test(x):
