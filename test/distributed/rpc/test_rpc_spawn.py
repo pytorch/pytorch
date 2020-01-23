@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from rpc_test import RpcTest
-from common_distributed import MultiProcessTestCase
-from common_utils import TEST_WITH_ASAN, run_tests
+from torch.testing._internal.distributed.rpc.rpc_test import RpcTest
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, run_tests
 
 import unittest
 
