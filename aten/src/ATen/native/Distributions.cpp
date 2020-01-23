@@ -211,13 +211,13 @@ Tensor& random_(Tensor& self, Generator* gen) {
   uint64_t range;
   auto iter_scalar_type = iter.dtype();
   if (isFloatingType(iter_scalar_type)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter_scalar_type, "random_cuda_range_calc", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter_scalar_type, "random_range_calc", [&] {
       range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
     });
   } else if (iter.dtype() == ScalarType::Bool) {
     range = 2;
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_cuda_range_calc", [&] {
+    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_range_calc", [&] {
       range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
     });
   }
