@@ -4,7 +4,7 @@ from functools import wraps
 import unittest
 import os
 import torch
-from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf
 
 # Note: Generic Device-Type Testing
@@ -505,6 +505,10 @@ def onlyCUDA(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
 
 
 # Skips a test on CPU if LAPACK is not available.
