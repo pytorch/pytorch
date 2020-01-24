@@ -1625,9 +1625,10 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void FoldConvBatchNorm2d(const script::Module& module) {
+script::Module FoldConvBatchNorm2d(const script::Module& module) {
   FoldConvBatchNorm2dHelper h;
   h.run(module);
+  return module;
 }
 
 void FoldQuantizeCallIntoBuffer(
