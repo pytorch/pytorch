@@ -255,7 +255,7 @@ Tensor detach(const Tensor & self) {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = make_variable_view(self, self, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
+  auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {

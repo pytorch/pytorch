@@ -3472,7 +3472,7 @@ for shape in [(1,), ()]:
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, None, None))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3797,6 +3797,32 @@ for shape in [(1,), ()]:
         c = torch.sum(s**b)
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+    def test_multi_view_methods(self):
+        # This list should math the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
+        # It maps a function its arguments for an input of size [3,]
+        fn_to_test = {
+            'split': (2,),
+            'split_with_sizes': ((2, 1),),
+            'unbind': (0,)
+        }
+
+        for fn, arg in fn_to_test.items():
+            inp = torch.rand(3, dtype=torch.double, requires_grad=True)
+
+            def foo(inp, inplace=False):
+                x = inp * 2
+                x = getattr(x, fn)(*arg)
+                res = 0.
+                for i, el in enumerate(x):
+                    if inplace:
+                        el *= 42
+                    res += (i + 1) * el.sum()
+                return res
+            self.assertTrue(gradcheck(foo, (inp,)))
+            self.assertTrue(gradgradcheck(foo, (inp,)))
+            self.assertTrue(gradcheck(foo, (inp, True)))
+            self.assertTrue(gradgradcheck(foo, (inp, True)))
 
 
 def index_variable(shape, max_indices):
