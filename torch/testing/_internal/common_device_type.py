@@ -507,6 +507,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
+
+
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)

@@ -3223,8 +3223,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer).
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
+            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -3241,7 +3242,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          S is the source sequence length.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3343,20 +3346,26 @@ def multi_head_attention_forward(query,                           # type: Tensor
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
     q = q * scaling
 
+    if attn_mask is not None:
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0)
+            if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 2D attn_mask is not correct.')
+        elif attn_mask.dim() == 3:
+            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 3D attn_mask is not correct.')
+        else:
+            raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
+        # attn_mask's dim is 3 now.
+
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask,
-                                      torch.zeros((attn_mask.size(0), 1),
-                                                  dtype=attn_mask.dtype,
-                                                  device=attn_mask.device)], dim=1)
+                attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                                   dtype=key_padding_mask.dtype,
-                                                   device=key_padding_mask.device)], dim=1)
+                key_padding_mask = pad(key_padding_mask, (0, 1))
         else:
             assert static_k is None, "bias cannot be added to static key."
             assert static_v is None, "bias cannot be added to static value."
@@ -3391,20 +3400,14 @@ def multi_head_attention_forward(query,                           # type: Tensor
         k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
         v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
-                                                          dtype=attn_mask.dtype,
-                                                          device=attn_mask.device)], dim=1)
+            attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+            key_padding_mask = pad(key_padding_mask, (0, 1))
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        attn_mask = attn_mask.unsqueeze(0)
         attn_output_weights += attn_mask
 
     if key_padding_mask is not None:
