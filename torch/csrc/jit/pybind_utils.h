@@ -165,9 +165,8 @@ inline InferredType tryToInferType(py::handle input) {
       const auto classname =
           c10::QualifiedName(py::cast<std::string>(qualifiedName));
       auto class_type = cu->get_class(classname);
-      if (class_type) {
-        return InferredType(class_type);
-      }
+      TORCH_INTERNAL_ASSERT(class_type);
+      return InferredType(class_type);
     }
   }
 
