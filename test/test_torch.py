@@ -27,21 +27,23 @@ from itertools import product, combinations, combinations_with_replacement, perm
 from functools import reduce
 from random import randrange
 from torch import multiprocessing as mp
-from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
+from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
-from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, TEST_DILL, \
+from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, TEST_DILL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf
 from multiprocessing.reduction import ForkingPickler
-from common_device_type import instantiate_device_type_tests, PYTORCH_CUDA_MEMCHECK, \
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
+    PYTORCH_CUDA_MEMCHECK
 import torch.backends.quantized
+import torch.testing._internal.data
 
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
@@ -4334,7 +4336,8 @@ class _TestTorchMixin(object):
             return module
 
         with filecontext_lambda() as checkpoint:
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                                    '_internal', 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -4347,7 +4350,8 @@ class _TestTorchMixin(object):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                                    '_internal', 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
@@ -6595,7 +6599,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse(self, device):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         # no batches: 2-D tensors
         matrix = random_fullrank_matrix_distinct_singular_value(5).to(device)
@@ -7039,7 +7043,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse_many_batches(self, device):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         matrices = random_fullrank_matrix_distinct_singular_value(5, 256, 256).to(device)
         matrices_inverse = torch.inverse(matrices)
@@ -7055,7 +7059,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_pinverse(self, device, dtype):
-        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(M):
             # Testing against definition for pseudo-inverses
@@ -7150,7 +7154,7 @@ class TestTorchDeviceType(TestCase):
         run_test(M)
 
         # This is for negative powers
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         M = random_fullrank_matrix_distinct_singular_value(5, dtype=dtype, device=device)
         run_test(M, sign=-1)
 
@@ -7362,8 +7366,8 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet_batched(self, device, dtype):
-        from common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
-                                  random_symmetric_pd_matrix, random_square_matrix_of_rank)
+        from torch.testing._internal.common_utils import (random_symmetric_matrix, random_symmetric_psd_matrix,
+                                                          random_symmetric_pd_matrix, random_square_matrix_of_rank)
 
         # mat_chars denotes matrix characteristics
         # possible values are: sym, sym_psd, sym_pd, sing, non_sym
@@ -7410,7 +7414,7 @@ class TestTorchDeviceType(TestCase):
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
@@ -7448,7 +7452,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype,
                                                            device=device).permute(1, 0, 2)
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
@@ -7492,7 +7496,7 @@ class TestTorchDeviceType(TestCase):
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_symmetric_pd_matrix(*A_dims, dtype=dtype, device=device)
@@ -7531,7 +7535,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_cholesky_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         for upper in [True, False]:
             A = random_symmetric_pd_matrix(2, 2, dtype=dtype, device='cpu')
@@ -7564,7 +7568,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_cholesky_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         def run_test(A_dims, b_dims, upper):
             A_matrix_size = A_dims[-1]
@@ -7589,7 +7593,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_inverse(self, device, dtype):
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
         a = random_symmetric_pd_matrix(5, dtype=dtype, device=device)
 
         # compute inverse directly
@@ -7616,7 +7620,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_batched_many_batches(self, device, dtype):
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         def cholesky_test_helper(n, batchsize, device, upper):
             A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
@@ -7639,7 +7643,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_batched(self, device, dtype):
-        from common_utils import random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
 
         def cholesky_test_helper(n, batch_dims, upper):
             A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
@@ -8825,7 +8829,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         A = random_fullrank_matrix_distinct_singular_value(2, 2, dtype=dtype, device='cpu')
         b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
@@ -8838,7 +8842,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x, x_exp)
 
     def lu_solve_test_helper(self, A_dims, b_dims, pivot, device, dtype):
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_fullrank_matrix_distinct_singular_value(*A_dims, dtype=dtype, device=device)
@@ -8908,7 +8912,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_lu_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
-        from common_utils import random_fullrank_matrix_distinct_singular_value
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
         def run_test(A_dims, b_dims, pivot=True):
             A_matrix_size = A_dims[-1]
@@ -9078,7 +9082,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_symeig(self, device, dtype):
-        from common_utils import random_symmetric_matrix
+        from torch.testing._internal.common_utils import random_symmetric_matrix
 
         def run_test(dims, eigenvectors, upper):
             x = random_symmetric_matrix(*dims, dtype=dtype, device=device)
@@ -12984,7 +12988,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_lu(self, device):
-        from common_utils import random_matrix
+        from torch.testing._internal.common_utils import random_matrix
 
         def run_test(device, pivot):
             def run_subtest(matrix_size, batches, device, pivot, singular=False, a=None):

@@ -32,6 +32,7 @@ BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
 mkdir -p "${BUILD_ROOT}"
+mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
 
 build_analyzer() {
@@ -106,7 +107,7 @@ analyze_torch_mobile() {
   call_analyzer
 
   if [ -n "${DEPLOY}" ]; then
-    DEST="${BUILD_ROOT}/torch_deps.py"
+    DEST="${BUILD_ROOT}/pt_deps.bzl"
     cat > ${DEST} <<- EOM
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
@@ -114,6 +115,7 @@ analyze_torch_mobile() {
 EOM
     printf "TORCH_DEPS = " >> ${DEST}
     cat "${OUTPUT}" >> ${DEST}
+    echo "Deployed file at: ${DEST}"
   fi
 }
 
