@@ -230,12 +230,12 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               // Propagate error to responseFuture if we had one.
               responseFuture->setError(error->what());
             } else {
-              auto msg = std::move(getMessageWithAutograd(
+              auto msg = getMessageWithAutograd(
                   fromWorkerId,
                   std::move(*wrappedRpcResponseFuture).moveValue(),
-                  MessageType::FORWARD_AUTOGRAD_RESP));
+                  MessageType::FORWARD_AUTOGRAD_RESP);
               msg.setId(messageId);
-              responseFuture->markCompleted(msg);
+              responseFuture->markCompleted(std::move(msg));
             }
           });
       return responseFuture;
