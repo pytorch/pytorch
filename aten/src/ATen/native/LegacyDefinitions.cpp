@@ -76,12 +76,4 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cpu::_th_gather_out(result, self, dim, index);
-}
-
-Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  return legacy::cpu::_th_gather(self, dim, index);
-}
-
 }} // namespace at::native

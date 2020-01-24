@@ -46,6 +46,11 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
+    if (param_names.size() == 0) {
+      throw ErrorReport(loc)
+          << "Non-static method does not have a self argument";
+    }
+
     // If there is a `self` parameter on the callable, skip it on the names list
     args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
     ++names_it;

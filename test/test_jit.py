@@ -4026,6 +4026,19 @@ class TestScript(JitTestCase):
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
 
+    def test_no_self_arg_ignore_function(self):
+        class MyModule(nn.Module):
+            @torch.jit.ignore  # noqa: B902
+            def call_np():  # noqa: B902
+                # type: () -> int
+                return np.random.choice(2, p=[.95, .05])
+
+            def forward(self):
+                return self.call_np()
+
+        with self.assertRaisesRegex(Exception, "does not have a self argument"):
+            torch.jit.script(MyModule())
+
     def test_loop_liveness(self):
         with enable_profiling_mode():
             @torch.jit.script
