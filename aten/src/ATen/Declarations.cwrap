@@ -279,7 +279,8 @@
 [[
   name: _th_gather
   cname: gather
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants:
     - function
