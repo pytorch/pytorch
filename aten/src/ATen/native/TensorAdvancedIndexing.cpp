@@ -71,6 +71,7 @@ DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
+DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 
 static bool all_strides_match(TensorList tensors) {
@@ -486,6 +487,17 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
+}
+
+Tensor & gather_out_cpu(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  result.resize_(index.sizes());
+  gather_stub(result.device().type(), result, self, dim, index);
+  return result;
+}
+
+Tensor gather_cpu(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  Tensor result = at::empty({0}, self.options());
+  return gather_out_cpu(result, self, dim, index, sparse_grad);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {

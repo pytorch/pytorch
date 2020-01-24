@@ -26,6 +26,28 @@ static inline IdxVec ensure_nonempty_vec(IdxVec vec) {
   return vec;
 }
 
+// Used for `gather`-like methods
+// Test:
+// 1. index.size(d) == self.size(d) for all d != dim
+void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index) {
+  auto self_dims = ensure_nonempty_dim(self.dim());
+
+  TORCH_CHECK(self_dims == ensure_nonempty_dim(index.dim()),
+    "Index tensor must have the same number of dimensions as input tensor"
+  );
+
+  for (int64_t i = 0; i < self_dims; ++i) {
+    if (i != dim) {
+      TORCH_CHECK(
+        ensure_nonempty_size(index, i) == ensure_nonempty_size(self, i),
+        "Size does not match at dimension ", i,
+        " get ", ensure_nonempty_size(self, i),
+        " vs ", ensure_nonempty_size(index, i)
+      );
+    }
+  }
+}
+
 // Used for `scatter` and `scatter_add`
 // Tests:
 //  1. index.size(d) <= src.size(d) for all d
@@ -133,6 +155,37 @@ void cpu_scatter_gather_base_kernel(
   );
 }
 
+void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+  if (index.numel() == 0) {
+    return;
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  gather_shape_check(self, dim, index);
+
+  int64_t index_dim_size = ensure_nonempty_size(index, dim);
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  cpu_scatter_gather_base_kernel(
+    result, dim, index, self,
+    "gather_out_cpu", [&] (
+      auto* result_data, auto result_dim_stride,
+      const auto* index_data, auto index_dim_stride,
+      const auto* self_data, auto self_dim_stride
+    ) {
+      for (int64_t i = 0; i < index_dim_size; ++i) {
+        int64_t idx_dim = index_data[i * index_dim_stride];
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
+          "index ", idx_dim,
+          " is out of bounds for dimension ", dim,
+          " with size ", self_dim_size);
+        result_data[i * result_dim_stride] = self_data[idx_dim * self_dim_stride];
+      }
+    }, /*serial_exec=*/false
+  );
+}
+
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (index.numel() == 0) {
     return;
@@ -166,6 +219,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
 
 } // anonymous napespace
 
+REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
 
 }} // namespace at::native
