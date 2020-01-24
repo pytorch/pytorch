@@ -148,7 +148,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
         IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+      gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
     }
   }
 }
@@ -197,7 +197,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
       IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+    gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
 }
 
