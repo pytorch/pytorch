@@ -70,7 +70,8 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
 # functions that only perform viewing (called pure views here) versus all others (like
 # user-defined Functions). This list is used to know which functions are pure views.
 # A function should NOT be added to this list if:
-# - Your backward function does more than just the backward of the views.
+# - Your backward function does more than just the backward of the views. For example if your
+# function makes changes to the layout both in forward and backward.
 # A function should be added to this list if:
 # - You want to allow inplace modification of the result.
 # - You are aware that inplace modification of the output will change the memory usage of the
