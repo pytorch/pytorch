@@ -4026,6 +4026,19 @@ class TestScript(JitTestCase):
         jit_trace = torch.jit.trace(fct_loop, x)
         out_trace = jit_trace(x)
 
+    def test_no_self_arg_ignore_function(self):
+        class MyModule(nn.Module):
+            @torch.jit.ignore  # noqa: B902
+            def call_np():  # noqa: B902
+                # type: () -> int
+                return np.random.choice(2, p=[.95, .05])
+
+            def forward(self):
+                return self.call_np()
+
+        with self.assertRaisesRegex(Exception, "does not have a self argument"):
+            torch.jit.script(MyModule())
+
     def test_loop_liveness(self):
         with enable_profiling_mode():
             @torch.jit.script
@@ -4835,12 +4848,33 @@ def foo(x):
 
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_take_as_arg(self):
+        global StackString  # see [local resolution in python]
+        StackString = torch.classes._TorchScriptTesting_StackString
+
+        def foo(stackstring):
+            # type: (StackString)
+            stackstring.push("lel")
+            return stackstring
+
+        script_input = torch.classes._TorchScriptTesting_StackString([])
+        scripted = torch.jit.script(foo)
+        script_output = scripted(script_input)
+        self.assertEqual(script_output.pop(), "lel")
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_instance(self):
         def foo():
             ss = torch.classes._TorchScriptTesting_StackString(["hi", "mom"])
             return ss
 
         scripted = torch.jit.script(foo)
+        # Ensure we are creating the object and calling __init__
+        # rather than calling the __init__wrapper nonsense
+        fc = FileCheck().check('prim::CreateObject()')\
+                        .check('prim::CallMethod[name="__init__"]')
+        fc.run(str(scripted.graph))
         out = scripted()
         self.assertEqual(out.pop(), "mom")
         self.assertEqual(out.pop(), "hi")
@@ -4873,6 +4907,45 @@ def foo(x):
         out = scripted()
         self.assertEqual(out.pop(), "hi")
         self.assertEqual(out.pop(), "mom")
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_getstate_setstate(self):
+        def f():
+            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            s = val.__getstate__()
+            # TODO: sort out whether unpickler should call __new__ or __init__
+            val2 = torch.classes._TorchScriptTesting_StackString(["0", "0"])
+            val2.__setstate__(s)
+            return val.pop(), val2.pop()
+        ret = f()
+        self.assertEqual(ret[0], ret[1])
+
+        ret = torch.jit.script(f)()
+        self.assertEqual(ret[0], ret[1])
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_return_tuple(self):
+        def f():
+            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
+            return val.return_a_tuple()
+
+        scripted = torch.jit.script(f)
+        tup = scripted()
+        self.assertEqual(tup, (1337.0, 123))
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_save_load(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            ss2 = torch.classes._TorchScriptTesting_StackString(["hi"])
+            ss.merge(ss2)
+            return ss
+
+        scripted = torch.jit.script(foo)
+        self.getExportImportCopy(scripted)
 
     def test_jitter_bug(self):
         @torch.jit.script
