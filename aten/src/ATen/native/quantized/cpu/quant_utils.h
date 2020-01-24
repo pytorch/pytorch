@@ -58,7 +58,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   if (scale == 0.0f || isinf(1.0f / scale)) {
     scale = 0.1;
   }
-  TORCH_CHECK(scale > 0, "qlinear_dynamic scale should be > 0");
+  TORCH_CHECK(scale > 0, "quantization scale should be > 0");
 
   if (force_scale_power_of_two) {
     if (scale < 1) {

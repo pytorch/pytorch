@@ -82,7 +82,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     // we just pass a pointer to the scale values (and internally
     // ReQuantizeForFloat won't index past 0.
 
-    float* bias_ptr = nullptr;
+    const float* bias_ptr = nullptr;
     at::Tensor bias_vec;
     if (pack_ptr.bias.has_value()) {
       bias_vec = pack_ptr.bias.value();

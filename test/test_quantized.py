@@ -12,11 +12,11 @@ from torch.nn.modules.utils import _pair
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
-from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -1112,17 +1112,18 @@ class TestDynamicQuantizedLinear(TestCase):
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
 
-            avoid_vpmaddubsw_overflow_linear(
-                batch_size,
-                input_channels,
-                output_channels,
-                X_q0,
-                X_value_min,
-                X_value_max,
-                W_q0,
-                W_value_min,
-                W_value_max,
-            )
+            if qengine == 'fbgemm':
+                avoid_vpmaddubsw_overflow_linear(
+                    batch_size,
+                    input_channels,
+                    output_channels,
+                    X_q0,
+                    X_value_min,
+                    X_value_max,
+                    W_q0,
+                    W_value_min,
+                    W_value_max,
+                )
 
             X_fp32 = torch.from_numpy(_dequantize(X_q0, X_scale, X_zp)).to(dtype=torch.float)
             if use_multi_dim_input:
