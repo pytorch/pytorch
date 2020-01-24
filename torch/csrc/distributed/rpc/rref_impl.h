@@ -213,6 +213,7 @@ class RRef : public RRefInterface {
   inline const TypePtr type() {
     return type_;
   }
+
  protected:
   friend class RRefContext;
 
