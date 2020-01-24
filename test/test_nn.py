@@ -5732,6 +5732,7 @@ class TestNN(NNTestCase):
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_partial_flat_weights(self):
         input_size = 10
         hidden_size = 6
