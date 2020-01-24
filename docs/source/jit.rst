@@ -193,6 +193,11 @@ The :any:`math` module is also supported (see :ref:`math-module` for details), b
 (built-in or third party) are supported.
 
 
+Python Language Reference Comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a full listing of supported Python features, see :ref:`python-language-reference`.
+
 Debugging
 ---------
 
@@ -744,7 +749,7 @@ Attributes
 The TorchScript compiler needs to know the types of `module attributes`_. Most types
 can be inferred from the value of the member. Empty lists and dicts cannot have their
 types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
-If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
 to the resulting :class:`ScriptModule`
 
 

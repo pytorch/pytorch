@@ -105,8 +105,8 @@ struct BailOutGraphBuilderForNode {
   }
 
   void mapValues(
-      const at::ArrayRef<Value*>& block_outputs,
-      const at::ArrayRef<Value*>& carried_deps) {
+      const at::ArrayRef<Value*> block_outputs,
+      const at::ArrayRef<Value*> carried_deps) {
     TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
     for (size_t i = 0; i < block_outputs.size(); i++) {
       auto nv = getOrAddInputForValue(block_outputs[i]);
@@ -129,7 +129,6 @@ struct BailOutGraphBuilderForNode {
     auto one = copy_graph_->insertConstant({1});
     updated_max_trip_count =
         copy_graph_->insert(aten::sub, {updated_max_trip_count, one});
-    TORCH_INTERNAL_ASSERT(old_to_new_.count(outer_node->inputs()[0]) != 0);
     auto cur_plus_one = copy_graph_->insert(aten::add, {one, cur_iter});
 
     // We need to be careful when mapping `block_outputs` to continuation
@@ -185,7 +184,7 @@ struct BailOutGraphBuilderForNode {
   }
 
   void buildBailOutIf(
-      const at::ArrayRef<Value*>& block_outputs,
+      const at::ArrayRef<Value*> block_outputs,
       Node* outer_node) {
     auto if_outputs = outer_node->outputs();
     mapValues(block_outputs, if_outputs);
@@ -291,7 +290,7 @@ struct BailOutInserter {
         const auto& live_inputs = liveness_sets_[*it];
 
         // guarded inputs come first
-        // currently, there's always one guaded input
+        // currently, there's always one guarded input
         bailout_node->addInput(it->input());
         for (auto li : live_inputs) {
           // Guarded inputs have already been added

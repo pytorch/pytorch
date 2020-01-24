@@ -37,7 +37,7 @@ std::unique_ptr<::gloo::Algorithm> initializeAlgorithm(
 }
 
 /**
- * This is a helper function which attemtps to get a base value depending on the
+ * This is a helper function which attempts to get a base value depending on the
  * # of nodes. Larger the base the better performance (up to 4) is what we have
  * observed in gloo benchmarks. At the moment bcube works only if # nodes = base
  * ^ x. Where x is some constant. So, if # node don't match our expectation

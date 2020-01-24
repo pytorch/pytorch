@@ -3,7 +3,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <atomic>
@@ -164,7 +164,7 @@ class RRefContext {
 
   // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
-  // following two conditions is ture:
+  // following two conditions is true:
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //

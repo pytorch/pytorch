@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/module.h>
+#include <aten/src/ATen/core/ivalue.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -158,7 +159,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
   // Function attributes that are calls to builtin functions. These get de-sugared
-  // directly into the correpsonding aten:: call.
+  // directly into the corresponding aten:: call.
   // The map is attribute name -> aten symbol name
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
@@ -188,7 +189,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
-  c10::optional<py::object> findConstant(const std::string& name) const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;

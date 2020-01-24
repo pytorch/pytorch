@@ -11,6 +11,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
@@ -50,7 +51,7 @@ using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
-  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::VariableTensorId);
 }
 }
 
@@ -203,9 +204,14 @@ class CAFFE2_API Tensor {
     return impl_->is_non_overlapping_and_dense();
   }
 
-  at::MemoryFormat suggest_memory_format() const {
-    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
-      return at::MemoryFormat::ChannelsLast;
+  at::MemoryFormat suggest_memory_format(
+      bool channels_last_strides_exact_match = false) const {
+    // Setting channels_last_strides_exact_match to true forces function to
+    // check 0,1 - sized dimention strides.
+    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
+      if (!channels_last_strides_exact_match || get_channels_last_strides(sizes()) == strides()) {
+        return at::MemoryFormat::ChannelsLast;
+      }
     }
     return at::MemoryFormat::Contiguous;
   }
@@ -234,14 +240,14 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  [[deprecated("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")]]
+  C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
+        dispatchKeyToBackend(legacyExtractDispatchKey(key_set())),
         scalar_type());
   }
-  TensorTypeSet type_set() const {
-    return impl_->type_set();
+  DispatchKeySet key_set() const {
+    return impl_->key_set();
   }
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
@@ -258,7 +264,7 @@ class CAFFE2_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  [[deprecated("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")]]
+  C10_DEPRECATED_MESSAGE("Tensor.is_variable() is deprecated; everything is a variable now. (If you want to assert that variable has been appropriately handled already, use at::impl::variable_excluded_from_dispatch())")
   bool is_variable() const noexcept {
     return !at::impl::variable_excluded_from_dispatch();
   }
@@ -313,7 +319,7 @@ class CAFFE2_API Tensor {
   T * data_ptr() const;
 
   template<typename T>
-  [[deprecated("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")]]
+  C10_DEPRECATED_MESSAGE("Tensor.data<T>() is deprecated. Please use Tensor.data_ptr<T>() instead.")
   T * data() const {
     return data_ptr<T>();
   }
@@ -364,12 +370,12 @@ class CAFFE2_API Tensor {
   PackedTensorAccessor64<T,N,PtrTraits> packed_accessor64() && = delete;
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  [[deprecated("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")]]
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
     return generic_packed_accessor<T,N,PtrTraits,index_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  [[deprecated("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")]]
+  C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() && = delete;
 
   Tensor operator-() const;
@@ -522,8 +528,8 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace detail
 
-static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
-  return legacyExtractTypeId(t.type_set());
+static inline DispatchKey legacyExtractDispatchKey(const Tensor& t) {
+  return legacyExtractDispatchKey(t.key_set());
 }
 
 } // namespace at
