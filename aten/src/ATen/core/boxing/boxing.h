@@ -32,7 +32,9 @@ using not_ok_to_box =
     // is_constructible), but do not actually work with all
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
-    std::is_same<optional<ArrayRef<at::Dimname>>, T>
+    std::is_same<optional<ArrayRef<at::Dimname>>, T>,
+    std::is_same<ArrayRef<at::Dimname>, T>
+
   >;
 
 // TODO boxing should be ok for all kernels. Then remove not_ok_to_box and supports_boxing.

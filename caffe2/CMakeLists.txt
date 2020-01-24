@@ -360,6 +360,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/unpickler.cpp
@@ -426,6 +427,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops_c10.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
@@ -461,7 +463,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
-  if (NOT INTERN_BUILD_MOBILE)
+  if (NOT INTERN_DISABLE_MOBILE_INTERP)
     set (MOBILE_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
@@ -1082,6 +1084,33 @@ if(USE_CUDA)
 
 endif()
 
+
+# Note [Global dependencies]
+# Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
+# and they assume that all of their symbols will be available in the global namespace.
+# On the other hand we try to be good citizens and avoid polluting the symbol
+# namespaces, so libtorch is loaded with all its dependencies in a local scope.
+# That usually leads to missing symbol errors at run-time, so to avoid a situation like
+# this we have to preload those libs in a global namespace.
+if (BUILD_SHARED_LIBS)
+  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+  if (USE_MPI)
+      target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
+  endif()
+  target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
+  # The CUDA libraries are linked here for a different reason: in some
+  # cases we load these libraries with ctypes, and if they weren't opened
+  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
+  # not find them, because they're usually in non-standard locations)
+  if (USE_CUDA)
+    target_link_libraries(torch_global_deps ${TORCH_CUDA_LIBRARIES})
+    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+    target_link_libraries(torch_global_deps torch::cudart)
+  endif()
+
+  install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)

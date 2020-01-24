@@ -15,7 +15,11 @@ DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
+DEFINE_DISPATCH(bitwise_and_stub);
+DEFINE_DISPATCH(bitwise_or_stub);
 DEFINE_DISPATCH(bitwise_xor_stub);
+DEFINE_DISPATCH(lshift_stub);
+DEFINE_DISPATCH(rshift_stub);
 DEFINE_DISPATCH(logical_and_stub);
 DEFINE_DISPATCH(logical_or_stub);
 DEFINE_DISPATCH(logical_xor_stub);
@@ -27,18 +31,13 @@ DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
-
-static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
-  TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
-              "Boolean alpha only supported for Boolean results.");
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true),
-              "For integral input tensors, argument alpha must not be a floating point number.");
-}
+DEFINE_DISPATCH(max_elementwise_stub);
+DEFINE_DISPATCH(min_elementwise_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -47,7 +46,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -109,21 +108,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
-// Basic checking for all sub functions.
-static inline void sub_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-}
-
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -133,7 +122,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -251,6 +240,100 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
   return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
+Tensor& bitwise_and_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  bitwise_and_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_and(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  at::bitwise_and_out(result, self, other);
+  return result;
+}
+
+Tensor& bitwise_and_(Tensor& self, const Tensor& other) {
+  return at::bitwise_and_out(self, self, other);
+}
+
+Tensor& bitwise_and_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::bitwise_and_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_and(const Tensor& self, Scalar other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_and_out(result, self, other);
+}
+
+Tensor& bitwise_and_(Tensor& self, Scalar other) {
+  return at::bitwise_and_out(self, self, other);
+}
+
+// Legacy and interfaces. They are aliased to bitwise_and* functions
+Tensor __and__(const Tensor& self, const Tensor& other) {
+  return at::bitwise_and(self, other);
+}
+
+Tensor __and__(const Tensor& self, Scalar other) {
+  return at::bitwise_and(self, other);
+}
+
+Tensor& __iand__(Tensor& self, const Tensor& other) {
+  return self.bitwise_and_(other);
+}
+
+Tensor& __iand__(Tensor& self, Scalar other) {
+  return self.bitwise_and_(other);
+}
+
+Tensor& bitwise_or_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  bitwise_or_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor bitwise_or(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  at::bitwise_or_out(result, self, other);
+  return result;
+}
+
+Tensor& bitwise_or_(Tensor& self, const Tensor& other) {
+  return at::bitwise_or_out(self, self, other);
+}
+
+Tensor& bitwise_or_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::bitwise_or_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor bitwise_or(const Tensor& self, Scalar other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_or_out(result, self, other);
+}
+
+Tensor& bitwise_or_(Tensor& self, Scalar other) {
+  return at::bitwise_or_out(self, self, other);
+}
+
+// Legacy or interfaces. They are aliased to bitwise_or* functions
+Tensor __or__(const Tensor& self, const Tensor& other) {
+  return at::bitwise_or(self, other);
+}
+
+Tensor __or__(const Tensor& self, Scalar other) {
+  return at::bitwise_or(self, other);
+}
+
+Tensor& __ior__(Tensor& self, const Tensor& other) {
+  return self.bitwise_or_(other);
+}
+
+Tensor& __ior__(Tensor& self, Scalar other) {
+  return self.bitwise_or_(other);
+}
+
 Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
@@ -296,6 +379,62 @@ Tensor& __ixor__(Tensor& self, const Tensor& other) {
 
 Tensor& __ixor__(Tensor& self, Scalar other) {
   return self.bitwise_xor_(other);
+}
+
+Tensor __lshift__(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor __lshift__(const Tensor& self, Scalar other) { 
+  Tensor result;
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& __ilshift__(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor& __ilshift__(Tensor& self, Scalar other) {
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(self, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor __rshift__(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  rshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor __rshift__(const Tensor& self, Scalar other) { 
+  Tensor result;
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, wrapper);
+  rshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& __irshift__(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  rshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor& __irshift__(Tensor& self, Scalar other) {
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(self, self, wrapper);
+  rshift_stub(iter.device_type(), iter);
+  return self;
 }
 
 template <typename Stub>
@@ -412,5 +551,40 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
+
+Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  max_elementwise_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor max(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::max_out(result, self, other);
+}
+
+Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
+
+Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  min_elementwise_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor min(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::min_out(result, self, other);
+}
+
+Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+
 }
 }  // namespace at

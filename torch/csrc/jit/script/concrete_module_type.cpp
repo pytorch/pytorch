@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/script/concrete_module_type.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace jit {
 namespace script {
+
 ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   auto cu = get_python_cu();
   py::object pyQualName = py::module::import("torch._jit_internal")
@@ -27,6 +29,18 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     cls->addAttribute(name, type, isParameter);
   }
 
+  for (const auto& pr : constants_) {
+    const auto& name = pr.first;
+    const auto& val = pr.second.v_;
+    auto match = tryToInferType(val);
+    if (!match.success()) {
+      TORCH_INTERNAL_ASSERT(false, "We need to infer the type of constant to convert the python value to IValue, but failed to infer type of ", py::str(val), "\n:", match.reason());
+    }
+    // Validation and conversion to make sure `val` is a valid constant
+    // is done in python, see `torch/jit/_recursive.py`
+    cls->addConstant(name, toIValue(val, match.type()));
+  }
+
   for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
         moduleInfo.name_, moduleInfo.meta_->getJitType(), /*is_parameter=*/false);
@@ -45,6 +59,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
   }
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
+  ret->data_.setPoisoned();
   return ret;
 }
 
@@ -74,7 +89,8 @@ bool ConcreteModuleTypeBuilder::equals(
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
-      functionAttributes_ == other.functionAttributes_;
+      functionAttributes_ == other.functionAttributes_ &&
+      builtinFunctions_ == other.builtinFunctions_;
   // clang-format on
   if (!equal) {
     return false;
@@ -125,6 +141,15 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   const auto it = data_.functionAttributes_.find(name);
   if (it != data_.functionAttributes_.end()) {
     return it->second.function_->function();
+  }
+  return c10::nullopt;
+}
+
+c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
+    const std::string& name) const {
+  const auto it = data_.builtinFunctions_.find(name);
+  if (it != data_.builtinFunctions_.end()) {
+    return it->second;
   }
   return c10::nullopt;
 }
@@ -191,6 +216,13 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
                                                 std::move(pyFunction)});
 }
 
+void ConcreteModuleTypeBuilder::addBuiltinFunction(
+    std::string name,
+    std::string symbol_name) {
+  builtinFunctions_.emplace(
+      std::move(name), c10::Symbol::fromQualString(symbol_name));
+}
+
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
     std::shared_ptr<ConcreteModuleType> meta) {
@@ -208,15 +240,6 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
-}
-
-c10::optional<py::object> ConcreteModuleType::findConstant(
-    const std::string& name) const {
-  auto it = data_.constants_.find(name);
-  if (it != data_.constants_.end()) {
-    return it->second.v_;
-  }
-  return c10::nullopt;
 }
 
 void ConcreteModuleType::dump() const {
@@ -270,12 +293,12 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
-    const {
-  std::vector<std::pair<std::string, TypePtr>> ret;
+std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
+ConcreteModuleType::getModulesPy() const {
+  std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>> ret;
 
   for (const auto& info : data_.modules_) {
-    ret.emplace_back(std::make_pair(info.name_, info.meta_->getJitType()));
+    ret.emplace_back(std::make_pair(info.name_, info.meta_));
   }
   return ret;
 }

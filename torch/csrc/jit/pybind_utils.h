@@ -10,15 +10,17 @@
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_custom_class.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -411,7 +413,7 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
+            return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
             c10::List<double> repeated;
@@ -423,7 +425,7 @@ inline IValue toIValue(
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<double>>(obj));
+            return IValue(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
@@ -434,9 +436,9 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::BoolType:
-          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
+          return IValue(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
-          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
+          return IValue(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -543,10 +545,14 @@ inline IValue toIValue(
     case TypeKind::FutureType:
     case TypeKind::QSchemeType:
       break;
+    case TypeKind::PyObjectType:
+      // convert a py::handle to the IValue that holds the py::object
+      return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
-    case TypeKind::CapsuleType:
-      AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::CapsuleType: {
+      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
+    } break;
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
   }
@@ -616,17 +622,6 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline c10::optional<py::object> tryToConvertToCustomClass(
-    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
-  if (obj->name().find("__torch__.torch.classes") == 0) {
-    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
-    auto classConverter = c10::getClassConverter()[obj->name()];
-    py::handle rawPyObj = classConverter(objPtr);
-    auto o = py::reinterpret_steal<py::object>(rawPyObj);
-    return o;
-  }
-  return c10::nullopt;
-}
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -649,16 +644,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
-  } else if (ivalue.isIntList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
-  } else if (ivalue.isDoubleList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
-  } else if (ivalue.isBoolList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
-  } else if (ivalue.isTensorList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
-  } else if (ivalue.isGenericList()) {
-    auto list = std::move(ivalue).toGenericList();
+  } else if (ivalue.isList()) {
+    auto list = std::move(ivalue).toList();
     py::list t{list.size()};
     for (size_t i = 0; i < list.size(); ++i) {
       t[i] = toPyObject(IValue{list.get(i)});
@@ -699,9 +686,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    auto res = tryToConvertToCustomClass(obj);
-    if (res.has_value()) {
-      return res.value();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
@@ -717,6 +703,11 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isPyObject()) {
+    // return borrowed reference to ensure it correctly incref the underlying PyObject
+    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
+  } else if (ivalue.isCapsule()) {
+    return py::cast(ivalue.toCapsule());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -937,6 +928,17 @@ inline py::object invokeScriptMethodFromPython(
       [&](Graph& graph, const script::MatchedSchema& match) {
         return graph.insertMethodCall(callee.name(), match);
       });
+}
+
+inline py::object invokeScriptMethodFromPython(
+    script::Object& object,
+    const std::string& method_name,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  auto type = object.type();
+  script::Method init_method(object._ivalue(), type->getMethod(method_name));
+  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
+  return py::cast(script::Object(object));
 }
 
 inline py::object invokeOperatorFromPython(

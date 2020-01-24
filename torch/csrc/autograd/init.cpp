@@ -50,9 +50,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
+  m.def("_profiler_enabled", profilerEnabled);
 
   m.def("_push_range", [](std::string name) { pushRange(std::move(name)); });
   m.def("_pop_range", []() { popRange(); });
+  m.def("_run_before_callbacks", runBeforeCallbacks);
+
+  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
+    .def(py::init<>());
 
   Py_RETURN_TRUE;
 }
