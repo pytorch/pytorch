@@ -3,6 +3,7 @@ import argparse
 import os
 
 import yaml
+from collections import defaultdict
 from collections import OrderedDict
 
 import sys
@@ -253,10 +254,7 @@ def add_op_registrations(per_type_registrations, per_op_registrations, op_regist
             per_type_registrations.append(registration)
             continue
         # per op registration
-        try:
-            per_op_registrations[opname].append(registration)
-        except KeyError:
-            per_op_registrations[opname] = [registration]
+        per_op_registrations[opname].append(registration)
 
 
 def generate_storage_type_and_tensor(backend, density, declarations, per_op_registrations):
@@ -425,6 +423,12 @@ def generate_per_op_registration(per_op_registrations):
     # Ensure all whitelisted operators have a corresponding registration file.
     # Generate an empty placeholder file for nonexistent operators, which might
     # be registered manually instead of via codegen.
+    # This can simplify the custom BUCK build which consumes the output of this
+    # script, since it can uniformly create per-op build targets and dependencies
+    # without having to know the subtle difference about op registration.
+    # Manually registered operators might call codegen registered operators thus
+    # we cannot simply ignore them when calculating transitive dependencies for
+    # custom build.
     for whitelisted_op in op_registration_whitelist:
         if whitelisted_op not in per_op_registrations:
             per_op_registrations[whitelisted_op] = []
@@ -450,7 +454,7 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
 
-    per_op_registrations = {} if options.per_op_registration else None
+    per_op_registrations = defaultdict(list) if options.per_op_registration else None
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends

@@ -28,7 +28,7 @@
 
 namespace c10d {
 
-C10_DEFINE_SHARED_REGISTRY(
+C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(
     GlooDeviceRegistry,
     ::gloo::transport::Device,
     const std::string& /* interface */,
