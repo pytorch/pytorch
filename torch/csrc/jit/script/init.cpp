@@ -108,6 +108,12 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+
+    if (py::isinstance<ScriptClass>(obj)) {
+      auto script_class = py::cast<ScriptClass>(obj);
+      return script_class.class_type_.type_;
+    }
+
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
     if (!py::cast<bool>(isClass)) {
       return nullptr;
@@ -674,13 +680,15 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // STL containers are not mutable by default and hence we need to bind as
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
   py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
