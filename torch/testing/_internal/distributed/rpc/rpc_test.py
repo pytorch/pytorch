@@ -598,11 +598,14 @@ class RpcTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, my_function(n, n + 1, n + 2))
 
-    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args):
+    def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_func_decorator=False):
         dst = (self.rank + 1) % self.world_size
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
+                if use_record_func_decorator:
+                    record_fun = torch.autograd.profiler.record_function("foo")
+                    record_fun.__enter__()
                 if rpc_exec_mode == RPCExecMode.SYNC:
                     rpc.rpc_sync("worker{}".format(dst), func, args=args)
                 elif rpc_exec_mode == RPCExecMode.ASYNC:
@@ -623,6 +626,8 @@ class RpcTest(RpcAgentTestFixture):
                     while num_pending_users != 0:
                         time.sleep(0.1)
                         num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+                if use_record_func_decorator:
+                    record_fun.__exit__()
 
             events = prof.function_events
             rpc_event = [event for event in events if rpc_exec_mode.value in event.name][0]
@@ -639,6 +644,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
+        self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,), use_record_func_decorator=True)
 
     @dist_init
     def test_profiler_with_sync_rpc_builtin(self):

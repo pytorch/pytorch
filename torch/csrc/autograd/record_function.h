@@ -130,7 +130,9 @@ struct TORCH_API RecordFunction {
   std::vector<c10::IValue> inputs_;
   // parent_ points to the parent RecordFunction and must out live this.
   RecordFunction* parent_ = nullptr;
-
+  // Pointer to thread_local_func pointer and mutex to serialize access.
+  std::mutex original_mutex;
+  RecordFunction** original_thread_local_func = nullptr;
   bool initialized_ = false;
   bool run_sampled_ = false;
   // The thread_id that this RecordFunction was created with. If 0, this means

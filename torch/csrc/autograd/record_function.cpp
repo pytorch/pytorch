@@ -192,6 +192,13 @@ void RecordFunction::processCallbacks() {
   parent_ = thread_local_func_;
   thread_local_func_ = this;
 
+  {
+    std::lock_guard<std::mutex> guard(original_mutex);
+    // remember thread_local_func
+    // TODO ideally we would only do this when we know we are calling ::end() in
+    // a different thread.
+    original_thread_local_func = &thread_local_func_;
+  }
   for (size_t idx = 0; idx < manager().start_callbacks.size(); ++idx) {
     if (!manager().is_callback_sampled[idx] || run_sampled_) {
       manager().start_callbacks[idx](*this);
@@ -210,7 +217,7 @@ void RecordFunction::setThreadId() {
 RecordFunction::~RecordFunction() {
   try {
     end();
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
   }
 }
@@ -233,7 +240,19 @@ void RecordFunction::end() {
         ": must be top of stack. If you are calling RecordFunction::end in a"
         "separate thread, call RecordFunction::setThreadId() in the creating"
         "thread.");
-    thread_local_func_ = parent_;
+
+    // For nested RecordFunction scopes to work when calling
+    // RecordFunction::end() from a different thread, we access a pointer to the
+    // thread_local_func belonging to the thread that started this
+    // RecordFunction.
+    if (threadId_ != 0) {
+      {
+        std::lock_guard<std::mutex> guard(original_mutex);
+        *original_thread_local_func = parent_;
+      }
+    } else {
+      thread_local_func_ = parent_;
+    }
     initialized_ = false;
   }
 }
