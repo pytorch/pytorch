@@ -311,7 +311,7 @@ auto Engine::thread_main(
     }
 
     if (task.fn_ && !local_graph_task->has_error_.load()) {
-      GradMode::set_enabled(local_graph_task->grad_mode_);
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
       try {
         evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
@@ -386,7 +386,11 @@ void GraphTask::set_exception(
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    future_result_->setError(e.what());
+    if (!future_result_->completed()) {
+      future_result_->setError(e.what());
+    } else {
+      TORCH_INTERNAL_ASSERT(future_result_->hasError());
+    }
   }
 }
 
@@ -558,6 +562,7 @@ void Engine::evaluate_function(
     // Records leaf stream (if applicable)
     // See note "Streaming backwards"
     if (opt_parent_stream) {
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
     }
     return;
@@ -756,12 +761,14 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
       --current_depth;
       --total_depth;
 
-      // Check for errors, call callbacks and sync streams. We return a
-      // completed future here since 'thread_main' above is a call blocking an
-      // autograd engine thread and not the thread the user called
+      // The graph task should have completed and the associated future should
+      // be marked completed as well.
+      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+
+      // We return a completed future here since 'thread_main' above is a call
+      // blocking an autograd engine thread and not the thread the user called
       // 'execute_with_graph_task' from.
-      return std::make_shared<FutureVariableList>(
-          graph_task_exec_post_processing(graph_task));
+      return graph_task->future_result_;
     }
   }
 }

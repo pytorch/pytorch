@@ -507,33 +507,6 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   THLongTensor_free(index);
 }
 
-void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
-{
-  int64_t elems_per_row, i, idx;
-
-  THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(src), 4,
-             "Index tensor must have same dimensions as input tensor");
-  THArgCheck(dim >= 0 && dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
-             "Index dimension is out of bounds");
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 2,
-             "Input tensor must have same dimensions as output tensor");
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= src_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in gather");
-                         }
-                         *(tensor_data + i*tensor_stride) = src_data[idx * src_stride];
-                       })
-}
-
 void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
@@ -566,38 +539,6 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
                        })
 }
 
-void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
-{
-  int64_t elems_per_row, i, idx;
-  int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
-
-  THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(index_ndim_legacy_all == 0
-             || THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
-             "Index tensor must have same dimensions as output tensor");
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
-             "Input tensor must have same dimensions as output tensor");
-
-  // no-op if index is empty
-  if (index_ndim_legacy_all == 0)
-      return;
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
-                       TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= tensor_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in scatterAdd");
-                         }
-                         tensor_data[idx * tensor_stride] += *(src_data + i*src_stride);
-                       })
-}
-
 #if !defined(TH_REAL_IS_BOOL)
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
@@ -618,82 +559,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    src_data += sz*src_stride;
                    break;);
   return sum;
-}
-
-void THTensor_(lshift)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT)
-  return THTensor_(mul)(r_, t, powf(2, value));
-#elif defined(TH_REAL_IS_DOUBLE)
-  return THTensor_(mul)(r_, t, pow(2, value));
-#elif defined(TH_REAL_IS_HALF)
-  return THError("lshift is not supported for torch.HalfTensor");
-#elif defined(TH_REAL_IS_BFLOAT16)
-  return THError("lshift is not supported for torch.BFloat16Tensor");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_BYTE)
-        rp[i] = ((scalar_t) tp[i]) << value;
-#else
-        rp[i] = ((ureal) tp[i]) << value;
-#endif
-      }
-    });
-  } else {
-#if defined(TH_REAL_IS_BYTE)
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((scalar_t) *t_data) << value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((ureal) *t_data) << value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-  }
-#endif
-}
-
-void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT)
-  return THTensor_(div)(r_, t, powf(2, value));
-#elif defined(TH_REAL_IS_DOUBLE)
-  return THTensor_(div)(r_, t, pow(2, value));
-#elif defined(TH_REAL_IS_HALF)
-  return THError("rshift is not supported for torch.HalfTensor");
-#elif defined(TH_REAL_IS_BFLOAT16)
-  return THError("rshift is not supported for torch.BFloat16Tensor");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-#if defined(TH_REAL_IS_BYTE)
-        rp[i] = ((scalar_t) tp[i]) >> value;
-#else
-        rp[i] = ((ureal) tp[i]) >> value;
-#endif
-      }
-    });
-  } else {
-#if defined(TH_REAL_IS_BYTE)
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((scalar_t) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#else
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((ureal) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-#endif
-  }
-#endif
 }
 
 void THTensor_(fmod)(THTensor *r_, THTensor *t, scalar_t value)
