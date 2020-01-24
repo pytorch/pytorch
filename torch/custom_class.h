@@ -33,6 +33,8 @@ template <class Sig>
 struct args;
 template <class R, class CurClass, class... Args>
 struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
+template <class R, class CurClass, class... Args>
+struct args<R (CurClass::*)(Args...) const> : types<R, Args...> {};
 template <class Sig>
 using args_t = typename args<Sig>::type;
 } // namespace detail
@@ -61,7 +63,7 @@ class class_ {
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
-  const std::string topModule = "torch";
+  const std::string topModule = "__torch__.torch";
 
  public:
   class_(std::string className_) : className(std::move(className_)) {
@@ -122,14 +124,19 @@ class class_ {
       graph->addInput()->setType(arg.type());
     }
 
-    bool hasRet = schema.returns().size();
-    auto methodCall = graph->insertNode(graph->create(
-        func_symbol, graph->inputs(), hasRet));
+    auto opCall = graph->insertNode(graph->create(
+        func_symbol, graph->inputs(), schema.returns().size()));
     Value* res;
-    if (hasRet) {
+    if (schema.returns().size() > 1) {
       const auto& returns = schema.returns();
-      TORCH_CHECK(returns.size() == 1);
-      res = methodCall->output()->setType(returns[0].type());
+      size_t op_invocation_idx = 0;
+      for (const auto& ret : returns) {
+        opCall->output(op_invocation_idx++)->setType(ret.type());
+      }
+      res = graph->insertNode(graph->createTuple(opCall->outputs()))->output();
+    } else if (schema.returns().size() == 1) {
+      const auto& returns = schema.returns();
+      res = opCall->output()->setType(returns[0].type());
     } else {
       res = graph->insertConstant(IValue())->setType(NoneType::get());
     }
