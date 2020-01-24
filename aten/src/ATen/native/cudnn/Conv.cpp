@@ -1108,7 +1108,7 @@ Tensor cudnn_convolution_transpose(
 {
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 };
-  CheckedFrom c = "cudnn_convolution_transpose"; 
+  CheckedFrom c = "cudnn_convolution_transpose";
   auto output_t = cudnn_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   return output_t;

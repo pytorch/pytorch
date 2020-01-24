@@ -156,6 +156,9 @@ Tensor mkldnn_convolution_backward_input(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
   auto grad_input = at::empty(input_size, grad_output.options());
+  if (grad_input.numel() == 0) {
+    return grad_input;
+  }
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
 
