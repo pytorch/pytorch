@@ -34,6 +34,23 @@ class TestScriptPy3(JitTestCase):
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
+    def test_optional_dict_construct(self):
+        class M(torch.nn.Module):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
+                return buffer["prev_key"]
+
+            def forward(self, x):
+                prev_key = torch.rand(2, 3)
+                next_key = torch.rand(2, 3)
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
+                    "prev_key": prev_key,
+                    "next_key": next_key,
+                }
+
+                return self.use(saved_state)
+
+        self.checkModule(M(), (torch.rand(2, 2),))
+
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
             class M(torch.nn.Module):
