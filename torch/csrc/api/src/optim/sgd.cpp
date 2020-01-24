@@ -72,7 +72,7 @@ void SGD::step() {
       if (momentum != 0) {
         auto& param_state = static_cast<SGDParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
         Tensor buf;
-        if (param_state.momentum_buffer().defined()) {
+        if (param_state.momentum_buffer().size(0) == 0) {
           buf = torch::clone(d_p).detach();
           param_state.momentum_buffer(buf);
         } else {
@@ -91,12 +91,39 @@ void SGD::step() {
   }
 }
 
+size_t SGD::size() const noexcept {
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
+}
+
 void SGD::save(serialize::OutputArchive& archive) const {
   serialize(*this, archive);
 }
 
 void SGD::load(serialize::InputArchive& archive) {
-  serialize(*this, archive);
+  IValue pytorch_version;
+  if (archive.try_read("pytorch_version", pytorch_version)) {
+    serialize(*this, archive);
+  }
+  else { // deserializing archives saved in old format (prior to version 1.5.0)
+    TORCH_WARN(
+      "Your serialized SGD optimizer is still using the old serialization format. "
+      "You should re-save your SGD optimizer to use the new serialization format.");
+    std::vector<Tensor> momentum_buffers;
+    int64_t iteration_;
+    torch::optim::serialize(archive, "momentum_buffers", momentum_buffers);
+    torch::optim::serialize(archive, "iteration_", iteration_);
+    // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
+    std::vector<Tensor> params = param_groups_.at(0).params();
+    for (size_t idx = 0; idx < params.size(); idx++) {
+      auto state = std::make_unique<SGDParamState>();
+      state->momentum_buffer(momentum_buffers[idx]);
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+    }
+  }
 }
 } // namespace optim
 } // namespace torch

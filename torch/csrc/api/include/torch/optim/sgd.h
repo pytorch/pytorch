@@ -36,7 +36,7 @@ public:
 };
 
 struct TORCH_API SGDParamState : public OptimizerCloneableParamState<SGDParamState> {
-  TORCH_ARG(torch::Tensor, momentum_buffer) = Tensor();
+  TORCH_ARG(torch::Tensor, momentum_buffer);
 
 public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -49,16 +49,26 @@ class TORCH_API SGD : public Optimizer {
  public:
   explicit SGD(std::vector<OptimizerParamGroup> param_groups,
       SGDOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<SGDOptions>(defaults)) {
-    TORCH_CHECK(defaults.lr() < 0, "Invalid learning rate: ", defaults.lr());
+    TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.momentum() >= 0, "Invalid momentum value: ", defaults.momentum());
     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
     TORCH_CHECK(!defaults.nesterov() || (defaults.momentum() > 0 && defaults.dampening() == 0), "Nesterov momentum requires a momentum and zero dampening");
+    for (const auto& group : param_groups_) {
+      for (const auto& p : group.params()) {
+        auto state = std::make_unique<SGDParamState>();
+        state->momentum_buffer(torch::empty({0}, p.options()));
+        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
+      }
+    }
   }
 
   explicit SGD(std::vector<Tensor> params,
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   void step() override;
+
+  /// Returns the number of parameters referenced by the optimizer.
+  size_t size() const noexcept override;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
