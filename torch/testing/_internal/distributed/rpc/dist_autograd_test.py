@@ -8,9 +8,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import dist_utils
-from dist_utils import dist_init, wait_until_node_failure, initialize_pg
-from rpc_agent_test_fixture import RpcAgentTestFixture
+import torch.testing._internal.dist_utils
+from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 from torch.testing import FileCheck
 
 import threading
@@ -1056,7 +1056,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
@@ -1250,7 +1250,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
+    @unittest.skipIf(torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent " +
                      "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
