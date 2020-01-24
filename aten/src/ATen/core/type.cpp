@@ -3,7 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
-#include <torch/csrc/autograd/grad_mode.h>
+#include <ATen/core/grad_mode.h>
 #include <iostream>
 
 namespace c10 {
