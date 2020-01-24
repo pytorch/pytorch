@@ -42,10 +42,6 @@ Tensor quantized_cat_impl(
     int64_t dim,
     double scale,
     int64_t zero_point) {
-  TORCH_CHECK(
-      is_valid_quantization_scheme(qxs[0]),
-      "Only per-tensor quantization is supported in 'cat'!")
-
   if (is_cat_nhwc_fast_path(qxs, dim)) {
     if (ReLUFused) {
       return qcat_relu_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
@@ -86,6 +82,8 @@ class QCat final : public torch::OperatorKernel {
       int64_t dim,
       c10::optional<double> scale,
       c10::optional<int64_t> zero_point) {
+    TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+                "Only per-tensor quantization is supported in 'cat'!")
     double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();
     int64_t _zero_point =
         zero_point.has_value() ? zero_point.value() : qxs.get(0).q_zero_point();
@@ -97,6 +95,10 @@ template <bool ReLUFused = false>
 class QCatOut final : public torch::OperatorKernel {
  public:
   Tensor operator()(const c10::List<Tensor>& qxs, int64_t dim, Tensor out) {
+    TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+                "Only per-tensor quantization is supported in 'cat'!")
+    TORCH_CHECK(is_valid_quantization_scheme(out),
+                "Only per-tensor quantization is supported in 'cat'!")
     auto out_ =
         quantized_cat_impl<ReLUFused>(qxs, dim, out.q_scale(), out.q_zero_point());
     at::native::copy_(out, out_, /*non_blocking=*/false);
@@ -126,12 +128,18 @@ static auto registry =
 } // namespace
 
 Tensor quantized_cat(TensorList qxs, int64_t dim) {
+  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+              "Only per-tensor quantization is supported in 'cat'!")
   double _scale = qxs[0].q_scale();
   int64_t _zero_point = qxs[0].q_zero_point();
   return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
 }
 
 Tensor& quantized_cat_out(Tensor& out, TensorList qxs, int64_t dim) {
+  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+              "Only per-tensor quantization is supported in 'cat'!")
+  TORCH_CHECK(is_valid_quantization_scheme(out),
+              "Only per-tensor quantization is supported in 'cat'!")
   auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
                                         out.q_zero_point());
   at::native::copy_(out, out_, /*non_blocking=*/false);
