@@ -140,6 +140,10 @@ public:
     return {iterator_};
   }
 
+  ListElementReference<T, Iterator> operator[](std::size_t pos) const {
+    return {iterator_ + pos};
+  }
+
 private:
   explicit ListIterator(Iterator iterator): iterator_(std::move(iterator)) {}
 
