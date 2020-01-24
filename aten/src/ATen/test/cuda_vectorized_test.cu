@@ -58,7 +58,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   scalar_t buf[vectorized::thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   policy.load(accessor, src + 256 * blockIdx.x);
-  policy.store(dst + 256 * blockIdx.x, accessor);
+  policy.store(accessor, dst + 256 * blockIdx.x);
 }
 
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
