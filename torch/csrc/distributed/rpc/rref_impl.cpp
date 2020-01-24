@@ -105,7 +105,7 @@ UserRRef::UserRRef(
   //     properly notify the owner.
 }
 
-void UserRRef<T>::tryDel() {
+void UserRRef::tryDel() {
   std::lock_guard<std::mutex> lockGuard(sentDelUserMutex_);
   if (!sentDelUser_) {
     try {
@@ -123,11 +123,11 @@ void UserRRef<T>::tryDel() {
   }
 }
 
-UserRRef<T>::~UserRRef() {
+UserRRef::~UserRRef() {
   tryDel();
 }
 
-const ForkId& UserRRef<T>::forkId() const {
+const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
