@@ -118,3 +118,6 @@
     ignore = dirty
     path = android/libs/fbjni
     url = https://github.com/facebookincubator/fbjni.git
+[submodule "custom_class_project"]
+	path = custom_class_project
+	url = /home/jamesreed/custom_class_project/
