@@ -23,7 +23,6 @@ void reset_buffers() {
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
-  std::cout << ((uint64_t)ptr) << std::endl;
 
   ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 4);
   ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr), 4);
@@ -50,6 +49,8 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   ASSERT_EQ(can_vectorize_up_to<int64_t>(ptr + 8), 1);
 }
 
+// The following kernel copy values by using vectorized policies
+// defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   using vectorized = policies<64, 4>::vectorized<vec_size>;
@@ -61,7 +62,10 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
 }
 
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
   double *b1 = reinterpret_cast<double *>(buffer1);
   double *b2 = reinterpret_cast<double *>(buffer2);
 

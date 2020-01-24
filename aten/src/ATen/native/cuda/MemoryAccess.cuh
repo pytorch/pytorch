@@ -105,7 +105,7 @@ struct policies {
 };
 
 template<typename scalar_t>
-constexpr inline int can_vectorize_up_to(char *pointer) {
+inline int can_vectorize_up_to(char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of<aligned_vector<scalar_t, 2>>::value;
   constexpr int vec4_alignment = std::alignment_of<aligned_vector<scalar_t, 4>>::value;
