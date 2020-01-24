@@ -1389,48 +1389,6 @@ class ModuleUseDeduper {
   std::vector<Value*> uses_to_rewrite_;
 };
 
-} // namespace
-
-TORCH_API script::Module InsertObservers(
-    script::Module& input_module,
-    const std::string& method_name,
-    const QConfigDict& qconfig_dict,
-    bool inplace) {
-  ModuleQConfigMap map_before_clone;
-  fillQConfigMap(input_module, qconfig_dict, map_before_clone);
-  ModuleCloneHelper mh;
-  script::Module module =
-      inplace ? input_module : mh.clone(input_module, map_before_clone);
-  ModuleQConfigMap module_qconfig_map;
-  fillQConfigMap(module, qconfig_dict, module_qconfig_map);
-  InsertObserversHelper helper(module_qconfig_map);
-  helper.insertObservers(module, method_name);
-  return module;
-}
-
-script::Module InsertQuantDeQuant(
-    script::Module& input_module,
-    const std::string& method_name,
-    bool inplace) {
-  script::Module module = inplace ? input_module : input_module.clone();
-  InsertQuantDeQuantHelper h;
-  h.run(module, method_name);
-  h.cleanup(module);
-  return module;
-}
-
-void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
-  throw std::runtime_error("Pass not implemented yet!");
-}
-
-void QuantFusion(std::shared_ptr<Graph>& graph) {
-  for (const auto& item : quant_fusion_pattern_and_replacements()) {
-    SubgraphRewriter rewriter;
-    rewriter.RegisterRewritePattern(item.first, item.second);
-    rewriter.runOnGraph(graph);
-  }
-}
-
 struct ConvBNParameters {
   at::Tensor conv_w;
   at::Tensor conv_b;
@@ -1441,26 +1399,40 @@ struct ConvBNParameters {
   at::Tensor bn_b;
 };
 
-/**
- * Given the current weight and bias tensors of a Conv2d module and parameters
- * of the BatchNorm2d module we're folding with, compute the updated values for
- * the weight and bias.
- *
- * The function is basically copied from torch/nn/utils/fusion.py
- */
-static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-    const ConvBNParameters& p) {
+static bool hastensor(script::Module& m, const char* name) {
+  return m.hasattr(name) && m.attr(name).isTensor();
+}
+
+class FoldConvBatchNorm2dHelper {
+ public:
+  void run(const script::Module& module);
+
+ private:
+  bool tryExtractingConvBNParameters(
+      script::Module& conv,
+      script::Module& bn,
+      ConvBNParameters& r);
+
+  /**
+   * Given the current weight and bias tensors of a Conv2d module and parameters
+   * of the BatchNorm2d module we're folding with, compute the updated values
+   * for the weight and bias.
+   *
+   * The function is basically copied from torch/nn/utils/fusion.py
+   */
+  std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
+      const ConvBNParameters& p);
+};
+
+std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
+    computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
   at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
   at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape({-1, 1, 1, 1});
   at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
   return std::make_tuple(new_w, new_b);
 }
 
-static bool hastensor(script::Module& m, const char* name) {
-  return m.hasattr(name) && m.attr(name).isTensor();
-}
-
-static bool tryExtractingConvBNParameters(
+bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
@@ -1486,7 +1458,7 @@ static bool tryExtractingConvBNParameters(
   return true;
 }
 
-void FoldConvBatchNorm2d(const script::Module& module) {
+void FoldConvBatchNorm2dHelper::run(const script::Module& module) {
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
     %conv_submodule = match::module[name="Conv2d"](%self)
@@ -1607,6 +1579,55 @@ graph(%self, %x):
       n->destroy();
     }
   }
+}
+
+} // namespace
+
+TORCH_API script::Module InsertObservers(
+    script::Module& input_module,
+    const std::string& method_name,
+    const QConfigDict& qconfig_dict,
+    bool inplace) {
+  ModuleQConfigMap map_before_clone;
+  fillQConfigMap(input_module, qconfig_dict, map_before_clone);
+  ModuleCloneHelper mh;
+  script::Module module =
+      inplace ? input_module : mh.clone(input_module, map_before_clone);
+  ModuleQConfigMap module_qconfig_map;
+  // Since the types are changed after clone, we need to fill
+  // the qconfig map again
+  fillQConfigMap(module, qconfig_dict, module_qconfig_map);
+  InsertObserversHelper helper(module_qconfig_map);
+  helper.insertObservers(module, method_name);
+  return module;
+}
+
+script::Module InsertQuantDeQuant(
+    script::Module& input_module,
+    const std::string& method_name,
+    bool inplace) {
+  script::Module module = inplace ? input_module : input_module.clone();
+  InsertQuantDeQuantHelper h;
+  h.run(module, method_name);
+  h.cleanup(module);
+  return module;
+}
+
+void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
+  throw std::runtime_error("Pass not implemented yet!");
+}
+
+void QuantFusion(std::shared_ptr<Graph>& graph) {
+  for (const auto& item : quant_fusion_pattern_and_replacements()) {
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(item.first, item.second);
+    rewriter.runOnGraph(graph);
+  }
+}
+
+void FoldConvBatchNorm2d(const script::Module& module) {
+  FoldConvBatchNorm2dHelper h;
+  h.run(module);
 }
 
 void FoldQuantizeCallIntoBuffer(
