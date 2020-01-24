@@ -40,8 +40,6 @@
 #include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/utils/memory.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
@@ -77,7 +75,6 @@ inline c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
-using namespace torch::autograd;
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {

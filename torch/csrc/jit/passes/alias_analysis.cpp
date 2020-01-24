@@ -22,8 +22,12 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
       return unshapedType(type);
     case TypeKind::OptionalType:
       return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
-    case TypeKind::FutureType:
-      return getMutableTypePtr(type->cast<FutureType>()->getElementType());
+    case TypeKind::FutureType: {
+      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
+        return FutureType::create(*elem);
+      }
+      return c10::nullopt;
+    }
     case TypeKind::TupleType: {
       std::vector<TypePtr> mutable_types;
       for (const auto& elem : type->expect<TupleType>()->elements()) {
@@ -685,7 +689,6 @@ void AliasDb::analyzeConservative(Node* node) {
     }
     auto elem = elementMap_.at(input);
     registerWrite(input, node);
-    // for (const auto& elem: maybe_mutable)
     MemoryLocations mem_locations;
     memoryDAG_->collectAllContainedMemoryLocations(elem, mem_locations);
     for (unsigned loc : mem_locations) {
@@ -875,27 +878,40 @@ bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
   std::vector<Element*> a_elements;
+  bool a_cannot_check_containment = false;
   for (const auto& val : a) {
     if (cannotCheckAliasContainment(val)) {
-      return true;
+      a_cannot_check_containment = true;
+      break;
     }
     if (mutableType(val)) {
       a_elements.push_back(elementMap_.at(val));
     }
   }
 
-  if (a_elements.size() == 0) {
-    return false;
-  }
-
   std::vector<Element*> b_elements;
+  bool b_cannot_check_containment = false;
   for (const auto& val : b) {
     if (cannotCheckAliasContainment(val)) {
-      return true;
+      b_cannot_check_containment = true;
+      break;
     }
     if (mutableType(val)) {
       b_elements.push_back(elementMap_.at(val));
     }
+  }
+  // if we can check all elements of one value set and it doesn't contain any
+  // mutable types, then we can safely return false
+  if (!a_cannot_check_containment && a_elements.size() == 0) {
+    return false;
+  }
+  if (!b_cannot_check_containment && b_elements.size() == 0) {
+    return false;
+  }
+  // now both elements must contain mutable elements, so if we cannot check
+  // containment we must return true
+  if (a_cannot_check_containment || b_cannot_check_containment) {
+    return true;
   }
   return memoryDAG_->mayContainAlias(a_elements, b_elements);
 }
