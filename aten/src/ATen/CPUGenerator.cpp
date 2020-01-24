@@ -51,7 +51,9 @@ CPUGenerator::CPUGenerator(uint64_t seed_in)
   : Generator{Device(DeviceType::CPU)},
     engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
-    next_double_normal_sample_{c10::optional<double>()} { }
+    next_double_normal_sample_{c10::optional<double>()} {
+  key_set_ = DispatchKeySet(c10::DispatchKey::CPUTensorId);
+}
 
 /**
  * Manually seeds the engine with the seed input

@@ -75,7 +75,10 @@ struct CAFFE2_API Generator {
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
-  virtual DispatchKeySet key_set() const = 0;
+  DispatchKeySet key_set() const { return key_set_; }
+
+  protected:
+    DispatchKeySet key_set_;
 
   private:
     Device device_;

@@ -860,7 +860,7 @@ if __name__ == '__main__':
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
-            ]
+            ],
         },
         url='https://pytorch.org/',
         download_url='https://github.com/pytorch/pytorch/tags',

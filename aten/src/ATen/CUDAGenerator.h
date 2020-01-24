@@ -22,7 +22,6 @@ struct TORCH_CUDA_API CUDAGenerator : public Generator {
   uint64_t philox_offset_per_thread();
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static DeviceType device_type();
-  DispatchKeySet key_set() const override { return DispatchKeySet(c10::DispatchKey::CUDATensorId); }
 
 private:
   CUDAGenerator* clone_impl() const override;
