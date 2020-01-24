@@ -335,6 +335,8 @@ class BuildExtension(build_ext, object):
                         cflags = COMMON_NVCC_FLAGS + ['--compiler-options',
                                                   "'-fPIC'"] + cflags + _get_cuda_arch_flags(cflags)
                 elif ROCM_HOME:
+                    if isinstance(cflags, dict):
+                        cflags = cflags['cxx']
                     cflags = COMMON_HIPCC_FLAGS + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
