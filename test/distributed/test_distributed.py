@@ -17,10 +17,10 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from common_utils import TestCase, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-from common_distributed import simple_sparse_reduce_tests, skip_if_rocm
+from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
 
 try:
     import torchvision

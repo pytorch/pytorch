@@ -13,7 +13,7 @@ from collections import OrderedDict
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
+from torch.testing._internal.jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -650,3 +650,19 @@ class TestRecursiveScript(JitTestCase):
                 return self.encoder(input)
 
         self.checkModule(ContainsLoaded(), (torch.rand(2, 3), ))
+
+    def test_optional_module(self):
+        class Dummy(nn.Module):
+            def __init__(self):
+                super(Dummy, self).__init__()
+                self.foo = nn.Linear(2, 2)
+
+            def forward(self, x):
+                if self.foo is not None:
+                    return self.foo(x)
+                return x
+
+        mod = Dummy()
+        self.checkModule(mod, (torch.rand(2, 2),))
+        mod.foo = None
+        self.checkModule(mod, (torch.rand(2, 2),))
