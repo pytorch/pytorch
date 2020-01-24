@@ -4014,23 +4014,6 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
-    def test_optional_dict_construct(self):
-        class M(torch.nn.Module):
-            def use(self, buffer: Dict[str, Optional[Tensor]]):
-                return buffer["prev_key"]
-
-            def forward(self, x):
-                prev_key = torch.rand(2, 3)
-                next_key = torch.rand(2, 3)
-                saved_state: Dict[str, Optional[Tensor]] = {
-                    "prev_key": prev_key,
-                    "next_key": next_key,
-                }
-
-                return self.use(saved_state)
-
-        self.checkModule(M(), (torch.rand(2, 2),))
-
     def test_nested_bailouts(self):
         @torch.jit.script
         def fct_loop(x):
