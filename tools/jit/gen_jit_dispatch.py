@@ -532,20 +532,24 @@ def match_signature(decl, constructed_string, should_match_schema):
     return constructed_string
 
 
+# index_put et al are the only ops whose schema_string isn't used directly.
+# TODO remove special handling and gen_jit_dispatch will become very simple
+NEEDS_SCHEMA_STRING_HACK = [
+    "aten::_index_put_impl_",
+    "aten::index.Tensor", 
+    "aten::index_put",
+    "aten::index_put_",
+]
+
 def needs_schema_string_hack(schema_string):
-    # index_put() is defined with this arg type, which the JIT correctly rejects
-    # but which AD codegen requires. Here we're preserving an on the fly conversion
-    # TODO once index_put signature is fixed, we can just use the schema string 
-    # directly and gen_jit_dispatch will become very simple
-    return 'Tensor?[]' in schema_string
+    # return 'Tensor?[]' in schema_string
+    return any([schema_string.startswith(name) for name in NEEDS_SCHEMA_STRING_HACK])
 
 
 def signature(decl, should_match_schema=True):
     schema_string = decl.get('schema_string')
     if schema_string and not needs_schema_string_hack(schema_string):
         return schema_string
-
-    print(f"HEY {decl['name']} should match {should_match_schema} {decl['should_match_schema']}")
 
     def format_arg(arg):
         name = arg['name']
@@ -596,8 +600,6 @@ def signature(decl, should_match_schema=True):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
     constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
-
-    print(f"HEY constructed_string {constructed_string}")
 
     return match_signature(decl, constructed_string, should_match_schema)
 
