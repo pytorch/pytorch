@@ -8,6 +8,28 @@ namespace rpc {
 
 namespace {
 
+// PythonTypeResolver that inherits from Script::Resolver to
+// support resolving types together with ScriptTypeParser.
+struct PythonTypeResolver : public jit::script::Resolver {
+  std::shared_ptr<jit::script::SugaredValue> resolveValue(
+      const std::string& /* unused */,
+      Function& /* unused */,
+      const jit::SourceRange& /* unused */) override {
+    TORCH_INTERNAL_ASSERT(
+        false, "RPC Type resolver does not need to resolve value");
+  }
+
+  TypePtr resolveType(
+      const std::string& name,
+      const jit::SourceRange& /* unused */) override {
+    if (name == "PyObject") {
+      return PyObjectType::get();
+    }
+    auto python_cu = torch::jit::get_python_cu();
+    return python_cu->get_type(name);
+  }
+};
+
 py::object getFunction(const py::object& module, const char* name) {
   py::object fn = module.attr(name);
   TORCH_CHECK(
@@ -28,6 +50,8 @@ PythonRpcHandler::PythonRpcHandler() {
   pySerialize_ = getFunction(module, "serialize");
   pyHandleException_ = getFunction(module, "_handle_exception");
   jitCompilationUnit_ = torch::jit::get_python_cu();
+  typeParser_ = std::make_shared<jit::script::ScriptTypeParser>(
+      std::make_shared<PythonTypeResolver>());
 }
 
 void PythonRpcHandler::cleanup() {
@@ -93,6 +117,10 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
 void PythonRpcHandler::handleException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
   pyHandleException_(obj);
+}
+
+TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
+  return typeParser_->parseType(type_str);
 }
 
 } // namespace rpc
