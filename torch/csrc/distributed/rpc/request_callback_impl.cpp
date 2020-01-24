@@ -21,6 +21,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -81,8 +82,9 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
+      TypePtr ret_type = scriptRemoteCall.op()->schema().returns()[0].type();
       auto ownerRRef =
-          ctx.getOrCreateOwnerRRef<IValue>(scriptRemoteCall.retRRefId());
+          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), ret_type);
 
       // TODO: make this asynchronous
       // scriptRemoteCall is only alive within this block, use reference to
@@ -118,10 +120,13 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto forkId = ForkId::fromIValue(prc.retForkId());
       auto& ctx = RRefContext::getInstance();
 
-      auto ownerRRef = ctx.getOrCreateOwnerRRef<py::object>(rrefId);
+      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, PyObjectType::get());
 
-      ownerRRef->setValue(
-          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
+      IValue py_ivalue = jit::toIValue(
+          PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()),
+          PyObjectType::get());
+
+      ownerRRef->setValue(std::move(py_ivalue));
 
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
@@ -139,8 +144,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef<IValue>> rref =
-          ctx.getOwnerRRef<IValue>(srf.rrefId());
+      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -161,11 +165,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef<py::object>> rref =
-          ctx.getOwnerRRef<py::object>(prf.rrefId());
+      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result =
-            PythonRpcHandler::getInstance().serialize(rref->getValue());
+        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+            jit::toPyObject(rref->getValue()));
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
       }
 
@@ -177,8 +180,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           [responseFuture, messageId, rref](
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& /* unused */) {
-            SerializedPyObj result =
-                PythonRpcHandler::getInstance().serialize(rref->getValue());
+            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
+                jit::toPyObject(rref->getValue()));
             Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
             m.setId(messageId);
             responseFuture->markCompleted(m);
