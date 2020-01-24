@@ -76,6 +76,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*preserve_sparsity=*/false);
 
     q_params.precision = precision;
+
     // ReQuantizeForFloat requires pointers to the zero point values,
     // since in the case of rowwise quantization these will be arrays rather
     // than scalars. But in this case, we're doing whole-tensor quantization so
