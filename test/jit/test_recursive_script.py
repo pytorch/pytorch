@@ -663,7 +663,6 @@ class TestRecursiveScript(JitTestCase):
                 return x
 
         mod = Dummy()
-        torch.jit.script(mod)
-
+        self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
-        torch.jit.script(mod)
+        self.checkModule(mod, (torch.rand(2, 2),))
