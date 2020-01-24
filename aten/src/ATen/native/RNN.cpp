@@ -44,6 +44,19 @@ struct PackedSequence {
   Tensor batch_sizes;
 };
 
+// TODO: Remove this once https://github.com/pytorch/pytorch/issues/30987 is closed
+// This is used to avoid limitations with the autograd inplace verification check
+// that cannot detect non-overlapping changes.
+std::vector<Tensor> unsafe_chunk_no_version_check(const Tensor& self, int chunks, int dim) {
+  const auto results = self.chunk(chunks, dim);
+  // Each result gets its own version counter as they don't overlap.
+  // This is still unsafe as changes to self will not be properly tracked as modifying results
+  for (auto& t: results) {
+    t.unsafeGetTensorImpl()->set_version_counter(c10::VariableVersion());
+  }
+  return results;
+}
+
 // Pretty much all cells we support take the same set of arguments, but threading those
 // 4 arguments manually is really annoying. Their lifetime is externally managed, so we only
 // pass this struct of references around.
@@ -411,7 +424,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
 
     const auto gates = params.linear_hh(hx).add_(
         pre_compute_input ? input : params.linear_ih(input));
-    auto chunked_gates = gates.chunk(4, 1);
+    auto chunked_gates = unsafe_chunk_no_version_check(gates, 4, 1);
     auto ingate = chunked_gates[0].sigmoid_();
     auto forgetgate = chunked_gates[1].sigmoid_();
     auto cellgate = chunked_gates[2].tanh_();
@@ -444,7 +457,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
     const auto chunked_igates = pre_compute_input
         ? input.chunk(3, 1)
         : params.linear_ih(input).chunk(3, 1);
-    auto chunked_hgates = params.linear_hh(hidden).chunk(3, 1);
+    auto chunked_hgates = unsafe_chunk_no_version_check(params.linear_hh(hidden), 3, 1);
     const auto reset_gate =
         chunked_hgates[0].add_(chunked_igates[0]).sigmoid_();
     const auto input_gate =
