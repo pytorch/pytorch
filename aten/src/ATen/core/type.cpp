@@ -72,11 +72,11 @@ AnyTypePtr AnyType::get() {
 }
 
 template <typename T>
-static bool test_primitive(c10::optional<T> e, T a) {
+static bool compatible_optional(c10::optional<T> e, T a) {
   return !e.has_value() || e.value() == a;
 }
 
-static bool test_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+static bool compatible_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
   if (!e.size().has_value()) {
     return true;
   }
@@ -87,25 +87,30 @@ static bool test_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
 
   auto ndim = a.size();
   for (size_t i = 0; i < ndim; i++) {
-    if (!test_primitive(e[i], a[i])) {
+    if (!compatible_optional(e[i], a[i])) {
       return false;
     }
   }
   return true;
 }
 
-bool TensorType::isCompatibleWith(at::Tensor& t) const {
+bool TensorType::isCompatibleWithInCurrentExecutionContext(
+    at::Tensor& t) const {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
+  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
   if (!t.defined()) {
-    return test_primitive(undefined(), !t.defined());
+    return compatible_optional(undefined(), !t.defined());
   }
 
-  return test_varying_shape(sizes(), t.sizes()) &&
+  return compatible_varying_shape(sizes(), t.sizes()) &&
       (t.is_sparse() || t.is_mkldnn() ||
-       test_varying_shape(strides(), t.strides())) &&
-      test_primitive(
+       compatible_varying_shape(strides(), t.strides())) &&
+      compatible_optional(
              requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
-      test_primitive(scalarType(), t.scalar_type()) &&
-      test_primitive(device(), t.device());
+      compatible_optional(scalarType(), t.scalar_type()) &&
+      compatible_optional(device(), t.device());
 }
 
 TensorTypePtr TensorType::get() {
