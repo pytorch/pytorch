@@ -442,10 +442,13 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         # add annotations about alias an mutability of arguments
         annotate_op(decl)
 
+        decl['should_match_schema'] = True
+
         decl_copy = copy.deepcopy(decl)
         for arg in decl_copy['arguments']:
             if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
                 arg['is_nullable'] = False
+                decl_copy['should_match_schema'] = False
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
@@ -469,7 +472,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
+            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
                                                  op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
@@ -512,6 +515,91 @@ def annotate_op(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
+
+
+def match_signature(decl, constructed_string, should_match_schema):
+    # If matches_jit_signature has been specified the signature constructed from the
+    # declared attributes should match the raw string passed through. In the
+    # case of native_functions.yaml, func should match the generated signature,
+    # if matches_jit_signature is true. This is used to track and verify the alignment
+    # of native_function.yaml's function schema with that used in this parse.
+    if decl.get('matches_jit_signature') and should_match_schema:
+        assert(constructed_string == decl['schema_string']), \
+            decl['schema_string'] + ' is flagged as JIT signature compliant' + \
+            ', but does not match the signature ' + constructed_string
+        return decl['schema_string']
+
+    return constructed_string
+
+
+def needs_schema_string_hack(schema_string):
+    # index_put() is defined with this arg type, which the JIT correctly rejects
+    # but which AD codegen requires. Here we're preserving an on the fly conversion
+    # TODO once index_put signature is fixed, we can just use the schema string 
+    # directly and gen_jit_dispatch will become very simple
+    return 'Tensor?[]' in schema_string
+
+
+def signature(decl, should_match_schema=True):
+    schema_string = decl.get('schema_string')
+    if schema_string and not needs_schema_string_hack(schema_string):
+        return schema_string
+
+    print(f"HEY {decl['name']} should match {should_match_schema} {decl['should_match_schema']}")
+
+    def format_arg(arg):
+        name = arg['name']
+        typ = jit_type_of(arg)
+        decl = '{} {}'.format(typ, name)
+        if 'default' in arg:
+            # clean up initializer lists {{true, true}} -> [true, true]
+            default = arg['default']
+            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
+            # signatures.  repr(float) doesn't seem to truncate in these cases.
+            default = str(default) if not isinstance(default, float) else repr(default)
+            default = default \
+                .replace('{{', '[') \
+                .replace('}}', ']') \
+                .replace('true', 'True') \
+                .replace('false', 'False') \
+                .replace('at::Reduction::Mean', 'Mean') \
+                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
+                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
+                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
+                .replace('{', '[') \
+                .replace('}', ']')
+
+            default = default_map.get(default, default)
+            decl = '{}={}'.format(decl, default)
+        return decl
+
+    args = []
+    kwarg_only = False
+
+    ordered_arguments = sorted(zip(argument_order(decl), decl['arguments']))
+    for _, a in ordered_arguments:
+        if not kwarg_only and is_kwarg_only(a):
+            args.append('*')
+            kwarg_only = True
+        args.append(format_arg(a))
+
+    arg_list = ', '.join(args)
+    if len(decl['returns']) == 1:
+        ret_list = jit_type_of(decl['returns'][0])
+        # Adding output name if it exists
+        if decl['returns'][0].get('field_name'):
+            ret_list += ' ' + decl['returns'][0]['field_name']
+    else:
+        def type_maybe_field(r):
+            return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
+        ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
+    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
+
+    print(f"HEY constructed_string {constructed_string}")
+
+    return match_signature(decl, constructed_string, should_match_schema)
 
 
 def signature_without_args(decl):
