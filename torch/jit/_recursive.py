@@ -114,7 +114,13 @@ def infer_concrete_type_builder(nn_module):
 
     for name, item in nn_module._modules.items():
         attr_type = infer_type(name, item)
+        if item is None:
+            # Modules can be None. We don't have direct support for optional
+            # Modules, so the register it as an NoneType attribute instead.
+            concrete_type_builder.add_attribute(name, attr_type, False)
+            continue
         if attr_type is not None:
+            assert attr_type.is_interface_type()
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
