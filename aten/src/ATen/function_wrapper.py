@@ -453,6 +453,7 @@ THFormal = TypedDict('THFormal', {
     'default': str,
     'output': bool,
     'size': int,
+    'annotation': str,
     'allocate': bool,
     'mask': bool,
     'wrap_dim': str,
