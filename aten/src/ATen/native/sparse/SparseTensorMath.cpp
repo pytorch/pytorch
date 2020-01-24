@@ -1418,7 +1418,56 @@ Tensor any_sparse(const Tensor& self) {
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
   Tensor result;
+  result = at::zeros({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
   return bmm_out_sparse_cpu(result, self, mat2);
+}
+
+
+// batched sparse x dense matrix worker based on s_addmm_out_sparse_dense_worker
+template <typename scalar_t>
+void s_bmm_out_sparse_dense_worker(int64_t nnz, Tensor& result, const Tensor& indices, const Tensor& values, const Tensor& mat2) {
+  auto indices_accessor = indices.accessor<int64_t, 2>();
+  auto values_accessor = values.accessor<scalar_t, 1>();
+
+  int64_t mat2_num_cols = mat2.size(2);
+
+  scalar_t* mat2_ptr = mat2.data_ptr<scalar_t>();
+  scalar_t* result_ptr = result.data_ptr<scalar_t>();
+
+  int64_t mat2_stride0 = mat2.stride(0);
+  int64_t mat2_stride1 = mat2.stride(1);
+  int64_t mat2_stride2 = mat2.stride(2);
+
+  int64_t result_stride0 = result.stride(0);
+  int64_t result_stride1 = result.stride(1);
+  int64_t result_stride2 = result.stride(2);
+
+  int64_t cur_mat_idx = -1;
+  scalar_t* mat2_matrix_ptr;
+  scalar_t* result_matrix_ptr;
+
+  for (int64_t nnz_idx = 0; nnz_idx < nnz; nnz_idx++) {
+    scalar_t val = values_accessor[nnz_idx];
+    int64_t mat_idx = indices_accessor[0][nnz_idx];
+    int64_t row = indices_accessor[1][nnz_idx];
+    int64_t col = indices_accessor[2][nnz_idx];
+
+    if (mat_idx != cur_mat_idx) {
+      cur_mat_idx = mat_idx;
+      mat2_matrix_ptr = mat2_ptr + (mat_idx * mat2_stride0);
+      result_matrix_ptr = result_ptr + (mat_idx * result_stride0);
+    }
+
+    THBlas_axpy<scalar_t> (
+      mat2_num_cols,
+      val,
+      // mat2_ptr + (mat_idx * mat2_stride0) + (col * mat2_stride1), mat2_stride2,
+      // result_ptr + (mat_idx * result_stride0) + (row * result_stride1), result_stride2
+      mat2_matrix_ptr + (col * mat2_stride1), mat2_stride2,
+      result_matrix_ptr + (row * result_stride1), result_stride2
+    );
+
+  }
 }
 
 Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
@@ -1431,17 +1480,19 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
-  int64_t dim0_size = self.size(0);
+  SparseTensor self_coalesced = coalesce_sparse_cpu(self);
 
-  result = at::empty({dim0_size, self.size(1), mat2.size(2)}, mat2.options());
+  int64_t nnz =        self_coalesced._nnz();
+  LongTensor indices = self_coalesced._indices();
+  Tensor values =      self_coalesced._values();
 
-  std::vector<Tensor> results;
+  AT_DISPATCH_ALL_TYPES(
+      values.scalar_type(), "bmm_sparse_dense", [&] {
+        s_bmm_out_sparse_dense_worker<scalar_t>(nnz, result, indices, values, mat2);
+      }
+  );
 
-  for (int64_t dim0_idx = 0; dim0_idx < dim0_size; dim0_idx++) {
-    results.push_back(at::_sparse_mm(self[dim0_idx], mat2[dim0_idx]));
-  }
-
-  return at::stack_out(result, results, 0);
+  return result;
 }
 
 }} // namespace at::native
