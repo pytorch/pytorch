@@ -1168,7 +1168,8 @@ struct VarType : public Type {
 
 struct CapsuleType;
 using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
-// This type represents a Python Capsule
+// This type represents a Python Capsule.
+// It does not appear in the IR and is only used during runtime
 struct CAFFE2_API CapsuleType : public Type {
   static CapsuleTypePtr create() {
     return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
