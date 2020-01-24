@@ -20,13 +20,14 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   auto agent = RpcAgent::getDefaultRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
+
   // Get function return type to construct c10::ivalue::Future.
-  // Script call only allows single IValue returned.
   auto returns = PythonRpcHandler::getInstance()
                      .jitCompilationUnit()
                      ->get_function(qualifiedName)
                      .getSchema()
                      .returns();
+  // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
       "Return value of an annotated torchScript function should be a single "
@@ -50,7 +51,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   return futPtr;
 }
 
-std::shared_ptr<UserRRef<IValue>> remoteTorchscript(
+std::shared_ptr<UserRRef> remoteTorchscript(
     const WorkerInfo& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack) {
@@ -59,7 +60,22 @@ std::shared_ptr<UserRRef<IValue>> remoteTorchscript(
   TORCH_INTERNAL_ASSERT(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
-  auto userRRefPtr = ctx.createUserRRef<IValue>(dst.id_);
+
+  // Get function return type to construct UserRRef.
+  auto returns = PythonRpcHandler::getInstance()
+                     .jitCompilationUnit()
+                     ->get_function(qualifiedName)
+                     .getSchema()
+                     .returns();
+  // Script call only allows single IValue returned.
+  TORCH_INTERNAL_ASSERT(
+      returns.size() == 1,
+      "Return value of an annotated torchScript function should be a single "
+      "IValue.",
+      returns.size());
+  auto returnType = returns.at(0).type();
+
+  auto userRRefPtr = ctx.createUserRRef(dst.id_, returnType);
 
   auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
       qualifiedName,

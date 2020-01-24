@@ -26,7 +26,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack);
 
-std::shared_ptr<UserRRef<IValue>> remoteTorchscript(
+std::shared_ptr<UserRRef> remoteTorchscript(
     const WorkerInfo& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack);

@@ -150,14 +150,14 @@ PyRRef pyRemoteBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
-  TypePtr ret_type = op->schema().returns()[0].type();
+  TypePtr returnType = op->schema().returns()[0].type();
 
   auto& ctx = RRefContext::getInstance();
   // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
-  auto userRRef = ctx.createUserRRef(dst.id_, ret_type);
+  auto userRRef = ctx.createUserRRef(dst.id_, returnType);
 
   auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
