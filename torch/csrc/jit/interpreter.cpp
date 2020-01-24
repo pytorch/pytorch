@@ -10,8 +10,9 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -406,6 +407,27 @@ struct CodeImpl {
 
   const std::vector<c10::IValue>& constant_table() const {
     return constant_table_;
+  }
+
+  void request_bailout(size_t index) {
+    auto count = index;
+    for (size_t instr_index = 0; instr_index < instructions_.size();
+         instr_index++) {
+      if (instructions_[instr_index].op == GUARD) {
+        if (count == 0) {
+          // patching GUARD to FAIL_GUARD
+          instructions_[instr_index] =
+              Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
+          GRAPH_DEBUG(
+              "Added a bailout request for ",
+              index,
+              " at instruction ",
+              instr_index);
+          break;
+        }
+        count--;
+      }
+    }
   }
 
   const std::vector<Instruction>& instructions() const {
@@ -1043,6 +1065,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(future->value());
             ++af.pc;
           } break;
+          case FAIL_GUARD: {
+            // patch FAIL_GUARD back to GUARD
+            GRAPH_DEBUG(
+                "Bailout ", inst.X, " triggered via bailout_requests_!");
+            af.instructions[af.pc] = Instruction(GUARD, inst.X, 0);
+            push(stack, false);
+            ++af.pc;
+            break;
+          }
           case GUARD: {
             auto t = stack.back().toTensor();
             auto actual = tensorTypeInCurrentExecutionContext(t);
@@ -1051,6 +1082,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
             af.functions[inst.X]->ensure_defined();
             size_t remaining_bailout_depth =
                 frames.back().function->remaining_bailout_depth_ > 0
@@ -1170,6 +1202,14 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_bailouts() const {
+  return pImpl->type_table_.size();
+}
+
+void Code::request_bailout(size_t index) {
+  pImpl->request_bailout(index);
 }
 
 size_t Code::num_inputs() const {
