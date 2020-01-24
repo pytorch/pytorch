@@ -124,7 +124,7 @@ class RNNBase(Module):
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
 
-        with torch.cuda.device_of(any_param):
+        with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
 
             # NB: This is a temporary hack while we still don't have Tensor
