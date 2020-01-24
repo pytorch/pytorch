@@ -7,5 +7,6 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/autograd/custom_function.h>
+#include <torch/custom_class.h>
 
 #include <ATen/ATen.h>
