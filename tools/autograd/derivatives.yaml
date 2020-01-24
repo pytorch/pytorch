@@ -101,9 +101,14 @@
 #       of one of its input:
 #         - If there is only one differentiable output, this Tensor is marked as a
 #           differentiable view.
-#         - If there are more than one differentiable output, all the views are
+#         - If there are more than one differentiable output, by default all the views are
 #           marked as differentiable views and created with allow_rebase_history=false.
 #           Meaning that any inplace operation on it will raise an error.
+#         - If there are more than one differentiable output, and the function is only doing
+#           view operation, it can be added to PURE_VIEW_FUNCTIONS in gen_autograd.py. In that
+#           case, the outputs won't be created with allow_rebase_history=false but the backward
+#           specified in this file might NOT be used. See the note in gen_autograd.py for
+#           more details.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
