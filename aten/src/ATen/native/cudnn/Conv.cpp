@@ -192,7 +192,7 @@ static void convolution_shape_check(
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
-  
+
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
   checkSize(c, input, input_channels_dim, weight->size(1) * groups);
@@ -935,7 +935,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     bool benchmark, bool deterministic, std::array<bool,2> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-  
+
   Tensor grad_input, grad_weight;
   if (input.numel() == 0) {
     if (output_mask[0]) {
@@ -1106,11 +1106,9 @@ Tensor cudnn_convolution_transpose(
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
-
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 };
-  CheckedFrom c = "cudnn_convolution_transpose";
-  
+  CheckedFrom c = "cudnn_convolution_transpose"; 
   auto output_t = cudnn_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   return output_t;

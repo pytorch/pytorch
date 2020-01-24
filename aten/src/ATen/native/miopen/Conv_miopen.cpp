@@ -680,6 +680,10 @@ Tensor miopen_depthwise_convolution_forward(
                                      padding, stride, dilation),
                     input->options());
 
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
