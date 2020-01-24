@@ -283,7 +283,7 @@ __device__ void elementwise_kernel_helper(func_t f, array_t data, policy_t polic
 
   // store
   auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-  policy.store(result_base, result_accessor);
+  policy.store(result_accessor, result_base);
 }
 
 template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>

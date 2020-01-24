@@ -47,7 +47,7 @@ struct policies {
     }
 
     template<typename accessor_t, typename scalar_t>
-    __device__ inline void store(scalar_t *to, accessor_t from) {
+    __device__ inline void store(accessor_t from, scalar_t *to) {
       int thread_idx = threadIdx.x;
       #pragma unroll
       for (int i = 0; i < thread_work_size_; i++) {
@@ -87,7 +87,7 @@ struct policies {
     }
 
     template<typename accessor_t, typename scalar_t>
-    __device__ inline void store(scalar_t *to, accessor_t from) {
+    __device__ inline void store(accessor_t from, scalar_t *to) {
       using vec_t = aligned_vector<scalar_t, vec_size>;
       vec_t *to_ = reinterpret_cast<vec_t *>(to);
       int thread_idx = threadIdx.x;
