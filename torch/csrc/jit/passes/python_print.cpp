@@ -925,15 +925,13 @@ struct PythonPrintImpl {
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        // Empty dicts must be annotated with their type so the compiler knows
-        // what type is supposed to be inside them
-        if (node->inputs().size() == 0) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
-          // If we can't infer the type based on what's inside, explicitly
-          // annotate it to disambiguate.
-          // This happens for Dict[str, Tensor] vs. Dict[str, Optional[Tensor]]
-        } else if (
+        // There are cases where we must annotate the dict with an explicit type
+        // to help the compiler out:
+        //   - the dict is empty
+        //   - the dict has potentially ambiguous element types
+        //       (e.g. Tensor vs. Optional[Tensor])
+        if (
+            node->inputs().size() == 0 ||
             !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
             !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
           stmt << "annotate(" << node->output()->type()->python_str() << ", ";
