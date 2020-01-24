@@ -237,7 +237,7 @@ inline int can_vectorize_up_to(array_t pointers) {
 }  // namespace detail
 
 template<typename func_t, typename array_t, typename policy_t>
-__device__ void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
+__device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
