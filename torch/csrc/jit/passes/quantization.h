@@ -110,7 +110,7 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.
  */
-TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
+TORCH_API script::Module FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *
