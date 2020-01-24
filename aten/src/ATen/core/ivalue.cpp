@@ -44,13 +44,15 @@ TypePtr IValue::type() const {
       return DictType::create(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return ListType::create(toGenericList().elementType());
+      return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
+    case Tag::PyObject:
+      return PyObjectType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
@@ -88,10 +90,10 @@ std::ostream& printMaybeAnnotatedList(
     std::ostream& out,
     const IValue& the_list,
     IValueFormatter formatter) {
-  if (the_list.toGenericListRef().size() == 0) {
+  if (the_list.toListRef().size() == 0) {
     out << "annotate(" << the_list.type()->python_str() << ", [])";
   } else {
-    return printList(out, the_list.toGenericListRef(), "[", "]", formatter);
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
   return out;
 }
@@ -130,8 +132,9 @@ std::ostream& IValue::repr(
   }
 
   const IValue& v = *this;
-  auto formatter = [&](std::ostream& out, const IValue& v) {
-    v.repr(out, customFormatter);
+  // continue to use custom formatter in recursion
+  auto formatter = [&](std::ostream& out, const IValue& input) {
+    input.repr(out, customFormatter);
   };
   switch (v.tag) {
     case IValue::Tag::None:
@@ -162,9 +165,6 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, v.toStringRef());
       return out;
     case IValue::Tag::GenericList: {
-      auto formatter = [&](std::ostream& out, const IValue& v) {
-        v.repr(out, customFormatter);
-      };
       return printMaybeAnnotatedList(out, *this, formatter);
     }
     case IValue::Tag::Device: {
@@ -220,7 +220,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Capsule:
       return out << "Capsule";
     case IValue::Tag::GenericList:
-      return printList(out, v.toGenericList(), "[", "]", formatter);
+      return printList(out, v.toList(), "[", "]", formatter);
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -229,11 +229,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
-    case IValue::Tag::Object:
+    case IValue::Tag::PyObject: {
+      auto py_obj = v.toPyObject();
+      return out << "<PyObject at" << py_obj << ">";
+    }
+    case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
+    }
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }

@@ -397,7 +397,7 @@ message ExecutionStep {
   optional int64 run_every_ms = 11;
 
   // If false or not set, execute sub-steps serially.
-  // If true, execute all substeps concurrently, each one in a separte thread.
+  // If true, execute all substeps concurrently, each one in a separate thread.
   optional bool concurrent_substeps = 6;
 
   // Name of a scalar boolean tensor.
