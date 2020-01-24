@@ -9,6 +9,10 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+
+#include <c10/core/ScalarType.h>
 
 #include <algorithm>
 #include <functional>
@@ -244,16 +248,28 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const T
       indices.fill_(0);
     }
     else if(self.numel() != 0) {
-      // update values and indices for the first values along the dimension dim
-      values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
-      indices.narrow(dim, 0, 1).fill_(0);
-      for(int i = 1; i < self.size(dim); i++) {
-        auto res_at_i = at::max(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
-        // values at index i
-        values.narrow(dim, i, 1) = std::get<0>(res_at_i);
-        // indices at index i
-        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
-       }
+      AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummax", [&]() -> void {
+        auto values__data = values.data_ptr<scalar_t>();
+        auto self__data = self.data_ptr<scalar_t>();
+        auto indices__data = indices.data_ptr<int64_t>();
+        int64_t values__stride_dim = values.stride(dim);
+        int64_t self__stride_dim = self.stride(dim);
+        int64_t indices__stride_dim = indices.stride(dim);
+        at::parallel_for(0, self.size(dim), internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+          values__data[0] = self__data[0];
+          auto cummax = values__data[0];
+          indices__data[0] = 0;
+          auto idx = 0;
+          for(int64_t i = p_begin + 1; i < p_end; i++) {
+            if(self__data[i*self__stride_dim] >= cummax) {
+              cummax = self__data[i*self__stride_dim];
+              idx = i;
+            }
+            values__data[i*values__stride_dim] = cummax;
+            indices__data[i*indices__stride_dim] = idx;
+          }
+        });
+      });
     }
   }
   namedinference::propagate_names(values, self);
@@ -280,16 +296,28 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
       indices.fill_(0);
     }
     else if(self.numel() != 0) {
-      // update values and indices for the first values along the dimension dim
-      values.narrow(dim, 0, 1) = self.narrow(dim, 0, 1);
-      indices.narrow(dim, 0, 1).fill_(0);
-      for(int i = 1; i < self.size(dim); i++) {
-        auto res_at_i = at::min(at::cat({values.narrow(dim, i-1, 1), self.narrow(dim, i, 1)}, dim), dim, true);
-        // values at index i
-        values.narrow(dim, i, 1) = std::get<0>(res_at_i);
-        // indices at index i
-        indices.narrow(dim, i, 1) = at::max(indices.narrow(dim, i-1, 1), (i * (std::get<1>(res_at_i))));
-       }
+      AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummin", [&]() -> void {
+        auto values__data = values.data_ptr<scalar_t>();
+        auto self__data = self.data_ptr<scalar_t>();
+        auto indices__data = indices.data_ptr<int64_t>();
+        int64_t values__stride_dim = values.stride(dim);
+        int64_t self__stride_dim = self.stride(dim);
+        int64_t indices__stride_dim = indices.stride(dim);
+        at::parallel_for(0, self.size(dim), internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+          values__data[0] = self__data[0];
+          auto cummin = values__data[0];
+          indices__data[0] = 0;
+          auto idx = 0;
+          for(int64_t i = p_begin + 1; i < p_end; i++) {
+            if(self__data[i*self__stride_dim] <= cummin) {
+              cummin = self__data[i*self__stride_dim];
+              idx = i;
+            }
+            values__data[i*values__stride_dim] = cummin;
+            indices__data[i*indices__stride_dim] = idx;
+          }
+        });
+      });
     }
   }
   namedinference::propagate_names(values, self);
