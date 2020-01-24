@@ -31,7 +31,7 @@ namespace c10 {
  * > static auto registry = c10::RegisterOperators()
  * >     .op(c10::RegisterOperators::options()
  * >         .schema("my_op")
- * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+ * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
  */
 class CAFFE2_API RegisterOperators final {
 public:
@@ -52,7 +52,7 @@ public:
 
     // internal-only for registering stack based kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
-    Options&& kernel(TensorTypeId dispatch_key) && {
+    Options&& kernel(DispatchKey dispatch_key) && {
       return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
     }
 
@@ -80,14 +80,14 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
      * >
      * >
      * > // Explicitly specify full schema
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op(Tensor a) -> Tensor")
-     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
      */
     Options&& schema(const std::string& schemaOrName) {
       TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
@@ -118,7 +118,7 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId));
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -137,11 +137,11 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<my_kernel_cpu>(TensorTypeId::CPUTensorId, "some_configuration", 3, true));
+     * >         .kernel<my_kernel_cpu>(DispatchKey::CPUTensorId, "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
-    std::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> kernel(TensorTypeId dispatch_key, ConstructorParameters&&... constructorParameters) && {
+    std::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> kernel(DispatchKey dispatch_key, ConstructorParameters&&... constructorParameters) && {
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
@@ -215,11 +215,11 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(TensorTypeId::CPUTensorId));
+     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(DispatchKey::CPUTensorId));
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) && {
+    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(DispatchKey dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
@@ -261,7 +261,7 @@ public:
 
     template<class FuncType>
     // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key, FuncType* kernel_func) && {
+    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(DispatchKey dispatch_key, FuncType* kernel_func) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
@@ -290,7 +290,7 @@ public:
     // TODO Remove impl_unboxedOnlyKernel once all of aten can generate boxed kernels
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(TensorTypeId dispatch_key) && {
+    std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyKernel(DispatchKey dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
@@ -329,14 +329,14 @@ public:
      * > static auto registry = c10::RegisterOperators()
      * >     .op(c10::RegisterOperators::options()
      * >         .schema("my_op")
-     * >         .kernel(TensorTypeId::CPUTensorId, [] (Tensor a) -> Tensor {...}));
+     * >         .kernel(DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
     std::enable_if_t<
         guts::is_functor<std::decay_t<Lambda>>::value
         && !std::is_same<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::func_type, KernelFunction::BoxedKernelFunction>::value,
-        Options&&> kernel(TensorTypeId dispatch_key, Lambda&& functor) && {
+        Options&&> kernel(DispatchKey dispatch_key, Lambda&& functor) && {
       static_assert(!std::is_base_of<OperatorKernel, std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
@@ -402,7 +402,7 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<DispatchKey>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
@@ -426,7 +426,7 @@ public:
         , inferred_function_schema(nullptr)
       {}
 
-      c10::optional<TensorTypeId> dispatch_key;
+      c10::optional<DispatchKey> dispatch_key;
       KernelFunction func;
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };

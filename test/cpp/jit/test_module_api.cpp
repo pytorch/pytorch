@@ -7,6 +7,41 @@ namespace jit {
 
 using namespace torch::jit::script;
 
+void testModuleClone() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto parent = ClassType::create("parent", cu, true);
+  // creating child module
+  auto child = ClassType::create("child", cu, true);
+  auto attr_name = "attr";
+  child->addAttribute(attr_name, IntType::get());
+  Module c1(cu, child);
+  auto v1 = IValue(2);
+  c1.register_attribute(attr_name,
+                        IntType::get(),
+                        v1,
+                        false);
+  Module c2(cu, child);
+  auto v2 = IValue(3);
+  c2.register_attribute(attr_name,
+                        IntType::get(),
+                        v2,
+                        false);
+
+  // attach two child module instance to parent that shares
+  // ClassType
+  Module p(cu, parent);
+  p.register_attribute("c1", c1.type(), c1._ivalue(), false);
+  p.register_attribute("c2", c2.type(), c2._ivalue(), false);
+
+  // clone parent
+  Module p2 = p.clone();
+  // check the two child module has the same ClassType
+  ASSERT_EQ(p2.attr("c1").type(), p2.attr("c2").type());
+  // but different instances
+  ASSERT_EQ(Module(p2.attr("c1").toObject()).attr(attr_name).toInt(), 2);
+  ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
+}
+
 void testModuleCloneInstance() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
