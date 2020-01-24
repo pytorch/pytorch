@@ -6177,39 +6177,6 @@ class TestNN(NNTestCase):
         bn = nn.BatchNorm1d(1).to('cuda', dtype)
         data = torch.rand(131072, 1, device="cuda", dtype=dtype)
         out = bn(data).sum().backward()
-
-    def test_BatchNorm1d_leaves_running_variables_intact_for_0_dim_input(self):
-        bn = torch.nn.BatchNorm1d(5)
-        x = torch.ones(0, 5, 9, requires_grad=True)
-        y = bn(x)
-        y.backward(torch.ones(y.shape))
-
-        self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
-        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
-
-    def test_BatchNorm2d_leaves_running_variables_intact_for_0_dim_input(self):
-        bn = torch.nn.BatchNorm2d(5) 
-        x = torch.ones(0,5,2,2, requires_grad=True)
-        y = bn(x)
-        y.backward(torch.ones(y.shape))
-        
-        self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
-        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
-
-    def test_BatchNorm3d_leaves_running_variables_intact_for_0_dim_input(self):
-        bn = torch.nn.BatchNorm3d(5) 
-        x = torch.ones(0,5,2,2,2, requires_grad=True)
-        y = bn(x)
-        y.backward(torch.ones(y.shape))
-        
-        self.assertEqual(bn.running_mean, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.running_var, torch.tensor([1.,1,1,1,1]))
-        self.assertEqual(bn.weight.grad, torch.tensor([0.,0,0,0,0]))
-        self.assertEqual(bn.bias.grad, torch.tensor([0.,0,0,0,0]))
         
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -9031,6 +8998,11 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+        self.assertEqual(bn.running_mean, torch.tensor([0.,0,0], device=device))
+        self.assertEqual(bn.running_var, torch.tensor([1.,1,1], device=device))
+        self.assertEqual(bn.weight.grad, None)
+        self.assertEqual(bn.bias.grad, None)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
