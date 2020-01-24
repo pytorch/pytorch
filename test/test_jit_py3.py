@@ -12,13 +12,13 @@ import torch.nn as nn
 class TestScriptPy3(JitTestCase):
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
-            def use(self, buffer: Dict[str, Optional[Tensor]]):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
                 return buffer["prev_key"]
 
             def forward(self, x):
                 prev_key = torch.rand(2, 3)
                 next_key = torch.rand(2, 3)
-                saved_state: Dict[str, Optional[Tensor]] = {
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
                     "prev_key": prev_key,
                     "next_key": next_key,
                 }
