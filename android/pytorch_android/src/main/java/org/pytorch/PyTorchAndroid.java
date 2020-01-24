@@ -2,6 +2,7 @@ package org.pytorch;
 
 import android.content.res.AssetManager;
 
+import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.soloader.nativeloader.NativeLoader;
 import com.facebook.soloader.nativeloader.SystemDelegate;
 
@@ -38,5 +39,6 @@ public final class PyTorchAndroid {
     nativeSetNumThreads(numThreads);
   }
 
+  @DoNotStrip
   private static native void nativeSetNumThreads(int numThreads);
 }
