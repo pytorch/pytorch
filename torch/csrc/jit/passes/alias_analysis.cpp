@@ -22,8 +22,12 @@ c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
       return unshapedType(type);
     case TypeKind::OptionalType:
       return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
-    case TypeKind::FutureType:
-      return getMutableTypePtr(type->cast<FutureType>()->getElementType());
+    case TypeKind::FutureType: {
+      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
+        return FutureType::create(*elem);
+      }
+      return c10::nullopt;
+    }
     case TypeKind::TupleType: {
       std::vector<TypePtr> mutable_types;
       for (const auto& elem : type->expect<TupleType>()->elements()) {
@@ -685,7 +689,6 @@ void AliasDb::analyzeConservative(Node* node) {
     }
     auto elem = elementMap_.at(input);
     registerWrite(input, node);
-    // for (const auto& elem: maybe_mutable)
     MemoryLocations mem_locations;
     memoryDAG_->collectAllContainedMemoryLocations(elem, mem_locations);
     for (unsigned loc : mem_locations) {
@@ -860,7 +863,8 @@ std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
 bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
-  return memoryDAG_->mayContainAlias(getElements(a), getElements(b));
+  auto a_elems = getElements(a);
+  return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list

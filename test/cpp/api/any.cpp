@@ -8,7 +8,6 @@
 #include <string>
 
 using namespace torch::nn;
-using namespace torch::detail;
 
 struct AnyModuleTest : torch::test::SeedingFixture {};
 
