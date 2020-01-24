@@ -313,7 +313,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                     args=pack_arguments(args[1:]), num_inputs=num_inputs)
 
     def requires_lvalue(arg):
-        return 'jit_type' in arg and arg['jit_type'] in {"Tensor!", "Tensor(a!)"}
+        jit_type = arg.get('jit_type')
+        return jit_type is not None and jit_type.startswith('Tensor') and '!' in jit_type
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
@@ -387,11 +388,18 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
+        'schema_string': schema_string,
         'overload_name': '',
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-    } for name in ['sizes', 'strides', 'dim', 'numel']]
+    } for name, schema_string in [
+        ('sizes', 'aten::sizes(Tensor self) -> int'),
+        ('strides', 'aten::strides(Tensor self) -> int'),
+        ('dim', 'aten::dim(Tensor self) -> int'),
+        ('numel', 'aten::numel(Tensor self) -> int'),
+    ]]
+
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
@@ -434,13 +442,10 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         # add annotations about alias an mutability of arguments
         annotate_op(decl)
 
-        decl['should_match_schema'] = True
-
         decl_copy = copy.deepcopy(decl)
         for arg in decl_copy['arguments']:
             if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
                 arg['is_nullable'] = False
-                decl_copy['should_match_schema'] = False
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
@@ -464,7 +469,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
         for decl in group:
-            shards[x].append(OPERATOR.substitute(signature=signature(decl, decl['should_match_schema']),
+            shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                  op=emit_decl_variant(decl)))
 
     for i, shard in enumerate(shards):
@@ -507,74 +512,6 @@ def annotate_op(decl):
 
 def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
-
-
-def match_signature(decl, constructed_string, should_match_schema):
-    # If matches_jit_signature has been specified the signature constructed from the
-    # declared attributes should match the raw string passed through. In the
-    # case of native_functions.yaml, func should match the generated signature,
-    # if matches_jit_signature is true. This is used to track and verify the alignment
-    # of native_function.yaml's function schema with that used in this parse.
-    if decl.get('matches_jit_signature') and should_match_schema:
-        assert(constructed_string == decl['schema_string']), \
-            decl['schema_string'] + ' is flagged as JIT signature compliant' + \
-            ', but does not match the signature ' + constructed_string
-        return decl['schema_string']
-
-    return constructed_string
-
-
-def signature(decl, should_match_schema=True):
-    def format_arg(arg):
-        name = arg['name']
-        typ = jit_type_of(arg)
-        decl = '{} {}'.format(typ, name)
-        if 'default' in arg:
-            # clean up initializer lists {{true, true}} -> [true, true]
-            default = arg['default']
-            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
-            # signatures.  repr(float) doesn't seem to truncate in these cases.
-            default = str(default) if not isinstance(default, float) else repr(default)
-            default = default \
-                .replace('{{', '[') \
-                .replace('}}', ']') \
-                .replace('true', 'True') \
-                .replace('false', 'False') \
-                .replace('at::Reduction::Mean', 'Mean') \
-                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
-                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
-                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
-                .replace('{', '[') \
-                .replace('}', ']')
-
-            default = default_map.get(default, default)
-            decl = '{}={}'.format(decl, default)
-        return decl
-
-    args = []
-    kwarg_only = False
-
-    ordered_arguments = sorted(zip(argument_order(decl), decl['arguments']))
-    for _, a in ordered_arguments:
-        if not kwarg_only and is_kwarg_only(a):
-            args.append('*')
-            kwarg_only = True
-        args.append(format_arg(a))
-
-    arg_list = ', '.join(args)
-    if len(decl['returns']) == 1:
-        ret_list = jit_type_of(decl['returns'][0])
-        # Adding output name if it exists
-        if decl['returns'][0].get('field_name'):
-            ret_list += ' ' + decl['returns'][0]['field_name']
-    else:
-        def type_maybe_field(r):
-            return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
-        ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
-    return match_signature(decl, constructed_string, should_match_schema)
 
 
 def signature_without_args(decl):
