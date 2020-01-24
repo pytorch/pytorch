@@ -13,7 +13,7 @@ from torch._six import PY2
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -355,6 +355,14 @@ class TestList(JitTestCase):
 
         test_mutation()
         FileCheck().check("aten::sort").run(test_mutation.graph_for())
+
+        def test_sorted_copy():
+            a = [torch.tensor(2), torch.tensor(0), torch.tensor(1)]
+            b = sorted(a)
+            a[0] = torch.tensor(10)
+            return a, b
+
+        self.checkScript(test_sorted_copy, ())
 
     def test_list_slice(self):
         def test_regular_slice():

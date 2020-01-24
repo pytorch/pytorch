@@ -13,6 +13,11 @@ graph {
     name: "ATen_0"
     op_type: "ATen"
     attribute {
+      name: "include_last_offset"
+      i: 0
+      type: INT
+    }
+    attribute {
       name: "mode"
       i: 1
       type: INT
