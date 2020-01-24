@@ -353,11 +353,6 @@ struct CodeImpl {
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
-  // bailout index to instruction index map
-  // this mapping makes `request_bailout` API simpler
-  // since a user doesn't need to deal with
-  // instruction indices.
-  std::unordered_map<size_t, size_t> bi_to_ii_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -415,12 +410,24 @@ struct CodeImpl {
   }
 
   void request_bailout(size_t index) {
-    size_t instr_index = bi_to_ii_[index];
-    TORCH_INTERNAL_ASSERT(instructions_[instr_index].op == GUARD);
-    // patching GUARD to FAIL_GUARD
-    instructions_[instr_index] =
-        Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
-    GRAPH_DEBUG("Added a bailout request for ", index);
+    auto count = index;
+    for (size_t instr_index = 0; instr_index < instructions_.size();
+         instr_index++) {
+      if (instructions_[instr_index].op == GUARD) {
+        if (count == 0) {
+          // patching GUARD to FAIL_GUARD
+          instructions_[instr_index] =
+              Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
+          GRAPH_DEBUG(
+              "Added a bailout request for ",
+              index,
+              " at instruction ",
+              instr_index);
+          break;
+        }
+        count--;
+      }
+    }
   }
 
   const std::vector<Instruction>& instructions() const {
@@ -611,7 +618,6 @@ struct CodeImpl {
     // guarded input is at index 1
     // the rest of args follow
     emitLoadInputs(node->inputs().slice(1, 1));
-    bi_to_ii_[type_table_.size()] = instructions_.size();
     insertInstruction(GUARD, type_table_.size());
     type_table_.emplace_back(node->outputs().at(0)->type());
     insertInstruction(JF, 0 /* to be patched */);
