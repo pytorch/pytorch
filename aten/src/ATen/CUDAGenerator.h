@@ -1,8 +1,6 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
-#include <c10/core/DispatchKey.h>
-#include <c10/core/DispatchKeySet.h>
 
 // TODO: this file should be in ATen/cuda, not top level
 
