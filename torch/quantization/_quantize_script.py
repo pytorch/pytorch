@@ -101,7 +101,7 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
     torch._C._jit_pass_dedup_module_uses(model._c)
     model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
-    # model = prepare_script(model, scripted_qconfig_dict, True)
-    # run_fn(model._c._get_method('forward'), *run_args)
-    # model = convert_script(model, True)
+    model = prepare_script(model, scripted_qconfig_dict, True)
+    run_fn(model._c._get_method('forward'), *run_args)
+    model = convert_script(model, True)
     return model

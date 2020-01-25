@@ -1459,10 +1459,12 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   r.bn_b = bn.attr("bias").toTensor();
 
   r.conv_w = conv.attr("weight").toTensor();
+  r.conv_b = at::zeros_like(r.bn_rm);
   if (hastensor(conv, "bias")) {
-    r.conv_b = conv.attr("bias").toTensor();
-  } else {
-    r.conv_b = at::zeros_like(r.bn_rm);
+    auto t = conv.attr("bias").toTensor();
+    if (t.numel() > 0) {
+      r.conv_b = conv.attr("bias").toTensor();
+    }
   }
 
   return true;
@@ -1506,8 +1508,7 @@ graph(%self, %x):
           method.graph());
       const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
-      GRAPH_DEBUG("type name:", current.type()->name()->qualifiedName());
-      GRAPH_DEBUG("match? ", matches.size());
+      GRAPH_DEBUG("number of matches: ", matches.size());
       Graph* g = method.graph().get();
       bool is_folded_graph = folded_graph_.find(g) != folded_graph_.end();
       folded_graph_.insert(g);
@@ -1561,20 +1562,12 @@ graph(%self, %x):
         nodes_to_delete_.insert(matched_bn);
         GRAPH_UPDATE("Deleting ", *matched_bn);
 
-        // If conv submodule has bias as attribute/constant
-        // we want to remove the constant
-        if (conv_submodule.hasattr("bias")) {
-          // conv module has an existing non-Tensor bias
-          if (conv_submodule.type()->hasConstant("bias")) {
-            if (conv_submodule.type()->getConstant("bias").isNone()) {
-              conv_submodule.type()->unsafeRemoveConstant("bias");
-              GRAPH_UPDATE("Removing bias None from conv module");
-            } else {
-              TORCH_CHECK(false, "We don't support folding Conv"
-                          " module with non-None bias constants");
-            }
-          }
-        }
+        // TODO: we have a workaround right now
+        // that changes self.bias to torch.Tensor and
+        // use numel() == 0 to indicate self.bias is None
+        // since https://github.com/pytorch/pytorch/blob/master/torch/jit/_recursive.py#L91-L95
+        // we have to fix this when we change self.bias
+        // back to Optional[torch.Tensor]
       } // matches
     } // methods
   } // while
@@ -1584,13 +1577,8 @@ void FoldConvBatchNorm2dHelper::transform() {
   for (const auto& item : conv_module_and_params_) {
     script::Module conv(item.first);
     auto w_b = item.second;
-    GRAPH_DEBUG("setting weight and bias for conv");
-    GRAPH_DEBUG("type name:", conv.type()->name()->qualifiedName());
-    GRAPH_DEBUG("instance:", conv._ivalue());
-    GRAPH_DEBUG("transform conv original weight:", conv.attr("weight"));
-    GRAPH_DEBUG("transform conv new weight:", std::get<0>(w_b));
     conv.setattr("weight", std::get<0>(w_b));
-    conv.register_parameter("bias", std::get<1>(w_b), false);
+    conv.setattr("bias", std::get<1>(w_b));
   }
 }
 
