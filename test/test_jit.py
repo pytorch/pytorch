@@ -4971,16 +4971,6 @@ def foo(x):
         scripted = torch.jit.script(foo)
         self.getExportImportCopy(scripted)
 
-    @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
-    def test_torchbind_lambda_method(self):
-        def foo():
-            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
-            return ss.top()
-
-        scripted = torch.jit.script(foo)
-        self.assertEqual(scripted(), "mom")
-
     def test_class_as_attribute(self):
         @torch.jit.script
         class Foo321(object):
