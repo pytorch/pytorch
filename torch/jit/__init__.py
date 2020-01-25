@@ -1653,6 +1653,15 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
+        def save_for_mobile(self, *args, **kwargs):
+            r"""
+            _save_for_mobile(f)
+
+            """
+            print(type(self._c))
+            print(dir(self._c))
+            return self._c._save_for_mobile(*args, **kwargs)
+
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
 
