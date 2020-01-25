@@ -8999,10 +8999,10 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
 
-        self.assertEqual(bn.running_mean, torch.tensor([0.,0,0], device=device))
-        self.assertEqual(bn.running_var, torch.tensor([1.,1,1], device=device))
-        self.assertEqual(bn.weight.grad, None)
-        self.assertEqual(bn.bias.grad, None)
+        self.assertEqual(mod.running_mean, torch.tensor([0., 0, 0], device=device))
+        self.assertEqual(mod.running_var, torch.tensor([1., 1, 1], device=device))
+        self.assertEqual(mod.weight.grad, None)
+        self.assertEqual(mod.bias.grad, None)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
