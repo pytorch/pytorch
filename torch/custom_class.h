@@ -106,7 +106,7 @@ class class_ {
   }
 
   // Pickle
-  template<typename GetStateFn, typename SetStateFn>
+  template <typename GetStateFn, typename SetStateFn>
   class_& def(detail::pickle_factory<GetStateFn, SetStateFn> pickle) {
     def("__getstate__", pickle.g);
 
@@ -115,9 +115,12 @@ class class_ {
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
     auto s = pickle.s;
-    auto setstate_wrapper = [s](c10::tagged_capsule<CurClass> self, decltype(pickle.arg_state_type()) arg) {
+    auto setstate_wrapper = [s](c10::tagged_capsule<CurClass> self,
+                                decltype(pickle.arg_state_type()) arg) {
       c10::intrusive_ptr<CurClass> classObj = at::guts::invoke(s, arg);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
+      auto genericPtr =
+          c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
+              classObj);
       auto capsule = IValue(genericPtr);
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);
@@ -131,23 +134,30 @@ class class_ {
       ss << getstate_schema;
       return ss.str();
     };
-    TORCH_CHECK(getstate_schema.arguments().size() == 1,
-                "__getstate__ should take exactly one argument: self. Got: ",
-                format_getstate_schema());
+    TORCH_CHECK(
+        getstate_schema.arguments().size() == 1,
+        "__getstate__ should take exactly one argument: self. Got: ",
+        format_getstate_schema());
     auto first_arg_type = getstate_schema.arguments().at(0).type();
-    TORCH_CHECK(first_arg_type->isSubtypeOf(classTypePtr),
-                "self argument of __getstate__ must be the custom class type. Got ",
-                first_arg_type->str());
-    TORCH_CHECK(getstate_schema.returns().size() == 1,
-                "__getstate__ should return exactly one value for serialization. Got: ", format_getstate_schema());
+    TORCH_CHECK(
+        first_arg_type->isSubtypeOf(classTypePtr),
+        "self argument of __getstate__ must be the custom class type. Got ",
+        first_arg_type->str());
+    TORCH_CHECK(
+        getstate_schema.returns().size() == 1,
+        "__getstate__ should return exactly one value for serialization. Got: ",
+        format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
     auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
     TORCH_INTERNAL_ASSERT(setstate_schema.arguments().size() == 2);
     auto arg_type = setstate_schema.arguments().at(1).type();
-    TORCH_CHECK((arg_type->isSubtypeOf(ser_type)),
-                "__setstate__'s argument should be the same type as the "
-                "return value of __getstate__. Got ", arg_type->str(),
-                " but expected ", ser_type->str());
+    TORCH_CHECK(
+        (arg_type->isSubtypeOf(ser_type)),
+        "__setstate__'s argument should be the same type as the "
+        "return value of __getstate__. Got ",
+        arg_type->str(),
+        " but expected ",
+        ser_type->str());
 
     return *this;
   }
