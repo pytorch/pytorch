@@ -66,6 +66,7 @@ class AmpLists(object):
             ("matmul", mat0_fp32 + mat1_fp32),
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
+            ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
         ]
         # self.torch_fp16_inplace = []
         # self.torch_fp16_user_supplied_out = []
@@ -91,6 +92,16 @@ class AmpLists(object):
             ("log_softmax", pointwise0_fp16 + (0,)),
             ("layer_norm", pointwise0_fp16 + ((pointwise0_fp16[0].numel(),),)),
             ("group_norm", mat0_fp16 + (1,)),
+            ("norm", pointwise0_fp16),
+            ("norm", pointwise0_fp16, {"dim": 0}),
+            # these need magma
+            # ("norm", mat0_fp16, {"p": "nuc"}),
+            # ("norm", mat0_fp16, {"p": "nuc", "dim": 0}),
+            ("norm", pointwise0_fp16, {"p": 1}),
+            ("norm", pointwise0_fp16, {"p": 1, "dim": 0}),
+            ("cosine_similarity", mat0_fp16 + mat1_fp16),
+            ("poisson_nll_loss", mat0_fp16 + mat1_fp16 + (True, False, 1.e-8,
+                                                          torch.nn.functional._Reduction.get_enum('mean'))),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
@@ -111,6 +122,8 @@ class AmpLists(object):
             ("tensordot", (torch.randn((2,2,2), dtype=torch.float32, device="cuda"),
                            torch.randn((2,2,2), dtype=torch.float16, device="cuda"))),
             ("equal", pointwise0_fp32 + pointwise1_fp16),
+            ("cat", (pointwise0_fp16 + pointwise1_fp32,)),
+            ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
         ]
         # self.torch_passthrough_user_supplied_out = []
         # self.torch_firstarg_inplace = []
