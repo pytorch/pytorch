@@ -957,6 +957,7 @@ bool Node::hasSideEffects() const {
     case prim::PythonOp:
     case prim::IgnoredPythonOp:
     case prim::Print:
+    case aten::breakpoint:
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:

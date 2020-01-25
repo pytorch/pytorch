@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
@@ -28,6 +29,9 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// todo: windows
+#include <signal.h>
 
 namespace torch {
 namespace jit {
@@ -857,6 +861,88 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
 
     ActiveFrame af(frames.back());
+
+    setDebuggerHook([&]() {
+      std::cout << "starting debugger...\n";
+      // struct sigaction sigIntHandler;
+
+      // sigIntHandler.sa_handler = my_handler;
+      // sigemptyset(&sigIntHandler.sa_mask);
+      // sigIntHandler.sa_flags = 0;
+
+      // sigaction(SIGINT, &sigIntHandler, NULL);
+      std::string command;
+      do {
+        std::cout << "(tdb) ";
+        std::cin >> command;
+        if (command == "list") {
+          size_t old_pc = frames.back().pc;
+          frames.back().pc = af.pc;
+          formatStackTrace(std::cout);
+          frames.back().pc = old_pc;
+        } else if (command == "dump") {
+          dump(std::cout, stack);
+        } else if (command == "err") {
+          throw std::runtime_error("meow");
+        } else if (command == "continue" || command == "c") {
+          break;
+        } else if (command == "info") {
+          std::cout << "Have " << frames.size() << " frames\n";
+        } else if (command == "graph") {
+          const auto& frame = frames.back();
+          std::cout << *frame.function->graph_ << "\n";
+        } else if (command == "frame") {
+          const auto& frame = frames.back();
+          // std::cout << *frame.function->graph_ << "\n";
+          std::cout << "Registers:\n";
+          for (size_t i = 0; i < registers.size(); i++) {
+            std::cout << "\t" << i << " " << registers.at(i) << "\n";
+          }
+          std::cout << "Values:\n";
+          for (auto entry : frame.function->value_to_reg_) {
+            auto v = entry.first;
+            auto use_entry = frame.function->use_count_.find(v);
+            if (use_entry != frame.function->use_count_.end()) {
+              std::cout << use_entry->second << ", " << v->uses().size() << ": ";
+              if (use_entry->second == v->uses().size()) {
+
+              std::cout << "(dead) ";
+              } else {
+              std::cout << "(live) ";
+
+              }
+            } else {
+            }
+            std::cout << entry.second << " " << entry.first->debugName() << " " << *entry.first->node();
+          }
+        } else if (command == "read") {
+          const auto& frame = frames.back();
+          std::cout << "value name: ";
+          std::string name;
+          std::cin >> name;
+          bool done = false;
+          for (auto entry : frame.function->value_to_reg_) {
+            if (name == entry.first->debugName()) {
+              std::cout << name << ":\n";
+              std::cout << "\t" << *entry.first->node();
+              size_t idx = registers.size() - entry.second;
+              std::cout << "\t" << registers.at(idx) << "\n";
+              // std::cout << "\t" << reg(entry.second - 1) << "\n";
+              done = true;
+              break;
+            }
+          }
+          if (!done) {
+            std::cout << "unknown value debugName: " << name << "\n";
+          }
+        } else if (command == "q" || command == "quit") {
+          break;
+        } else {
+          std::cout << "unknown command: " << command << "\n";
+        }
+      } while (true);
+    });
+
     try {
       while (true) {
 //         std::cout << "RUNNING ";
@@ -1076,7 +1162,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
       }
     } catch (std::exception& e) {
-      frames.back().pc = af.pc;
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       handleError(ExceptionMessage(e), is_jit_exception);
       return false;

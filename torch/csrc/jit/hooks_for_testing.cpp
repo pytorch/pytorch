@@ -27,5 +27,14 @@ std::pair<ModuleHook, FunctionHook> getEmitHooks() {
   return std::make_pair(emit_module_callback, emit_function_callback);
 }
 
+static DebuggerHook debugger;
+void setDebuggerHook(DebuggerHook fn) {
+  debugger = std::move(fn);
+}
+
+DebuggerHook getDebuggerHook() {
+  return debugger;
+}
+
 } // namespace jit
 } // namespace torch

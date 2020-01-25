@@ -368,6 +368,7 @@ void AliasDb::analyzeImpl(Node* node) {
       giveFreshAlias(node->output());
       return;
     case prim::Print:
+    case aten::breakpoint:
     case prim::isinstance:
       // These ops do nothing
       return;
@@ -1291,6 +1292,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       prim::Print,
+      aten::breakpoint,
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,

@@ -45,6 +45,7 @@ namespace c10 {
   _(prim, PadPacked) /* onnx */      \
   _(prim, Placeholder) /* debug */   \
   _(prim, Print)                     \
+  _(aten, breakpoint)                     \
   _(prim, PythonOp)                  \
   _(prim, IgnoredPythonOp)           \
   _(prim, Reverse)                   \
