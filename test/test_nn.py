@@ -8937,12 +8937,13 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
-    def _test_module_empty_input(self, module, inp):
+    def _test_module_empty_input(self, module, inp, check_size = True):
         inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
         out.backward(gO)
-        self.assertEqual(out.size(), inp.size())
+        if check_size:
+            self.assertEqual(out.size(), inp.size())
         for p in module.parameters():
             # TODO: p.grad should not be None, but this is not yet supported
             # (https://github.com/pytorch/pytorch/issues/12013)
@@ -9044,6 +9045,14 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    def test_group_conv_empty(self, device):
+        mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
+        inp = torch.randn(0, 4, 4, 4)
+        self._test_module_empty_input(mod, inp, check_size=False)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp, check_size=False)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
