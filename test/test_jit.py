@@ -4983,7 +4983,7 @@ def foo(x):
 
     def test_class_as_attribute(self):
         @torch.jit.script
-        class Foo321:
+        class Foo321(object):
             def __init__(self):
                 self.x = 3
 

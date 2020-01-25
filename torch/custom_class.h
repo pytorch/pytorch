@@ -105,16 +105,17 @@ class class_ {
   template <
       typename Method,
       std::enable_if_t<
-          !c10::guts::is_stateless_lambda<std::decay_t<Method>>::value,
+          std::is_member_function_pointer<std::decay_t<Method>>::value,
           bool> = false>
   class_& def(std::string name, Method m) {
-    auto res = def_(name, m, detail::args_t<decltype(m)>{});
+    auto res =
+        def_(std::move(name), std::move(m), detail::args_t<decltype(m)>{});
     return *this;
   }
   template <
       typename Func,
       std::enable_if_t<
-          c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
   class_& def(std::string name, Func f) {
     auto res = def_(name, f, detail::args_t<decltype(&Func::operator())>{});
@@ -165,13 +166,14 @@ class class_ {
       typename R,
       typename... Types,
       std::enable_if_t<
-          !c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
   class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
-    auto func = [f](c10::intrusive_ptr<CurClass> cur, Types... args) {
+    auto func = [f = std::move(f)](
+                    c10::intrusive_ptr<CurClass> cur, Types... args) {
       return at::guts::invoke(f, *cur, args...);
     };
-    defineMethod<R>(name, std::move(func));
+    defineMethod<R>(std::move(name), std::move(func));
     return *this;
   }
 
@@ -187,11 +189,11 @@ class class_ {
       typename R,
       typename... Types,
       std::enable_if_t<
-          c10::guts::is_stateless_lambda<std::decay_t<Func>>::value,
+          !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
   class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
     assert_self_type(funcInfo);
-    defineMethod<R>(name, f);
+    defineMethod<R>(std::move(name), std::move(f));
     return *this;
   }
 };
