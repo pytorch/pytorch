@@ -4997,6 +4997,8 @@ def foo(x):
 
         scripted = torch.jit.script(FooBar1234())
         eic = self.getExportImportCopy(scripted)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted(x), eic(x))
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
