@@ -570,6 +570,7 @@ class RpcTest(RpcAgentTestFixture):
         # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
         rpc.api._wait_all_workers()
+        rpc.api._wait_all_workers()
         rpc.shutdown(graceful=False)
 
     @dist_init
