@@ -11571,6 +11571,9 @@ class TestTorchDeviceType(TestCase):
                 g0 = torch.rand_like(actual)
                 actual.backward(g0)
                 expected.backward(g0)
+                print('shape {}, device {}, p {}, dtype {}, trans {}'.format(
+                    shape, device, p, dtype, trans))
+                print('grad.abx().max(): {}'.format((x.grad - y.grad).abs().max()))
                 self.assertTrue(torch.allclose(x.grad, y.grad))
 
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
