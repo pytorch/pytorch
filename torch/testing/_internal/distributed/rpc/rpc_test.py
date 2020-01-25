@@ -796,8 +796,8 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(Exception, "no_args"):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
 
+        rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
         with self.assertRaisesRegex(Exception, "no_args"):
-            rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
             rref.to_here()
 
     @dist_init

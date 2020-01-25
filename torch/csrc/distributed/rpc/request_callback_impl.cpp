@@ -82,9 +82,21 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
 
-      TypePtr ret_type = scriptRemoteCall.op()->schema().returns()[0].type();
+      TypePtr returnType;
+      if (scriptRemoteCall.hasOp()) {
+        returnType = scriptRemoteCall.op()->schema().returns()[0].type();
+      } else {
+        returnType = PythonRpcHandler::getInstance()
+                         .jitCompilationUnit()
+                         ->get_function(scriptRemoteCall.qualifiedName())
+                         .getSchema()
+                         .returns()
+                         .at(0)
+                         .type();
+      }
+
       auto ownerRRef =
-          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), ret_type);
+          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), returnType);
 
       // TODO: make this asynchronous
       // scriptRemoteCall is only alive within this block, use reference to

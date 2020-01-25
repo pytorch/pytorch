@@ -711,7 +711,7 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
 @_require_initialized
 def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
     r"""
-    Make a remote call to run ``func`` on worker ``to`` and return an
+    Make a remote call to run TorchScript func ``qualified_name`` on worker ``to`` and return an
     :class:`~torch.distributed.rpc.RRef` to the result value immediately.
     Worker ``to`` will be the owner of the returned
     :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
@@ -722,7 +722,7 @@ def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): any callable function. python callable, builtin or annotated TorchScript
+        qualified_name (str): any callable function. python callable, builtin or annotated TorchScript
                          functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
