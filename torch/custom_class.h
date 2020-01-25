@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
+#include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
 
@@ -24,23 +25,6 @@ namespace jit {
 
 TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
 TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
-
-namespace detail {
-template <class R, class...>
-struct types {
-  using type = types;
-};
-template <class Sig>
-struct args;
-template <class R, class CurClass, class... Args>
-struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
-template <class R, class CurClass, class... Args>
-struct args<R (CurClass::*)(Args...) const> : types<R, Args...> {};
-template <class Sig>
-using args_t = typename args<Sig>::type;
-} // namespace detail
-template <class... Types>
-detail::types<void, Types...> init() { return detail::types<void, Types...>{}; }
 
 // To bind custom classes into Torchscript, use an API very similar to Pybind's.
 // Currently exposes one class `torch::jit::class_<T>` and 2 methods.
@@ -118,6 +102,28 @@ class class_ {
           bool> = false>
   class_& def(std::string name, Func f) {
     auto res = def_(name, f, detail::args_t<decltype(&Func::operator())>{});
+    return *this;
+  }
+
+  // Pickle
+  template<typename GetStateFn, typename SetStateFn>
+  class_& def(detail::pickle_factory<GetStateFn, SetStateFn> pickle) {
+    def("__getstate__", pickle.g);
+
+    // __setstate__ needs to be registered with some custom handling:
+    // We need to wrap the invocation of of the user-provided function
+    // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
+    // and assign it to the `capsule` attribute.
+    auto s = pickle.s;
+    auto setstate_wrapper = [s](c10::tagged_capsule<CurClass> self, decltype(pickle.arg_state_type()) arg) {
+      c10::intrusive_ptr<CurClass> classObj = at::guts::invoke(s, arg);
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
+      auto capsule = IValue(genericPtr);
+      auto object = self.ivalue.toObject();
+      object->setSlot(0, capsule);
+    };
+    defineMethod<void>("__setstate__", std::move(setstate_wrapper));
+
     return *this;
   }
 

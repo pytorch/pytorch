@@ -55,14 +55,6 @@ struct Stack : torch::jit::CustomClassHolder {
     }
   }
 
-  std::vector<std::string> __getstate__() const {
-    return stack_;
-  }
-
-  void __setstate__(std::vector<std::string> state) {
-    stack_ = std::move(state);
-  }
-
   std::tuple<double, int64_t> return_a_tuple() const {
     return std::make_tuple(1337.0f, 123);
   }
@@ -83,8 +75,14 @@ static auto testStack =
         .def("pop", &Stack<std::string>::pop)
         .def("clone", &Stack<std::string>::clone)
         .def("merge", &Stack<std::string>::merge)
-        .def("__getstate__", &Stack<std::string>::__getstate__)
-        .def("__setstate__", &Stack<std::string>::__setstate__)
+        .def(torch::jit::pickle_(
+            [](const c10::intrusive_ptr<Stack<std::string>>& self) {
+              return self->stack_;
+            },
+            [](std::vector<std::string> state) { // __setstate__
+              return c10::make_intrusive<Stack<std::string>>(
+                  std::vector<std::string>{"i", "was", "deserialized"});
+            }))
         .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
         .def(
             "top",

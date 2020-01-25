@@ -4998,6 +4998,22 @@ def foo(x):
         scripted = torch.jit.script(FooBar1234())
         eic = self.getExportImportCopy(scripted)
 
+    def test_torchbind_class_attribute(self):
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = torch.classes._TorchScriptTesting_StackString(["3", "4"])
+
+            def forward(self):
+                return self.f.top()
+
+        inst = FooBar1234()
+        scripted = torch.jit.script(inst)
+        eic = self.getExportImportCopy(scripted)
+        assert eic() == "deserialized"
+        for expected in ["deserialized", "was", "i"]:
+            assert eic.f.pop() == expected
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):

@@ -130,6 +130,25 @@ struct is_type_condition<C, std::enable_if_t<std::is_same<bool, std::remove_cv_t
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
 
+/// Strip the class from a method type
+template <typename T> struct remove_class { };
+template <typename C, typename R, typename... A> struct remove_class<R (C::*)(A...)> { typedef R type(A...); };
+template <typename C, typename R, typename... A> struct remove_class<R (C::*)(A...) const> { typedef R type(A...); };
+
+template <typename F> struct strip_function_object {
+    using type = typename remove_class<decltype(&F::operator())>::type;
+};
+
+template <typename Function, typename F = std::remove_reference_t<Function>>
+using function_signature_t = std::conditional_t<
+    std::is_function<F>::value,
+    F,
+    typename std::conditional_t<
+        std::is_pointer<F>::value || std::is_member_pointer<F>::value,
+        std::remove_pointer<F>,
+        strip_function_object<F>
+    >::type
+>;
 
 }
 }
