@@ -98,7 +98,7 @@ class class_ {
           !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
   class_& def(std::string name, Func f) {
-    auto res = def_(name, f, detail::args_t<decltype(&Func::operator())>{});
+    auto res = def_(std::move(name), std::move(f), detail::args_t<decltype(&Func::operator())>{});
     return *this;
   }
 
@@ -113,7 +113,7 @@ class class_ {
     // and assign it to the `capsule` attribute.
     auto s = pickle.s;
     auto setstate_wrapper = [s](c10::tagged_capsule<CurClass> self,
-                                decltype(pickle.arg_state_type()) arg) {
+                                typename decltype(pickle)::arg_state_type arg) {
       c10::intrusive_ptr<CurClass> classObj = at::guts::invoke(s, arg);
       auto genericPtr =
           c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
@@ -137,7 +137,7 @@ class class_ {
         format_getstate_schema());
     auto first_arg_type = getstate_schema.arguments().at(0).type();
     TORCH_CHECK(
-        first_arg_type->isSubtypeOf(classTypePtr),
+        *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
         first_arg_type->str());
     TORCH_CHECK(
@@ -149,7 +149,7 @@ class class_ {
     TORCH_INTERNAL_ASSERT(setstate_schema.arguments().size() == 2);
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        (arg_type->isSubtypeOf(ser_type)),
+        (*arg_type == *ser_type),
         "__setstate__'s argument should be the same type as the "
         "return value of __getstate__. Got ",
         arg_type->str(),

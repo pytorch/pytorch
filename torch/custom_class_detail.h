@@ -45,7 +45,7 @@ template <
 struct pickle_factory<Get, Set, RetState(Self), NewInstance(ArgState)> {
   pickle_factory(Get&& g, Set&& s) : g(std::move(g)), s(std::move(s)) {}
 
-  [[noreturn]] ArgState arg_state_type() {}
+  using arg_state_type = ArgState;
 
   Get g;
   Set s;
