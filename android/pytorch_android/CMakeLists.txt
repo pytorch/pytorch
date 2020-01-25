@@ -48,6 +48,14 @@ add_library(pytorch_jni SHARED
     ${pytorch_android_SOURCES}
 )
 
+if (APPLE)
+  # Need to add rpath so dlopen can find dependencies.
+  add_custom_command(TARGET pytorch_jni
+      POST_BUILD COMMAND
+      ${CMAKE_INSTALL_NAME_TOOL} -add_rpath "@loader_path"
+        $<TARGET_FILE:pytorch_jni>)
+endif()
+
 target_compile_options(pytorch_jni PRIVATE
   -fexceptions
 )
