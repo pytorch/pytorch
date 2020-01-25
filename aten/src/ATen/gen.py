@@ -176,7 +176,10 @@ quantized_scalar_types = [
 ]
 
 # whitelist used to filter op registrations for custom build
-op_registration_whitelist = set(options.op_registration_whitelist or [])
+if options.op_registration_whitelist is not None:
+    op_registration_whitelist = set(options.op_registration_whitelist)
+else:
+    op_registration_whitelist = None
 
 # shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
@@ -247,14 +250,14 @@ def add_op_registrations(per_type_registrations, per_op_registrations, op_regist
         opname = op_registration.operator_name
         registration = op_registration.registration_code
         # apply whitelist
-        if op_registration_whitelist and opname not in op_registration_whitelist:
+        if op_registration_whitelist is not None and opname not in op_registration_whitelist:
             continue
-        # per type registration
         if not options.per_op_registration:
+            # per type registration
             per_type_registrations.append(registration)
-            continue
-        # per op registration
-        per_op_registrations[opname].append(registration)
+        else:
+            # per op registration
+            per_op_registrations[opname].append(registration)
 
 
 def generate_storage_type_and_tensor(backend, density, declarations, per_op_registrations):
@@ -367,7 +370,7 @@ def iterate_types():
 
 
 def gen_per_op_registration_filename(opname):
-    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '_'))
+    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
 
 
 ###################
@@ -400,7 +403,7 @@ def declare_outputs():
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
 
     if options.per_op_registration:
-        if not op_registration_whitelist:
+        if op_registration_whitelist is None:
             raise Exception("Must set --op_registration_whitelist for per-op registration.")
         for whitelisted_op in op_registration_whitelist:
             fname = gen_per_op_registration_filename(whitelisted_op)
