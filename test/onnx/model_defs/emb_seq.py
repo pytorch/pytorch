@@ -20,7 +20,7 @@ class EmbeddingNetwork2(nn.Module):
 
     def __init__(self, in_space=10, dim=3):
         super(EmbeddingNetwork2, self).__init__()
-        self.embedding = nn.Embedding(n, dim)
+        self.embedding = nn.Embedding(in_space, dim)
         self.seq = nn.Sequential(
             self.embedding,
             nn.Linear(dim, 1),
