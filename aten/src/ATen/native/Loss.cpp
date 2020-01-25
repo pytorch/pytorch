@@ -10,6 +10,9 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <torch/torch.h>
+
+#include <iostream>
 
 #define EPSILON 1e-12
 #define _USE_MATH_DEFINES
@@ -79,7 +82,10 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
   auto output_pos = target * (at::log(target) - input);
   auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto output = at::where(target > 0, output_pos, zeros);
+  // Perform a check for (target > -EPSILON) & (target < EPSILON) since floating point
+  // errors in output_pos cause the output values to be 1e-17 on GPU and -1e-14 on CPU.
+  auto output = at::where(target > -EPSILON, output_pos, zeros);
+  output = at::where(output < EPSILON, zeros, output_pos);
   return apply_loss_reduction(output, reduction);
 }
 
