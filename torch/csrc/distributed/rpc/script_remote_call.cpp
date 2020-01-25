@@ -9,12 +9,43 @@ namespace rpc {
 
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
-    std::vector<at::IValue>&& args,
+    std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
     const ForkId& retForkId)
-    : ScriptCall(std::move(op), std::move(args)),
+    : ScriptCall(std::move(op), std::move(stack)),
       retRRefId_(retRRefId),
       retForkId_(retForkId) {}
+
+ScriptRemoteCall::ScriptRemoteCall(
+    const c10::QualifiedName& qualifiedName,
+    std::vector<at::IValue>&& stack,
+    const RRefId& retRRefId,
+    const ForkId& retForkId)
+    : ScriptCall(qualifiedName, std::move(stack)),
+      retRRefId_(retRRefId),
+      retForkId_(retForkId) {}
+
+std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
+    std::vector<at::IValue>& ivalues) {
+  // remove the last element from values and convert it back to an RRef
+  auto retForkId = RRefId::fromIValue(ivalues.back());
+  ivalues.pop_back();
+  auto retRRefId = ForkId::fromIValue(ivalues.back());
+  ivalues.pop_back();
+
+  auto scriptCallPtr = ScriptCall::fromIValues(ivalues);
+
+  if (scriptCallPtr->hasOp()) {
+    return std::make_unique<ScriptRemoteCall>(
+        scriptCallPtr->op(), std::move(ivalues), retRRefId, retForkId);
+  } else {
+    return std::make_unique<ScriptRemoteCall>(
+        scriptCallPtr->qualifiedName(),
+        std::move(ivalues),
+        retRRefId,
+        retForkId);
+  }
+}
 
 Message ScriptRemoteCall::toMessage() && {
   std::vector<IValue> ivalues;
@@ -40,16 +71,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   auto value =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   auto values = value.toTuple()->elements();
-
-  // remove the last element from values and convert it back to an RRef
-  auto retForkId = RRefId::fromIValue(values.back());
-  values.pop_back();
-  auto retRRefId = ForkId::fromIValue(values.back());
-  values.pop_back();
-
-  auto scriptCallPtr = ScriptCall::fromIValues(values);
-  return std::make_unique<ScriptRemoteCall>(
-      scriptCallPtr->op(), std::move(values), retRRefId, retForkId);
+  return fromIValues(values);
 }
 
 } // namespace rpc

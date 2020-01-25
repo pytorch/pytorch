@@ -10,13 +10,13 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
-    std::vector<at::IValue>&& args)
-    : op_(std::move(op)), stack_(args) {}
+    std::vector<at::IValue>&& stack)
+    : op_(std::move(op)), stack_(stack) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
-    std::vector<at::IValue>&& args)
-    : qualifiedName_(qualifiedName), stack_(args) {}
+    std::vector<at::IValue>&& stack)
+    : qualifiedName_(qualifiedName), stack_(stack) {}
 
 bool ScriptCall::hasOp() const {
   return op_ ? true : false;

@@ -12,6 +12,13 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace callback {
+// It's the callback for RemoteCall.
+void confirmPendingUser(
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr);
+} // namespace callback
+
 // Manages RRef lifetime and keeps track of RRef forks.
 class RRefContext {
  public:

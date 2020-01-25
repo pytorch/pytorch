@@ -241,6 +241,11 @@ def clear_global_rref():
 
 
 @torch.jit.script
+def no_args():
+    a = 1
+
+
+@torch.jit.script
 class MyScriptClass:
     def __init__(self):
         self.a = 10
@@ -786,13 +791,13 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_script_function_exception(self):
-        @torch.jit.script
-        def no_args():
-            a = 1
-        n = self.rank + 1
-        dst_rank = n % self.world_size
+        dst_rank = (self.rank + 1) % self.world_size
+
         with self.assertRaisesRegex(Exception, "no_args"):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
+
+        with self.assertRaisesRegex(Exception, r"no_args\(\) expected at most 0 argument"):
+            rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
 
     @dist_init
     def test_script_functions_not_supported(self):
