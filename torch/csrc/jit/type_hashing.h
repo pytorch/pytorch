@@ -8,11 +8,11 @@ namespace torch {
 namespace jit {
 
 struct TORCH_API HashType {
-  size_t operator()(const TypePtr& type) const;
+  TORCH_API size_t operator()(const TypePtr& type) const;
 };
 
 struct TORCH_API EqualType {
-  bool operator()(const TypePtr& a, const TypePtr& b) const;
+  TORCH_API bool operator()(const TypePtr& a, const TypePtr& b) const;
 };
 
 } // namespace jit
