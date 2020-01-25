@@ -20,50 +20,6 @@ PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
-    'test_autograd',
-    'test_cpp_extensions',
-    'distributed/test_c10d',
-    'distributed/test_c10d_spawn',
-    'test_cuda',
-    'test_cuda_primary_ctx',
-    'test_dataloader',
-    'distributed/test_data_parallel',
-    'distributed/test_distributed',
-    'test_distributions',
-    'test_docs_coverage',
-    'test_expecttest',
-    'test_fake_quant',
-    'test_indexing',
-    'test_jit',
-    'test_logging',
-    'test_mkldnn',
-    'test_multiprocessing',
-    'test_multiprocessing_spawn',
-    'distributed/test_nccl',
-    'test_nn',
-    'test_numba_integration',
-    'test_optim',
-    'test_qat',
-    'test_quantization',
-    'test_quantized',
-    'test_quantized_tensor',
-    'test_quantized_nn_mods',
-    'test_sparse',
-    'test_torch',
-    'test_type_info',
-    'test_type_hints',
-    'test_utils',
-    'test_namedtuple_return_api',
-    'test_jit_fuser',
-    'test_jit_simple',
-    'test_jit_legacy',
-    'test_jit_fuser_legacy',
-    'test_tensorboard',
-    'test_namedtensor',
-    'test_type_promotion',
-    'test_jit_disabled',
-    'test_function_schema',
-    'test_overrides',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -71,14 +27,11 @@ TESTS = [
 if PY33:
     TESTS.extend([
         'distributed/rpc/test_rpc_spawn',
-        'distributed/rpc/test_dist_autograd_spawn',
-        'distributed/rpc/test_dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.extend([
-        'test_jit_py3',
     ])
 
 WINDOWS_BLACKLIST = [

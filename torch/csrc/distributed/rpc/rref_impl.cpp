@@ -106,6 +106,8 @@ UserRRef::UserRRef(
 }
 
 void UserRRef::tryDel() {
+  LOG(ERROR) << "Entering deleteing UserRRef. RRefID:" << rrefId()
+             << " ForkID: " << forkId();
   std::lock_guard<std::mutex> lockGuard(sentDelUserMutex_);
   if (!sentDelUser_) {
     try {
@@ -121,6 +123,8 @@ void UserRRef::tryDel() {
                  << "unknown error";
     }
   }
+  LOG(ERROR) << "Exiting deleteing UserRRef. RRefID:" << rrefId()
+             << " ForkID: " << forkId();
 }
 
 UserRRef::~UserRRef() {
