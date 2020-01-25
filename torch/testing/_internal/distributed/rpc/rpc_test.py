@@ -796,9 +796,8 @@ class RpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(Exception, "no_args"):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
 
-        rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
-        with self.assertRaisesRegex(Exception, "no_args"):
-            rref.to_here()
+        with self.assertRaisesRegex(Exception, r"no_args\(\) expected at most 0 argument"):
+            rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
 
     @dist_init
     def test_script_functions_not_supported(self):
