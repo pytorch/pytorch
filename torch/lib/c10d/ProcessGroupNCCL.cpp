@@ -279,13 +279,23 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
+  try {
+    ncclCommWatchdogInternal();
+    LOG(ERROR) << "NCCL watchdog thread terminated";
+  } catch(std::exception& e) {
+    LOG(ERROR) << "NCCL watchdog thread terminated with: " << e.what();
+  } catch(...) {
+    LOG(ERROR) << "NCCL watchdog thread terminated with unknown exception";
+  }
+}
+
+void ProcessGroupNCCL::ncclCommWatchdogInternal() {
   while (!terminateWatchdog_.load()) {
     {
       // Loop through all outstanding work and clean any work that has timed
       // out or received any errors.
       std::lock_guard<std::mutex> lock(outstandingWorkMutex_);
-      for (auto it = outstandingWork_.begin(); it != outstandingWork_.end();
-           it++) {
+      for (auto it = outstandingWork_.begin(); it != outstandingWork_.end();) {
         auto work = *it;
         auto currentTime = std::chrono::steady_clock::now();
         bool timedOutOp = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -323,8 +333,10 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
         // completed or had any errors).
         if (work->isCompleted() || timedOutOp) {
           it = outstandingWork_.erase(it);
-          it--;
+          // Avoid incrementing the iterator.
+          continue;
         }
+        it++;
       }
     }
 

@@ -21,11 +21,11 @@ using torch::jit::Operator;
 class TORCH_API ScriptCall : public RpcCommandBase {
  public:
   // Constructor for builitin operator call.
-  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
+  ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& stack);
   // Constructor for TorchScript function call.
   ScriptCall(
       const c10::QualifiedName& qualifiedName,
-      std::vector<at::IValue>&& args);
+      std::vector<at::IValue>&& stack);
 
   bool hasOp() const;
   std::shared_ptr<Operator> op() const;
