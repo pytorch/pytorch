@@ -87,7 +87,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
     r.fill_(std::pow(base, start.to<double>()));
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
-      float scalar_base = static_cast<float>(base); // Integrals are promoted to double, use float to avoid
+      float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
