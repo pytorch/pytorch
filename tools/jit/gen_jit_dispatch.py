@@ -502,8 +502,12 @@ def is_kwarg_only(a):
     return a.get('kwarg_only') or a.get('output')
 
 
-# index_put et al are the only ops whose schema_string isn't used directly.
-# TODO remove special handling and gen_jit_dispatch will become very simple
+#
+# create a clone of these declarations
+# with nullability scrubbed from TensorList arg types
+# TOOD find out why this exists and how to do it without the hack
+#
+
 NEEDS_HACKED_TWIN_NAMES = [
     "aten::_index_put_impl_",
     "aten::index.Tensor", 
@@ -517,15 +521,11 @@ def needs_hacked_twin(decl):
 
 
 def hacked_twin(decl):
-    # create a clone of the declaration with nullability scrubbed from TensorList arg types
-    # TOOD find out why this exists and how to do it without the hack
     decl_copy = copy.deepcopy(decl)
     decl_copy['schema_string'] = decl['schema_string'].replace('Tensor?[]', 'Tensor[]')
     for arg in decl_copy['arguments']:
         if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
             arg['is_nullable'] = False
-            # decl_copy['should_match_schema'] = False
-
     return decl_copy
 
 
