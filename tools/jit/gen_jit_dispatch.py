@@ -81,17 +81,23 @@ def optional_type_of(arg, typ):
     return typ
 
 
-def jit_type_of(arg):
-    # override for when viewing ops have already set
-    # annotated jit types
-    if 'jit_type' in arg:
-        return arg['jit_type']
-    typ = TYPE_MAP[arg['simple_type']]
-    if is_sized_intlist_arg(arg):
-        typ = 'int[{}]'.format(arg['size'])
-
-    typ = optional_type_of(arg, typ)
+def annotated_type_of(arg, typ):
+    anno = arg.get('annotation')
+    if anno:
+        typ = '{}({})'.format(typ, anno)
     return typ
+
+
+def jit_type_of(arg):
+    jit_type = arg.get('jit_type')
+    if not jit_type:
+        jit_type = TYPE_MAP[arg['simple_type']]
+        if is_sized_intlist_arg(arg):
+            jit_type = 'int[{}]'.format(arg['size'])
+        jit_type = optional_type_of(arg, jit_type)
+        jit_type = annotated_type_of(arg, jit_type)
+        arg['jit_type'] = jit_type
+    return jit_type
 
 
 # map from aten 'simple_type' to the function that will turn a tensor into
@@ -313,8 +319,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                     args=pack_arguments(args[1:]), num_inputs=num_inputs)
 
     def requires_lvalue(arg):
-        jit_type = arg.get('jit_type')
-        return jit_type is not None and jit_type.startswith('Tensor') and '!' in jit_type
+        jit_type = jit_type_of(arg)
+        return  jit_type.startswith('Tensor') and '!' in jit_type
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
@@ -439,8 +445,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
     for decl in jit_decls:
         decl['arguments'] = [a for i, arg in enumerate(decl['arguments']) for a in expand_options(decl, i, arg)]
-        # add annotations about alias and mutability of arguments
-        annotate_op(decl)
+        if is_out_variant(decl):
+            reorder_out_args(decl)
         if needs_hacked_twin(decl):
             additional_jit_decls.append(hacked_twin(decl))
 
@@ -477,25 +483,14 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
 
 
-def annotate_arg(arg):
-    anno = arg.get('annotation')
-    if anno:
-        arg['jit_type'] = '{}({})'.format(jit_type_of(arg), anno)
-
-
-def annotate_op(decl):
-    for arg in decl['arguments']:
-        annotate_arg(arg)
-    for ret in decl['returns']:
-        annotate_arg(ret)
-    if is_out_variant(decl):
-        first_arg = decl['arguments'][0]
-        assert(first_arg['output'])
-        # the output variant must go at the end
-        # note: this is an annoying side effect of using a single '*'
-        # to denote kwarg_only
-        nargs = len(decl['arguments'])
-        decl['jit_argument_order'] = [nargs - 1] + list(range(nargs - 1))
+def reorder_out_args(decl):
+    first_arg = decl['arguments'][0]
+    assert(first_arg['output'])
+    # the output variant must go at the end
+    # note: this is an annoying side effect of using a single '*'
+    # to denote kwarg_only
+    nargs = len(decl['arguments'])
+    decl['jit_argument_order'] = [nargs - 1] + list(range(nargs - 1))
 
 
 def is_kwarg_only(a):
