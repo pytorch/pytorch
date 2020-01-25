@@ -124,6 +124,31 @@ class class_ {
     };
     defineMethod<void>("__setstate__", std::move(setstate_wrapper));
 
+    // type validation
+    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
+    auto format_getstate_schema = [&getstate_schema]() {
+      std::stringstream ss;
+      ss << getstate_schema;
+      return ss.str();
+    };
+    TORCH_CHECK(getstate_schema.arguments().size() == 1,
+                "__getstate__ should take exactly one argument: self. Got: ",
+                format_getstate_schema());
+    auto first_arg_type = getstate_schema.arguments().at(0).type();
+    TORCH_CHECK(first_arg_type->isSubtypeOf(classTypePtr),
+                "self argument of __getstate__ must be the custom class type. Got ",
+                first_arg_type->str());
+    TORCH_CHECK(getstate_schema.returns().size() == 1,
+                "__getstate__ should return exactly one value for serialization. Got: ", format_getstate_schema());
+    auto ser_type = getstate_schema.returns().at(0).type();
+    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
+    TORCH_INTERNAL_ASSERT(setstate_schema.arguments().size() == 2);
+    auto arg_type = setstate_schema.arguments().at(1).type();
+    TORCH_CHECK((arg_type->isSubtypeOf(ser_type)),
+                "__setstate__'s argument should be the same type as the "
+                "return value of __getstate__. Got ", arg_type->str(),
+                " but expected ", ser_type->str());
+
     return *this;
   }
 
