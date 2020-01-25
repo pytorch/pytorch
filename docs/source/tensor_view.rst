@@ -34,12 +34,12 @@ For reference, here’s a list of all view ops in PyTorch:
 - :meth:`~torch.Tensor.unsqueeze`
 - :meth:`~torch.Tensor.indices`
 - :meth:`~torch.Tensor.values`
-- :meth:`~torch.Tensor.narrow`
 - :meth:`~torch.Tensor.view`
 - :meth:`~torch.Tensor.view_as`
 - :meth:`~torch.Tensor.unbind`
 - :meth:`~torch.Tensor.split`
 - :meth:`~torch.Tensor.chunk`
+- :meth:`~torch.Tensor.split_with_sizes`
 - Basic indexing returns views, while advanced indexing returns copys. Assignment with both basic and advanced indexing is in-place. See more in :ref:`indexing-and-view`.
 
 The following ops can return either a view of existing storage or new storage,
