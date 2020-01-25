@@ -81,7 +81,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     });
   } else {
     AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
-      double scalar_base = static_cast<double>(base);
+      double scalar_base = static_cast<double>(base); // will be autopromoted anyway
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_to>();
       scalar_t *data_ptr = r.data_ptr<scalar_t>();
