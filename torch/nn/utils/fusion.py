@@ -15,7 +15,7 @@ def fuse_conv_bn_eval(conv, bn):
     return fused_conv
 
 def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b):
-    if conv_b is None:
+    if conv_b is None or conv_b.numel() == 0:
         conv_b = bn_rm.new_zeros(bn_rm.shape)
     bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
 
