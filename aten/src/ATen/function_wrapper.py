@@ -1017,8 +1017,8 @@ def create_generic(top_env, declarations):
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
             # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
-            # I.e., the cpp signature of the cpp implementation currently fits the code
-            # generated from a misread schema, but but the alias annotation is the truth.
+            # I.e., the signature of the cpp implementation currently fits the code
+            # generated from a misread schema, but the alias annotation is the truth.
             # TODO fix the signature of set_data's cpp impl to match correct codegen from
             # the current schema.
             # then remove this
