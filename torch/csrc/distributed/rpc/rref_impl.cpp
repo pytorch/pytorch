@@ -167,40 +167,37 @@ IValue UserRRef::toHere() {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
-  return value_.value();
+  std::unique_lock<std::mutex> lock(futureValuePtrMutex_);
+  futureValueCompletedCV_.wait(
+      lock, [this] { return futureValuePtr_->completed(); });
+  return futureValuePtr_->wait();
 }
 
 bool OwnerRRef::hasValue() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  std::lock_guard<std::mutex> lock(futureValuePtrMutex_);
+  return futureValuePtr_->completed();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (future_.get()) {
-    return future_;
-  }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
-  if (value_.has_value()) {
-    lock.unlock();
-    ret->markCompleted(Message());
-  }
-  return ret;
+std::shared_ptr<torch::utils::Future<IValue>> OwnerRRef::getFuture() {
+  std::lock_guard<std::mutex> lock(futureValuePtrMutex_);
+  return futureValuePtr_;
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
+  std::unique_lock<std::mutex> lock(futureValuePtrMutex_);
+  if (futureValuePtr_->completed()) {
+    // `tempFutureValuePtr` is a new `FutureValuePtr`.
+    std::shared_ptr<torch::utils::Future<IValue>> tempFutureValuePtr =
+        std::make_shared<torch::utils::Future<IValue>>();
+    // After this, OwnerRRef has a new `FutureValuePtr`,
+    // while, `tempFutureValuePtr` becomes the old `FutureValuePtr`
+    // OwnerRRef once holds,
+    // which might have a few callbacks registered.
+    tempFutureValuePtr.swap(futureValuePtr_);
   }
+  lock.unlock();
+  futureValuePtr_->markCompleted(std::move(value));
+  futureValueCompletedCV_.notify_all();
 }
 
 } // namespace rpc

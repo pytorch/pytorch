@@ -142,11 +142,15 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
           [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(m);
+              const auto& /* unused */,
+              const c10::optional<utils::FutureError>& error) {
+            if (!error) {
+              Message m = ScriptRRefFetchRet({rref->getValue()}).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(error->what());
+            }
           });
       return responseFuture;
     }
@@ -166,13 +170,18 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       // Our response is satisfied when the rpcs come back.
       whenValueSet->addCallback(
           [responseFuture, messageId, rref](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-                jit::toPyObject(rref->getValue()));
-            Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
-            m.setId(messageId);
-            responseFuture->markCompleted(m);
+              const auto& /* unused */,
+              const c10::optional<utils::FutureError>& error) {
+            if (!error) {
+              SerializedPyObj result =
+                  PythonRpcHandler::getInstance().serialize(
+                      jit::toPyObject(rref->getValue()));
+              Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
+              m.setId(messageId);
+              responseFuture->markCompleted(std::move(m));
+            } else {
+              responseFuture->setError(error->what());
+            }
           });
       return responseFuture;
     }
