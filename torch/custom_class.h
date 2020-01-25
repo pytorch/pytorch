@@ -118,7 +118,7 @@ class class_ {
           !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
   class_& def(std::string name, Func f) {
-    auto res = def_(name, f, detail::args_t<decltype(&Func::operator())>{});
+    auto res = def_(std::move(name), std::move(f), detail::args_t<decltype(&Func::operator())>{});
     return *this;
   }
 
