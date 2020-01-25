@@ -195,8 +195,8 @@ void OwnerRRef::setValue(IValue&& value) {
     // which might have a few callbacks registered.
     tempFutureValuePtr.swap(futureValuePtr_);
   }
-  lock.unlock();
   futureValuePtr_->markCompleted(std::move(value));
+  lock.unlock();
   futureValueCompletedCV_.notify_all();
 }
 
