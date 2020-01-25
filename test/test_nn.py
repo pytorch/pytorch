@@ -6329,8 +6329,8 @@ class TestNN(NNTestCase):
         import torch.nn.functional as F
 
         for device in device_():
-            a = torch.tensor([[1.0,2,3], [5.0, 5.0, 5.0]], device=device)
-            b = torch.tensor([[1.0,2,3], [5.0, 5.0, 5.0]], device=device)
+            a = torch.tensor([[1.0, 2, 3], [5.0, 5.0, 5.0]], device=device)
+            b = torch.tensor([[1.0, 2, 3], [5.0, 5.0, 5.0]], device=device)
 
             self.assertEqual(
                 F.kl_div(F.log_softmax(a, 1), F.softmax(b, 1), reduction="none"),
