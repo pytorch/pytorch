@@ -241,6 +241,11 @@ def clear_global_rref():
 
 
 @torch.jit.script
+def no_args():
+    a = 1
+
+
+@torch.jit.script
 class MyScriptClass:
     def __init__(self):
         self.a = 10
