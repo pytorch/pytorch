@@ -11037,23 +11037,42 @@ class TestTorchDeviceType(TestCase):
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
-    def test_linspace(self, device):
+    @dtypes(torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
+    @dtypesIfCUDA(torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
+    def test_linspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
-        res1 = torch.linspace(_from, to, 137, device=device)
-        res2 = torch.tensor((), device=device)
-        torch.linspace(_from, to, 137, out=res2)
+        res1 = torch.linspace(_from, to, 137, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.linspace(_from, to, 137, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, 0)
         self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device))
         self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
 
+        # Check linspace for generating the correct output for each dtype.
+        expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
+        actual_lin = torch.linspace(-100, 100, 401, device=device, dtype=dtype)
+        # If on GPU, allow for minor error depending on dtype.
+        tol = 0.
+        if device != 'cpu':
+            if dtype == torch.half:
+                tol = 1e-1
+            elif dtype == torch.float:
+                tol = 1e-5
+            elif dtype == torch.double:
+                tol = 1e-10
+
+        self.assertEqual(expected_lin.to(dtype), actual_lin, tol)
+
         # Check linspace for generating with start > end.
-        self.assertEqual(torch.linspace(2, 0, 3, device=device), torch.tensor((2, 1, 0), device=device), 0)
+        self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
+                         torch.tensor((2, 1, 0), device=device, dtype=dtype), 
+                         0)
 
         # Check linspace for non-contiguous tensors.
-        x = torch.zeros(2, 3, device=device)
-        y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device), 0)
+        x = torch.zeros(2, 3, device=device, dtype=dtype)
+        y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
+        self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
