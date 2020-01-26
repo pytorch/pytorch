@@ -542,6 +542,12 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
 
+    .. warning::
+        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.  
+        It is possible to construct malicious pickle data which will execute arbitrary code
+        during unpickling. Never load data that could have come from an untrusted
+        source, or that could have been tampered with. **Only load data you trust**.
+
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
         will be loaded to GPU by default. You can call ``torch.load(.., map_location='cpu')``
