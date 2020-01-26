@@ -464,12 +464,12 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(info, pickled_python_udf, tensors, rf)
     return fut
 
 
