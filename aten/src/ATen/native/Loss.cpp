@@ -81,8 +81,8 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
   auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Perform a check for (target > -EPSILON) & (target < EPSILON) since floating point
   // errors in output_pos cause the output values to be 1e-17 on GPU and -1e-14 on CPU.
-  auto output = at::where(target > -EPSILON, output_pos, zeros);
-  output = at::where(output < EPSILON, zeros, output_pos);
+  auto output = at::where(target > 0, output_pos, zeros);
+  output = at::where(output < EPSILON, zeros, output);
   return apply_loss_reduction(output, reduction);
 }
 
