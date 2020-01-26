@@ -83,7 +83,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       double scalar_base = static_cast<double>(base); // will be autopromoted anyway
       scalar_t scalar_start = start.to<scalar_t>();
-      scalar_t scalar_end = end.to<scalar_to>();
+      scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data_ptr<scalar_t>();
       double step = static_cast<double>(scalar_end - scalar_start) / (steps-1);
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
