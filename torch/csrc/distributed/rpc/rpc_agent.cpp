@@ -24,14 +24,17 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
 std::shared_ptr<RpcAgent> RpcAgent::defaultRpcAgent_ = nullptr;
 
 std::shared_ptr<RpcAgent> RpcAgent::getDefaultRpcAgent() {
-  TORCH_INTERNAL_ASSERT(
-      defaultRpcAgent_, "Default rpc agent is not initialized!");
   return defaultRpcAgent_;
 }
 
 void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
-  TORCH_INTERNAL_ASSERT(
-      !defaultRpcAgent_, "Default rpc agent is already initialized!");
+  if (defaultRpcAgent) {
+    TORCH_INTERNAL_ASSERT(
+        !defaultRpcAgent_, "Default rpc agent is already initialized!");
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        defaultRpcAgent_, "Default rpc agent was not initialized!");
+  }
   defaultRpcAgent_ = std::move(defaultRpcAgent);
 }
 

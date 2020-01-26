@@ -286,7 +286,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_get_worker_infos(self):
-        worker_infos = rpc.api._agent.get_worker_infos()
+        worker_infos = rpc.api.get_current_rpc_agent().get_worker_infos()
 
         worker_names = {
             worker_info.name for worker_info in worker_infos
@@ -1378,26 +1378,25 @@ class RpcTest(RpcAgentTestFixture):
     def test_disable_gil_profiling(self):
         # test that rpc.enable_gil_profilig(false) will result in
         # GIL wait time not being recorded.
-        from torch.distributed.rpc.api import _agent
+
         # GIL profiling should be disabled by default.
         dst_rank = (self.rank + 1) % self.world_size
         rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
-        info = _agent.get_debug_info()
+        info = rpc.api.get_current_rpc_agent().get_debug_info()
         self.assertRaises(KeyError, lambda: info["agent.gil_average_wait_time_us"])
         rpc.enable_gil_profiling(True)
         rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
-        info = _agent.get_debug_info()
+        info = rpc.api.get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.gil_average_wait_time_us", info)
 
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_process_group_debug_info(self):
-        from torch.distributed.rpc.api import _agent
         rpc.enable_gil_profiling(True)
         initialize_pg(self.init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
-        info = _agent.get_debug_info()
+        info = rpc.api.get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1418,7 +1417,7 @@ class RpcTest(RpcAgentTestFixture):
         # blocks until the request arrives
         self.assertEqual(self.rank, VALUE_FUTURE.result())
 
-        info = _agent.get_debug_info()
+        info = rpc.api.get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1442,7 +1441,7 @@ class RpcTest(RpcAgentTestFixture):
         # request
         dist.barrier()
 
-        info = _agent.get_debug_info()
+        info = rpc.api.get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1454,7 +1453,7 @@ class RpcTest(RpcAgentTestFixture):
             # the local send/recv threads would have finished. We try three
             # times. (NB: this might potentially be flaky. If flakiness does
             # occur, then we have to relax the assert.)
-            info = _agent.get_debug_info()
+            info = rpc.api.get_current_rpc_agent().get_debug_info()
             if int(info["agent.num_idle_threads"]) == NUM_THREAD:
                 break
             time.sleep(0.1)
@@ -1483,12 +1482,11 @@ class RpcTest(RpcAgentTestFixture):
     def test_debug_info(self):
         # only test keys in this test case. Values should be covered by
         # individual module debug info tests
-        from torch.distributed.rpc.api import _agent
         import torch.distributed.autograd as dist_autograd
 
         info = _get_debug_info()
         rref_info = _rref_context_get_debug_info()
-        agent_info = _agent.get_debug_info()
+        agent_info = rpc.api.get_current_rpc_agent().get_debug_info()
         autograd_info = dist_autograd._get_debug_info()
         common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
         self.assertEqual(0, len(common_keys))

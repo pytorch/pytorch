@@ -253,6 +253,16 @@ If the future completes with an error, an exception is thrown.
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
+  module.def(
+      "get_current_rpc_agent",
+      &RpcAgent::getDefaultRpcAgent,
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_reset_current_rpc_agent",
+      []() { RpcAgent::setDefaultRpcAgent(nullptr); },
+      py::call_guard<py::gil_scoped_release>());
+
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
     RpcAgent::setDefaultRpcAgent(agent);
     agent->start();

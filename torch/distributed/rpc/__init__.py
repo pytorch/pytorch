@@ -88,8 +88,7 @@ if is_available():
     @_require_initialized
     def _get_debug_info():
         from . import _rref_context_get_debug_info
-        from .api import _agent
         info = _rref_context_get_debug_info()
-        info.update(_agent.get_debug_info())
+        info.update(get_current_rpc_agent().get_debug_info())
         info.update(dist_autograd._get_debug_info())
         return info
