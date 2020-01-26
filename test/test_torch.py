@@ -2142,7 +2142,7 @@ class _TestTorchMixin(object):
         _from = random.random()
         to = _from + random.random()
         res1 = torch.logspace(_from, to, 137, device=device, dtype=dtype)
-        res2 = torch.Tensor()
+        res2 = torch.tensor((), device=device, dtype=dtype)
         torch.logspace(_from, to, 137, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, 0)
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1, device=device, dtype=dtype))
@@ -2150,10 +2150,12 @@ class _TestTorchMixin(object):
                          torch.ones(1, device=device, dtype=dtype), 0)
 
         # Check precision - start, stop and base are chosen to avoid overflow
-        # steps is chosen to be so that step size is not subject to rounding error
-        expected_log = torch.tensor([2**(i / 8.) for i in range(49)], device=device, dtype=dtype)
-        actual_log = torch.logspace(0, 6, steps=49, base=2, device=device, dtype=dtype)
-
+        # steps is chosen so that step size is not subject to rounding error
+        # a tolerance is needed for gpu tests due to differences in computation
+        tol = 0.
+        self.assertEqual(torch.tensor([2. ** (i / 8.) for i in range(49)], device=device, dtype=dtype),
+                         torch.logspace(0, 6, steps=49, base=2, device=device, dtype=dtype),
+                         tol)
         # Check non-default base=2
         self.assertEqual(torch.logspace(1, 1, 1, 2, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype) * 2)
@@ -2167,7 +2169,7 @@ class _TestTorchMixin(object):
         # Check logspace_ for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.logspace(0, 3, 4, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.Tensor(((0, 1, 10), (0, 100, 1000), device=device, dtype=dtype)), 0)
+        self.assertEqual(x, torch.Tensor(((0, 1, 10), (0, 100, 1000)), device=device, dtype=dtype), 0)
 
     def test_rand(self):
         torch.manual_seed(123456)
