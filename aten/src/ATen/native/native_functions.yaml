@@ -2494,7 +2494,7 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -5244,11 +5244,13 @@
   dispatch:
     CPU: legacy::cpu::_th_cat
     CUDA: legacy::cuda::_th_cat
+    QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_cat_out
     CUDA: legacy::cuda::_th_cat_out
+    QuantizedCPU: quantized_cat_out
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
