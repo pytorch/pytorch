@@ -260,7 +260,8 @@ def method_tests():
         ('sin', (S, S, S), NO_ARGS, '', (True,)),
         ('sin', (), NO_ARGS, 'scalar', (True,)),
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
-        ('cos', (), NO_ARGS, 'scalar', (True,)),
+        # See https://github.com/pytorch/pytorch/issues/32502
+        ('cos', (), NO_ARGS, 'scalar', (True,), NO_ARGS, [skipIf(IS_MACOS)]),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
