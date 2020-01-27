@@ -163,8 +163,9 @@ def pca(A, q=None, center=True, niter=2):
 
                 - the :math:`V` columns represent the principal directions
 
-                - :math:`S ** 2 / (m - 1)` are the eigenvalues of
-                  covariance matrix :math:`A^T A / (m - 1)`
+                - :math:`S ** 2 / (m - 1)` contains the eigenvalues of
+                  :math:`A^T A / (m - 1)` which is the covariance of
+                  ``A`` when ``center=True`` is provided.
 
                 - ``matmul(A, V[:, :k])`` projects data to the first k
                   principal components

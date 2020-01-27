@@ -57,24 +57,20 @@ def get_floating_dtype(A):
     return A.dtype.type
 
 
+def _identity_matmul(A, other):
+    return other
+
+
 def get_matmul(A):
     """Return matrix multiplication implementation.
     """
     if A is None:  # A is identity
-        return lambda A, other: other
+        return _identity_matmul
     if isinstance(A, torch.Tensor):
         if is_sparse(A):
             return torch.sparse.mm
         else:
             return torch.matmul
-    else:
-        import numpy
-        import scipy.sparse
-        if isinstance(A, scipy.sparse.coo.coo_matrix):
-            return lambda A, other : A.dot(other)
-        elif isinstance(A, numpy.ndarray):
-            return numpy.dot
-
     raise NotImplementedError('get_matmul(<{} instance>)'
                               .format(type(A).__name__))
 

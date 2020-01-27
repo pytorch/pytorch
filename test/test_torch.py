@@ -8785,7 +8785,9 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_svd_lowrank(self, device):
-        from common_utils import random_lowrank_matrix, random_sparse_matrix
+        import torch
+        import torch.lowrank
+        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
         def run_subtest(actual_rank, matrix_size, batches, device, **options):
             density = options.pop('density', 1)
@@ -8848,7 +8850,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_pca(self, device):
-        from common_utils import random_lowrank_matrix, random_sparse_matrix
+        from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, **options):
             density = options.pop('density', 1)
@@ -13641,7 +13643,7 @@ class TestTorchDeviceType(TestCase):
         self._test_lobpcg_method(device, dtype, 'ortho')
 
     def _test_lobpcg_method(self, device, dtype, method):
-        from common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
         from torch._linalg_utils import get_matmul, qform
         from torch.lobpcg import lobpcg
 
@@ -13755,9 +13757,11 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_utils(self, device, dtype):
-        from common_utils import random_symmetric_pd_matrix, random_matrix
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_matrix
         from torch._linalg_utils import get_matmul
-        from torch.lobpcg import svqb, ortho, get_RR_transform
+        from torch.lobpcg import svqb, _ortho, _get_rayleigh_ritz_transform
+        from torch.lobpcg import _ortho as ortho
+        from torch.lobpcg import _get_rayleigh_ritz_transform as get_rayleigh_ritz_transform
         mm = torch.matmul
 
         for m, n in [(5, 1), (6, 2), (9, 3), (100, 5)]:
@@ -13800,7 +13804,7 @@ class TestTorchDeviceType(TestCase):
             A = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
             S = random_matrix(m, n, device=device)
             for B in [None, random_symmetric_pd_matrix(m, device=device, dtype=dtype)]:
-                Ri = get_RR_transform(B, S)
+                Ri = get_rayleigh_ritz_transform(B, S)
                 M = torch.chain_matmul(Ri.transpose(-2, -1), S.transpose(-2, -1), get_matmul(A)(A, S), Ri)
                 E, Z = torch.symeig(M, eigenvectors=True)
                 C = torch.matmul(Ri, Z)

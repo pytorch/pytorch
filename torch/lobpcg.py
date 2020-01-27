@@ -218,8 +218,8 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
     if method is None:
         method = 'ortho'
 
-    return {'basic': lobpcg_worker_basic,
-            'ortho': lobpcg_worker_ortho}[method](
+    return {'basic': _lobpcg_worker_basic,
+            'ortho': _lobpcg_worker_ortho}[method](
                 torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
                 tracker, converged_eigenpairs_count, **params)
 
@@ -299,9 +299,9 @@ def svqb(M, U, tau=1e-6, drop=False):
     return torch.chain_matmul(U, D, Z, torch.diag_embed(E ** -0.5))
 
 
-def ortho(M, U, V, tau_ortho=1e-6, tau_drop=1e-6, tau_replace=1e-6,
-          use_drop=False, **params):
-    """Return M-orthonormal U that columns are M-orthogonal to V.
+def _ortho(M, U, V, tau_ortho=1e-6, tau_drop=1e-6, tau_replace=1e-6,
+           use_drop=False, **params):
+    """Return M-orthonormal U with columns are M-orthogonal to V.
 
     .. note:: When `use_drop` is `False` then `ortho` is based on the
               Algorithm 3 from [DuerschPhD2015] that is a slight
@@ -385,7 +385,7 @@ def ortho(M, U, V, tau_ortho=1e-6, tau_drop=1e-6, tau_replace=1e-6,
     return U, stats
 
 
-def get_RR_transform(B, S):
+def _get_rayleigh_ritz_transform(B, S):
     """Return a transformation matrix that is used in Rayleigh-Ritz
     procedure for reducing a general eigenvalue problem :math:`(S^TAS)
     C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
@@ -418,26 +418,26 @@ def get_RR_transform(B, S):
     return Rinv * d_
 
 
-def residual(A, B, X, E):
+def _residual(A, B, X, E):
     """Return residual :math:`A X - B X diag(E)`.
     """
     n = X.shape[-1]
     return _utils.get_matmul(A)(A, X) - torch.matmul(_utils.get_matmul(B)(B, X), torch.diag_embed(E[:n]))
 
 
-def lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
-                        tracker, converged_count, **params):
+def _lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
+                         tracker, converged_count, **params):
     mm = torch.matmul
 
     # Rayleigh-Ritz procedure, initialize
-    Ri = get_RR_transform(B, X)
+    Ri = _get_rayleigh_ritz_transform(B, X)
     R_diag_abs = abs(Ri.diagonal(0, -2, -1))
     R_cond = R_diag_abs.max() / R_diag_abs.min()
 
     M = _utils.qform(_utils.qform(A, X), Ri)
     E, Z = _utils.symeig(M, largest)
     X = mm(X, mm(Ri, Z))
-    R = residual(A, B, X, E)
+    R = _residual(A, B, X, E)
     np = 0
     nc, rerr = converged_count(R, X, E)
     S[..., :n] = X
@@ -457,7 +457,7 @@ def lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
         S_ = S[:, nc:ns]
 
         # Rayleigh-Ritz procedure
-        Ri = get_RR_transform(B, S_)
+        Ri = _get_rayleigh_ritz_transform(B, S_)
         R_diag_abs = abs(Ri.diagonal(0, -2, -1))
         R_cond = R_diag_abs.max() / R_diag_abs.min()
 
@@ -472,11 +472,12 @@ def lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
         np = P.shape[-1]
 
         # check convergence
-        R = residual(A, B, X, E)
+        R = _residual(A, B, X, E)
         prev_nc = nc
         nc, rerr = converged_count(R, X, E)
-        if nc < prev_nc:
-            raise RuntimeError('nc decreased: {} -> {}'.format(prev_nc, nc))
+        assert nc >= prev_nc, (
+            'the number of converged eigenpairs '
+            '(was %s, got %s) cannot decrease' % (prev_nc, nc))
 
         # update S
         S[:, :n] = X
@@ -494,8 +495,8 @@ def lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
     return E[:k], X[:, :k]
 
 
-def lobpcg_worker_ortho(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
-                        tracker, converged_count, **params):
+def _lobpcg_worker_ortho(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
+                         tracker, converged_count, **params):
     mm = torch.chain_matmul
 
     params['tol_ortho'] = params.get('tol_ortho', tol)
@@ -505,15 +506,15 @@ def lobpcg_worker_ortho(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
     params['ortho.j_max'] = params.get('ortho.j_max', 3)
 
     # Rayleigh-Ritz procedure, initialize
-    Ri = get_RR_transform(B, X)
+    Ri = _get_rayleigh_ritz_transform(B, X)
     M = _utils.qform(_utils.qform(A, X), Ri)
     E, Z = _utils.symeig(M, largest)
     X = mm(X, Ri, Z)
-    R = residual(A, B, X, E)
+    R = _residual(A, B, X, E)
     np = 0
     nc, rerr = converged_count(R, X, E)
     S[:, :n] = X
-    W, ortho_stats = ortho(B, R, X, **params)
+    W, ortho_stats = _ortho(B, R, X, **params)
     ns = n + np + W.shape[-1]
     S[:, n + np:ns] = W
 
@@ -540,16 +541,17 @@ def lobpcg_worker_ortho(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
         np = P.shape[-1]
 
         # check convergence
-        R = residual(A, B, X, E)
+        R = _residual(A, B, X, E)
         prev_nc = nc
         nc, rerr = converged_count(R, X, E)
-        if nc < prev_nc:
-            raise RuntimeError('nc decreased: {} -> {}'.format(prev_nc, nc))
+        assert nc >= prev_nc, (
+            'the number of converged eigenpairs '
+            '(was %s, got %s) cannot decrease' % (prev_nc, nc))
 
         # update S
         S[:, :n] = X
         S[:, n:n + np] = P
-        W, ortho_stats = ortho(B, R[:, nc:], S[:, :n + np], **params)
+        W, ortho_stats = _ortho(B, R[:, nc:], S[:, :n + np], **params)
         ns = n + np + W.shape[-1]
         S[:, n + np:ns] = W
 
