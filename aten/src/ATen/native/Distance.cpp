@@ -178,8 +178,8 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
    * 3. Losing precision may cause |cosing_similarity(x1, x2)| > 1.0.
    * 
    * Current implementation:
-   * 1. Compute x1_normalized = x1 / max(||x1||, sqrt(eps)),
-   *            x2_normalized = x2 / max(||x2||, sqrt(eps)),
+   * 1. Compute x1_normalized = x1 / max(||x1||, eps),
+   *            x2_normalized = x2 / max(||x2||, eps),
    * 2. Return <x1_normalized, x2_normalized>.
    * 
    * The current implementation improves over the previous one by:
@@ -195,8 +195,8 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
 
   {
     at::NoGradGuard guard;
-    x1_squared_norm.clamp_min_(eps);
-    x2_squared_norm.clamp_min_(eps);
+    x1_squared_norm.clamp_min_(eps * eps);
+    x2_squared_norm.clamp_min_(eps * eps);
   }
 
   auto x1_norm = x1_squared_norm.sqrt_();
