@@ -103,7 +103,7 @@ void DistAutogradContext::addOutstandingRpc(
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
           std::runtime_error err((*futErr).what());
-          graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
+          graphTask_->set_exception(err, nullptr);
         }
       });
   std::lock_guard<std::mutex> guard(lock_);

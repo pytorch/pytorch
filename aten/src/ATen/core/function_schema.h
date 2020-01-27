@@ -184,7 +184,7 @@ struct FunctionSchema {
   std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
-  // currently this is used primarily to represent 'primtive' operators whose
+  // currently this is used primarily to represent 'primitive' operators whose
   // arguments are not checked by schema
   bool is_vararg_;
   bool is_varret_;
@@ -257,6 +257,15 @@ public:
         overload_name(),
         std::move(new_arguments),
         returns(),
+        is_vararg(),
+        is_varret());
+  }
+  FunctionSchema cloneWithReturns(std::vector<Argument> new_returns) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        arguments(),
+        std::move(new_returns),
         is_vararg(),
         is_varret());
   }

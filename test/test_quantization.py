@@ -22,8 +22,8 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from common_utils import run_tests
-from common_quantization import QuantizationTestCase, \
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
     AnnotatedConvBnModel, ConvBnModel, \
@@ -35,12 +35,12 @@ from common_quantization import QuantizationTestCase, \
     TwoLayerLinearModel, NestedModel, ResNetBase, LSTMDynamicModel, \
     ModelWithNoQconfigPropagation
 
-from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
+from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
 
 from hypothesis import given
 from hypothesis import strategies as st
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 import io
 import copy

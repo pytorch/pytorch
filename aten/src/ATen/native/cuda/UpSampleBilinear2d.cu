@@ -156,8 +156,8 @@ static void upsample_bilinear2d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_bilinear2d_out_cuda", {input_arg, output_arg});
 
@@ -203,9 +203,9 @@ static void upsample_bilinear2d_out_cuda_template(
         auto odata = output.packed_accessor64<scalar_t, 4>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners, scales_1);
+            input_height, output_height, align_corners, scales_h);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners, scales_2);
+            input_width, output_width, align_corners, scales_w);
 
         upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -224,8 +224,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -283,9 +283,9 @@ static void upsample_bilinear2d_backward_out_cuda_template(
         auto odata = grad_output.data_ptr<scalar_t>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners, scales_1);
+            input_height, output_height, align_corners, scales_h);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners, scales_2);
+            input_width, output_width, align_corners, scales_w);
 
         upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)),
@@ -314,10 +314,10 @@ Tensor& upsample_bilinear2d_out_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_out_cuda_template(
-      output, input, output_size, align_corners, scales_1, scales_2);
+      output, input, output_size, align_corners, scales_h, scales_w);
   return output;
 }
 
@@ -325,11 +325,11 @@ Tensor upsample_bilinear2d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bilinear2d_out_cuda_template(
-      output, input, output_size, align_corners, scales_1, scales_2);
+      output, input, output_size, align_corners, scales_h, scales_w);
   return output;
 }
 
@@ -339,10 +339,10 @@ Tensor& upsample_bilinear2d_backward_out_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
 }
 
@@ -351,11 +351,11 @@ Tensor upsample_bilinear2d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bilinear2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
 }
 

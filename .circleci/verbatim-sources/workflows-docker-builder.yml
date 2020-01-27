@@ -18,12 +18,6 @@
           name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
       - docker_build_job:
-          name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
-          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
-      - docker_build_job:
-          name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
-          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
-      - docker_build_job:
           name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
           image_name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
       - docker_build_job:

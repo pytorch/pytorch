@@ -27,7 +27,7 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // specifically, each NCCL call is scheduled on a separate CUDA stream that is
 // different from the current CUDA stream. This is for the purpose of
 // achieving potentially concurrency and better performance. As a result,
-// it is the callers' responsibilty to make sure that the CUDA stream their
+// it is the callers' responsibility to make sure that the CUDA stream their
 // code works on needs to wait for the NCCL operation from
 // this class.
 //
@@ -146,7 +146,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
-  [[deprecated]] ProcessGroupNCCL(
+  C10_DEPRECATED ProcessGroupNCCL(
       const std::shared_ptr<Store>& store,
       int rank,
       int size,
@@ -177,6 +177,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_base(
+      at::Tensor& outputbuffer,
+      at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
@@ -272,6 +277,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
+  void ncclCommWatchdogInternal();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -356,6 +363,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
+
+  // Outstanding work items for this process group.
+  std::vector<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> outstandingWork_;
+
+  std::mutex outstandingWorkMutex_;
 };
 
 } // namespace c10d

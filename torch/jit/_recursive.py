@@ -114,7 +114,13 @@ def infer_concrete_type_builder(nn_module):
 
     for name, item in nn_module._modules.items():
         attr_type = infer_type(name, item)
+        if item is None:
+            # Modules can be None. We don't have direct support for optional
+            # Modules, so the register it as an NoneType attribute instead.
+            concrete_type_builder.add_attribute(name, attr_type, False)
+            continue
         if attr_type is not None:
+            assert attr_type.is_interface_type()
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
@@ -425,7 +431,7 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 def _check_no_signature(func):
-    signature = torch.jit.annotations.get_signature(func, None, None)
+    signature = torch.jit.annotations.get_signature(func, None, None, inspect.ismethod(func))
     if signature is None:
         qual_name = torch.jit._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))

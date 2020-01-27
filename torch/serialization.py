@@ -144,14 +144,7 @@ def _cpu_deserialize(obj, location):
 
 
 def validate_cuda_device(location):
-    if isinstance(location, torch.device):
-        location = str(location)
-    if not isinstance(location, _string_classes):
-        raise ValueError("location should be a string or torch.device")
-    if location[5:] == '':
-        device = 0
-    else:
-        device = max(int(location[5:]), 0)
+    device = torch.cuda._utils._get_device_index(location, True)
 
     if not torch.cuda.is_available():
         raise RuntimeError('Attempting to deserialize object on a CUDA '
@@ -161,10 +154,10 @@ def validate_cuda_device(location):
                            'to map your storages to the CPU.')
     if device >= torch.cuda.device_count():
         raise RuntimeError('Attempting to deserialize object on CUDA device '
-                           '{} but torch.cuda.device_count() is {}. Please use '
+                           '{device} but torch.cuda.device_count() is {device_count}. Please use '
                            'torch.load with map_location to map your storages '
                            'to an existing device.'.format(
-                               device, torch.cuda.device_count()))
+                               device=device, device_count=torch.cuda.device_count()))
     return device
 
 
@@ -188,8 +181,8 @@ def location_tag(storage):
         location = tagger(storage)
         if location:
             return location
-    raise RuntimeError("don't know how to determine data location of " +
-                       torch.typename(storage))
+    raise RuntimeError("don't know how to determine data location of "
+                       + torch.typename(storage))
 
 
 def default_restore_location(storage, location):
@@ -197,9 +190,9 @@ def default_restore_location(storage, location):
         result = fn(storage, location)
         if result is not None:
             return result
-    raise RuntimeError("don't know how to restore data location of " +
-                       torch.typename(storage) + " (tagged with " +
-                       location + ")")
+    raise RuntimeError("don't know how to restore data location of "
+                       + torch.typename(storage) + " (tagged with "
+                       + location + ")")
 
 
 def normalize_storage_type(storage_type):
@@ -320,9 +313,9 @@ def _check_seekable(f):
     def raise_err_msg(patterns, e):
         for p in patterns:
             if p in str(e):
-                msg = (str(e) + ". You can only torch.load from a file that is seekable." +
-                                " Please pre-load the data into a buffer like io.BytesIO and" +
-                                " try to load from it instead.")
+                msg = (str(e) + ". You can only torch.load from a file that is seekable."
+                                + " Please pre-load the data into a buffer like io.BytesIO and"
+                                + " try to load from it instead.")
                 raise type(e)(msg)
         raise e
 
@@ -549,6 +542,12 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
 
+    .. warning::
+        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.  
+        It is possible to construct malicious pickle data which will execute arbitrary code
+        during unpickling. Never load data that could have come from an untrusted
+        source, or that could have been tampered with. **Only load data you trust**.
+
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
         will be loaded to GPU by default. You can call ``torch.load(.., map_location='cpu')``
@@ -656,8 +655,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                        "accessing the object's source attribute or set "
                        "`torch.nn.Module.dump_patches = True` and use the "
                        "patch tool to revert the changes.")
-            msg = ("source code of class '{}' has changed. {}"
-                   .format(torch.typename(container_type), msg))
+            msg = ("source code of class '{container_type}' has changed. {msg}"
+                   .format(container_type=torch.typename(container_type), msg=msg))
             warnings.warn(msg, SourceChangeWarning)
 
     def legacy_load(f):
@@ -753,7 +752,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         except tarfile.TarError:
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
-                raise RuntimeError("{} is a zip archive (did you mean to use torch.jit.load()?)".format(f.name))
+                raise RuntimeError(
+                    "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name))
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 

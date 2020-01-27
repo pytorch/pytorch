@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from common_utils import enable_profiling_mode
+from torch.testing._internal.common_utils import enable_profiling_mode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,8 +9,8 @@ import torch.nn.functional as F
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase, RUN_CUDA
-from common_utils import slowTest, suppress_warnings
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+from torch.testing._internal.common_utils import slowTest, suppress_warnings
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -217,6 +217,7 @@ class TestModels(JitTestCase):
 
         self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
+    @slowTest
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
 
@@ -427,6 +428,7 @@ class TestModels(JitTestCase):
         self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
+    @slowTest
     def test_super_resolution(self):
         self._test_super_resolution(self, device='cpu')
 

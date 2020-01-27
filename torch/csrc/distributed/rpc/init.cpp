@@ -3,9 +3,10 @@
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/script_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -97,6 +98,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "enable_gil_profiling",
+              &RpcAgent::enableGILProfiling,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_metrics",
@@ -270,9 +275,10 @@ If the future completes with an error, an exception is thrown.
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRpcBuiltin(agent, dst, opName, args, kwargs);
+        return pyRpcBuiltin(agent, dst, opName, rf, args, kwargs);
       });
 
   module.def(
@@ -280,28 +286,111 @@ If the future completes with an error, an exception is thrown.
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors);
-      });
+         std::vector<torch::Tensor>& tensors,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
+
+  // TODO This python future wrapper wraps c10::ivalue::Future.
+  // Will merge with JIT PythonFutureWrapper while merging generic Future with
+  // c10::ivalue::Future later on.
+  struct PythonFutureWrapper {
+    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+        : fut(std::move(fut)) {}
+
+    c10::intrusive_ptr<c10::ivalue::Future> fut;
+  };
+
+  // Since FutureMessage is binded to Future, here we need to bind the
+  // PythonFutureWrapper to a different name.
+  // TODO Once python object can be tagged as IValue and c10::ivalue::Future is
+  // implemented as generic Future<IValue>, we can consider all rpc call
+  // to return a future<IValue> later on.
+  shared_ptr_class_<PythonFutureWrapper>(module, "_pyFuture")
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            fut.fut->wait();
+            auto res = fut.fut->value();
+            {
+              // acquiring GIL as torch::jit::toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return torch::jit::toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_invoke_rpc_script",
+      [](const std::string& dst,
+         const std::string& qualifiedName,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        // No need to catch exception here, if function can not be found,
+        // exception will be thrown in get_function() call; if args do not match
+        // with function schema, exception will be thrown in
+        // createStackForSchema() call.
+        auto name = c10::QualifiedName(qualifiedName);
+        auto fnSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(name)
+                            .getSchema();
+        auto stack = torch::jit::createStackForSchema(
+            fnSchema, args, kwargs, c10::nullopt);
+        auto fut = rpcTorchscript(dst, name, stack);
+        return PythonFutureWrapper(fut);
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          const std::string& opName,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRemoteBuiltin(agent, dst, opName, args, kwargs);
+        return pyRemoteBuiltin(agent, dst, opName, rf, args, kwargs);
       });
+
+  module.def(
+      "_invoke_remote_torchscript",
+      [](const WorkerInfo& dst,
+         const std::string& qualifiedName,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        auto name = c10::QualifiedName(qualifiedName);
+        auto fnSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(name)
+                            .getSchema();
+        auto stack = torch::jit::createStackForSchema(
+            fnSchema, args, kwargs, c10::nullopt);
+        auto userRRefPtr = remoteTorchscript(dst, name, stack);
+        return PyRRef(userRRefPtr);
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_python_udf",
       [](RpcAgent& agent,
          const WorkerInfo& dst,
          std::string& pickledPythonUDF,
-         std::vector<torch::Tensor>& tensors) {
-        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors);
-      });
+         std::vector<torch::Tensor>& tensors,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+      },
+      py::arg("agent"),
+      py::arg("dst"),
+      py::arg("pickledPythonUDF"),
+      py::arg("tensors"),
+      py::arg("rf") = nullptr);
 
   module.def(
       "get_rpc_timeout",

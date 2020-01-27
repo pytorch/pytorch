@@ -10,28 +10,33 @@
 #include <c10d/TCPStore.hpp>
 
 // Different ports for different tests.
-void testHelper(int port, const std::string& prefix = "") {
+void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  std::unique_ptr<c10d::TCPStore> serverTCPStore;
-  std::unique_ptr<c10d::PrefixStore> serverStore;
-  // server store
-  auto serverThread =
-      std::thread([&serverTCPStore, &serverStore, &prefix, &numWorkers, &port] {
-        serverTCPStore = std::make_unique<c10d::TCPStore>(
-            "127.0.0.1", port, numWorkers, true, std::chrono::seconds(30));
-        serverStore =
-            std::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
+  auto serverTCPStore = std::make_unique<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      numWorkers,
+      true,
+      std::chrono::seconds(30),
+      /* wait */ false);
 
-        // Basic set/get on the server store
-        c10d::test::set(*serverStore, "key0", "value0");
-        c10d::test::set(*serverStore, "key1", "value1");
-        c10d::test::set(*serverStore, "key2", "value2");
-        c10d::test::check(*serverStore, "key0", "value0");
-        c10d::test::check(*serverStore, "key1", "value1");
-        c10d::test::check(*serverStore, "key2", "value2");
-      });
+  auto serverStore =
+      std::make_unique<c10d::PrefixStore>(prefix, *serverTCPStore);
+  // server store
+  auto serverThread = std::thread([&serverStore, &serverTCPStore] {
+    // Wait for all workers to join.
+    serverTCPStore->waitForWorkers();
+
+    // Basic set/get on the server store
+    c10d::test::set(*serverStore, "key0", "value0");
+    c10d::test::set(*serverStore, "key1", "value1");
+    c10d::test::set(*serverStore, "key2", "value2");
+    c10d::test::check(*serverStore, "key0", "value0");
+    c10d::test::check(*serverStore, "key1", "value1");
+    c10d::test::check(*serverStore, "key2", "value2");
+  });
 
   // Hammer on TCPStore
   std::vector<std::thread> threads;
@@ -42,8 +47,9 @@ void testHelper(int port, const std::string& prefix = "") {
   std::vector<std::unique_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientTCPStores.push_back(std::unique_ptr<c10d::TCPStore>(
-        new c10d::TCPStore("127.0.0.1", port, numWorkers, false)));
+    clientTCPStores.push_back(
+        std::unique_ptr<c10d::TCPStore>(new c10d::TCPStore(
+            "127.0.0.1", serverTCPStore->getPort(), numWorkers, false)));
     clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
         new c10d::PrefixStore(prefix, *clientTCPStores[i])));
   }
@@ -105,9 +111,9 @@ void testHelper(int port, const std::string& prefix = "") {
 }
 
 TEST(TCPStoreTest, testHelper) {
-  testHelper(29500);
+  testHelper();
 }
 
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper(29501, "testPrefix");
+  testHelper("testPrefix");
 }

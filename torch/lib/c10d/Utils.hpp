@@ -95,7 +95,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
     const at::DeprecatedTypeProperties& type,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
   if (!tensors[index].options().type_equal(type.options())) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
@@ -106,7 +106,7 @@ inline void assertTypeMatch(
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
     const at::TensorOptions& options,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
   if (!tensors[index].options().type_equal(options)) {
     fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
@@ -118,7 +118,7 @@ inline void assertTypeMatch(
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::IntArrayRef& sizes,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
   if (tensors[index].sizes() != sizes) {
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
@@ -129,7 +129,7 @@ inline void assertSizesMatch(
 inline void assertLayoutMatch(
     std::function<void(const std::string&)> fn,
     const c10::Layout& expected,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
   const auto& actual = tensors[index].layout();
   if (actual != expected) {
@@ -140,7 +140,7 @@ inline void assertLayoutMatch(
 
 inline void assertLayoutMatch(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   for (size_t i = 1; i < tensors.size(); i++) {
     assertLayoutMatch(fn, layout, tensors, i);
@@ -149,7 +149,7 @@ inline void assertLayoutMatch(
 
 inline void assertNonEmpty(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() == 0) {
     fn("requires non-empty tensor list");
   }
@@ -157,7 +157,7 @@ inline void assertNonEmpty(
 
 inline void assertSingleElement(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
   }
@@ -165,7 +165,7 @@ inline void assertSingleElement(
 
 inline void assertSingleElementInput(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
   }
@@ -173,7 +173,7 @@ inline void assertSingleElementInput(
 
 inline void assertSingleElementOutput(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
   }
@@ -199,7 +199,7 @@ inline void assertRootTensor(
 
 inline void assertDense(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
     fn("only supports dense tensors");
@@ -208,7 +208,7 @@ inline void assertDense(
 
 inline void assertCPU(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
     fn("only supports CPU tensors");
@@ -217,7 +217,7 @@ inline void assertCPU(
 
 inline void assertSameDevice(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;
   }
@@ -231,7 +231,7 @@ inline void assertSameDevice(
 
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
@@ -242,7 +242,7 @@ inline void assertTypeAndSizesMatch(
 
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors,
+    const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
@@ -253,7 +253,7 @@ inline void assertTypeAndSizesMatch(
 
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
+    const at::ArrayRef<at::Tensor> tensors) {
   const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
   assertTypeAndSizesMatch(fn, tensors.slice(1), options, sizes);
