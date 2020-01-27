@@ -34,7 +34,7 @@ class SyncBatchNorm(Function):
         mean_all_reduce.wait()
         invstd_all_reduce.wait()
 
-        # calcualte global mean & invstd
+        # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,

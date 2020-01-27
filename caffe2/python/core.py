@@ -2972,8 +2972,8 @@ def _extract_stacktrace():
     This function extracts stacktrace without file system access
     by purely using sys._getframe() and removes part that belongs to
     this file (core.py). We are not using inspect module because
-    its just a wrapper on top of sys._getframe() whos
-    logis is based on accessing source files on disk - exactly what
+    its just a wrapper on top of sys._getframe() whose
+    logic is based on accessing source files on disk - exactly what
     we are trying to avoid here. Same stands for traceback module
 
     The reason for file system access avoidance is that

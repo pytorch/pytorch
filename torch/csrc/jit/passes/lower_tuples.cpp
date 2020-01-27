@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch {
 namespace jit {
@@ -76,6 +77,33 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
 
 static void LowerAllTuples(Block* block);
 
+static void RemoveTupleConstants(Node* n) {
+  if (!(n->kind() == prim::Constant &&
+        n->output()->type()->cast<TupleType>())) {
+    return;
+  }
+
+  auto g = n->owningGraph();
+  auto tuple_elements = toIValue(n->output()).value().toTuple()->elements();
+  WithInsertPoint insert(n);
+  std::vector<Value*> elements;
+  for (const auto& elem : tuple_elements) {
+    auto constant = insertConstant(*n->owningGraph(), elem);
+    elements.push_back(constant);
+  }
+  auto tuple_type = n->output()->type()->expect<TupleType>();
+  auto tuple_construct = g->insertNode(n->owningGraph()->createTuple(
+      elements, tuple_type->schema() ? tuple_type : nullptr));
+
+  // insert the tuple first before recursing on its elements, so that its
+  // elements will have a use
+  for (Value * elem: elements) {
+    RemoveTupleConstants(elem->node());
+  }
+
+  n->replaceAllUsesWith(tuple_construct);
+}
+
 static void VisitNode(Node* n, Node* insert_point) {
   auto& graph = *n->owningGraph();
 
@@ -124,6 +152,10 @@ static void VisitNode(Node* n, Node* insert_point) {
   // flatten the outputs list
   for (size_t i = 0; i < n->outputs().size();) {
     Value* output = n->outputs()[i];
+    if (!output->hasUses()) {
+      return;
+    }
+
     // (a, b, tup, c) -> (a, b, t0, t1, c)
     // and:
     //    tup = (t0, t1)
@@ -157,6 +189,7 @@ static void LowerAllTuples(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     auto n = *it++;
+    RemoveTupleConstants(n);
     VisitNode(n, *it);
   }
   // tuples in return lists of blocks behave exactly the same as

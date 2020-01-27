@@ -4,8 +4,12 @@ import android.graphics.Bitmap;
 import android.graphics.ImageFormat;
 import android.media.Image;
 
+import com.facebook.soloader.nativeloader.NativeLoader;
+import com.facebook.soloader.nativeloader.SystemDelegate;
+
 import org.pytorch.Tensor;
 
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.Locale;
@@ -185,108 +189,57 @@ public final class TensorImageUtils {
     checkRotateCWDegrees(rotateCWDegrees);
     checkTensorSize(tensorWidth, tensorHeight);
 
-    final int widthBeforeRotation = image.getWidth();
-    final int heightBeforeRotation = image.getHeight();
+    Image.Plane[] planes = image.getPlanes();
+    Image.Plane Y = planes[0];
+    Image.Plane U = planes[1];
+    Image.Plane V = planes[2];
 
-    int widthAfterRotation = widthBeforeRotation;
-    int heightAfterRotation = heightBeforeRotation;
-    if (rotateCWDegrees == 90 || rotateCWDegrees == 270) {
-      widthAfterRotation = heightBeforeRotation;
-      heightAfterRotation = widthBeforeRotation;
-    }
+    NativePeer.imageYUV420CenterCropToFloatBuffer(
+        Y.getBuffer(),
+        Y.getRowStride(),
+        Y.getPixelStride(),
+        U.getBuffer(),
+        V.getBuffer(),
+        U.getRowStride(),
+        U.getPixelStride(),
+        image.getWidth(),
+        image.getHeight(),
+        rotateCWDegrees,
+        tensorWidth,
+        tensorHeight,
+        normMeanRGB,
+        normStdRGB,
+        outBuffer,
+        outBufferOffset
+    );
+  }
 
-    int centerCropWidthAfterRotation = widthAfterRotation;
-    int centerCropHeightAfterRotation = heightAfterRotation;
-
-    if (tensorWidth * heightAfterRotation <= tensorHeight * widthAfterRotation) {
-      centerCropWidthAfterRotation =
-          (int) Math.floor((float) tensorWidth * heightAfterRotation / tensorHeight);
-    } else {
-      centerCropHeightAfterRotation =
-          (int) Math.floor((float) tensorHeight * widthAfterRotation / tensorWidth);
-    }
-
-    int centerCropWidthBeforeRotation = centerCropWidthAfterRotation;
-    int centerCropHeightBeforeRotation = centerCropHeightAfterRotation;
-    if (rotateCWDegrees == 90 || rotateCWDegrees == 270) {
-      centerCropHeightBeforeRotation = centerCropWidthAfterRotation;
-      centerCropWidthBeforeRotation = centerCropHeightAfterRotation;
-    }
-
-    final int offsetX =
-        (int) Math.floor((widthBeforeRotation - centerCropWidthBeforeRotation) / 2.f);
-    final int offsetY =
-        (int) Math.floor((heightBeforeRotation - centerCropHeightBeforeRotation) / 2.f);
-
-    final Image.Plane yPlane = image.getPlanes()[0];
-    final Image.Plane uPlane = image.getPlanes()[1];
-    final Image.Plane vPlane = image.getPlanes()[2];
-
-    final ByteBuffer yBuffer = yPlane.getBuffer();
-    final ByteBuffer uBuffer = uPlane.getBuffer();
-    final ByteBuffer vBuffer = vPlane.getBuffer();
-
-    final int yRowStride = yPlane.getRowStride();
-    final int uRowStride = uPlane.getRowStride();
-
-    final int yPixelStride = yPlane.getPixelStride();
-    final int uPixelStride = uPlane.getPixelStride();
-
-    final float scale = (float) centerCropWidthAfterRotation / tensorWidth;
-    final int uvRowStride = uRowStride >> 1;
-
-    final int channelSize = tensorHeight * tensorWidth;
-    final int tensorInputOffsetG = channelSize;
-    final int tensorInputOffsetB = 2 * channelSize;
-    for (int x = 0; x < tensorWidth; x++) {
-      for (int y = 0; y < tensorHeight; y++) {
-
-        final int centerCropXAfterRotation = (int) Math.floor(x * scale);
-        final int centerCropYAfterRotation = (int) Math.floor(y * scale);
-
-        int xBeforeRotation = offsetX + centerCropXAfterRotation;
-        int yBeforeRotation = offsetY + centerCropYAfterRotation;
-        if (rotateCWDegrees == 90) {
-          xBeforeRotation = offsetX + centerCropYAfterRotation;
-          yBeforeRotation =
-              offsetY + (centerCropHeightBeforeRotation - 1) - centerCropXAfterRotation;
-        } else if (rotateCWDegrees == 180) {
-          xBeforeRotation =
-              offsetX + (centerCropWidthBeforeRotation - 1) - centerCropXAfterRotation;
-          yBeforeRotation =
-              offsetY + (centerCropHeightBeforeRotation - 1) - centerCropYAfterRotation;
-        } else if (rotateCWDegrees == 270) {
-          xBeforeRotation =
-              offsetX + (centerCropWidthBeforeRotation - 1) - centerCropYAfterRotation;
-          yBeforeRotation = offsetY + centerCropXAfterRotation;
-        }
-
-        final int yIdx = yBeforeRotation * yRowStride + xBeforeRotation * yPixelStride;
-        final int uvIdx = (yBeforeRotation >> 1) * uvRowStride + xBeforeRotation * uPixelStride;
-
-        int Yi = yBuffer.get(yIdx) & 0xff;
-        int Ui = uBuffer.get(uvIdx) & 0xff;
-        int Vi = vBuffer.get(uvIdx) & 0xff;
-
-        int a0 = 1192 * (Yi - 16);
-        int a1 = 1634 * (Vi - 128);
-        int a2 = 832 * (Vi - 128);
-        int a3 = 400 * (Ui - 128);
-        int a4 = 2066 * (Ui - 128);
-
-        int r = clamp((a0 + a1) >> 10, 0, 255);
-        int g = clamp((a0 - a2 - a3) >> 10, 0, 255);
-        int b = clamp((a0 + a4) >> 10, 0, 255);
-        final int offset = outBufferOffset + y * tensorWidth + x;
-        float rF = ((r / 255.f) - normMeanRGB[0]) / normStdRGB[0];
-        float gF = ((g / 255.f) - normMeanRGB[1]) / normStdRGB[1];
-        float bF = ((b / 255.f) - normMeanRGB[2]) / normStdRGB[2];
-
-        outBuffer.put(offset, rF);
-        outBuffer.put(offset + tensorInputOffsetG, gF);
-        outBuffer.put(offset + tensorInputOffsetB, bF);
+  private static class NativePeer {
+    static {
+      if (!NativeLoader.isInitialized()) {
+        NativeLoader.init(new SystemDelegate());
       }
+      NativeLoader.loadLibrary("pytorch_vision_jni");
     }
+
+    private static native void imageYUV420CenterCropToFloatBuffer(
+        ByteBuffer yBuffer,
+        int yRowStride,
+        int yPixelStride,
+        ByteBuffer uBuffer,
+        ByteBuffer vBuffer,
+        int uvRowStride,
+        int uvPixelStride,
+        int imageWidth,
+        int imageHeight,
+        int rotateCWDegrees,
+        int tensorWidth,
+        int tensorHeight,
+        float[] normMeanRgb,
+        float[] normStdRgb,
+        Buffer outBuffer,
+        int outBufferOffset
+    );
   }
 
   private static void checkOutBufferCapacity(FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
@@ -308,10 +261,6 @@ public final class TensorImageUtils {
         && rotateCWDegrees != 270) {
       throw new IllegalArgumentException("rotateCWDegrees must be one of 0, 90, 180, 270");
     }
-  }
-
-  private static final int clamp(int c, int min, int max) {
-    return c < min ? min : c > max ? max : c;
   }
 
   private static void checkNormStdArg(float[] normStdRGB) {

@@ -213,7 +213,7 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
     accscalar_t value) {
   int access_y = max(min(y, height - 1), 0);
   int access_x = max(min(x, width - 1), 0);
-  /* TODO: result here is trucated to scalar_t,
+  /* TODO: result here is truncated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */
   gpuAtomicAdd(

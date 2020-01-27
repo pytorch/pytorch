@@ -91,7 +91,7 @@ void pytorch_qnnp_requantize_precise__scalar_unsigned32(
      *
      * To avoid full 64-bit shift, we leverage the fact that shift >= 32, and do
      * it in two steps:
-     * - Shift by 32, which can be implemented by extacting the high 32-bit word
+     * - Shift by 32, which can be implemented by extracting the high 32-bit word
      * on 32-bit systems.
      * - Shift by (shift - 32), which can be implemented as a 32-bit shift of
      * high word of addition result.
