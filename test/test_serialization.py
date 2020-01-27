@@ -437,7 +437,7 @@ class TestSerialization(TestCase):
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
-                        '_internal', 'data', 'network2.py')
+                                    '_internal', 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
