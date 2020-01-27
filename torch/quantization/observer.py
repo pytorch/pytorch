@@ -137,7 +137,7 @@ class _ObserverBase(ObserverBase):
             scales: Per channel scales tensor of shape (#channels,)
             zero_points: Per channel zero points tensor of shape (#channels,)
         """
-        if min_vals is None or max_vals is None:
+        if min_vals.numel() == 0 or max_vals.numel() == 0:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
@@ -175,7 +175,7 @@ class _ObserverBase(ObserverBase):
             zero_point: Zero point as a tensor of shape (1,)
         """
 
-        if max_val is None or min_val is None:
+        if max_val.numel() == 0 or min_val.numel() == 0:
             warnings.warn("Must run observer before calling calculate_qparams.\
                            Returning default scale and zero point.")
             return torch.tensor([1.0]), torch.tensor([0])
