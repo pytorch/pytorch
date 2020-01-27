@@ -133,7 +133,7 @@ class TORCH_API RpcAgent {
   virtual void shutdown() = 0;
 
   // Check if current RPC agent is set.
-  bool isCurrentRpcAgentSet();
+  static bool isCurrentRpcAgentSet();
 
   // Retrieve the valid current RPC agent.
   static std::shared_ptr<RpcAgent> getCurrentRpcAgent();

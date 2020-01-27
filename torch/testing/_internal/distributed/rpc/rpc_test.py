@@ -352,9 +352,9 @@ class RpcTest(RpcAgentTestFixture):
         self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
 
     @mock.patch.object(torch.distributed.autograd, "_init")
-    @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
+    @mock.patch.object(torch.distributed.rpc.api, "_set_and_start_rpc_agent")
     @dist_init(setup_rpc=False)
-    def test_register_rpc_backend_and_start_rpc_backend(
+    def test_register_rpc_backend_and_set_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
