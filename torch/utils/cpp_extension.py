@@ -29,9 +29,10 @@ def _find_cuda_home():
         # Guess #2
         try:
             which = 'where' if IS_WINDOWS else 'which'
-            nvcc = subprocess.check_output(
-                [which, 'nvcc']).decode().rstrip('\r\n')
-            cuda_home = os.path.dirname(os.path.dirname(nvcc))
+            with open(os.devnull, 'w') as devnull:
+                nvcc = subprocess.check_output([which, 'nvcc'],
+                                               stderr=devnull).decode().rstrip('\r\n')
+                cuda_home = os.path.dirname(os.path.dirname(nvcc))
         except Exception:
             # Guess #3
             if IS_WINDOWS:
