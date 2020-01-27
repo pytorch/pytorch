@@ -593,20 +593,29 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
 
-  if (input.size(0) == 0 || input.size(1) == 0) {
+  if (input.size(0) == 0 || input.size(1) == 0) {    
     // don't send empty inputs through backends
-    // but need to compute correct output size first
-    std::vector<int64_t> o;
-    if (params.transposed) {
-      o = conv_input_size(input.sizes(), weight_sizes, params.padding,
+    // but need to compute correct output size first and set up history for params
+    int64_t size0, size1;
+    if (input_is_mkldnn && weight.ndimension() == input.ndimension() + 1) {
+      size0 = weight.size(0) * weight.size(1);
+      size1 = weight.size(2);
+    } else {
+      size0 = weight.size(0);
+      size1 = weight.size(1);
+    }
+    at::Tensor weight_reduced = at::_unsafe_view(weight, {size0, size1, -1}).sum(-1);        
+    at::Tensor input_viewed = at::_unsafe_view(input, {input.size(0), input.size(1)});
+    if (!params.transposed) {
+      auto o = conv_output_size(input.sizes(), weight_sizes, params.padding,
+                           params.stride, params.dilation);
+      return input_viewed.mm(weight_reduced.t()).view(o) + reshape_bias(input.dim(), bias);
+    } else {
+      auto o = conv_input_size(input.sizes(), weight_sizes, params.padding,
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
-    } else {
-      o = conv_output_size(input.sizes(), weight_sizes, params.padding,
-                           params.stride, params.dilation);
+      return input_viewed.mm(weight_reduced).view(o) + reshape_bias(input.dim(), bias);
     }
-    //return a view of input rather than empty tensor to not break the gradient chain
-    return input.clone().view(o);
   }
 
   if (k == 3) {
