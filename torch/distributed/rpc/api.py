@@ -83,7 +83,7 @@ class WaitAllWorkersStates(object):
         # It's only used by leader worker. Leader worker is user-specified or
         # elected as the first worker in a sorted worker name list.
         # Whenever there is a worker showing shutdown intention to the leader, by
-        # calling _wait_all_workers()`, the leader adds this worker's name to the set.
+        # calling `_wait_all_workers()`, the leader adds this worker's name to the set.
         # The leader also adds itself's name to the set on calling
         # `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
         # to be called only once, by examing if leader's name has been added to the set.
@@ -130,7 +130,7 @@ def _set_proceed_shutdown_signal(sequence_id):
 
 
 @_require_initialized
-def _wait_all_workers(exit_on_worker_done=None):
+def _wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
@@ -141,10 +141,7 @@ def _wait_all_workers(exit_on_worker_done=None):
     assert (
         _ALL_WORKER_NAMES is not None
     ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
-    if exit_on_worker_done is not None:
-        leader_worker_name = _to_worker_info(exit_on_worker_done).name
-    else:
-        leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
+    leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
     self_worker_name = _agent.get_worker_info().name
 
@@ -160,18 +157,16 @@ def _wait_all_workers(exit_on_worker_done=None):
     if is_leader_worker:
         _on_leader_follower_report_shutdown_intent(sequence_id, self_worker_name)
     else:
-        if exit_on_worker_done is None:
-            rpc_sync(
-                leader_worker_name,
-                _on_leader_follower_report_shutdown_intent,
-                args=(sequence_id, self_worker_name),
-            )
+        rpc_sync(
+            leader_worker_name,
+            _on_leader_follower_report_shutdown_intent,
+            args=(sequence_id, self_worker_name,),
+        )
 
-    if not is_leader_worker or (is_leader_worker and exit_on_worker_done is None):
-        proceed_signal = _wait_all_workers_sequence_id_to_states[
-            sequence_id
-        ].proceed_signal
-        proceed_signal.wait()
+    proceed_signal = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].proceed_signal
+    proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
     # Leader's signal is the first to be unblocked,
@@ -198,7 +193,7 @@ def _wait_all_workers(exit_on_worker_done=None):
 
 
 @_require_initialized
-def shutdown(graceful=True, exit_on_worker_done=None):
+def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
     stops the local agent from  accepting outstanding requests, and shuts
@@ -213,10 +208,6 @@ def shutdown(graceful=True, exit_on_worker_done=None):
                          this will block until all local and remote RPC
                          processes have reached this method and wait for all
                          outstanding work to complete.
-        exit_on_worker_done (str or WorkerInfo): The worker to act as the leader in
-            sending out the termination command. Other workers act as followers.
-            Notice all workers should pass the same value as this argument,
-            otherwise they would hang on termination.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -246,7 +237,7 @@ def shutdown(graceful=True, exit_on_worker_done=None):
     global _agent
 
     if graceful:
-        _wait_all_workers(exit_on_worker_done=exit_on_worker_done)
+        _wait_all_workers()
         _agent.join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
