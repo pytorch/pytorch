@@ -16,7 +16,7 @@
 #
 # - colocate any new hacks/adjustments with existing ones of the same kind.
 #   ideally in a data structure rather than code if possible. See e.g.
-#   CPP_DECL_TYPE_CONVERSION_HACKS, SCHEMA_DEFAULT_CONVERSION_HACKS, etc.
+#   SCHEMA_DEFAULT_CONVERSION_HACKS, etc.
 #
 # - similarly, conversions from one format to another should happen all at
 #   once in a single place, not be spread around. see e.g. get_python_args()
@@ -212,7 +212,7 @@ UNPACK_METHODS = {
     'Generator *': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
-    'const Type &': 'scalartype',
+    'const ScalarType &': 'scalartype',
     'const THPLayout &': 'layout',
     'const Device &': 'device',
     'c10::optional<DimnameList>': 'toDimnameListOptional',
@@ -241,7 +241,7 @@ UNPACK_WITH_SIZE_METHODS = {
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
-    'const Type &': 'scalartypeWithDefault',
+    'const ScalarType &': 'scalartypeWithDefault',
     'const THPLayout &': 'layoutWithDefault',
     'const Device &': 'deviceWithDefault',
 }
@@ -315,7 +315,6 @@ def parse_arg(arg, arg_index, unpack_to_local=False):
 #
 
 TEMP_SAFE_CPP_DECL_TYPE = {
-    'Tensor': 'const Tensor &',
     'Tensor &': 'Tensor',
 }
 
@@ -352,23 +351,26 @@ SUPPORTED_RETURN_TYPES = {
 
 def get_simple_return_type(declaration):
     # Use the simple_return_type (Tensor) rather than the fancy return type
-    # (Tensor &).  This is important because the dispatch functions take
+    # (Tensor &).  This is important because the dispatch lambdas take
     # mutable arguments *by value*, not by reference.  If you then return
-    # a a reference to such an argument, you will now have a pointer to a
+    # a reference to such an argument, you will now have a pointer to a
     # dangling stack entry.  Not good.
     #
     # You want:
     #
-    #   Tensor dispatch_selu_(Tensor self) { return at::selu_(self); }
+    #   auto dispatch_selu_ = [](Tensor self) -> Tensor { ...; return at::selu_(self); };
+    #                                            ^^^^^^
     #
     # *not*
     #
-    #   Tensor& dispatch_selu_(Tensor self) { return at::selu_(self); }
+    #   auto dispatch_selu_ = [](Tensor self) -> Tensor& { ...; return at::selu_(self); };
+    #                                            ^^^^^^^
     #
     # (NB: We can't make dispatch_selu_ take Tensor&, because the enclosing
-    # codegen looks like dispatch_selu_(wrap(tensor)), and you can't take a
+    # codegen looks like dispatch_selu_(_r.tensor(0)), and you can't take a
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
+    #
     simple_return_type = declaration['return_type'].replace(' &', '')
     if simple_return_type not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(declaration['name'] + " returns unsupported type " + simple_return_type)
@@ -435,7 +437,7 @@ check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isN
 # Lambda is so GIL is back on by wrap() time (wrap can allocate)
 PY_VARIABLE_WRAP = CodeTemplate("""\
 ${inits}
-auto dispatch_${name} = [](${lambda_formals}) {
+auto dispatch_${name} = [](${lambda_formals}) -> ${simple_return_type} {
   ${auto_no_gil}
   return ${dispatch_callee}(${dispatch_args});
 };
@@ -445,9 +447,9 @@ return wrap(${namedtuple_typeref}dispatch_${name}(${lambda_args})${set_requires_
 # void return variant
 PY_VARIABLE_RETURN_VOID = CodeTemplate("""\
 ${inits}
-auto dispatch_${name} = [](${lambda_formals}) {
+auto dispatch_${name} = [](${lambda_formals}) -> ${simple_return_type} {
   ${auto_no_gil}
-  return ${dispatch_callee}(${dispatch_args});
+  ${dispatch_callee}(${dispatch_args});
 };
 dispatch_${name}(${lambda_args})${set_requires_grad};
 Py_RETURN_NONE;
@@ -521,7 +523,7 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
 
 # arg['name'] to arg['simple_type'] for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
-    'dtype': 'Type',
+    'dtype': 'ScalarType',
     'device': 'Device',
     'layout': 'Layout',
     'pin_memory': 'bool',
@@ -632,8 +634,7 @@ def handle_python_binding_args(declaration, output_gap):
 PY_VARIABLE_OUT = CodeTemplate("""\
 if (_r.isNone(${out_idx})) {
   ${call_dispatch}
-}
-else {
+} else {
   ${call_dispatch_out}
 }
 """)
@@ -824,7 +825,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
 """)
 
-# python binding for singe-overload function/method
+# python binding for single-overload function/method
 PY_VARIABLE_METHOD_VARARGS_SINGLETON = CodeTemplate("""\
 // ${name}
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
@@ -1132,10 +1133,6 @@ def sort_declarations(grouped_decls):
 # python signature codegen
 #
 
-SCHEMA_TYPE_CONVERSION_HACKS = {
-    'Type': 'ScalarType',
-}
-
 SCHEMA_DEFAULT_CONVERSION_HACKS = {
     'nullptr': 'None',
     'c10::nullopt': 'None',
@@ -1143,12 +1140,8 @@ SCHEMA_DEFAULT_CONVERSION_HACKS = {
 }
 
 def get_schema_formal(arg, is_python_method):
-    # name
     name = arg['name']
-
-    # type
     typename = arg['simple_type']
-    typename = SCHEMA_TYPE_CONVERSION_HACKS.get(typename, typename)
 
     # TODO: remove this and make optional types in simple_type to be consistent across
     # tensor and other types after make Tensor? be optional instead of undefined
@@ -1355,11 +1348,11 @@ def make_python_binding_args(declaration):
         py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
         dtype_arg = {
             'default': default_type,
-            'dynamic_type': 'Type',
+            'dynamic_type': 'ScalarType',
             'kwarg_only': True,
             'name': 'dtype',
-            'type': 'const Type &',
-            'simple_type': 'Type',
+            'type': 'const ScalarType &',
+            'simple_type': 'ScalarType',
             'python_default_init': py_default_dtype,
         }
         python_binding_arguments.append(dtype_arg)
@@ -1463,6 +1456,7 @@ def is_nn_module_function(declaration):
 
 
 def function_namespace(declaration):
+    # TODO look into why these can't all be 'torch' calls
     if has_tensor_options(declaration) or op_name(declaration).endswith('_like'):
         return 'torch'
     else:
