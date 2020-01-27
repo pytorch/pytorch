@@ -418,10 +418,13 @@ TopEnvironment = TypedDict('TopEnvironment', {
 
 # A Declarations.cwrap formal argument
 # type can contain THTensor* types
+# NOTE: this must contain all 'AtFormal' attributes, because FunctionOption
+# doesn't differentiate between whether we have AtFormals or THFormals
 THFormal = TypedDict('THFormal', {
     'name': str,
     'type': str,
     'dynamic_type': str,
+    'kwarg_only': bool,
     'is_nullable': bool,
     'default': str,
     'output': bool,
