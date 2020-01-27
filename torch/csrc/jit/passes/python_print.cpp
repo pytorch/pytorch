@@ -777,48 +777,17 @@ struct PythonPrintImpl {
     }
   }
 
-  void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
-      const IValue& the_list) {
-    if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
-    } else {
-      stmt << the_list;
-    }
-  }
-
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
-    std::stringstream ss;
-    if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if (v.isString()) {
-      c10::printQuotedString(ss, v.toStringRef());
-    } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      c10::printQuotedString(ss, device_stream.str());
-      ss << ")";
-    } else if (v.isTensorList()) {
-      ss << "[";
-      const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-        delim = ", ";
+    const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isTensor()) {
+        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+        return true;
       }
-      ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
-    } else {
-      ss << v;
-    }
+      return false;
+    };
+
+    std::stringstream ss;
+    v.repr(ss, customFormatter);
     stmt << ss.str();
   }
 
@@ -937,32 +906,38 @@ struct PythonPrintImpl {
       case prim::ListConstruct: {
         ListTypePtr list_type = node->output()->type()->expect<ListType>();
         TypePtr elem_type = list_type->getElementType();
-        if (!elem_type->isSubtypeOf(TensorType::get())) {
-          // when the list is empty and is not a list of tensors,
-          // we need to annotate it, otherwise it won't be possible
-          // to infer the type on import
-          if (node->inputs().size() == 0) {
-            stmt << "annotate(" << node->output()->type()->python_str()
-                 << ", [])";
-          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-            stmt << "annotate(" << node->output()->type()->python_str() << ",";
-            printValueList(stmt, node->inputs(), "[", "]");
-            stmt << ")";
-          } else {
-            printValueList(stmt, node->inputs(), "[", "]");
-          }
+        // Empty lists must be annotated with their type so the compiler knows
+        // what type is supposed to be inside them
+        if (node->inputs().size() == 0) {
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", [])";
+          // If we can't infer the type based on what's inside, explicitly
+          // annotate it to disambiguate.
+          // This happens for List[Tensor] vs. List[Optional[Tensor]]
+        } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printValueList(stmt, node->inputs(), "[", "]");
+          stmt << ")";
+          // Otherwise just print a list
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        bool is_default_type =
-            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
-        if (node->inputs().size() == 0 && !is_default_type) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
+        // There are cases where we must annotate the dict with an explicit type
+        // to help the compiler out:
+        //   - the dict is empty
+        //   - the dict has potentially ambiguous element types
+        //       (e.g. Tensor vs. Optional[Tensor])
+        if (
+            node->inputs().size() == 0 ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printDict(stmt, node->inputs());
+          stmt << ")";
+          // Otherwise just print a dict
         } else {
           printDict(stmt, node->inputs());
         }

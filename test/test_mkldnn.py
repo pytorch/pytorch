@@ -13,7 +13,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 import torch
 import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
-from common_utils import TestCase, run_tests, TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 

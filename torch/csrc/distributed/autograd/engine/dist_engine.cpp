@@ -307,7 +307,7 @@ void DistEngine::execute(const variable_list& roots) {
   // functions.
   {
     std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
-    // Context should not have been intialized already.
+    // Context should not have been initialized already.
     TORCH_INTERNAL_ASSERT(
         initializedContextIds_.find(autogradContext->contextId()) ==
         initializedContextIds_.end());
