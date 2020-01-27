@@ -277,8 +277,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
-  void ncclCommWatchdogInternal();
-
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 

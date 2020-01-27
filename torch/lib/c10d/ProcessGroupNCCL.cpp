@@ -279,17 +279,6 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
-  try {
-    ncclCommWatchdogInternal();
-    LOG(ERROR) << "NCCL watchdog thread terminated";
-  } catch(std::exception& e) {
-    LOG(ERROR) << "NCCL watchdog thread terminated with: " << e.what();
-  } catch(...) {
-    LOG(ERROR) << "NCCL watchdog thread terminated with unknown exception";
-  }
-}
-
-void ProcessGroupNCCL::ncclCommWatchdogInternal() {
   while (!terminateWatchdog_.load()) {
     {
       // Loop through the cache of communicators for NCCL errors.
@@ -320,7 +309,6 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         } else {
           it++;
         }
-        it++;
       }
     }
 
