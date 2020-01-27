@@ -15,8 +15,8 @@ from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
-from common_utils import TestCase, IS_WINDOWS, TEST_DILL, PY3, run_tests, \
-    download_file, BytesIOContext
+from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
+    TEST_DILL, PY3, run_tests, download_file, BytesIOContext
 
 
 if TEST_DILL:
@@ -422,7 +422,8 @@ class TestSerialization(TestCase):
             return module
 
         with filecontext_lambda() as checkpoint:
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                                    '_internal', 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -435,7 +436,8 @@ class TestSerialization(TestCase):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                        '_internal', 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
