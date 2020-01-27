@@ -266,9 +266,6 @@ TYPE_FORMAL_GENERIC = {
     'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THBoolTensor*': 'Tensor &',
-    'THIntegerTensor*': 'Tensor &',
-    'THDenseTensor*': 'Tensor &',
-    'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
     'IntArrayRefSize': 'IntArrayRef',
@@ -282,9 +279,6 @@ DYNAMIC_TYPE = {
     'THByteTensor*': 'ByteTensor',
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
-    'THIntegerTensor*': 'IntegerTensor',
-    'THDenseTensor*': 'Tensor',
-    'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'IntArrayRefSize': 'IntArrayRef',
@@ -303,9 +297,6 @@ TYPE_RETURN = {
     'THIndexTensor*': 'Tensor',
     'THByteTensor*': 'Tensor',
     'THBoolTensor*': 'Tensor',
-    'THIntegerTensor*': 'Tensor',
-    'THDenseTensor*': 'Tensor',
-    'THDenseIndexTensor*': 'Tensor',
     'real': 'Tensor',
     'accreal': 'Tensor',
     'long': 'int64_t',
@@ -332,11 +323,6 @@ CHECKED_CAST = {
             'checked_dense_tensor_unwrap('
             '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
             'DeviceType::${DeviceType}, ScalarType::Long)'),
-    'THIntegerTensor*':
-        CodeTemplate(
-            'checked_dense_tensor_unwrap('
-            '${arg_name}, "${arg_name}", ${arg_pos}, "${api_name}", ${null_okay}, '
-            'DeviceType::${DeviceType}, ScalarType::Int)'),
     'THStorage*':
         CodeTemplate(
             'checked_storage('
@@ -359,9 +345,6 @@ CHECKED_USE = {
     'THIndexTensor*': '{}_',
     'THByteTensor*': '{}_',
     'THBoolTensor*': '{}_',
-    'THIntegerTensor*': '{}_',
-    'THDenseTensor*': '{}_',
-    'THDenseIndexTensor*': '{}_',
     'THStorage*': '{}_.unsafeGetStorageImpl()',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -381,9 +364,6 @@ ALLOC_NOARGS_WRAP = {
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
                      'DispatchKey::${Backend}TensorId).release()',
-    'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
-                        'DispatchKey::${Backend}TensorId).release()',
 }
 
 ALLOC_WRAP = {
@@ -391,9 +371,6 @@ ALLOC_WRAP = {
     'THByteTensor*': '${arguments}',
     'THBoolTensor*': '${arguments}',
     'THIndexTensor*': '${arguments}',
-    'THIntegerTensor*': '${arguments}',
-    'THDenseTensor*': '${arguments}',
-    'THDenseIndexTensor*': '${arguments}',
 }
 
 # Replacements for constants when calling into TH
