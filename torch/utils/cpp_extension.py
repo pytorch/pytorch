@@ -549,14 +549,17 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
-    if not ROCM_HOME:
-        libraries.append('cudart')
     libraries.append('c10')
-    libraries.append('c10_cuda')
     libraries.append('torch')
     libraries.append('torch_cpu')
-    libraries.append('torch_cuda')
     libraries.append('torch_python')
+    if ROCM_HOME:
+        libraries.append('c10_hip')
+        libraries.append('torch_hip')
+    else:
+        libraries.append('cudart')
+        libraries.append('c10_cuda')
+        libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
