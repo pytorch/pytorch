@@ -15,7 +15,7 @@ static inline
  __host__ __device__
 #endif
 T powi(T a, T b) {
-  if ( b < 0 ) {
+  if ( std::numeric_limits<T>::is_signed && b < 0 ) {
       if ( a == 1 ) {
           return 1;
       } else if ( a == -1 ) {
