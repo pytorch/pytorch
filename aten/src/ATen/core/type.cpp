@@ -1,9 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <ATen/core/grad_mode.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -70,6 +71,48 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
+template <typename T>
+static bool compatible_optional(c10::optional<T> e, T a) {
+  return !e.has_value() || e.value() == a;
+}
+
+static bool compatible_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+  if (!e.size().has_value()) {
+    return true;
+  }
+
+  if (e.size().value() != a.size()) {
+    return false;
+  }
+
+  auto ndim = a.size();
+  for (size_t i = 0; i < ndim; i++) {
+    if (!compatible_optional(e[i], a[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorType::isCompatibleWithInCurrentExecutionContext(
+    at::Tensor& t) const {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
+  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
+  if (!t.defined()) {
+    return compatible_optional(undefined(), !t.defined());
+  }
+
+  return compatible_varying_shape(sizes(), t.sizes()) &&
+      (t.is_sparse() || t.is_mkldnn() ||
+       compatible_varying_shape(strides(), t.strides())) &&
+      compatible_optional(
+             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
+      compatible_optional(scalarType(), t.scalar_type()) &&
+      compatible_optional(device(), t.device());
+}
+
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {},
@@ -128,6 +171,10 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
+PyObjectTypePtr PyObjectType::get() {
+  static auto value = PyObjectType::create();
+  return value;
+}
 CapsuleTypePtr CapsuleType::get() {
   static auto value = CapsuleType::create();
   return value;
@@ -146,6 +193,10 @@ ListTypePtr ListType::ofFloats() {
 }
 ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
+  return value;
+}
+ListTypePtr ListType::ofStrings() {
+  static auto value = ListType::create(StringType::get());
   return value;
 }
 
@@ -202,9 +253,17 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(TupleType::create(elements));
   }
 
+  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+    if (auto elem = unifyTypes(
+            t1->cast<FutureType>()->getElementType(),
+            t2->cast<FutureType>()->getElementType())) {
+      return FutureType::create(*elem);
+    }
+  }
+
   // Check direct subtyping relations again with Unshaped Types,
-  // to handle unification of container types which might contain two different
-  // specialized tensors (ListType / FutureType)
+  // to handle unification of mutable container types which might contain two different
+  // specialized tensors (ListType / DictType)
   auto t1_unshaped = unshapedType(t1);
   auto t2_unshaped = unshapedType(t2);
 
@@ -212,26 +271,6 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
     return t2_unshaped;
   } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
     return t1_unshaped;
-  }
-
-  // List unification is covered by direct subtyping relation check above
-  // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-  // int?[] = std::vector<IValue>  we don't unify list element types
-  // Without specializations we could attempt to unify the list element type
-
-  // Dicts are not specialized, so we can unify contained types, but we do not
-  // maintain Tensor Specialization in dictionary types bc of mutability
-  // so we run this after calling unshapedType
-  if (t1_unshaped->cast<DictType>() && t2_unshaped->cast<DictType>()) {
-    auto dict1 = t1_unshaped->cast<DictType>();
-    auto dict2 = t2_unshaped->cast<DictType>();
-
-    auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
-    auto unified_value = unifyTypes(dict1->getValueType(), dict2->getValueType());
-    if (!unified_key || !unified_value) {
-      return c10::nullopt;
-    }
-    return DictType::create(*unified_key, *unified_value);
   }
 
   return c10::nullopt;

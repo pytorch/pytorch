@@ -100,6 +100,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "enable_gil_profiling",
+              &RpcAgent::enableGILProfiling,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
@@ -308,16 +312,19 @@ If the future completes with an error, an exception is thrown.
   // implemented as generic Future<IValue>, we can consider all rpc call
   // to return a future<IValue> later on.
   shared_ptr_class_<PythonFutureWrapper>(module, "_pyFuture")
-      .def("wait", [](PythonFutureWrapper& fut) {
-        fut.fut->wait();
-        auto res = fut.fut->value();
-        {
-          // acquiring GIL as torch::jit::toPyObject creates new py::object
-          // without grabbing the GIL.
-          AutoGIL ag;
-          return torch::jit::toPyObject(std::move(res));
-        }
-      });
+      .def(
+          "wait",
+          [](PythonFutureWrapper& fut) {
+            fut.fut->wait();
+            auto res = fut.fut->value();
+            {
+              // acquiring GIL as torch::jit::toPyObject creates new py::object
+              // without grabbing the GIL.
+              pybind11::gil_scoped_acquire ag;
+              return torch::jit::toPyObject(std::move(res));
+            }
+          },
+          py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_rpc_script",
@@ -336,9 +343,10 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto fut = rpcTorchscriptCall(dst, name, stack);
+        auto fut = rpcTorchscript(dst, name, stack);
         return PythonFutureWrapper(fut);
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_builtin",
@@ -350,6 +358,24 @@ If the future completes with an error, an exception is thrown.
          const py::kwargs& kwargs) {
         return pyRemoteBuiltin(agent, dst, opName, rf, args, kwargs);
       });
+
+  module.def(
+      "_invoke_remote_torchscript",
+      [](const WorkerInfo& dst,
+         const std::string& qualifiedName,
+         const py::args& args,
+         const py::kwargs& kwargs) {
+        auto name = c10::QualifiedName(qualifiedName);
+        auto fnSchema = PythonRpcHandler::getInstance()
+                            .jitCompilationUnit()
+                            ->get_function(name)
+                            .getSchema();
+        auto stack = torch::jit::createStackForSchema(
+            fnSchema, args, kwargs, c10::nullopt);
+        auto userRRefPtr = remoteTorchscript(dst, name, stack);
+        return PyRRef(userRRefPtr);
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_invoke_remote_python_udf",

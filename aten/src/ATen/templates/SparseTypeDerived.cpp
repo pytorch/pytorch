@@ -30,15 +30,9 @@ $extra_cuda_headers
 namespace at {
 
 namespace ${Type} {
-#ifndef USE_STATIC_DISPATCH
-namespace {
-#endif
 
 ${type_derived_method_definitions}
 
-#ifndef USE_STATIC_DISPATCH
-}
-#endif
 }  // namespace ${Type}
 
 #ifndef USE_STATIC_DISPATCH

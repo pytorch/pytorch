@@ -52,7 +52,7 @@ tensor that encodes bounding box regression predictions.
         2,
         "locations",
         "2D tensor of shape (M, 4) that identifies M 'select' locations "
-        "encoded by the four colums: (n, c, y, x). The loss is computed on the "
+        "encoded by the four columns: (n, c, y, x). The loss is computed on the "
         "four contiguous channel locations [c, c + 3] (inclusive).")
     .Input(
         3,

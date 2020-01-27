@@ -153,6 +153,7 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
 SET(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/fc-run.cc
+  src/fc-dynamic-run.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -176,6 +177,7 @@ SET(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8gavgpool/up8xm-neon.c
   src/q8gemm/4x-sumrows-neon.c
   src/q8gemm/4x8-neon.c
+  src/q8gemm/4x8-dq-neon.c
   src/q8gemm/4x8c2-xzp-neon.c
   src/q8gemm/6x4-neon.c
   src/q8gemm/8x8-neon.c
@@ -196,11 +198,13 @@ SET(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8conv/4x8-aarch32-neon.S
   src/q8dwconv/up8x9-aarch32-neon.S
   src/q8gemm/4x8-aarch32-neon.S
+  src/q8gemm/4x8-dq-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S)
 
 SET(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
   src/q8conv/8x8-aarch64-neon.S
-  src/q8gemm/8x8-aarch64-neon.S)
+  src/q8gemm/8x8-aarch64-neon.S
+  src/q8gemm/8x8-dq-aarch64-neon.S)
 
 SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8avgpool/mp8x9p8q-sse2.c
@@ -213,6 +217,7 @@ SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8gavgpool/up8x7-sse2.c
   src/q8gavgpool/up8xm-sse2.c
   src/q8gemm/2x4c8-sse2.c
+  src/q8gemm/4x4c2-dq-sse2.c
   src/q8gemm/4x4c2-sse2.c
   src/q8vadd/sse2.c
   src/u8clamp/sse2.c
