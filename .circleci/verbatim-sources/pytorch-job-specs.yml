@@ -140,7 +140,7 @@ jobs:
         path: test-reports
 
   pytorch_windows_build:
-    << *pytorch_windows_params
+    <<: *pytorch_windows_params
     executor: windows-cpu-with-nvidia-cuda
     steps:
       - checkout
@@ -172,7 +172,7 @@ jobs:
             set -x
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
-    << *pytorch_windows_params
+    <<: *pytorch_windows_params
     executor: windows-with-nvidia-gpu
     steps:
       - checkout
