@@ -41,9 +41,20 @@ namespace torch { namespace autograd {
 
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
-    AT_ERROR(
-      "a leaf Variable that requires grad has been used in an in-place operation.");
+  if (var.requires_grad() && GradMode::is_enabled()) {
+    if (var.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
+    } else if (var.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      auto grad_fn = impl::grad_fn_unsafe(var);
+      // NB: !var.is_leaf() ==> grad_fn != nullptr
+      TORCH_INTERNAL_ASSERT(grad_fn);
+      TORCH_CHECK(diff_view_meta->allow_rebase_history,
+          "The ", diff_view_meta->output_nr_, "th output of ", grad_fn->name(),
+          " is being modified inplace but this is not allowed as it would prevent correct gradient computation.");
+    }
   }
 }
 
@@ -97,23 +108,44 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
+inline Tensor as_differentiable_view(const Tensor & base, Tensor tensor, bool allow_rebase_history) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
-  return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
+  return make_variable_differentiable_view(std::move(base_var), std::move(tensor), allow_rebase_history);
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
-                                   bool is_differentiable = true) {
+inline std::vector<Tensor> as_differentiable_view(const Tensor & base, std::vector<Tensor> tensors,
+                                                  bool allow_rebase_history) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
+    tensor = make_variable_differentiable_view(base_var, std::move(tensor), allow_rebase_history);
+  }
+  return tensors;
+}
+
+// See NOTE [ Autograd View Variables ] for details.
+inline Tensor as_non_differentiable_view(const Tensor & base, Tensor tensor) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
+  }
+  return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+}
+
+// See NOTE [ Autograd View Variables ] for details.
+inline std::vector<Tensor> as_non_differentiable_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
+  }
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
   }
   return tensors;
 }
