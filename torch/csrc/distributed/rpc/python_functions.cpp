@@ -82,7 +82,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
 
   // set forceGradRecording to true as even if the args does not contain any
   // tensor, the return value might still contain tensors.
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   return torch::distributed::autograd::sendMessageWithAutograd(
       *agent,
       dst,
@@ -136,7 +136,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
       *agent, dst, std::move(*scriptCall).toMessage(), false, rf);
 }
@@ -161,7 +161,7 @@ PyRRef pyRemoteBuiltin(
   auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
       op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
 
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   auto fm = sendMessageWithAutograd(
       *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, rf);
 
@@ -179,7 +179,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
 
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
       *agent,
       dst,
@@ -196,7 +196,7 @@ PyRRef pyRemotePythonUdf(
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
     ctx.addPendingUser(userRRef->forkId(), userRRef);

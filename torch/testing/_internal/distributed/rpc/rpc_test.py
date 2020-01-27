@@ -53,7 +53,7 @@ def _stub_construct_rpc_backend_options_handler(
     return mock.Mock()  # RpcBackendOptions.
 
 
-def _stub_start_rpc_backend_handler(
+def _stub_init_rpc_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
     return StubRpcAgent(world_size=world_size)
@@ -286,7 +286,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_get_worker_infos(self):
-        worker_infos = rpc.api.get_current_rpc_agent().get_worker_infos()
+        worker_infos = rpc.api._get_current_rpc_agent().get_worker_infos()
 
         worker_names = {
             worker_info.name for worker_info in worker_infos
@@ -352,9 +352,9 @@ class RpcTest(RpcAgentTestFixture):
         self._test_self_remote_rref_as_remote_arg(rpc.get_worker_info())
 
     @mock.patch.object(torch.distributed.autograd, "_init")
-    @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
+    @mock.patch.object(torch.distributed.rpc.api, "_set_and_start_rpc_agent")
     @dist_init(setup_rpc=False)
-    def test_register_rpc_backend_and_start_rpc_backend(
+    def test_register_rpc_backend_and_set_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
@@ -362,7 +362,7 @@ class RpcTest(RpcAgentTestFixture):
         backend = rpc.backend_registry.register_backend(
             backend_name,
             _stub_construct_rpc_backend_options_handler,
-            _stub_start_rpc_backend_handler,
+            _stub_init_rpc_backend_handler,
         )
 
         with self.assertRaisesRegex(
@@ -371,7 +371,7 @@ class RpcTest(RpcAgentTestFixture):
             backend = rpc.backend_registry.register_backend(
                 backend_name,
                 _stub_construct_rpc_backend_options_handler,
-                _stub_start_rpc_backend_handler,
+                _stub_init_rpc_backend_handler,
             )
 
         rpc.init_rpc(
@@ -389,7 +389,7 @@ class RpcTest(RpcAgentTestFixture):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc_backend(
+            rpc.api._init_rpc_backend(
                 backend=self.rpc_backend,
                 store=store,
                 name="duplicate_name",
@@ -574,7 +574,6 @@ class RpcTest(RpcAgentTestFixture):
         # worker0 calls this at the end after waiting for RPC responses.
         # worker1/2 calls this immediately and has some works after it.
         # worker3 calls this immediately and has no more work.
-        rpc.api._wait_all_workers()
         rpc.api._wait_all_workers()
         rpc.shutdown(graceful=False)
 
@@ -1382,11 +1381,11 @@ class RpcTest(RpcAgentTestFixture):
         # GIL profiling should be disabled by default.
         dst_rank = (self.rank + 1) % self.world_size
         rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
-        info = rpc.api.get_current_rpc_agent().get_debug_info()
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertRaises(KeyError, lambda: info["agent.gil_average_wait_time_us"])
         rpc.enable_gil_profiling(True)
         rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(torch.ones(1), torch.ones(1)))
-        info = rpc.api.get_current_rpc_agent().get_debug_info()
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.gil_average_wait_time_us", info)
 
     @dist_init
@@ -1396,7 +1395,7 @@ class RpcTest(RpcAgentTestFixture):
         initialize_pg(self.init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
-        info = rpc.api.get_current_rpc_agent().get_debug_info()
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1417,7 +1416,7 @@ class RpcTest(RpcAgentTestFixture):
         # blocks until the request arrives
         self.assertEqual(self.rank, VALUE_FUTURE.result())
 
-        info = rpc.api.get_current_rpc_agent().get_debug_info()
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1441,7 +1440,7 @@ class RpcTest(RpcAgentTestFixture):
         # request
         dist.barrier()
 
-        info = rpc.api.get_current_rpc_agent().get_debug_info()
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
         self.assertIn("agent.num_pending_requests", info)
         self.assertIn("agent.thread_pool_size", info)
         self.assertIn("agent.num_idle_threads", info)
@@ -1453,7 +1452,7 @@ class RpcTest(RpcAgentTestFixture):
             # the local send/recv threads would have finished. We try three
             # times. (NB: this might potentially be flaky. If flakiness does
             # occur, then we have to relax the assert.)
-            info = rpc.api.get_current_rpc_agent().get_debug_info()
+            info = rpc.api._get_current_rpc_agent().get_debug_info()
             if int(info["agent.num_idle_threads"]) == NUM_THREAD:
                 break
             time.sleep(0.1)
@@ -1486,7 +1485,7 @@ class RpcTest(RpcAgentTestFixture):
 
         info = _get_debug_info()
         rref_info = _rref_context_get_debug_info()
-        agent_info = rpc.api.get_current_rpc_agent().get_debug_info()
+        agent_info = rpc.api._get_current_rpc_agent().get_debug_info()
         autograd_info = dist_autograd._get_debug_info()
         common_keys = rref_info.keys() & agent_info.keys() & autograd_info.keys()
         self.assertEqual(0, len(common_keys))
