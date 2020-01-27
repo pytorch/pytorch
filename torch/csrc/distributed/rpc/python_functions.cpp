@@ -196,7 +196,6 @@ PyRRef pyRemotePythonUdf(
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
-  auto agent = RpcAgent::getCurrentRpcAgent();
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
     ctx.addPendingUser(userRRef->forkId(), userRRef);
