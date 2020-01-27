@@ -1076,9 +1076,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
             ++af.pc;
           } break;
           case TAIL_CALL: {
