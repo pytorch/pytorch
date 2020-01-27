@@ -254,8 +254,8 @@ class Conv2d(_ConvNd):
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
+                    mod.bias.numel() != 0, mod.padding_mode)
+        qconv.set_weight_bias(qweight, mod.bias if mod.bias.numel() != 0 else None)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 
@@ -368,8 +368,8 @@ class Conv3d(_ConvNd):
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
+                    mod.bias.numel() != 0, mod.padding_mode)
+        qconv.set_weight_bias(qweight, mod.bias if mod.bias.numel() != 0 else None)
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
 
