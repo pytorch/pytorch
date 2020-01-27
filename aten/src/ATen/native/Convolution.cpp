@@ -565,10 +565,11 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
+  std::vector<int64_t> weight_sizes_mkl;
   c10::IntArrayRef weight_sizes = weight.sizes();
   if (input_is_mkldnn && (k == input.ndimension() + 1)) {
     k = input.ndimension();
-    std::vector<int64_t> weight_sizes_mkl(k);
+    weight_sizes_mkl.resize(k);
     weight_sizes_mkl[0] = weight.size(0) * weight.size(1);
     std::copy_n(
         weight.sizes().cbegin() + 2, k - 1, weight_sizes_mkl.begin() + 1);
@@ -605,7 +606,7 @@ at::Tensor _convolution(
                            params.stride, params.dilation);
     }
     //return a view of input rather than empty tensor to not break the gradient chain
-    return input.view(o);
+    return input.clone().view(o);
   }
 
   if (k == 3) {
