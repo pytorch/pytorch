@@ -253,8 +253,11 @@ class MyScriptModule(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def my_method(self):
-        self.a = 11
+        return self.a
 
+def run_ref_script_module(ref_module):
+    module = ref_module.to_here()
+    return module.my_method()
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -830,6 +833,20 @@ class RpcTest(RpcAgentTestFixture):
                 'worker{}'.format(dst_rank),
                 MyScriptModule().my_method,
                 args=())
+
+    @dist_init
+    def test_py_remote_script_module(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        ref_script_module = rpc.remote(
+            "worker{}".format(dst_rank),
+            MyScriptModule,
+            args=())
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            run_ref_script_module,
+            args=(ref_script_module,))
+        self.assertEqual(ret, MyScriptModule().my_method())
 
     @dist_init
     def test_nested_rpc(self):
