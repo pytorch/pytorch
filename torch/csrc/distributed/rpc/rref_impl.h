@@ -287,8 +287,9 @@ class OwnerRRef final : public RRef {
 
   // Has a value been set?
   bool hasValue() const;
-  // Gets a future that is satisfied when the value is set.
-  std::shared_ptr<torch::utils::Future<IValue>> getFuture();
+  // Register a callback for being invoked, when setValue() is called.
+  // If hasValue() is already true, the callback will be invoked in-place.
+  void addCallback(const utils::Future<IValue>::Callback& callback);
 
  private:
   friend class RRefContext;

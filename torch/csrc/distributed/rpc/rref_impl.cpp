@@ -178,14 +178,15 @@ bool OwnerRRef::hasValue() const {
   return futureValuePtr_->completed();
 }
 
-std::shared_ptr<torch::utils::Future<IValue>> OwnerRRef::getFuture() {
+void OwnerRRef::addCallback(const utils::Future<IValue>::Callback& callback) {
   std::lock_guard<std::mutex> lock(futureValuePtrMutex_);
-  return futureValuePtr_;
+  futureValuePtr_->addCallback(callback);
 }
 
 void OwnerRRef::setValue(IValue&& value) {
   std::unique_lock<std::mutex> lock(futureValuePtrMutex_);
   if (futureValuePtr_->completed()) {
+    TORCH_CHECK(false, "Set value to OwnerRRef twice.")
     // `tempFutureValuePtr` is a new `FutureValuePtr`.
     std::shared_ptr<torch::utils::Future<IValue>> tempFutureValuePtr =
         std::make_shared<torch::utils::Future<IValue>>();
