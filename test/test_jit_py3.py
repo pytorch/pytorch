@@ -1,12 +1,13 @@
-from common_utils import run_tests
-from jit_utils import JitTestCase
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional, Any, Dict
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
-import jit_utils
+import torch.testing._internal.jit_utils
+import torch.nn as nn
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -32,6 +33,23 @@ class TestScriptPy3(JitTestCase):
 
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    def test_optional_dict_construct(self):
+        class M(torch.nn.Module):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
+                return buffer["prev_key"]
+
+            def forward(self, x):
+                prev_key = torch.rand(2, 3)
+                next_key = torch.rand(2, 3)
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
+                    "prev_key": prev_key,
+                    "next_key": next_key,
+                }
+
+                return self.use(saved_state)
+
+        self.checkModule(M(), (torch.rand(2, 2),))
 
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
@@ -254,7 +272,7 @@ class TestScriptPy3(JitTestCase):
 
         mm = MyMod()
         mm.save('foo.zip')
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
         loaded = torch.jit.load('foo.zip')
 
         out = mm()
@@ -313,6 +331,71 @@ class TestScriptPy3(JitTestCase):
             def foo():
                 return MyCoolNamedTuple(4, 5.5, [3])
             print(foo.graph)
+
+    def test_export_opnames_interface(self):
+        global OneTwoModule
+        @torch.jit.interface
+        class OneTwoModule(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                pass
+
+        class FooMod(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x + y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 * x
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.one(self.two(x), x)
+
+        class BarMod(nn.Module):
+            def one(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                return x * y
+
+            def two(self, x):
+                # type: (Tensor) -> Tensor
+                return 2 / x
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.two(self.one(x, x))
+
+        class M(nn.Module):
+            sub : OneTwoModule
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.sub = BarMod()
+
+            def forward(self, x):
+                # type: (Tensor) -> Tensor
+                return self.sub.forward(x)
+
+        def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
+            return mod_list[0].forward(x) + mod_list[1].forward(x)
+
+        scripted_M_mod = torch.jit.script(M())
+        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
+                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal', 'prim::Constant'])
+
+        scripted_M_mod.sub = torch.jit.script(FooMod())
+        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
+                         ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant'])
+
 
 if __name__ == '__main__':
     run_tests()

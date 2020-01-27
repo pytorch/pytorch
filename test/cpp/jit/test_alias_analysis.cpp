@@ -707,6 +707,31 @@ graph():
     AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
   }
   {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %c : Tensor[] = prim::ListConstruct(%y)
+    %d : Tensor[] = prim::ListConstruct(%y)
+    return (%c, %d)
+    )IR",
+        &*graph, vmap);
+
+    AliasDb aliasDb(graph);
+    auto x = vmap["x"];
+    auto c = vmap["c"];
+    AT_ASSERT(!aliasDb.mayContainAlias(x, c));
+    AT_ASSERT(!aliasDb.mayContainAlias(c, x));
+
+    auto d = vmap["d"];
+
+    AT_ASSERT(aliasDb.mayContainAlias(d, c));
+    AT_ASSERT(aliasDb.mayContainAlias(c, d));
+  }
+  {
     // Test list container aliasing
     auto graph = std::make_shared<Graph>();
     std::unordered_map<std::string, Value*> vmap;
