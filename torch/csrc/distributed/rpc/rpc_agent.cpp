@@ -21,21 +21,24 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
-std::shared_ptr<RpcAgent> RpcAgent::defaultRpcAgent_ = nullptr;
+std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
-std::shared_ptr<RpcAgent> RpcAgent::getDefaultRpcAgent() {
-  return defaultRpcAgent_;
+bool RpcAgent::isCurrentRpcAgentSet() {
+  return currentRpcAgent_ != nullptr;
 }
 
-void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
-  if (defaultRpcAgent) {
-    TORCH_INTERNAL_ASSERT(
-        !defaultRpcAgent_, "Default rpc agent is already initialized!");
+std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
+  TORCH_INTERNAL_ASSERT(currentRpcAgent_, "Current RPC agent is not set!");
+  return currentRpcAgent_;
+}
+
+void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
+  if (rpcAgent) {
+    TORCH_INTERNAL_ASSERT(!currentRpcAgent_, "Current RPC agent is set!");
   } else {
-    TORCH_INTERNAL_ASSERT(
-        defaultRpcAgent_, "Default rpc agent was not initialized!");
+    TORCH_INTERNAL_ASSERT(currentRpcAgent_, "Current RPC agent is not set!");
   }
-  defaultRpcAgent_ = std::move(defaultRpcAgent);
+  currentRpcAgent_ = std::move(rpcAgent);
 }
 
 void RpcAgent::enableGILProfiling(bool flag) {

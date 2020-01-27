@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import functools
 import logging
@@ -14,18 +13,19 @@ from torch._jit_internal import _qualified_name
 from . import (
     RpcBackendOptions,
     WorkerInfo,
-    get_current_rpc_agent,
     _cleanup_python_rpc_handler,
     _destroy_rref_context,
+    _get_current_rpc_agent,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
     _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
     _invoke_rpc_script,
-    _set_rpc_timeout,
-    _start_rpc_agent,
+    _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
+    _set_rpc_timeout,
+    _set_and_start_rpc_agent,
     backend_registry,
 )
 from .internal import (
@@ -68,7 +68,7 @@ def _use_rpc_pickler(rpc_pickler):
 def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if get_current_rpc_agent() is None:
+        if not _is_current_rpc_agent_set():
             raise RuntimeError(
                 "RPC has not been initialized. Call "
                 "torch.distributed.rpc.init_rpc first."
@@ -78,60 +78,43 @@ def _require_initialized(func):
     return wrapper
 
 
-class WaitAllWorkersStates(object):
-    def __init__(self):
-        # Each `intent_worker_names` is an empty set at beginning.
-        # It's only used by leader worker. Leader worker is user-specified or
-        # elected as the first worker in a sorted worker name list.
-        # Whenever there is a worker showing shutdown intention to the leader, by
-        # calling _wait_all_workers()`, the leader adds this worker's name to the set.
-        # The leader also adds itself's name to the set on calling
-        # `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
-        # to be called only once, by examing if leader's name has been added to the set.
-        self.intent_worker_names = set()
-        # Once `intent_worker_names == _ALL_WORKER_NAMES`,
-        # we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
-        # to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
-        self.proceed_signal = threading.Event()
-
-
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-_wait_all_workers_dict_lock = threading.Lock()
-_wait_all_workers_sequence_id = 0
-_wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
+# `_SHUTDOWN_INTENT_WORKER_NAMES` is an empty set at beginning.
+# It's only used by leader worker. Leader worker is elected as the first
+# worker in a sorted worker name list.
+# Whenever there is a worker showing shutdown intention to the leader, by
+# calling _wait_all_workers()`, the leader adds this worker's name to the set.
+# The leader also adds itself's name to the set on calling
+# `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
+# to be called only once, by examing if leader's name has been added to the set.
+_SHUTDOWN_INTENT_WORKER_NAMES = set()
+# Once `_SHUTDOWN_INTENT_WORKER_NAMES == _ALL_WORKER_NAMES`,
+# we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
+# to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+_SHUTDOWN_PROCEED_SIGNAL = threading.Event()
 
 
-def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
+def _on_leader_follower_report_shutdown_intent(worker_name):
     assert (
         worker_name in _ALL_WORKER_NAMES
     ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
-    intent_worker_names = _wait_all_workers_sequence_id_to_states[
-        sequence_id
-    ].intent_worker_names
     assert (
-        worker_name not in intent_worker_names
-    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
-        worker_name=worker_name, sequence_id=sequence_id
-    )
-    intent_worker_names.add(worker_name)
-    if _ALL_WORKER_NAMES == intent_worker_names:
-        _set_proceed_shutdown_signal(sequence_id)
+        worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
+    ), "{worker_name} reported intent twice. ".format(worker_name=worker_name)
+    _SHUTDOWN_INTENT_WORKER_NAMES.add(worker_name)
+    if _ALL_WORKER_NAMES == _SHUTDOWN_INTENT_WORKER_NAMES:
+        _set_proceed_shutdown_signal()
 
 
-def _set_proceed_shutdown_signal(sequence_id):
-    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
-    assert (
-        not proceed_signal.is_set()
-    ), "Termination signal sequence id {} got set twice.".format(
-        sequence_id=sequence_id
-    )
-    proceed_signal.set()
+def _set_proceed_shutdown_signal():
+    assert not _SHUTDOWN_PROCEED_SIGNAL.is_set(), "Termination signal got set twice."
+    _SHUTDOWN_PROCEED_SIGNAL.set()
 
 
 @_require_initialized
-def _wait_all_workers(exit_on_worker_done=None):
+def _wait_all_workers():
     r"""
     Block until all local and remote RPC processes reach this method and wait
     for all outstanding work to complete. Every RPC process must call this
@@ -142,37 +125,27 @@ def _wait_all_workers(exit_on_worker_done=None):
     assert (
         _ALL_WORKER_NAMES is not None
     ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
-    if exit_on_worker_done is not None:
-        leader_worker_name = _to_worker_info(exit_on_worker_done).name
-    else:
-        leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
+    leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
-    self_worker_name = get_current_rpc_agent().get_worker_info().name
-
-    global _wait_all_workers_sequence_id
-    with _wait_all_workers_dict_lock:
-        sequence_id = _wait_all_workers_sequence_id
-        _wait_all_workers_sequence_id += 1
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
+    assert (
+        self_worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
+    ), "Can not call `_wait_all_workers()` twice."
 
     is_leader_worker = leader_worker_name == self_worker_name
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
     if is_leader_worker:
-        _on_leader_follower_report_shutdown_intent(sequence_id, self_worker_name)
+        _on_leader_follower_report_shutdown_intent(self_worker_name)
     else:
-        if exit_on_worker_done is None:
-            rpc_sync(
-                leader_worker_name,
-                _on_leader_follower_report_shutdown_intent,
-                args=(sequence_id, self_worker_name),
-            )
+        rpc_sync(
+            leader_worker_name,
+            _on_leader_follower_report_shutdown_intent,
+            args=(self_worker_name,),
+        )
 
-    if not is_leader_worker or (is_leader_worker and exit_on_worker_done is None):
-        proceed_signal = _wait_all_workers_sequence_id_to_states[
-            sequence_id
-        ].proceed_signal
-        proceed_signal.wait()
+    _SHUTDOWN_PROCEED_SIGNAL.wait()
 
     # Phase 2: Leader asks followers to proceed.
     # Leader's signal is the first to be unblocked,
@@ -183,9 +156,7 @@ def _wait_all_workers(exit_on_worker_done=None):
         _set_rpc_timeout(timeout)
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(
-                follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,)
-            )
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=())
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
@@ -199,7 +170,7 @@ def _wait_all_workers(exit_on_worker_done=None):
 
 
 @_require_initialized
-def shutdown(graceful=True, exit_on_worker_done=None):
+def shutdown(graceful=True):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
     stops the local agent from  accepting outstanding requests, and shuts
@@ -214,10 +185,6 @@ def shutdown(graceful=True, exit_on_worker_done=None):
                          this will block until all local and remote RPC
                          processes have reached this method and wait for all
                          outstanding work to complete.
-        exit_on_worker_done (str or WorkerInfo): The worker to act as the leader in
-            sending out the termination command. Other workers act as followers.
-            Notice all workers should pass the same value as this argument,
-            otherwise they would hang on termination.
 
     Example::
         Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
@@ -245,13 +212,13 @@ def shutdown(graceful=True, exit_on_worker_done=None):
         >>> rpc.shutdown()
     """
     if graceful:
-        _wait_all_workers(exit_on_worker_done=exit_on_worker_done)
-        get_current_rpc_agent().join()
+        _wait_all_workers()
+        _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
     finally:
-        get_current_rpc_agent().shutdown()
+        _get_current_rpc_agent().shutdown()
         # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
@@ -277,7 +244,7 @@ def _init_rpc_backend(
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
-    if get_current_rpc_agent() is not None:
+    if _is_current_rpc_agent_set():
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
@@ -314,9 +281,9 @@ def get_worker_info(worker_name=None):
         current worker if ``worker_name`` is ``None``.
     """
     if worker_name:
-        return get_current_rpc_agent().get_worker_info(worker_name)
+        return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
-        return get_current_rpc_agent().get_worker_info()
+        return _get_current_rpc_agent().get_worker_info()
 
 
 def _to_worker_info(name_or_info):
@@ -431,7 +398,7 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(_get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         return _remote_torchscript(
             info, torch._jit_internal._qualified_name(func), args, kwargs
@@ -440,7 +407,7 @@ def remote(to, func, args=None, kwargs=None):
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        return _invoke_remote_python_udf(get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
+        return _invoke_remote_python_udf(_get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -464,12 +431,12 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(_get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(_get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -482,7 +449,7 @@ def enable_gil_profiling(flag):
     Arguments:
         flag (bool): True to set metrics profiling, False to disable.
     """
-    get_current_rpc_agent().enable_gil_profiling(flag)
+    _get_current_rpc_agent().enable_gil_profiling(flag)
 
 
 @_require_initialized
@@ -791,4 +758,6 @@ def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    return _invoke_remote_torchscript(to, qualified_name, *args, **kwargs)
+    return _invoke_remote_torchscript(
+        to, qualified_name, *args, **kwargs
+    )
