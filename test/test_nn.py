@@ -5713,20 +5713,12 @@ class TestNN(NNTestCase):
         num_layers = 2
         seq_length = 7
         batch = 6
-
-        # runs on CPU to acquire expected output
-        m = nn.LSTM(input_size, hidden_size, num_layers)
-        input = torch.randn(seq_length, batch, input_size)
+        m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
+        input = torch.randn(seq_length, batch, input_size).cuda()
         expected_output = m(input)
-
-        # adds weight normalization
+        # add weight normalization
         name = 'weight_hh_l0'
         m = torch.nn.utils.weight_norm(m, name=name)
-
-        # moves to CUDA
-        m = m.cuda()
-        input = input.cuda()
-
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
         self.assertEqual(m(input), expected_output)
@@ -5734,20 +5726,6 @@ class TestNN(NNTestCase):
         # remove weight norm
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
-
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_partial_flat_weights(self):
-        input_size = 10
-        hidden_size = 6
-        num_layers = 2
-
-        # creates an RNN (LSTM) and deletes an attribute
-        m = nn.LSTM(input_size, hidden_size, num_layers)
-        del m.weight_hh_l0
-
-        # verifies that moving to CUDA with only some attributes defined
-        # does not throw an error
-        m.cuda()
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
