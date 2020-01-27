@@ -108,13 +108,20 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   }
 }
 
-TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
-  auto registry = c10::Dispatcher::singleton()
-    .registerBackendFallbackKernel(
+struct Environment {
+  c10::RegistrationHandleRAII registry1 = c10::Dispatcher::singleton().registerBackendFallbackKernel(
+      DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
+      KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
+  );
+
+  c10::RegistrationHandleRAII registry2 = c10::Dispatcher::singleton().registerBackendFallbackKernel(
       DispatchKey::TESTING_ONLY_GenericModeTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
-    );
+  );
+};
 
+TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
+  Environment e;
   c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
 
   override_call_count = 0;
@@ -124,37 +131,10 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 }
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
-  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
-      KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
-  );
-
+  Environment e;
   override_call_count = 0;
   Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
-  ASSERT_EQ(override_call_count, 1);
-}
-
-TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
-  // By default fallthrough
-  auto registry = c10::Dispatcher::singleton().registerBackendFallbackKernel(
-      DispatchKey::TESTING_ONLY_GenericModeTensorId,
-      KernelFunction::makeFallthrough()
-  );
-  c10::RegistrationHandleRAII registry3 = c10::Dispatcher::singleton()
-   .registerKernel(
-     c10::Dispatcher::singleton().findSchemaOrThrow("aten::mul", "Tensor"),
-     DispatchKey::TESTING_ONLY_GenericModeTensorId,
-     KernelFunction::makeFromBoxedFunction<&generic_mode_fallback>()
-   );
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericModeTensorId);
-
-  override_call_count = 0;
-  // Doesn't trigger, as we fallthrough
-  Tensor a = zeros({5, 5}, kDouble);
-  ASSERT_EQ(override_call_count, 0);
-  // Does trigger, because we explicitly set it
-  Tensor b = mul(a, a);
   ASSERT_EQ(override_call_count, 1);
 }
 

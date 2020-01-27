@@ -32,7 +32,6 @@ Dispatcher::Dispatcher()
 : operators_()
 , operatorLookupTable_()
 , backendFallbackKernels_()
-, backendFallbackNonFallthroughSet_(DispatchKeySet::FULL)
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -129,9 +128,6 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
 RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dispatchKey, KernelFunction kernel) {
   auto inserted = backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
   TORCH_CHECK(inserted == impl::KernelFunctionTable::SetKernelResult::ADDED_NEW_KERNEL, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
-  if (kernel.isFallthrough()) {
-    backendFallbackNonFallthroughSet_ = backendFallbackNonFallthroughSet_.remove(dispatchKey);
-  }
 
   return RegistrationHandleRAII([this, dispatchKey] {
     deregisterBackendFallbackKernel_(dispatchKey);
@@ -140,7 +136,6 @@ RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dis
 
 void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
   auto result = backendFallbackKernels_.removeKernelIfExists(dispatchKey);
-  backendFallbackNonFallthroughSet_ = backendFallbackNonFallthroughSet_.add(dispatchKey);
   TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
