@@ -1916,13 +1916,13 @@ class TestQuantizedConv(unittest.TestCase):
                 (stride_d, stride_h, stride_w), (pad_d, pad_h, pad_w),
                 channelwise)
 
-# @unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
-#                      "This Pytorch Build has not been built with QNNPACK")
-# @unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
-# @unittest.skipIf(TEST_WITH_UBSAN,
-#                  "QNNPACK does not play well with UBSAN at the moment,"
-#                  " so we skip the test if we are in a UBSAN environment.")
-# @unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
+@unittest.skipUnless('qnnpack' in torch.backends.quantized.supported_engines,
+                     "This Pytorch Build has not been built with QNNPACK")
+@unittest.skipIf(IS_PPC, "QNNPACK is not currently supported on ppc64le")
+@unittest.skipIf(TEST_WITH_UBSAN,
+                 "QNNPACK does not play well with UBSAN at the moment,"
+                 " so we skip the test if we are in a UBSAN environment.")
+@unittest.skipIf(IS_MACOS, "QNNPACK tests are flaky on MacOS currently - Issue #29326")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
