@@ -303,7 +303,7 @@ class SummaryWriter(object):
         self._get_file_writer().add_summary(ssi)
         self._get_file_writer().add_summary(sei)
         for k, v in metric_dict.items():
-            self._get_file_writer().add_scalar(k, v)
+            self._get_file_writer().add_summary(scalar(k, v))
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
