@@ -518,7 +518,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/register_distributed_ops.cpp
       )
     endif()
   endif()

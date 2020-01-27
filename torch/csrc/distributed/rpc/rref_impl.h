@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/rref_interface.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -207,7 +207,7 @@ class RRef : public RRefInterface {
   inline bool isPyObj() {
     return type_ == PyObjectType::get();
   }
-  inline const TypePtr type() {
+  inline TypePtr type() const override {
     return type_;
   }
 
@@ -237,6 +237,12 @@ class UserRRef final : public RRef {
   UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
 
+  UserRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      TypePtr type);
+
   inline bool isOwner() const override {
     return false;
   }
@@ -254,12 +260,6 @@ class UserRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  UserRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId,
-      TypePtr type);
-
   const ForkId forkId_;
 };
 
@@ -271,6 +271,18 @@ class OwnerRRef final : public RRef {
   OwnerRRef(OwnerRRef&& other) = delete;
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
+      : OwnerRRef(ownerId, rrefId, type, {}) {}
+
+  OwnerRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      TypePtr type,
+      c10::optional<IValue> value)
+      : RRef(ownerId, rrefId, std::move(type)) {
+    value_ = std::move(value);
+  }
 
   inline bool isOwner() const override {
     return true;
@@ -292,18 +304,6 @@ class OwnerRRef final : public RRef {
 
  private:
   friend class RRefContext;
-
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-      : OwnerRRef(ownerId, rrefId, type, {}) {}
-
-  OwnerRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      TypePtr type,
-      c10::optional<IValue> value)
-      : RRef(ownerId, rrefId, std::move(type)) {
-    value_ = std::move(value);
-  }
 
   c10::optional<IValue> value_;
   mutable std::mutex mutex_;

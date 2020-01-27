@@ -253,7 +253,7 @@ class MyScriptModule(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def my_method(self):
-        self.a = 11
+        return self.a
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1650,3 +1650,47 @@ class RpcTest(RpcAgentTestFixture):
         with _use_rpc_pickler(test_pickler):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+
+@unittest.skipIf(
+    sys.version_info < (3, 0),
+    "Pytorch distributed rpc package " "does not support python2",
+)
+class RpcJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_rref_as_arg(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_to_here(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_var.to_here()
+
+        local_ret = rref_to_here(rref_var)
+        rpc_ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref_var,))
+        self.assertEqual(local_ret, rpc_ret)
+
+    @dist_init
+    def test_remote_script_module(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        ref_script_module = rpc.remote(
+            "worker{}".format(dst_rank),
+            MyScriptModule,
+            args=())
+
+        @torch.jit.script
+        def run_ref_script_module(ref_script_module):
+            module = ref_script_module.to_here()
+            return module.my_method()
+
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            run_ref_script_module,
+            args=(ref_script_module,))
+        self.assertEqual(ret, MyScriptModule().my_method())

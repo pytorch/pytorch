@@ -1,14 +1,16 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/types.h>
+#include <c10/util/intrusive_ptr.h>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace c10 {
+
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
+using worker_id_t = int16_t;
 
 // This abstract class contains only user-facing APIs, and will be shared
 // between jit and distributed to implement TorchScript support.
-class RRefInterface {
+class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
  public:
   RRefInterface() = default;
   // RRef is made NOT copyable NOT movable to prevent messing up reference
@@ -24,8 +26,8 @@ class RRefInterface {
 
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
+
+  virtual TypePtr type() const = 0;
 };
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+}

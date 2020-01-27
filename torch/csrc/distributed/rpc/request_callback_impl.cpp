@@ -132,7 +132,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -153,7 +153,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
             jit::toPyObject(rref->getValue()));
