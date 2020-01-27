@@ -25,23 +25,24 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+                                                  suppress_warnings, slowTest,
+                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
-                                        create_input, unpack_variables,
-                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                        exclude_tensor_method,
-                                        mask_not_all_zeros,
-                                        S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+from torch.testing._internal.common_methods_invocations import (method_tests,
+                                                                create_input, unpack_variables,
+                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                                                exclude_tensor_method,
+                                                                mask_not_all_zeros,
+                                                                S)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3017,14 +3018,14 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
         torch.autograd.grad(g.sum(), [x])
-        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+        self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
@@ -3468,11 +3469,10 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
+                 should_raise_tuple=(None, None, None))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3797,6 +3797,32 @@ for shape in [(1,), ()]:
         c = torch.sum(s**b)
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+    def test_multi_view_methods(self):
+        # This list should math the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
+        # It maps a function its arguments for an input of size [3,]
+        fn_to_test = {
+            'split': (2,),
+            'split_with_sizes': ((2, 1),),
+            'unbind': (0,)
+        }
+
+        for fn, arg in fn_to_test.items():
+            inp = torch.rand(3, dtype=torch.double, requires_grad=True)
+
+            def foo(inp, inplace=False):
+                x = inp * 2
+                x = getattr(x, fn)(*arg)
+                res = 0.
+                for i, el in enumerate(x):
+                    if inplace:
+                        el *= 42
+                    res += (i + 1) * el.sum()
+                return res
+            self.assertTrue(gradcheck(foo, (inp,)))
+            self.assertTrue(gradgradcheck(foo, (inp,)))
+            self.assertTrue(gradcheck(foo, (inp, True)))
+            self.assertTrue(gradgradcheck(foo, (inp, True)))
 
 
 def index_variable(shape, max_indices):
