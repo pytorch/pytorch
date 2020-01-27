@@ -51,6 +51,14 @@ static inline HOST_DEVICE T powi(T a, T b) {
   return powi_impl(a, b);
 }
 
+// avx2 and hip don't compile without this. 
+// "no overloaded function has restriction specifiers that are compatible with.."
+template <class T,
+  typename std::enable_if<!std::is_integral<T>::value, T>::type* = nullptr>
+static inline HOST_DEVICE T powi(T a, T b) {
+  AT_ERROR("not implemented");
+}
+
 using pow_tensor_tensor_fn = void (*)(TensorIterator&);
 using pow_tensor_scalar_fn = void (*)(TensorIterator&, Scalar);
 
