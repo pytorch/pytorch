@@ -17,10 +17,9 @@ C10_DEFINE_bool(
 namespace caffe2 {
 namespace opt {
 
-namespace {
 std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
-    bool use_fp16_acc_for_fc = false,
-    bool use_nnpi = false) {
+    bool use_fp16_acc_for_fc,
+    bool use_nnpi) {
   std::unordered_map<std::string, std::string> fake_fp16_op_conversion_map = {
       {"FC", "Fp16FCAcc32NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
@@ -53,7 +52,6 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
   }
   return fake_fp16_op_conversion_map;
 }
-} // namespace
 
 void fakeFp16Transform(NetDef* net) {
   static const std::unordered_map<std::string, std::string>
