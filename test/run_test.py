@@ -20,6 +20,9 @@ PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
+    'test_nn',
+    'test_jit_simple',
+    'test_jit_legacy',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn

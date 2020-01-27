@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import concurrent.futures
-from datetime import timedelta
 import sys
 import time
 import unittest
@@ -9,16 +8,13 @@ from collections import namedtuple
 from unittest import mock
 
 import torch
-import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.testing._internal.common_utils import load_tests, IS_MACOS
-from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
+from torch.testing._internal.common_utils import load_tests
+from torch.distributed.rpc import RRef
 import torch.testing._internal.dist_utils
-from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
-from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
+from torch.testing._internal.dist_utils import dist_init
+from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
-from torch._jit_internal import _qualified_name
 
 
 def requires_process_group_agent(message=""):
