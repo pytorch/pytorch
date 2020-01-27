@@ -9,18 +9,6 @@ namespace at { namespace native {
 
 namespace {
 
-template <typename T>
-static inline __host__ __device__ T powi(T a, T b) {
-  T result = 1;
-  while (b) {
-    if (b & 1) {
-       result *= a;
-    }
-    b /= 2;
-    a *= a;
-  }
-  return result;
-}
 
 // SFINAE doesn't work well with NVCC under Windows for math functions like pow and sqrt.
 // So we need to define the functions with the explicit function signatures.

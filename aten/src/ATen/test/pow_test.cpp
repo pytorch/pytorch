@@ -104,39 +104,53 @@ void assert_eq(T val, T act, T exp) {
   ASSERT_EQ(act, exp);
 }
 
-template<typename Vals, typename Pows>
-void tensor_pow_scalar(const Vals vals, const Pows pows) {
-  using T = typename Vals::value_type;
+template <class T,
+  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+T typed_pow(T base, T exp) {
+  return std::pow(base, exp);
+}
+template <class T,
+  typename std::enable_if<std::is_integral<T>::value,T>::type* = nullptr>
+T typed_pow(T base, T exp) {
+  return native::powi(base, exp);
+}
 
+template<typename Vals, typename Pows>
+void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType dtype) {
   const auto tensor = torch::tensor(vals);
 
   for (const auto pow : pows) {
+    if ( dtype == kInt && pow > std::numeric_limits<int>::max()) {
+      // value cannot be converted to type int without overflow
+      EXPECT_THROW(tensor.pow(pow), std::domain_error);
+      continue;
+    }
     auto actual_pow = tensor.pow(pow);
 
-    auto actual_pow_ = tensor.clone();
+    auto actual_pow_ = torch::empty_like(actual_pow);
+    actual_pow_.copy_(tensor);
     actual_pow_.pow_(pow);
 
-    auto actual_pow_out = torch::empty_like(tensor);
+    auto actual_pow_out = torch::empty_like(actual_pow);
     torch::pow_out(actual_pow_out, tensor, pow);
 
     auto actual_torch_pow = torch::pow(tensor, pow);
 
     int i = 0;
     for (const auto val : vals) {
-      const auto exp = static_cast<T>(
-        std::pow(static_cast<long double>(val), static_cast<double>(pow)));
+      const auto exp = torch::pow(torch::tensor({val}, dtype), torch::tensor(pow, dtype)).template item<double>();
 
-      const auto act_pow = actual_pow[i].template item<T>();
-      assert_eq(val, act_pow, exp);
+      const auto act_pow = actual_pow[i].to(at::kDouble).template item<double>();
+      assert_eq<long double>(val, act_pow, exp);
 
-      const auto act_pow_ = actual_pow_[i].template item<T>();
-      assert_eq(val, act_pow_, exp);
+      const auto act_pow_ = actual_pow_[i].to(at::kDouble).template item<double>();
+      assert_eq<long double>(val, act_pow_, exp);
 
-      const auto act_pow_out = actual_pow_out[i].template item<T>();
-      assert_eq(val, act_pow_out, exp);
+      const auto act_pow_out = actual_pow_out[i].to(at::kDouble).template item<double>();
+      assert_eq<long double>(val, act_pow_out, exp);
 
-      const auto act_torch_pow = actual_torch_pow[i].template item<T>();
-      assert_eq(val, act_torch_pow, exp);
+      const auto act_torch_pow = actual_torch_pow[i].to(at::kDouble).template item<double>();
+      assert_eq<long double>(val, act_torch_pow, exp);
 
       i++;
     }
@@ -151,14 +165,13 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
 
   for (const auto val : vals) {
     const auto actual_pow = torch::pow(val, pow_tensor);
-    auto actual_pow_out1 = torch::empty_like(pow_tensor);
+    auto actual_pow_out1 = torch::empty_like(actual_pow);
     const auto actual_pow_out2 =
       torch::pow_out(actual_pow_out1, val, pow_tensor);
 
     int i = 0;
     for (const auto pow : pows) {
-      const auto exp = static_cast<T>(
-        std::pow(static_cast<T>(val), pow));
+      const auto exp = typed_pow(static_cast<T>(val), T(pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
       assert_eq<T>(val, act_pow, exp);
@@ -198,7 +211,7 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
     int i = 0;
     for (const auto val : vals) {
       const auto pow = pows[i];
-      const auto exp = static_cast<T>(std::pow(val, pow));
+      const auto exp = typed_pow(T(val), T(pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
       assert_eq(val, act_pow, exp);
@@ -219,34 +232,79 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
   }
 }
 
+template<typename T>
+void test_pow_one(const std::vector<T> vals) {
+  for (const auto val : vals) {
+    ASSERT_EQ(native::powi(val, T(1)), val);
+  }
+}
+
+template<typename T>
+void test_squared(const std::vector<T> vals) {
+  for (const auto val : vals) {
+    ASSERT_EQ(native::powi(val, T(2)), val * val);
+  }
+}
+
+template<typename T>
+void test_cubed(const std::vector<T> vals) {
+  for (const auto val : vals) {
+    ASSERT_EQ(native::powi(val, T(3)), val * val * val);
+  }
+}
+template<typename T>
+void test_inverse(const std::vector<T> vals) {
+  for (const auto val : vals) {
+    // 1 has special checks below
+    if ( val != 1 && val != -1) {
+      ASSERT_EQ(native::powi(val, T(-4)), 0);
+      ASSERT_EQ(native::powi(val, T(-1)), val==1);
+    }
+  }
+  T neg1 = -1;
+  ASSERT_EQ(native::powi(neg1, T(0)), 1);
+  ASSERT_EQ(native::powi(neg1, T(-1)), -1);
+  ASSERT_EQ(native::powi(neg1, T(-2)), 1);
+  ASSERT_EQ(native::powi(neg1, T(-3)), -1);
+  ASSERT_EQ(native::powi(neg1, T(-4)), 1);
+
+  T one = 1;
+  ASSERT_EQ(native::powi(one, T(0)), 1);
+  ASSERT_EQ(native::powi(one, T(-1)), 1);
+  ASSERT_EQ(native::powi(one, T(-2)), 1);
+  ASSERT_EQ(native::powi(one, T(-3)), 1);
+  ASSERT_EQ(native::powi(one, T(-4)), 1);
+
+}
+
 }
 
 TEST(PowTest, IntTensorPowAllScalars) {
-  tensor_pow_scalar(ints, non_neg_ints);
-  tensor_pow_scalar(ints, non_neg_longs);
-  tensor_pow_scalar(ints, floats);
-  tensor_pow_scalar(ints, doubles);
+  tensor_pow_scalar(ints, non_neg_ints, kInt);
+  tensor_pow_scalar(ints, non_neg_longs, kInt);
+  tensor_pow_scalar(ints, floats, kFloat);
+  tensor_pow_scalar(ints, doubles, kDouble);
 }
 
 TEST(PowTest, LongTensorPowAllScalars) {
-  tensor_pow_scalar(longs, non_neg_ints);
-  tensor_pow_scalar(longs, non_neg_longs);
-  tensor_pow_scalar(longs, floats);
-  tensor_pow_scalar(longs, doubles);
+  tensor_pow_scalar(longs, non_neg_ints, kLong);
+  tensor_pow_scalar(longs, non_neg_longs, kLong);
+  tensor_pow_scalar(longs, floats, kFloat);
+  tensor_pow_scalar(longs, doubles, kDouble);
 }
 
 TEST(PowTest, FloatTensorPowAllScalars) {
-  tensor_pow_scalar(floats, ints);
-  tensor_pow_scalar(floats, longs);
-  tensor_pow_scalar(floats, floats);
-  tensor_pow_scalar(floats, doubles);
+  tensor_pow_scalar(floats, ints, kDouble);
+  tensor_pow_scalar(floats, longs, kDouble);
+  tensor_pow_scalar(floats, floats, kFloat);
+  tensor_pow_scalar(floats, doubles, kDouble);
 }
 
 TEST(PowTest, DoubleTensorPowAllScalars) {
-  tensor_pow_scalar(doubles, ints);
-  tensor_pow_scalar(doubles, longs);
-  tensor_pow_scalar(doubles, floats);
-  tensor_pow_scalar(doubles, doubles);
+  tensor_pow_scalar(doubles, ints, kDouble);
+  tensor_pow_scalar(doubles, longs, kDouble);
+  tensor_pow_scalar(doubles, floats, kDouble);
+  tensor_pow_scalar(doubles, doubles, kDouble);
 }
 
 TEST(PowTest, IntScalarPowAllTensors) {
@@ -286,3 +344,18 @@ TEST(PowTest, FloatTensorPowFloatTensor) {
 TEST(PowTest, DoubleTensorPowDoubleTensor) {
   tensor_pow_tensor(doubles, doubles);
 }
+
+TEST(PowTest, TestIntegralPow) {
+  test_pow_one(longs);
+  test_pow_one(ints);
+
+  test_squared(longs);
+  test_squared(ints);
+
+  test_cubed(longs);
+  test_cubed(ints);
+
+  test_inverse(longs);
+  test_inverse(ints);
+}
+
