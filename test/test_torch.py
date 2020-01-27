@@ -11015,6 +11015,7 @@ class TestTorchDeviceType(TestCase):
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
+    @precisionOverride({torch.half: 1e-1, torch.float: 1e-5, torch.double: 1e-10})
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
     def test_logspace(self, device, dtype):
@@ -11031,10 +11032,11 @@ class TestTorchDeviceType(TestCase):
         # Check precision - start, stop and base are chosen to avoid overflow
         # steps is chosen so that step size is not subject to rounding error
         # a tolerance is needed for gpu tests due to differences in computation
-        tol = 0.
+        tol = 0. if device == 'cpu' else self.precision
         self.assertEqual(torch.tensor([2. ** (i / 8.) for i in range(49)], device=device, dtype=dtype),
                          torch.logspace(0, 6, steps=49, base=2, device=device, dtype=dtype),
                          tol)
+
         # Check non-default base=2
         self.assertEqual(torch.logspace(1, 1, 1, 2, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype) * 2)
@@ -11047,8 +11049,8 @@ class TestTorchDeviceType(TestCase):
 
         # Check logspace_ for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
-        y = torch.logspace(0, 3, 4, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.tensor(((0, 1, 10), (0, 100, 1000)), device=device, dtype=dtype), 0)
+        y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
+        self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), 0)
 
     @dtypes(torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
