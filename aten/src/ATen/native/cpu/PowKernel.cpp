@@ -27,7 +27,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
       cpu_kernel(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
-          return powi(base, exp);
+          return native::powi(base, exp);
         }
       );
     });
@@ -152,7 +152,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       const scalar_t exp = exp_scalar.to<scalar_t>();
       cpu_kernel(iter,
         [=](scalar_t base) -> scalar_t {
-          return powi(base, exp);
+          return native::powi(base, exp);
         });
     });
   }

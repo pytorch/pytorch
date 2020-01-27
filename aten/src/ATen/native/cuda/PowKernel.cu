@@ -42,7 +42,7 @@ static inline __host__ __device__ typename std::enable_if<std::is_floating_point
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ typename std::enable_if<std::is_integral<Base_type>::value && std::is_same<Base_type, Exp_type>::value, Base_type>::type
   pow_(Base_type base, Exp_type exp) {
-  return powi(base, exp);
+  return native::powi(base, exp);
 }
 // pow (Otherwise)
 template <typename Base_type, typename Exp_type>
@@ -97,7 +97,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        return powi(base, exp);
+        return native::powi(base, exp);
       });
     });
   }
