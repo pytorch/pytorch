@@ -32,6 +32,7 @@ BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
 mkdir -p "${BUILD_ROOT}"
+mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
 
 build_analyzer() {
@@ -94,23 +95,19 @@ analyze_torch_mobile() {
   OUTPUT="${WORK_DIR}/torch_result.${FORMAT}"
 
   if [ ! -f "${INPUT}" ]; then
-    # Extract libtorch archive
-    OBJECT_DIR="${WORK_DIR}/torch_objs"
-    rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-    for f in "${TORCH_INSTALL_PREFIX}/lib"/*.a; do
-      ar x "${f}"
-    done
-    popd
-
     # Link libtorch into a single module
-    "${LLVM_DIR}/bin/llvm-link" -S "${OBJECT_DIR}"/*.cpp.o -o "${INPUT}"
+    # TODO: invoke llvm-link from cmake directly to avoid this hack.
+    # TODO: include *.c.o when there is meaningful fan-out from pure-c code.
+    "${LLVM_DIR}/bin/llvm-link" -S \
+    $(find "${TORCH_BUILD_ROOT}" -name '*.cpp.o' -o -name '*.cc.o') \
+    -o "${INPUT}"
   fi
 
   # Analyze dependency
   call_analyzer
 
   if [ -n "${DEPLOY}" ]; then
-    DEST="${BUILD_ROOT}/torch_deps.py"
+    DEST="${BUILD_ROOT}/pt_deps.bzl"
     cat > ${DEST} <<- EOM
 # Generated for selective build without using static dispatch.
 # Manually run the script to update:
@@ -118,6 +115,7 @@ analyze_torch_mobile() {
 EOM
     printf "TORCH_DEPS = " >> ${DEST}
     cat "${OUTPUT}" >> ${DEST}
+    echo "Deployed file at: ${DEST}"
   fi
 }
 
@@ -126,16 +124,12 @@ analyze_test_project() {
   FORMAT="${FORMAT:=yaml}"
   OUTPUT="${WORK_DIR}/test_result.${FORMAT}"
 
-  # Extract archive
-  OBJECT_DIR="${WORK_DIR}/test_objs"
-  rm -rf "${OBJECT_DIR}" && mkdir -p "${OBJECT_DIR}" && pushd "${OBJECT_DIR}"
-  for f in "${TEST_INSTALL_PREFIX}/lib"/*.a; do
-    ar x "${f}"
-  done
-  popd
-
-  # Link into a single module
-  "${LLVM_DIR}/bin/llvm-link" -S "${OBJECT_DIR}"/*.cpp.o -o "${INPUT}"
+  # Link into a single module (only need c10 and OpLib srcs)
+  # TODO: invoke llvm-link from cmake directly to avoid this hack.
+  "${LLVM_DIR}/bin/llvm-link" -S \
+  $(find "${TORCH_BUILD_ROOT}" -path '*/c10*' \( -name '*.cpp.o' -o -name '*.cc.o' \)) \
+  $(find "${TEST_BUILD_ROOT}" -path '*/OpLib*' \( -name '*.cpp.o' -o -name '*.cc.o' \)) \
+  -o "${INPUT}"
 
   # Analyze dependency
   call_analyzer
