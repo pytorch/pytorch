@@ -229,7 +229,9 @@ if (${name}.defined()) {
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
-OPERATOR_NAME = CodeTemplate("""\
+OPERATOR_NAME = CodeTemplate("aten::${operator_name}")
+
+OPERATOR_NAME_FULL = CodeTemplate("""\
     {"aten::${operator_name}", "${overload_name}"},
 """)
 
@@ -616,6 +618,11 @@ FunctionCode = NamedTuple('FunctionCode', [
     ('declaration', str),
 ])
 
+OpRegistration = NamedTuple('OpRegistration', [
+    ('operator_name', str),
+    ('registration_code', str),
+])
+
 
 def device_guard(option, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
@@ -696,7 +703,7 @@ def to_return_type(arg, option):
 
 
 def create_generic(top_env, declarations):
-    # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
+    # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
     # translates defaults from cwrap types to C++ values
     def translate_default(argument, type_str, default):
         # type: (THFormal, str, Any) -> Any
@@ -1214,7 +1221,7 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['list_of_aten_ops'].append(OPERATOR_NAME.substitute(option))
+        top_env['list_of_aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1234,13 +1241,19 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if option['manual_kernel_registration']:
-                top_env['function_registrations'].append(DEFAULT_SCHEMA_REGISTRATION.substitute(option))
+                op_registrations.append(OpRegistration(
+                    operator_name=OPERATOR_NAME.substitute(option),
+                    registration_code=DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
             else:
                 if option['use_c10_dispatcher'] == 'full':
-                    top_env['function_registrations'].append(DEFAULT_FUNCTION_REGISTRATION.substitute(option))
+                    op_registrations.append(OpRegistration(
+                        operator_name=OPERATOR_NAME.substitute(option),
+                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
                 else:
                     assert option['use_c10_dispatcher'] == 'unboxed_only'
-                    top_env['function_registrations'].append(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
+                    op_registrations.append(OpRegistration(
+                        operator_name=OPERATOR_NAME.substitute(option),
+                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1297,6 +1310,7 @@ def create_generic(top_env, declarations):
         )
 
     output_declarations = []  # type: List[OutputDeclaration]
+    op_registrations = []  # type: List[OpRegistration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
@@ -1314,14 +1328,14 @@ def create_generic(top_env, declarations):
                 option['skip'] = True
         output_declarations.extend(output_options)
 
-    return output_declarations
+    return output_declarations, op_registrations
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[OpRegistration], List[str], List[str]]
     type_object_declarations = []  # type: List[str]
     type_object_definitions = []  # type: List[str]
-    function_registrations = []  # type: List[str]
+    op_registrations = []  # type: List[OpRegistration]
     legacy_th_declarations = []  # type: List[str]
     legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
@@ -1627,12 +1641,14 @@ def create_derived(backend_type_env, declarations):
                     NATIVE_DISPATCH_DEFINITION_BACKEND.substitute(env))
                 if native_dispatch:
                     if option['use_c10_dispatcher'] == 'full':
-                        function_registrations.append(
-                            BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                        op_registrations.append(OpRegistration(
+                            operator_name=OPERATOR_NAME.substitute(option),
+                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env)))
                     else:
                         assert option['use_c10_dispatcher'] == 'unboxed_only'
-                        function_registrations.append(
-                            BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
+                        op_registrations.append(OpRegistration(
+                            operator_name=OPERATOR_NAME.substitute(option),
+                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env)))
 
     for declaration in declarations:
         for option in declaration['options']:
@@ -1646,5 +1662,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations,
+    return (type_object_declarations, type_object_definitions, op_registrations,
             legacy_th_declarations, legacy_th_definitions)
