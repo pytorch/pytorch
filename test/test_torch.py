@@ -11039,16 +11039,16 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.logspace(1, 1, 1, 2, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype) * 2)
         self.assertEqual(torch.logspace(0, 2, 3, 2, device=device, dtype=dtype),
-                         torch.Tensor((1, 2, 4), device=device, dtype=dtype))
+                         torch.tensor((1, 2, 4), device=device, dtype=dtype))
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2, device=device, dtype=dtype),
-                         torch.Tensor((10, 1), device=device, dtype=dtype), 0)
+                         torch.tensor((10, 1), device=device, dtype=dtype), 0)
 
         # Check logspace_ for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.logspace(0, 3, 4, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.Tensor(((0, 1, 10), (0, 100, 1000)), device=device, dtype=dtype), 0)
+        self.assertEqual(x, torch.tensor(((0, 1, 10), (0, 100, 1000)), device=device, dtype=dtype), 0)
 
     @dtypes(torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
