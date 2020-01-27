@@ -73,9 +73,8 @@ std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index) {
  * CUDAGenerator class implementation
  */
 CUDAGenerator::CUDAGenerator(DeviceIndex device_index)
-  : Generator{Device(DeviceType::CUDA, device_index)} {
-  key_set_ = DispatchKeySet(c10::DispatchKey::CUDATensorId);
-}
+  : Generator{Device(DeviceType::CUDA, device_index),
+              DispatchKeySet(c10::DispatchKey::CUDATensorId)} { }
 
 /**
  * Sets the seed to be used by curandStatePhilox4_32_10

@@ -48,12 +48,10 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
  * CPUGenerator class implementation
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
-  : Generator{Device(DeviceType::CPU)},
+  : Generator{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPUTensorId)},
     engine_{seed_in},
     next_float_normal_sample_{c10::optional<float>()},
-    next_double_normal_sample_{c10::optional<double>()} {
-  key_set_ = DispatchKeySet(c10::DispatchKey::CPUTensorId);
-}
+    next_double_normal_sample_{c10::optional<double>()} { }
 
 /**
  * Manually seeds the engine with the seed input
