@@ -14,7 +14,7 @@ import inspect
 import glob
 import os
 import shutil
-import common_utils as common
+import torch.testing._internal.common_utils as common
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]

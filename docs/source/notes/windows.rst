@@ -78,7 +78,7 @@ object to make it build on Windows.
        relative_to=__file__,
        with_cuda=with_cuda,
        extra_compile_args=["-std=c99"],
-       libraries=['ATen', '_C'] # Append cuda libaries when necessary, like cudart
+       libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
 
 Second, here is a workground for "unresolved external symbol 
@@ -176,7 +176,7 @@ You can resolve this by typing the following command.
     conda install -c peterjc123 vc vs2017_runtime
     conda install mkl_fft intel_openmp numpy mkl
 
-As for the wheels package, since we didn't pack some libaries and VS2017 
+As for the wheels package, since we didn't pack some libraries and VS2017 
 redistributable files in, please make sure you install them manually.
 The `VS 2017 redistributable installer
 <https://aka.ms/vs/15/release/VC_redist.x64.exe>`_ can be downloaded.

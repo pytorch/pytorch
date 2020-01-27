@@ -2,7 +2,9 @@ import torch
 import torch.nn.functional as F
 from itertools import product
 
-from ._overrides import torch_function_dispatch
+from ._overrides import has_torch_function, handle_torch_function
+
+Tensor = torch.Tensor
 
 __all__ = [
     'align_tensors',
@@ -22,10 +24,7 @@ __all__ = [
     'unique_consecutive',
 ]
 
-def _broadcast_tensors_dispatcher(*tensors):
-    return tensors
 
-@torch_function_dispatch(_broadcast_tensors_dispatcher)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
@@ -52,14 +51,11 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
+    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+        return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
-def _split_dispatcher(tensor, split_size_or_sections, dim=0):
-    return (tensor,)
-
-
-@torch_function_dispatch(_split_dispatcher)
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks.
 
@@ -78,6 +74,8 @@ def split(tensor, split_size_or_sections, dim=0):
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
+    if type(tensor) is not Tensor and has_torch_function((tensor,)):
+        return handle_torch_function(split, (tensor,), tensor, split_size_or_sections, dim=dim)
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
     # split_size_or_sections. The branching code is in tensor.py, which we
@@ -178,11 +176,6 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
-def _einsum_dispatcher(equation, *operands):
-    return operands
-
-
-@torch_function_dispatch(_einsum_dispatcher)
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
@@ -250,17 +243,14 @@ Examples::
     >>> torch.einsum('...ij->...ji', A).shape # batch permute
     torch.Size([2, 3, 5, 4])
 """
+    if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
+        return handle_torch_function(einsum, operands, *operands)
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
     return torch._C._VariableFunctions.einsum(equation, operands)
 
 
-def _meshgrid_dispatcher(*tensors, **kwargs):
-    return tensors
-
-
-@torch_function_dispatch(_meshgrid_dispatcher)
 def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
@@ -290,6 +280,8 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
                 [4, 5, 6],
                 [4, 5, 6]])
     """
+    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+        return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
     if kwargs:
         raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
@@ -298,13 +290,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return torch._C._VariableFunctions.meshgrid(tensors)
 
 
-def _stft_dispatcher(input, n_fft, hop_length=None, win_length=None,
-                     window=None, center=True, pad_mode='reflect',
-                     normalized=False, onesided=True):
-    return (input,)
 
-
-@torch_function_dispatch(_stft_dispatcher)
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
@@ -388,6 +374,10 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         Tensor: A tensor containing the STFT result with shape described above
 
     """
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(
+            stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length, window=window,
+            center=center, pad_mode=pad_mode, normalized=normalized, onesided=onesided)
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.
     if center:
@@ -401,12 +391,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
 del torch.unique_dim
 
-def _unique_dispatcher(input, sorted=None, return_inverse=None,
-                       return_counts=None, dim=None):
-    return (input,)
 
-
-@torch_function_dispatch(_unique_dispatcher)
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
 
@@ -466,6 +451,10 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
                 [ 1,  2]])
 
     """
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(
+            unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
+            return_counts=return_counts, dim=dim)
     if dim is not None:
         output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
             input,
@@ -490,11 +479,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
     else:
         return output
 
-def _unique_consecutive_dispatcher(
-        input, return_inverse=None, return_counts=None, dim=None):
-    return (input,)
 
-@torch_function_dispatch(_unique_consecutive_dispatcher)
 def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
@@ -545,6 +530,10 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(
+            unique_consecutive, (input,), input, return_inverse=return_inverse,
+            return_counts=return_counts, dim=dim)
     output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     if return_inverse and return_counts:
@@ -555,11 +544,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         return output, counts
     return output
 
-def _tensordot_dispatcher(a, b, dims=None):
-    return (a, b)
 
-
-@torch_function_dispatch(_tensordot_dispatcher)
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -604,6 +589,8 @@ def tensordot(a, b, dims=2):
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
     """
+    if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
+        return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
     if isinstance(dims, (list, tuple)) or \
        (isinstance(dims, torch.Tensor) and dims.numel() > 1):
         dims_a, dims_b = dims
@@ -616,7 +603,7 @@ def tensordot(a, b, dims=2):
         dims_b = list(range(dims))
     return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
 
-@torch_function_dispatch(_broadcast_tensors_dispatcher)
+
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
@@ -645,12 +632,11 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
+    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+        return handle_torch_function(cartesian_prod, tensors, *tensors)
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
-def _cdist_dispatcher(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
-    return (x1, x2)
 
-@torch_function_dispatch(_cdist_dispatcher)
 def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
@@ -692,6 +678,8 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
                 [2.7138, 3.8322],
                 [2.2830, 0.3791]])
     """
+    if (type(x1) is not Tensor or type(x2) is not Tensor) and has_torch_function((x1, x2)):
+        return handle_torch_function(cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
         return torch._C._VariableFunctions.cdist(x1, x2, p, None)
     elif compute_mode == 'use_mm_for_euclid_dist':
@@ -702,11 +690,6 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
 
-def _norm_dispatcher(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
-    return (input,)
-
-
-@torch_function_dispatch(_norm_dispatcher)
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     r"""Returns the matrix norm or vector norm of a given tensor.
 
@@ -767,6 +750,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
+    if type(input) is not Tensor and has_torch_function((input,)):
+        return handle_torch_function(
+            norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
     ndim = input.dim()
 
     # catch default case
@@ -804,11 +790,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
-def _chain_matmul_dispatcher(*matrices):
-    return matrices
-
-
-@torch_function_dispatch(_chain_matmul_dispatcher)
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
@@ -838,13 +819,11 @@ def chain_matmul(*matrices):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
+    if any(type(t) is not Tensor for t in matrices) and has_torch_function(matrices):
+        return handle_torch_function(chain_matmul, matrices, *matrices)
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
-def _lu_dispatcher(A, pivot=None, get_infos=None, out=None):
-    return (A,)
 
-
-@torch_function_dispatch(_lu_dispatcher)
 def lu(A, pivot=True, get_infos=False, out=None):
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
@@ -912,6 +891,9 @@ def lu(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if type(A) is not Tensor and has_torch_function((A,)):
+        return handle_torch_function(
+            lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     # If get_infos is True, then we don't need to check for errors and vice versa
     result = torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
     if out is not None:

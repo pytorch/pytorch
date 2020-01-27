@@ -33,9 +33,8 @@ inline void parallel_for(
 
 #pragma omp parallel num_threads(num_threads)
   {
-    int64_t num_threads = omp_get_num_threads();
     int64_t tid = omp_get_thread_num();
-    int64_t chunk_size = divup((end - begin), num_threads);
+    int64_t chunk_size = divup((end - begin), omp_get_num_threads());
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {

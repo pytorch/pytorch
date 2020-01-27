@@ -609,7 +609,7 @@ def fn(arg0, arg1, ...):
 
 fut = torch.jit._fork(fn, arg0, arg1, ...)
 ...
-v = fut.wait()
+v = torch.jit._wait(fut) 
 
 ```
 

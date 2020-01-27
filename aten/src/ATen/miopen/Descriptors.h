@@ -61,7 +61,7 @@ public:
   T* desc() const { return desc_.get(); }
   T* desc() { return desc_.get(); }
 
-  // Use mut_desc() to access the underlying desciptor pointer
+  // Use mut_desc() to access the underlying descriptor pointer
   // if you intend to modify what it points to (e.g., using
   // miopenSetFooDescriptor).  This will ensure that the descriptor
   // is initialized.  Code in this file will use this function.

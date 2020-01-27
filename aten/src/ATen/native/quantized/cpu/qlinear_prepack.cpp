@@ -154,19 +154,8 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
         " instead");
 
     Tensor weight_contig = weight.contiguous();
-    auto weight_zp = weight.q_zero_point() + 128;
+    auto weight_zp = weight.q_zero_point();
 
-    int8_t* inp_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
-    Tensor qnnp_weight = at::_empty_affine_quantized(
-        weight_contig.sizes(),
-        at::device(kCPU).dtype(kQUInt8),
-        weight.q_scale(),
-        weight_zp);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
-      qnnp_w_data[i] = static_cast<c10::quint8>(inp_data[i] + 128);
-    }
     initQNNPACK();
 
     // We set the pre-packed linear weights to nullptr below as we call pre-pack
