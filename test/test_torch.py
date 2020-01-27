@@ -14257,9 +14257,10 @@ class TestTorchDeviceType(TestCase):
             torch.cat([x, y])
 
     @onlyCPU
-    def test_div_zero(self, device):
-        a = torch.IntTensor([0, 1])
-        b = torch.IntTensor([0, 1])
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_div_zero(self, device, dtype):
+        a = torch.tensor([0, 1], dtype=dtype, device=device)
+        b = torch.tensor([0, 1], dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
             a.div(b)
 
