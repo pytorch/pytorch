@@ -53,7 +53,7 @@ def _stub_construct_rpc_backend_options_handler(
     return mock.Mock()  # RpcBackendOptions.
 
 
-def _stub_start_rpc_backend_handler(
+def _stub_init_rpc_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
     return StubRpcAgent(world_size=world_size)
@@ -362,7 +362,7 @@ class RpcTest(RpcAgentTestFixture):
         backend = rpc.backend_registry.register_backend(
             backend_name,
             _stub_construct_rpc_backend_options_handler,
-            _stub_start_rpc_backend_handler,
+            _stub_init_rpc_backend_handler,
         )
 
         with self.assertRaisesRegex(
@@ -371,7 +371,7 @@ class RpcTest(RpcAgentTestFixture):
             backend = rpc.backend_registry.register_backend(
                 backend_name,
                 _stub_construct_rpc_backend_options_handler,
-                _stub_start_rpc_backend_handler,
+                _stub_init_rpc_backend_handler,
             )
 
         rpc.init_rpc(
@@ -389,7 +389,7 @@ class RpcTest(RpcAgentTestFixture):
             store, _, _ = next(torch.distributed.rendezvous(
                 self.init_method, rank=self.rank, world_size=self.world_size
             ))
-            rpc._init_rpc_backend(
+            rpc.api._init_rpc_backend(
                 backend=self.rpc_backend,
                 store=store,
                 name="duplicate_name",
