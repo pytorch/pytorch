@@ -1,3 +1,15 @@
+import contextlib
+import functools
+import logging
+import numbers
+import sys
+import threading
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+from torch._jit_internal import _qualified_name
+
 from . import (
     RpcBackendOptions,
     WorkerInfo,
@@ -5,10 +17,11 @@ from . import (
     _destroy_rref_context,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
+    _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
-    _set_rpc_timeout,
     _invoke_rpc_script,
+    _set_rpc_timeout,
     _start_rpc_agent,
     backend_registry,
 )
@@ -19,16 +32,6 @@ from .internal import (
     _start_record_function,
 )
 
-import contextlib
-from datetime import timedelta
-import functools
-import numbers
-import sys
-import logging
-import threading
-import torch
-import torch.distributed as dist
-from torch._jit_internal import _qualified_name
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
@@ -45,6 +48,7 @@ _agent = None
 # To enable RRef leak checking, set this _ignore_rref_leak to False
 _ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
+
 
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
@@ -68,6 +72,7 @@ def _require_initialized(func):
                 "torch.distributed.rpc.init_rpc first."
             )
         return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -157,8 +162,7 @@ def _wait_all_workers():
             except RuntimeError as ex:
                 logger.error(
                     "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_worker_name,
-                        timeout=timeout,
+                        worker_name=follower_worker_name, timeout=timeout
                     )
                 )
 
@@ -292,6 +296,7 @@ def _to_worker_info(name_or_info):
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
+
 def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
     type_mapping = {
         backend: backend_registry.BackendType,
@@ -324,7 +329,8 @@ def remote(to, func, args=None, kwargs=None):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
-        func (callable): builtin functions (like :meth:`torch.add`).
+        func (callable): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -357,6 +363,24 @@ def remote(to, func, args=None, kwargs=None):
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
+
+        If invoking an annotated TorchScript function, then run the following
+        code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
+        >>> rref.to_here()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
     info = _to_worker_info(to)
@@ -376,13 +400,16 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(
-            _agent, info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
+    elif isinstance(func, torch.jit.ScriptFunction):
+        return _remote_torchscript(
+            info, torch._jit_internal._qualified_name(func), args, kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        return _invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors, rf)
+            PythonUDF(func, args, kwargs)
+        )
+        return _invoke_remote_python_udf(_agent, info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -406,15 +433,14 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(
-            _agent, info, qualified_name, rf, *args, **kwargs
-        )
+        fut = _invoke_rpc_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        fut = _invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors, rf)
+            PythonUDF(func, args, kwargs)
+        )
+        fut = _invoke_rpc_python_udf(_agent, info, pickled_python_udf, tensors, rf)
     return fut
+
 
 @_require_initialized
 def enable_gil_profiling(flag):
@@ -680,3 +706,60 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
     fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
     return fut
+
+
+@_require_initialized
+def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
+    r"""
+    Make a remote call to run TorchScript func ``qualified_name`` on worker ``to`` and return an
+    :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+    Worker ``to`` will be the owner of the returned
+    :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is
+    a user. The owner manages the global reference count of its
+    :class:`~torch.distributed.rpc.RRef`, and the owner
+    :class:`~torch.distributed.rpc.RRef` is only destructed when globally there
+    are no living references to it.
+
+    Arguments:
+        to (str or WorkerInfo): id or name of the destination worker.
+        qualified_name (str): any callable function. python callable, builtin or annotated TorchScript
+                         functions (like meth:`torch.add`) can be sent over RPC more efficiently.
+        args (tuple): the argument tuple for the ``func`` invocation.
+        kwargs (dict): is a dictionary of keyword arguments for the ``func``
+                       invocation.
+
+    Returns:
+        A user :class:`~torch.distributed.rpc.RRef` instance to the result
+        value. Use the blocking API :meth:`torch.distributed.rpc.RRef.to_here`
+        to retrieve the result value locally.
+
+    Example::
+        Make sure that ``MASTER_ADDRESS`` and ``MASTER_PORT`` are set properly
+        on both workers. Refer to :meth:`~torch.distributed.init_process_group`
+        API for more details. For example,
+
+        >>> export MASTER_ADDRESS=localhost
+        >>> export MASTER_port=5678
+
+        Then run the following code in two different processes:
+
+        >>> # On worker 0:
+        >>> @torch.jit.script
+        >>> def my_script_add(t1, t2):
+        >>>    return torch.add(t1, t2)
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
+        >>> rref = rpc._remote_torchscript("worker1", _qualified_name(my_script_add), args=(torch.ones(2), 3))
+        >>> rref.to_here()
+        >>> rpc.shutdown()
+
+        >>> # On worker 1:
+        >>> import torch.distributed.rpc as rpc
+        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
+        >>> rpc.shutdown()
+    """
+    args = args if args else ()
+    kwargs = kwargs if kwargs else {}
+    return _invoke_remote_torchscript(
+        to, qualified_name, *args, **kwargs
+    )
