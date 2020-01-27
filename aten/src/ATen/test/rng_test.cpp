@@ -9,21 +9,17 @@ using namespace at;
 
 namespace {
 
-const auto RES_FLOAT = static_cast<float>(42.0);
-const auto RES_UINT32 = reinterpret_cast<const uint32_t&>(RES_FLOAT);
 constexpr uint32_t FLOAT_MASK = (1 << 24) - 1;
 constexpr float FLOAT_DIVISOR = 1.0f / (1 << 24);
 
-const auto RES_DOUBLE = static_cast<double>(42.0);
-const auto RES_UINT64 = reinterpret_cast<const uint64_t&>(RES_DOUBLE);
 constexpr uint64_t DOUBLE_MASK = (1ULL << 53) - 1;
 constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << 53);
 
 struct CustomCPUGenerator : public Generator {
   CustomCPUGenerator() : Generator{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)} { }
   ~CustomCPUGenerator() = default;
-  uint32_t random() { return RES_UINT32; }
-  uint64_t random64() { return RES_UINT64; }
+  uint32_t random() { return 42; }
+  uint64_t random64() { return 42; }
   void set_current_seed(uint64_t seed) override { throw "not implemented"; }
   uint64_t current_seed() const override { throw "not implemented"; }
   uint64_t seed() override { throw "not implemented"; }
@@ -53,7 +49,7 @@ auto cauchy(T median, T sigma, RNG* generator){
   return median + sigma * ::tan(static_cast<T>(M_PI) * (uniform(0.0, 1.0, generator)-static_cast<T>(0.5)));
 }
 
-}
+} 
 
 TEST(RNGTest, RegisterCustomRNG) {
   static auto registry = torch::RegisterOperators()
