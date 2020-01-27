@@ -107,9 +107,11 @@ class class_ {
       std::enable_if_t<
           std::is_member_function_pointer<std::decay_t<Method>>::value,
           bool> = false>
-  class_& def(std::string name, Method &&m) {
-    auto res =
-        def_(std::move(name), std::forward<Method>(m), detail::args_t<decltype(m)>{});
+  class_& def(std::string name, Method&& m) {
+    auto res = def_(
+        std::move(name),
+        std::forward<Method>(m),
+        detail::args_t<std::remove_reference_t<decltype(m)>>{});
     return *this;
   }
   template <
@@ -117,8 +119,11 @@ class class_ {
       std::enable_if_t<
           !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
-  class_& def(std::string name, Func &&f) {
-    auto res = def_(std::move(name), std::forward<Func>(f), detail::args_t<decltype(&Func::operator())>{});
+  class_& def(std::string name, Func&& f) {
+    auto res = def_(
+        std::move(name),
+        std::forward<Func>(f),
+        detail::args_t<std::remove_reference_t<decltype(&Func::operator())>>{});
     return *this;
   }
 
@@ -191,7 +196,10 @@ class class_ {
       std::enable_if_t<
           !std::is_member_function_pointer<std::decay_t<Func>>::value,
           bool> = false>
-  class_& def_(std::string name, Func &&f, detail::types<R, Types...> funcInfo) {
+  class_& def_(
+      std::string name,
+      Func&& f,
+      detail::types<R, Types...> funcInfo) {
     assert_self_type(funcInfo);
     defineMethod<R>(std::move(name), std::forward<Func>(f));
     return *this;
