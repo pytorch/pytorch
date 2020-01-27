@@ -81,26 +81,13 @@ class class_ {
       object->setSlot(0, capsule);
     };
 
-    defineMethod<void>("__init__", std::move(func));
+    defineMethod("__init__", std::move(func));
     return *this;
   }
-  template <
-      typename Method,
-      std::enable_if_t<
-          std::is_member_function_pointer<std::decay_t<Method>>::value,
-          bool> = false>
-  class_& def(std::string name, Method m) {
-    auto res =
-        def_(std::move(name), std::move(m), detail::args_t<decltype(m)>{});
-    return *this;
-  }
-  template <
-      typename Func,
-      std::enable_if_t<
-          !std::is_member_function_pointer<std::decay_t<Func>>::value,
-          bool> = false>
+  template <typename Func>
   class_& def(std::string name, Func f) {
-    auto res = def_(std::move(name), std::move(f), detail::args_t<decltype(&Func::operator())>{});
+    auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
+    defineMethod(std::move(name), std::move(wrapped_f));
     return *this;
   }
 
@@ -124,7 +111,7 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);
     };
-    defineMethod<void>("__setstate__", std::move(setstate_wrapper));
+    defineMethod("__setstate__", detail::wrap_func<CurClass, decltype(setstate_wrapper)>(std::move(setstate_wrapper)));
 
     // type validation
     auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
@@ -162,7 +149,7 @@ class class_ {
   }
 
  private:
-  template<typename R, typename Func>
+  template<typename Func>
   void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
@@ -198,42 +185,6 @@ class class_ {
 
     auto method = classCU()->create_function(qualClassName + "." + name, graph);
     classTypePtr->addMethod(method);
-  }
-
-  template <
-      typename Func,
-      typename R,
-      typename... Types,
-      std::enable_if_t<
-          std::is_member_function_pointer<std::decay_t<Func>>::value,
-          bool> = false>
-  class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
-    auto func = [f = std::move(f)](
-                    c10::intrusive_ptr<CurClass> cur, Types... args) {
-      return at::guts::invoke(f, *cur, args...);
-    };
-    defineMethod<R>(std::move(name), std::move(func));
-    return *this;
-  }
-
-  template <typename R, typename Head, typename... Tail>
-  void assert_self_type(detail::types<R, Head, Tail...> funcInfo) {
-    static_assert(
-        std::is_same<std::decay_t<Head>, c10::intrusive_ptr<CurClass>>::value,
-        "First argument of a registered lambda method must be an intrusive_ptr<> of the corresponding class.");
-  }
-
-  template <
-      typename Func,
-      typename R,
-      typename... Types,
-      std::enable_if_t<
-          !std::is_member_function_pointer<std::decay_t<Func>>::value,
-          bool> = false>
-  class_& def_(std::string name, Func f, detail::types<R, Types...> funcInfo) {
-    assert_self_type(funcInfo);
-    defineMethod<R>(std::move(name), std::move(f));
-    return *this;
   }
 };
 
