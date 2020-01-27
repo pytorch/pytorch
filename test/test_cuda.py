@@ -2108,8 +2108,8 @@ t2.start()
     def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs={}):
         # helper to cast args
         def cast(val, to_type):
-            if isinstance(val, torch.Tensor) and val.is_floating_point():
-                return val.to(to_type)
+            if isinstance(val, torch.Tensor):
+                return val.to(to_type) if val.is_floating_point() else val
             elif isinstance(val, container_abcs.Iterable):
                 return type(val)(cast(v, to_type) for v in val)
             else:

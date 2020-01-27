@@ -154,9 +154,9 @@ cached_cast(at::ScalarType to_type, T arg) {
 
 /*******************************************************************************
 Logic to apply cached casting to signatures with Tensors and a single TensorList
-The functions here exist only to support CastPolicy::promote_with_tensorlist,
-which exists to preserve the lifetime of data that's viewed by TensorLists
-further down the call chain.
+The functions here exist only to support CastPolicy::*_with_tensorlist,
+which store a local vector to preserve the lifetime of data that's viewed by
+TensorLists further down the call chain.
 *******************************************************************************/
 
 // helper to pick out the TensorList arg and create a casted vector
@@ -247,7 +247,7 @@ struct WrapFunction final {
 // I could deduplicate these by having a single one with more complex (one-size-fits-all) type selection and
 // TensorList handling, but then every instantiation would be bigger than it needs to be, and I'm creating a lot
 // of instantiations.  I'd rather write out the specializations so each instantiation only compiles with the bare
-// minimum of logic it needs.  Maybe i can clean this up and strike some balance.
+// minimum of logic it needs.  Maybe i can rewrite to strike some balance.
 
 // CastPolicy::fp16
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
@@ -324,36 +324,36 @@ Boxed fallback for all other ops
 *******************************/
 
 // Temporary workaround used by autocast_fallback.  I copy pasted this from somewhere, it should die soon.
-void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  auto s = Symbol::fromQualString(op.schema().name());
-  auto operators = torch::jit::getAllOperatorsFor(s);
-  // Find the exact match
-  std::shared_ptr<torch::jit::Operator> jit_op;
-  for (const auto& candidate_op : operators) {
-    auto candidate_schema = candidate_op->schema();
-    // NB: this is a VERY slow equality test
-    if (candidate_schema == op.schema()) {
-      jit_op = candidate_op;
-      break;
-    }
-  }
-  TORCH_INTERNAL_ASSERT(jit_op);
+// void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+//   auto s = Symbol::fromQualString(op.schema().name());
+//   auto operators = torch::jit::getAllOperatorsFor(s);
+//   // Find the exact match
+//   std::shared_ptr<torch::jit::Operator> jit_op;
+//   for (const auto& candidate_op : operators) {
+//     auto candidate_schema = candidate_op->schema();
+//     // NB: this is a VERY slow equality test
+//     if (candidate_schema == op.schema()) {
+//       jit_op = candidate_op;
+//       break;
+//     }
+//   }
+//   TORCH_INTERNAL_ASSERT(jit_op);
+//
+//   auto offset = jit_op->getOperation()(*stack);
+//   TORCH_INTERNAL_ASSERT(offset == 0);
+// }
 
-  auto offset = jit_op->getOperation()(*stack);
-  TORCH_INTERNAL_ASSERT(offset == 0);
-}
-
-// void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
-void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
+// void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::cout << "autocast_fallback" << std::endl;
 
   c10::impl::ExcludeTensorTypeIdGuard no_autocast(TensorTypeId::AutocastTensorId);
   // Temporary workaround.
   // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
-  callBoxedWorkaround(op, stack);
+  // callBoxedWorkaround(op, stack);
   // Alternative:  Have the fallback go straight for the forward-compatible call, and if anything breaks,
   // manually register something for it.
-  // op.callBoxed(stack);
+  op.callBoxed(stack);
 }
 // TODO:  Once fallthrough is implemented (https://github.com/pytorch/pytorch/issues/29548),
 // autocast_fallback can be deleted entirely.
@@ -488,6 +488,19 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::nuclear_norm, "aten::nuclear_norm.dim(Tensor self, int[2] dim, bool keepdim=False) -> Tensor", Tensor (const Tensor &, IntArrayRef, bool), fp32)
   KERNEL(at::cosine_similarity, "aten::cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t, double), fp32)
   KERNEL(at::poisson_nll_loss, "aten::poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor", Tensor (const Tensor &, const Tensor &, bool, bool, double, int64_t), fp32)
+  KERNEL(at::cosine_embedding_loss, "aten::cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(at::nll_loss, "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(at::nll_loss2d, "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t), fp32)
+  KERNEL(at::hinge_embedding_loss, "aten::hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(at::kl_div, "aten::kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::l1_loss, "aten::l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::smooth_l1_loss, "aten::smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::mse_loss, "aten::mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::margin_ranking_loss, "aten::margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, double, int64_t), fp32)
+  KERNEL(at::multilabel_margin_loss, "aten::multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::soft_margin_loss, "aten::soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
+  KERNEL(at::triplet_margin_loss, "aten::triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(at::multi_margin_loss, "aten::multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
   // fp32_set_dtype
   KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_dtype)
   KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_dtype)

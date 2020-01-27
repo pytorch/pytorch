@@ -102,6 +102,13 @@ class AmpLists(object):
             ("cosine_similarity", mat0_fp16 + mat1_fp16),
             ("poisson_nll_loss", mat0_fp16 + mat1_fp16 + (True, False, 1.e-8,
                                                           torch.nn.functional._Reduction.get_enum('mean'))),
+            ("cosine_embedding_loss", (torch.tensor([[1,2,3]], device="cuda", dtype=torch.float16),
+                                       torch.tensor([[1,3,4]], device="cuda", dtype=torch.float16),
+                                       torch.tensor([1], device="cuda", dtype=torch.int))),
+            ("hinge_embedding_loss", mat0_fp16 +(torch.ones((8,), device="cuda", dtype=torch.int),)),
+            ("kl_div", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
+            ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((8,), device="cuda", dtype=torch.float16),)),
+            ("triplet_margin_loss", mat0_fp16 + mat1_fp16 + mat2_fp16),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
@@ -153,6 +160,16 @@ class AmpLists(object):
         self.nn_fp32 = [
             ("softplus", pointwise0_fp16),
             ("gelu", pointwise0_fp16),
+            ("nll_loss", (torch.rand((8,8), device="cuda", dtype=torch.float),
+                          torch.zeros((8,), device="cuda", dtype=torch.long))),
+            ("nll_loss2d", (torch.rand((8,8,8,8), device="cuda", dtype=torch.half),
+                            torch.zeros((8,8,8), device="cuda", dtype=torch.long))),
+            ("l1_loss", mat0_fp16 + mat1_fp16),
+            ("smooth_l1_loss", mat0_fp16 + mat1_fp16),
+            ("mse_loss", mat0_fp16 + mat1_fp16),
+            ("multilabel_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
+            ("soft_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
+            ("multi_margin_loss", mat0_fp16 + (torch.ones((8,), device="cuda", dtype=torch.long),)),
         ]
         # self.nn_fp32_inplace = []
         # self.nn_fp32_user_supplied_out = []
