@@ -1,9 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <ATen/core/grad_mode.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -68,6 +69,48 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 AnyTypePtr AnyType::get() {
   static auto value = AnyType::create();
   return value;
+}
+
+template <typename T>
+static bool compatible_optional(c10::optional<T> e, T a) {
+  return !e.has_value() || e.value() == a;
+}
+
+static bool compatible_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+  if (!e.size().has_value()) {
+    return true;
+  }
+
+  if (e.size().value() != a.size()) {
+    return false;
+  }
+
+  auto ndim = a.size();
+  for (size_t i = 0; i < ndim; i++) {
+    if (!compatible_optional(e[i], a[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorType::isCompatibleWithInCurrentExecutionContext(
+    at::Tensor& t) const {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
+  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
+  if (!t.defined()) {
+    return compatible_optional(undefined(), !t.defined());
+  }
+
+  return compatible_varying_shape(sizes(), t.sizes()) &&
+      (t.is_sparse() || t.is_mkldnn() ||
+       compatible_varying_shape(strides(), t.strides())) &&
+      compatible_optional(
+             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
+      compatible_optional(scalarType(), t.scalar_type()) &&
+      compatible_optional(device(), t.device());
 }
 
 TensorTypePtr TensorType::get() {
