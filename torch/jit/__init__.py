@@ -1657,6 +1657,13 @@ if _enabled:
             r"""
             _save_for_mobile(f)
 
+            Add (or update) the bytecode session to the script model. The updated model is used
+            in lite interpreter for mobile applications.
+
+            Arguments:
+                f: a string containing a file name.
+                _extra_files: Map from filename to contents which will be stored as part of 'f'.
+
             """
             return self._c._save_for_mobile(*args, **kwargs)
 
