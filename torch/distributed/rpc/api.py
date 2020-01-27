@@ -261,7 +261,7 @@ def _init_rpc_backend(
     global _ALL_WORKER_NAMES
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
 
-    _start_rpc_agent(rpc_agent)
+    _set_and_start_rpc_agent(rpc_agent)
 
 
 @_require_initialized
