@@ -146,7 +146,6 @@ COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
-    '-fno-gpu-rdc'
 ]
 
 # See comment in load_inline for more information
@@ -1118,11 +1117,12 @@ def _get_rocm_arch_flags(cflags=None):
     if cflags is not None:
         for flag in cflags:
             if 'amdgpu-target' in flag:
-                return []
+                return ['-fno-gpu-rdc']
     return [
         '--amdgpu-target=gfx803',
         '--amdgpu-target=gfx900',
-        '--amdgpu-target=gfx906'
+        '--amdgpu-target=gfx906',
+        '-fno-gpu-rdc'
     ]
 
 
