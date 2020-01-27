@@ -53,10 +53,8 @@ struct pickle_factory<Get, Set, RetState(Self), NewInstance(ArgState)> {
 
 } // namespace detail
 
-template <class... Types>
-detail::types<void, Types...> init() {
-  return detail::types<void, Types...>{};
-}
+TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
+TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
 
 template <typename GetState, typename SetState>
 detail::pickle_factory<GetState, SetState> pickle_(GetState&& g, SetState&& s) {

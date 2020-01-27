@@ -23,8 +23,10 @@
 namespace torch {
 namespace jit {
 
-TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
-TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
+template <class... Types>
+detail::types<void, Types...> init() {
+  return detail::types<void, Types...>{};
+}
 
 // To bind custom classes into Torchscript, use an API very similar to Pybind's.
 // Currently exposes one class `torch::jit::class_<T>` and 2 methods.
