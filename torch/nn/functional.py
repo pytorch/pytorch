@@ -1651,6 +1651,24 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 
+def _verify_batch_size(size):
+    # type: (List[int]) -> None    
+    # XXX: JIT script does not support the reduce from functools, and mul op is a
+    # builtin, which cannot be used as a value to a func yet, so rewrite this size
+    # check to a simple equivalent for loop
+    #
+    # TODO: make use of reduce like below when JIT is ready with the missing features:
+    # from operator import mul
+    # from functools import reduce
+    #
+    #   if reduce(mul, size[2:], size[0]) == 1
+    size_prods = size[0]
+    for i in range(len(size) - 2):
+        size_prods *= size[i + 2]
+    if size_prods == 1:
+        raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1660,21 +1678,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = input.size()
-        # XXX: JIT script does not support the reduce from functools, and mul op is a
-        # builtin, which cannot be used as a value to a func yet, so rewrite this size
-        # check to a simple equivalent for loop
-        #
-        # TODO: make use of reduce like below when JIT is ready with the missing features:
-        # from operator import mul
-        # from functools import reduce
-        #
-        #   if reduce(mul, size[2:], size[0]) == 1
-        size_prods = size[0]
-        for i in range(len(size) - 2):
-            size_prods *= size[i + 2]
-        if size_prods == 1:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+        _verify_batch_size(input.size())
 
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
@@ -1691,6 +1695,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+    _verify_batch_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
@@ -1713,6 +1718,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    _verify_batch_size(input.size())
     return torch.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
