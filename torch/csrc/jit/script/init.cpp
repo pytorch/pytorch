@@ -716,13 +716,11 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "getattr",
           [](Object& self, const std::string& name) {
-            std::cout << "getattr " << name << std::endl;
             return toPyObject(self.attr(name));
           })
       .def(
           "__getattr__",
           [](Object& self, const std::string& name) {
-            std::cout << "__getattr__ " << name << std::endl;
             if (auto method = self.find_method(name)) {
               return py::cast(*method);
             }
@@ -772,7 +770,6 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            std::cout << "calling m._save_for_mobile" << std::endl;
             m._save_for_mobile(filename, _extra_files);
           },
           py::arg("filename"),

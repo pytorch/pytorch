@@ -1658,8 +1658,6 @@ if _enabled:
             _save_for_mobile(f)
 
             """
-            print(type(self._c))
-            print(dir(self._c))
             return self._c._save_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
