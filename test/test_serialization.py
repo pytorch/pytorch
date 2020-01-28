@@ -18,6 +18,9 @@ from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, PY3, run_tests, download_file, BytesIOContext
 
+# These tests were all copied from `test/test_torch.py` at some point, so see
+# the actual blame, see this revision
+# https://github.com/pytorch/pytorch/blame/9a2691f2fc948b9792686085b493c61793c2de30/test/test_torch.py
 
 if TEST_DILL:
     import dill
