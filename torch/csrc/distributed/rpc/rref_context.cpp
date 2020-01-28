@@ -24,7 +24,7 @@ const std::string kNumPendingUsers = "num_pending_users";
 
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
-  static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
+  static RRefContext* context = new RRefContext(RpcAgent::getCurrentRpcAgent());
   return *context;
 }
 
