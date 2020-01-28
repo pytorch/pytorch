@@ -9913,6 +9913,23 @@ a")
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
 
+    def test_missing_getstate(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.x = 1
+
+            def forward(self, x):
+                return x * self.x
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.x = state[0]
+                self.training = state[1]
+
+        with self.assertRaisesRegex(RuntimeError, "getstate"):
+            scripted = torch.jit.script(Foo())
+
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):
             def __init__(self):
