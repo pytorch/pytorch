@@ -16,9 +16,13 @@ from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug
 import torch.testing._internal.dist_utils
 from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg, get_shutdown_error_regex
 from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
+from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode, _InternalRPCPickler
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 from torch._jit_internal import _qualified_name
+
+
+def foo_add():
+    return torch.add(torch.ones(1), torch.ones(1))
 
 
 def requires_process_group_agent(message=""):
@@ -32,6 +36,13 @@ def requires_process_group_agent(message=""):
 
 VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
+
+class StubRpcPickler(_InternalRPCPickler):
+    def __init__(self):
+        super().__init__()
+
+    # def deserialize(self, binary_data, tensor_table):
+    #     super().deserialie
 
 
 class StubRpcAgent:
@@ -1626,3 +1637,15 @@ class RpcTest(RpcAgentTestFixture):
         with _use_rpc_pickler(test_pickler):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+    @dist_init
+    def test_function_error(self):
+        setattr(self, "foo", foo_add)
+        if self.rank != 0:
+            import sys
+            this_module = sys.modules[__name__]
+            delattr(this_module, "foo_add")
+        if self.rank == 0:
+            with self.assertRaisesRegex(Exception, "AttributeError"):
+                ret = rpc.rpc_sync("worker1", self.foo, args=())
+
