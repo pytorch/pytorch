@@ -82,7 +82,6 @@ class _InternalRPCPickler:
         r"""
         Deserilize binary string + tensor table to original obj
         """
-        print("IN Deserialize")
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
