@@ -2440,7 +2440,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
-    # @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModel_1(torch.nn.Module):
             def forward(self, *tensor_list):
@@ -2464,8 +2464,8 @@ class TestONNXRuntime(unittest.TestCase):
                 eqn = 'i,i'
                 return torch.einsum(eqn, *tensor_list)
 
-        x = np.random.randn(5)
-        y = np.random.randn(5)
+        x = torch.randn(5)
+        y = torch.randn(5)
         self.run_test(EinsumModel_3(), input=(x, y))
 
         class EinsumModel_4(torch.nn.Module):
@@ -2473,7 +2473,7 @@ class TestONNXRuntime(unittest.TestCase):
                 eqn = 'ij->ji'
                 return torch.einsum(eqn, *tensor_list)
 
-        x = np.random.randn(3, 4)
+        x = torch.randn(3, 4)
         self.run_test(EinsumModel_4(), input=(x,))
 
     def test_empty_branch(self):
