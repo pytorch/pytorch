@@ -765,6 +765,15 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "_save_for_mobile",
+          [](Module& m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m._save_for_mobile(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
