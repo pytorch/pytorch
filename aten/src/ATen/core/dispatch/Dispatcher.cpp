@@ -164,8 +164,8 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   listeners_->addListener(std::move(listener));
 }
 
-[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey) {
-  if (!dispatchKey.has_value() || *dispatchKey == DispatchKey::UndefinedTensorId) {
+[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {
+  if (dispatchKey == DispatchKey::UndefinedTensorId) {
     TORCH_CHECK(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
@@ -173,7 +173,7 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
           "Available functions are ", dispatchTable.listAllDispatchKeys())
   }
 
-  const std::string dispatchKeyStr = toString(*dispatchKey);
+  const std::string dispatchKeyStr = toString(dispatchKey);
   TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
           " from the '", dispatchKeyStr, "' backend. '",
           dispatchTable.operatorName(), "' is only available for these backends: ",
