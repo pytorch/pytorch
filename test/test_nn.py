@@ -48,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionT
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, expectedFailureXLA
+    skipCUDAIfRocm, skipCUDAIf
 
 from torch.nn import MultiheadAttention
 
