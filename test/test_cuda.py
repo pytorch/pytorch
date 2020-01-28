@@ -2203,6 +2203,13 @@ t2.start()
         for op, args in self.amp_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
 
+    @skipIfRocm
+    def test_autocast_banned(self):
+        with torch.cuda.amp.autocast():
+            for op, args, module in self.amp_lists.banned:
+                with self.assertRaises(RuntimeError):
+                    getattr(module, op)(*args)
+
 
 if __name__ == '__main__':
     run_tests()

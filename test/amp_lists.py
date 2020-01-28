@@ -67,6 +67,13 @@ class AmpLists(object):
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
             ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
+            ("addbmm", mat0_fp32 + (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
+                                    torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
+            ("baddbmm", (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
+                         torch.randn((8,8,8), device="cuda", dtype=torch.float32),
+                         torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
+            ("bmm", (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
+                     torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
         ]
         # self.torch_fp16_inplace = []
         # self.torch_fp16_user_supplied_out = []
@@ -109,6 +116,7 @@ class AmpLists(object):
             ("kl_div", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
             ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((8,), device="cuda", dtype=torch.float16),)),
             ("triplet_margin_loss", mat0_fp16 + mat1_fp16 + mat2_fp16),
+            ("binary_cross_entropy_with_logits", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
@@ -198,3 +206,8 @@ class AmpLists(object):
         # self.tensor_only_expect_builtin_promote = []
         # self.tensor_only_expect_builtin_promote_inplace = []
         # self.tensor_only_expect_builtin_promote_user_supplied_out = []
+
+        self.banned = [
+          ("binary_cross_entropy", (torch.rand((8,8), device="cuda", dtype=torch.float32),
+                                    torch.rand((8,8), device="cuda", dtype=torch.float32)), torch._C._nn),
+        ]

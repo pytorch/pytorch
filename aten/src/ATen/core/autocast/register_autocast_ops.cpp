@@ -47,8 +47,8 @@ enum class CastPolicy : uint8_t {
                      // Otherwise, set the flag (if present in arglist) or append it
                      // (if not present) to ensure outputs are fp32.
   promote, // Run in the widest dtype among several args.
-  promote_with_tensorlist // Separate from CastPolicy::promote due to lifetime concerns
-                          // of data viewed by TensorLists.
+  promote_with_tensorlist, // Separate from CastPolicy::promote due to lifetime concerns
+                           // of data viewed by TensorLists.
 };
 
 /********************************************************************
@@ -243,11 +243,11 @@ struct WrapFunction final {
                              typename guts::function_traits<Registered>::parameter_types>;
 };
 
-// Aside from fp16 and fp32, the guts of each ::call below need divergent code, so declare specializations.
-// I could deduplicate these by having a single one with more complex (one-size-fits-all) type selection and
-// TensorList handling, but then every instantiation would be bigger than it needs to be, and I'm creating a lot
-// of instantiations.  I'd rather write out the specializations so each instantiation only compiles with the bare
-// minimum of logic it needs.  Maybe i can rewrite to strike some balance.
+// Aside from CastPolicy::fp16 and CastPolicy::fp32, the guts of each ::call below need divergent code.
+// Some need to flip a dtype, some need to append a dtype, some need to swap in a new casted vector in
+// place of a TensorList, etc, so I declare specializations.
+// I could deduplicate these by having a single template with more complex (one-size-fits-all) type selection and
+// TensorList handling, but with specializations, each instantiation can compile with only the logic it needs.
 
 // CastPolicy::fp16
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
@@ -320,6 +320,18 @@ struct WrapFunction_<CastPolicy::promote_with_tensorlist, Redispatch, F, Ret, gu
 };
 
 /*******************************
+Banned functions
+*******************************/
+
+Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const Tensor &, int64_t) {
+  AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
+           "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
+           "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
+           "or torch.nn.BCEWithLogitsLoss.  binary_cross_entropy_with_logits and BCEWithLogits are\n"
+           "safe to autocast.");
+}
+
+/*******************************
 Boxed fallback for all other ops
 *******************************/
 
@@ -361,7 +373,7 @@ void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
 #ifndef USE_STATIC_DISPATCH
 namespace {
 /*****************************************************************************************************************
-This section performs load-time registration for all autocast wrappers.
+This section performs load-time registration for autocast wrappers.
 
 It's debatable at which level operations should be patched.
 
@@ -379,16 +391,10 @@ recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
 I think Option 2 is the right answer for all ops, not just convolutions.  Option 2 is what I implement here.
 *****************************************************************************************************************/
 
-/**************************
-Boxed fallback registration
-**************************/
 auto register_fallback = c10::Dispatcher::singleton()
   .registerBackendFallbackKernel(TensorTypeId::AutocastTensorId,
                                  KernelFunction::makeFromBoxedFunction<&autocast_fallback>());
 
-/********************
-Explicit registration
-********************/
 // TODO:  Codegen the stuff below?  Ed said
 // > you are going to have to write the function definition at some point, I wouldn't try to get clever about it
 // Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
@@ -421,9 +427,9 @@ Explicit registration
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 
 /*****************************************
-Explicit registration for well-behaved ops
+Explicit registration for out-of-place ops
 *****************************************/
-auto register_well_behaved = torch::RegisterOperators()
+auto register_out_of_place = torch::RegisterOperators()
   // fp16
   // TODO (to consider): should the slow_conv*d from python_nn_functions_dispatch.h go here?
   // They use unfolding + admm (which may use cublas) so it's possible they benefit from Tensor Cores,
@@ -450,6 +456,9 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::mm, "aten::mm(Tensor self, Tensor mat2) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL(at::mv, "aten::mv(Tensor self, Tensor vec) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16)
   KERNEL_UNBOXED_ONLY(at::linear, "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &), fp16)
+  KERNEL(at::addbmm, "aten::addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::baddbmm, "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
+  KERNEL(at::bmm, "aten::bmm(Tensor self, Tensor mat2) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16)
   // fp16_with_tensorlist
   KERNEL_UNBOXED_ONLY(at::chain_matmul, "aten::chain_matmul(Tensor[] matrices) -> Tensor", Tensor (TensorList), fp16_with_tensorlist)
   // fp32
@@ -501,6 +510,7 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL(at::soft_margin_loss, "aten::soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, int64_t), fp32)
   KERNEL(at::triplet_margin_loss, "aten::triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
   KERNEL_UNBOXED_ONLY(at::multi_margin_loss, "aten::multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
+  KERNEL_UNBOXED_ONLY(at::binary_cross_entropy_with_logits, "aten::binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
   // fp32_set_dtype
   KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_dtype)
   KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_dtype)
@@ -530,6 +540,12 @@ auto register_well_behaved = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::_cat, "aten::_cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote_with_tensorlist)
   KERNEL_UNBOXED_ONLY(at::stack, "aten::stack(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote_with_tensorlist)
   ;
+
+auto register_banned = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor")
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), &at::autocast::binary_cross_entropy_banned>(TensorTypeId::AutocastTensorId)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 #endif
 
