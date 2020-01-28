@@ -14,7 +14,7 @@ import torch.distributed.rpc as rpc
 from torch.testing._internal.common_utils import load_tests, IS_MACOS
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 import torch.testing._internal.dist_utils
-from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
+from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg, get_shutdown_error_regex
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler, RPCExecMode
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
@@ -1511,11 +1511,12 @@ class RpcTest(RpcAgentTestFixture):
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
+            # Shutdown sequence is not very well defined and as a result
+            # we can see any of these error messages.
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else "(Request aborted during client shutdown)|"
-                     "(worker.: Error in reponse from worker.: server shutting down)")
+                else get_shutdown_error_regex())
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.
