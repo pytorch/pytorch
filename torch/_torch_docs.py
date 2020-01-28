@@ -1905,8 +1905,8 @@ Returns:
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[ True, False],
+            [False, True]])
 """.format(**common_args))
 
 add_docstr(torch.equal,
@@ -3844,15 +3844,16 @@ add_docstr(torch.mvlgamma,
            r"""
 mvlgamma(input, p) -> Tensor
 
-Computes the multivariate log-gamma function (`[reference]`_) with dimension :math:`p` element-wise, given by
+Computes the `multivariate log-gamma function
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
+:math:`p` element-wise, given by
 
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
 where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
-If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
-is thrown.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
 
 Args:
     input (Tensor): the tensor to compute the multivariate log-gamma function
@@ -3867,8 +3868,6 @@ Example::
     >>> torch.mvlgamma(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
-
-.. _`[reference]`: https://en.wikipedia.org/wiki/Multivariate_gamma_function
 """)
 
 add_docstr(torch.narrow,
