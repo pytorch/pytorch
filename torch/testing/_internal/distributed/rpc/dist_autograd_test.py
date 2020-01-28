@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
-from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg
+from torch.testing._internal.dist_utils import dist_init, wait_until_node_failure, initialize_pg, get_shutdown_error_regex
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 from torch.testing import FileCheck
 
@@ -1080,10 +1080,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                         wait_until_node_failure(rank)
 
                 # Shutdown sequence is not very well defined and as a result
-                # we might see either of the exception messages below.
-                with self.assertRaisesRegex(RuntimeError,
-                                            "(Request aborted during client shutdown)|"
-                                            "(worker.: Error in reponse from worker.: server shutting down)"):
+                # we might see any error given by get_shutdown_error_regex()
+                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
@@ -1277,10 +1275,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 wait_until_node_failure(2)
 
                 # Shutdown sequence is not very well defined and as a result
-                # we might see either of the exception messages below.
-                with self.assertRaisesRegex(RuntimeError,
-                                            "(Request aborted during client shutdown)|"
-                                            "(worker.: Error in reponse from worker.: server shutting down)"):
+                # we might see any error given by get_shutdown_error_regex().
+                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
 
