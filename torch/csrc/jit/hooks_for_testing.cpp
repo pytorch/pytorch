@@ -27,6 +27,5 @@ std::pair<ModuleHook, FunctionHook> getEmitHooks() {
   return std::make_pair(emit_module_callback, emit_function_callback);
 }
 
-
 } // namespace jit
 } // namespace torch

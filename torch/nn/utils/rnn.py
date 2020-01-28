@@ -278,8 +278,6 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         max_seq_length = total_length
     padded_output, lengths = _VF._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
-    print("padded_output")
-    print(padded_output)
     unsorted_indices = sequence.unsorted_indices
     if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
