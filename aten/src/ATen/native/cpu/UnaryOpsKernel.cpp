@@ -333,6 +333,17 @@ static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
   });
 }
 
+static void log_normal_kernel(TensorIterator& iter, double mean, double std, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
+      at::lognormal_distribution<double> logNormal(mean, std);
+      return (scalar_t)logNormal(generator);
+    });
+  });
+}
+
 static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
@@ -415,6 +426,7 @@ REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);

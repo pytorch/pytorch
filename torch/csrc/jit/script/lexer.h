@@ -510,7 +510,7 @@ struct Lexer {
   std::shared_ptr<Source> source;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
-  std::vector<int> indent_stack; // stack of identation level of blocks
+  std::vector<int> indent_stack; // stack of indentation level of blocks
   // Invariant: this should always contain at least a single element
   std::vector<Token> next_tokens;
   SharedParserData& shared;

@@ -253,7 +253,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse,
-                   const Tensor& per_sample_weights) {
+                   const Tensor& per_sample_weights,
+                   bool include_last_offset) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag_cuda", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -264,6 +265,15 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
+  if (include_last_offset) {
+    // Check https://github.com/pytorch/pytorch/issues/29019
+    // We plan to add one more element in offsets, which is equal to the size of
+    // indices. Currently for cuda devices, we still use the legacy
+    // implementation even this flag is enabled.
+    TORCH_CHECK(
+        numBags >= 1, "include_last_offset: numBags should be at least 1");
+    numBags -= 1;
+  }
   int64_t featureSize = weight.size(1);
 
   auto bag_size = at::zeros(offsets.sizes(), indices.options());
@@ -272,12 +282,12 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
+  auto output = at::zeros({numBags, featureSize}, weight.options());
 
   Tensor max_indices;
 
   if (mode == MODE_MAX) {
-    max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.options());
+    max_indices = at::zeros({numBags, featureSize}, indices.options());
   } else {
     // No need to allocate if we aren't doing a backwards pass
     max_indices = at::zeros({0}, indices.options());

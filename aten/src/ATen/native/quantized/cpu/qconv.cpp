@@ -515,7 +515,8 @@ class QConvInt8 final : public c10::OperatorKernel {
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
     auto* pack_w = pack_data.w.get();
     const auto& kernel = pack_data.kernel;
-    const auto& kernel_zp = pack_data.w_zp;
+    // Adjust weight zero point, similar to weight data.
+    const auto kernel_zp = pack_data.w_zp + 128;
     const auto& kernel_scale = pack_data.w_scale;
 
     const uint32_t kernel_h = kernel[0];

@@ -312,6 +312,7 @@ Other Operations
 .. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: cummax
+.. autofunction:: cummin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: diag
