@@ -173,6 +173,10 @@ jobs:
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
     <<: *pytorch_windows_params
+    parameters:
+      test_name:
+        type: string
+        default: ""
     executor: windows-with-nvidia-gpu
     steps:
       - checkout

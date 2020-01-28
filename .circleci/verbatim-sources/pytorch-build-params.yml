@@ -39,6 +39,10 @@ pytorch_ios_params: &pytorch_ios_params
     SELECTED_OP_LIST: << parameters.op_list >>
 
 pytorch_windows_params: &pytorch_windows_params
+  parameters:
+    test_name:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
     SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -48,3 +52,4 @@ pytorch_windows_params: &pytorch_windows_params
     VC_PRODUCT: "BuildTools"
     USE_CUDA: "1"
     TORCH_CUDA_ARCH_LIST: "7.5"
+    JOB_BASE_NAME: <<parameters.test_name>>
