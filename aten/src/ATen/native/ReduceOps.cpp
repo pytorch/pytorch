@@ -974,4 +974,12 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
 std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
+
+Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+  Tensor result = at::empty_like(self, at::MemoryFormat::Contiguous);
+  result = at::abs(self - other);
+  result = at::pow_out(result, result, p);
+  result = at::pow_out(result, at::sum(result), 1.0 / p.toDouble());
+  return result;
+
 }} // namespace at::native
