@@ -11,6 +11,39 @@
 
 .syntax unified
 
+#  Args passed via 4 registers (16 bytes)
+#  r0: mr
+#  r1: nr
+#  r2: kc
+#  r3: ks
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a          | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#  
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r12   | 64
+#  |a          | 100 96
+#  |w          | 104 100
+#  |c          | 108 104
+#  |c_stride   | 112 108
+#  |out ch indx| 116 112
+#  |params     | 120 116
+#  |-----------|
+#  
+
 # void pytorch_q8conv_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -30,15 +63,23 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
-    PUSH {r4, r5, r6, r7, r8, r9, r10, r11}
+    PUSH {r4, r5, r6, r7, r8, r9, r10, r11, r12}
 
     VPUSH {d8-d15}
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
+
     # Load params:
     # - r9 = params
-    LDR r9, [sp, 112]
+    LDR r9, [sp, 120]
+
+    # Load output channel index
+    LDR r12, [sp, 116]
+    # Load pointer to per channel zero points array
+    LDR r4, [r9]
+    # Add offset to the base pointer
+    ADD r12, r4, r12
 
     # q10 := vacc1x0123
     VMOV.I32 q10, q8
@@ -47,7 +88,7 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VMOV.I32 q11, q9
     # Load a
     # - r8 = a
-    LDR r8, [sp, 96]
+    LDR r8, [sp, 100]
     # q12 := vacc2x0123
     VMOV.I32 q12, q8
     # q13 := vacc2x4567
@@ -57,6 +98,9 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load b_zero_point:
     # - d15 = b_zero_point
     VLD1.8 {d15[]}, [r9], r4
+    VLD1.8 {d15}, [r12]
+    ADD r9, r9, 4
+
     # Load a_zero_point:
     # - d14 = a_zero_point
     VLD1.8 {d14[]}, [r9], r4
@@ -695,7 +739,7 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load c, c_stride:
     # - r2 = c
     # - r3 = c_stride
-    LDRD r2, r3, [sp, 104]
+    LDRD r2, r3, [sp, 108]
 
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9

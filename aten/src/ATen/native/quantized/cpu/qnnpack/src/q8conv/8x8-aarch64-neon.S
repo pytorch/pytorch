@@ -9,6 +9,24 @@
 #include <qnnpack/assembly.h>
 #include <requantization/runtime-assembly.h>
 
+#  Args passed via 4 registers (16 bytes)
+#  x0: mr
+#  x1: nr
+#  x2: kc
+#  x3: ks
+#  x4: a
+#  x5: w 
+#  x6: c 
+#  x7: c_stride
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |out ch indx| 0
+#  |params     | 8
+#  |-----------|
+
 
 # void pytorch_q8conv_ukernel_8x8__aarch64_neon(
 #    size_t mr,
@@ -19,10 +37,11 @@
 #    const void* restrict w,
 #    uint8_t* restrict c,
 #    size_t c_stride,
+#    size_t output_channel_index,
 #    const union pytorch_qnnp_q31_requantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # Load params
-    LDR x8, [sp]
+    LDR x8, [sp, 8]
 
     STP d15, d14, [sp, -16]
     STP d13, d12, [sp, -32]
@@ -33,13 +52,23 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     LD1 {v8.4s, v9.4s}, [x5], 32
     MOV x9, 2
 
+    # Load output channel index
+    # Note since this is an offset into a byte pointer
+    # We do not need to multiply with size of pointer type
+    LDR x18, [sp]
+    # Load pointer to per channel zero points array
+    LDR x19, [x8]
+    # Add offset to the base pointer
+    ADD x19, x19, x18
+
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
 
     # v11 := vacc1x4567
     MOV v11.16b, v9.16b
     # Load b_zero_point
-    LD1R {v25.8b}, [x8], x9
+    LD1 {v25.8b}, [x19]
+    ADD x8, x8, 4
     # Load a_zero_point
     LD1R {v24.8b}, [x8], x9
 

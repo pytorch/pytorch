@@ -144,7 +144,7 @@ PrePackConvWeights::PrePackConvWeights(
       }
       memset(
           packed_weights_,
-          conv_p.kernel_zero_point[0],
+          conv_p.kernel_zero_points[0],
           packed_group_weights_size * groups);
 
       switch (ukernel_type) {

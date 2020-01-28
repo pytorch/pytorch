@@ -24,7 +24,7 @@ void pytorch_q8dwconv_ukernel_up8x9__neon(
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   const uint8x8_t vkernel_zero_point =
-      vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
+      vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_points);
   const int32x4_t vmultiplier =
       vld1q_dup_s32(&quantization_params->neon.multiplier);
   const int32x4_t vright_shift =

@@ -17,7 +17,7 @@ struct conv_param_t {
   const uint32_t groups;
   const size_t input_channels;
   const size_t output_channels;
-  const uint8_t* kernel_zero_point;
+  const uint8_t* kernel_zero_points;
   const float* requantization_scale;
   const uint8_t output_min;
   const uint8_t output_max;
@@ -49,7 +49,7 @@ struct conv_param_t {
         groups(grp),
         input_channels(in_ch),
         output_channels(out_ch),
-        kernel_zero_point(kernel_zp),
+        kernel_zero_points(kernel_zp),
         requantization_scale(scale),
         output_min(out_min),
         output_max(out_max) {

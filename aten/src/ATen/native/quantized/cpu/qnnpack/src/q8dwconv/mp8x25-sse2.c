@@ -24,7 +24,7 @@ void pytorch_q8dwconv_ukernel_mp8x25__sse2(
   const __m128i vinput_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
   const __m128i vkernel_zero_point = _mm_load_si128(
-      (const __m128i*)quantization_params->sse2.kernel_zero_point);
+      (const __m128i*)quantization_params->sse2.kernel_zero_points);
   const __m128i vzero = _mm_setzero_si128();
 
   do {

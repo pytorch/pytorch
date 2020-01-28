@@ -137,7 +137,7 @@ union pytorch_qnnp_conv_quantization_params {
   } scalar;
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   struct {
-    int16_t kernel_zero_point;
+    const uint8_t* kernel_zero_points;
     int16_t input_zero_point;
     int32_t multiplier;
     int32_t right_shift;
@@ -148,7 +148,7 @@ union pytorch_qnnp_conv_quantization_params {
 #endif /* CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64 */
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   struct {
-    PYTORCH_QNNP_ALIGN(16) int16_t kernel_zero_point[8];
+    PYTORCH_QNNP_ALIGN(16) const uint8_t* kernel_zero_points;
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
     PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
@@ -278,6 +278,7 @@ typedef void (*pytorch_q8gemm_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 /*
@@ -320,6 +321,7 @@ typedef void (*pytorch_q8conv_ukernel_function)(
     const void* w,
     uint8_t* c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8gemm_xzp_ukernel_function)(

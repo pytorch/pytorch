@@ -386,7 +386,11 @@ class ConvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    std::vector<uint8_t> kernelZeroPoint(1, 127);
+    // Make num zero points multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded =
+      ((groups() * groupOutputChannels() + 7) / 8) * 8;
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
@@ -447,7 +451,7 @@ class ConvolutionOperatorTester {
                                              kx) *
                                                 groupInputChannels() +
                                             ic]) -
-                               int32_t(kernelZeroPoint[0]));
+                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -490,7 +494,7 @@ class ConvolutionOperatorTester {
             groups(),
             groupInputChannels() * groups(),
             groupOutputChannels() * groups(),
-            kernelZeroPoint.data(),
+            kernelZeroPoints.data(),
             requantization_scale.data(),
             qmin(),
             qmax());
@@ -533,16 +537,14 @@ class ConvolutionOperatorTester {
                 groupInputChannels(),
                 groupOutputChannels(),
                 inputZeroPoint,
-                1.0f /* input scale */,
-                kernelZeroPoint[0],
-                1.0f /* kernel scale */,
+                kernelZeroPoints.data(),
                 kernel.data(),
                 bias.data(),
                 outputZeroPoint,
-                outputScale,
                 qmin(),
                 qmax(),
                 0,
+                requantization_scale.data(),
                 &convolution));
 
         ASSERT_EQ(

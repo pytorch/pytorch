@@ -47,6 +47,7 @@ void pytorch_q8gemm_ukernel_2x4c8__sse2(
     const void* restrict w,
     uint8_t* restrict c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params
         quantization_params[RESTRICT_STATIC 1]) {
   __m128i vacc00 = _mm_cvtsi32_si128((int)((const int32_t*)w)[0]);
@@ -82,8 +83,19 @@ void pytorch_q8gemm_ukernel_2x4c8__sse2(
 
   const __m128i va_zero_point = _mm_load_si128(
       (const __m128i*)quantization_params->sse2.input_zero_point);
-  const __m128i vb_zero_point = _mm_load_si128(
-      (const __m128i*)quantization_params->sse2.kernel_zero_point);
+  const __m128i vb_zero_point_0 = _mm_set1_epi16(
+      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
+        output_channel_index]);
+  // Assumes kernel_zero_point allocated memory is always multiple of nr=4.
+  const __m128i vb_zero_point_1 = _mm_set1_epi16(
+      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
+        output_channel_index + 1]);
+  const __m128i vb_zero_point_2 = _mm_set1_epi16(
+      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
+        output_channel_index + 2]);
+  const __m128i vb_zero_point_3 = _mm_set1_epi16(
+      (int16_t)(uint16_t)quantization_params->sse2.kernel_zero_points[
+        output_channel_index + 3]);
   const __m128i vzero = _mm_setzero_si128();
   for (; k >= 8; k -= 8) {
     const __m128i va0 = _mm_loadl_epi64((const __m128i*)a0);
@@ -97,19 +109,19 @@ void pytorch_q8gemm_ukernel_2x4c8__sse2(
 
     const __m128i vb0 = _mm_loadl_epi64((const __m128i*)b0);
     const __m128i vxb0 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb0, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb0, vzero), vb_zero_point_0);
     b0 += b_stride;
     const __m128i vb1 = _mm_loadl_epi64((const __m128i*)b1);
     const __m128i vxb1 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb1, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb1, vzero), vb_zero_point_1);
     b1 += b_stride;
     const __m128i vb2 = _mm_loadl_epi64((const __m128i*)b2);
     const __m128i vxb2 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb2, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb2, vzero), vb_zero_point_2);
     b2 += b_stride;
     const __m128i vb3 = _mm_loadl_epi64((const __m128i*)b3);
     const __m128i vxb3 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb3, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb3, vzero), vb_zero_point_3);
     b3 += b_stride;
 
     vacc00 = _mm_add_epi32(vacc00, _mm_madd_epi16(vxa0, vxb0));
@@ -140,16 +152,16 @@ void pytorch_q8gemm_ukernel_2x4c8__sse2(
 
     const __m128i vb0 = _mm_loadl_epi64((const __m128i*)b0);
     const __m128i vxb0 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb0, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb0, vzero), vb_zero_point_0);
     const __m128i vb1 = _mm_loadl_epi64((const __m128i*)b1);
     const __m128i vxb1 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb1, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb1, vzero), vb_zero_point_1);
     const __m128i vb2 = _mm_loadl_epi64((const __m128i*)b2);
     const __m128i vxb2 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb2, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb2, vzero), vb_zero_point_2);
     const __m128i vb3 = _mm_loadl_epi64((const __m128i*)b3);
     const __m128i vxb3 =
-        _mm_sub_epi16(_mm_unpacklo_epi8(vb3, vzero), vb_zero_point);
+        _mm_sub_epi16(_mm_unpacklo_epi8(vb3, vzero), vb_zero_point_3);
 
     vacc00 = _mm_add_epi32(vacc00, _mm_madd_epi16(vxa0, vxb0));
     vacc01 = _mm_add_epi32(vacc01, _mm_madd_epi16(vxa0, vxb1));

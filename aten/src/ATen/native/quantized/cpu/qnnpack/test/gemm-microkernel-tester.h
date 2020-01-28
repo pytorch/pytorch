@@ -268,10 +268,11 @@ class GemmMicrokernelTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       const float requantizationScale = 1.0f / float(cScale);
+      std::vector<uint8_t> kernel_zero_points(nr(), bZeroPoint());
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              &this->bZeroPoint_,
+              kernel_zero_points.data(),
               &requantizationScale,
               cZeroPoint,
               qmin(),
@@ -290,6 +291,7 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
@@ -531,10 +533,11 @@ class GemmMicrokernelTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       const float requantizationScale = 1.0f / float(cScale);
+      std::vector<uint8_t> kernel_zero_points(nr(), bZeroPoint());
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
-              &this->bZeroPoint_,
+              kernel_zero_points.data(),
               &requantizationScale,
               cZeroPoint,
               qmin(),
@@ -553,6 +556,7 @@ class GemmMicrokernelTester {
           packedW.data(),
           c.data(),
           cStride() * sizeof(uint8_t),
+          0,
           &quantizationParams);
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {

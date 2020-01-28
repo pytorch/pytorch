@@ -125,7 +125,10 @@ class FullyConnectedOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    std::vector<uint8_t> kernelZeroPoint(1, 127);
+    // Make number of output channels multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded = ((outputChannels() + 7) / 8) * 8;
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
@@ -146,7 +149,7 @@ class FullyConnectedOperatorTester {
                 (int32_t(inputPtr[i * inputStride() + ic]) -
                  int32_t(inputZeroPoint)) *
                 (int32_t(kernel[oc * inputChannels() + ic]) -
-                 int32_t(kernelZeroPoint[0]));
+                 int32_t(kernelZeroPoints[oc]));
           }
         }
       }
@@ -172,23 +175,24 @@ class FullyConnectedOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
+      // 1 bcz input_scale and kernel_scale are both 1.
+      std::vector<float> requantization_scale(outputChannels(), 1 / outputScale);
       if (runtime_quant) {
           auto packW = std::unique_ptr<qnnpack::PackBMatrix>(
               new qnnpack::PackBMatrix(
                   inputChannels(),
                   outputChannels(),
-                  kernelZeroPoint[0],
+                  kernelZeroPoints[0],
                   1.0f,
                   kernel.data(),
                   bias.data()));
 
-          std::vector<float> requantization_scale(outputChannels(), 1 / outputScale);
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
               batchSize() /* batch_size */,
               inputChannels() /* input_channels */,
               outputChannels() /* output_channels */,
               inputZeroPoint,
-              kernelZeroPoint.data(),
+              kernelZeroPoints.data(),
               requantization_scale.data(),
               outputZeroPoint,
               qmin(),
@@ -211,16 +215,14 @@ class FullyConnectedOperatorTester {
                 inputChannels(),
                 outputChannels(),
                 inputZeroPoint,
-                1.0f /* input scale */,
-                kernelZeroPoint[0],
-                1.0f /* kernel scale */,
+                kernelZeroPoints.data(),
                 kernel.data(),
                 bias.data(),
                 outputZeroPoint,
-                outputScale,
                 qmin(),
                 qmax(),
                 0,
+                requantization_scale.data(),
                 &convolution));
 
         ASSERT_EQ(

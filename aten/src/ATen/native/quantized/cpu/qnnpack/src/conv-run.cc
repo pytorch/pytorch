@@ -105,6 +105,7 @@ static void compute_q8gemm(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = nr_block_start + group_index * n;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -115,6 +116,7 @@ static void compute_q8gemm(
       c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
           group_index * n,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -157,6 +159,7 @@ static void compute_q8conv(
   uint8_t* c = context->c;
   const size_t c_stride = context->c_stride;
 
+  size_t output_channel_index = group_index * n + nr_block_start;
   context->ukernel(
       mr_block_size,
       nr_block_size,
@@ -168,6 +171,7 @@ static void compute_q8conv(
       c + (mr_block_start + image_index * m) * c_stride + group_index * n +
           nr_block_start,
       c_stride,
+      output_channel_index,
       &context->quantization_params);
 }
 
@@ -327,7 +331,7 @@ enum pytorch_qnnp_status qnnpackConv(
   } else {
     conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
         input_zero_point,
-        conv_p.kernel_zero_point,
+        conv_p.kernel_zero_points,
         conv_p.requantization_scale,
         output_zero_point,
         conv_p.output_min,
@@ -519,7 +523,7 @@ enum pytorch_qnnp_status qnnpackConv(
           .m = input_size,
           .k = conv_p.group_input_channels,
           .a_stride = input_pixel_stride,
-          .multiplier = (int32_t)-conv_p.kernel_zero_point[0],
+          .multiplier = (int32_t)-conv_p.kernel_zero_points[0],
           .a_sum = a_sum,
           .a_sum_stride = input_size,
           .ukernel = pytorch_qnnp_params.q8sum_rows.sum_rows,

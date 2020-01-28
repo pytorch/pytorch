@@ -11,6 +11,39 @@
 
 .syntax unified
 
+#  Args passed via 4 registers (16 bytes)
+#  r0: mr
+#  r1: nr
+#  r2: k
+#  r3: a
+#
+
+#  Args passed via stack.
+#  TOS
+#  |-----------|
+#  |a_stride   | 0
+#  |w          | 4
+#  |c          | 8
+#  |c_stride   | 12
+#  |out ch indx| 16
+#  |params     | 20
+#  |-----------|
+#  
+
+#  After loading w pointer in ip reg.
+#  And after pushing r4-r8 and d8-d15 on stack
+#  |-----------|
+#  |d8 - d15   | 0
+#  |r4 - r8    | 64
+#  |a_stride   | 84
+#  |w          | 88
+#  |c          | 92
+#  |c_stride   | 96
+#  |out ch indx| 100
+#  |params     | 104
+#  |-----------|
+#  
+
 # void pytorch_q8gemm_ukernel_4x8__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
@@ -20,6 +53,7 @@
 #     const void*restrict w,
 #     uint8_t*restrict c,
 #     size_t c_stride,
+#     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_quantization_params quantization_params[restrict static 1])
 BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     .arm
@@ -30,27 +64,34 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
-    PUSH {r4, r5, r6, r7}
+    PUSH {r4, r5, r6, r7, r8}
 
     VPUSH {d8-d15}
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 96]
+    LDR r7, [sp, 104]
+
+    # Load output channel index
+    LDR r8, [sp, 100]
+    # Load pointer to per channel zero points array
+    LDR r4, [r7]
+    # Add offset to the base pointer
+    ADD r8, r4, r8
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
 
     # Load a_stride
     # - r6 = a_stride
-    LDR r6, [sp, 80]
+    LDR r6, [sp, 84]
     CMP r0, 2
 
     ADD r4, r3, r6
 
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15[]}, [r7]
-    ADD r7, r7, 2
+    VLD1.8 {d15}, [r8]
+    ADD r7, r7, 4
 
     # Load a_zero_point:
     # - d14 = a_zero_point
@@ -697,7 +738,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load c, c_stride:
     # - r2 = c
     # - r2 = c_stride
-    LDRD r2, r3, [sp, 88]
+    LDRD r2, r3, [sp, 96]
 
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9

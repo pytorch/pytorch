@@ -52,16 +52,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
     size_t group_input_channels,
     size_t group_output_channels,
     uint8_t input_zero_point,
-    float input_scale,
-    uint8_t kernel_zero_point,
-    float kernel_scale,
+    const uint8_t* kernel_zero_points,
     const uint8_t* kernel,
     const int32_t* bias,
     uint8_t output_zero_point,
-    float output_scale,
     uint8_t output_min,
     uint8_t output_max,
     uint32_t flags,
+    const float* requantization_scale,
     pytorch_qnnp_operator_t* convolution_out) {
   pytorch_qnnp_operator_t convolution = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
@@ -100,27 +98,6 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
         "dilation dimensions must be non-zero",
         dilation_width,
         dilation_height);
-    goto error;
-  }
-
-  if (input_scale <= 0.0f || !isnormal(input_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g input scale: scale must be finite and positive",
-        input_scale);
-    goto error;
-  }
-
-  if (kernel_scale <= 0.0f || !isnormal(kernel_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g kernel scale: scale must be finite and positive",
-        kernel_scale);
-    goto error;
-  }
-
-  if (output_scale <= 0.0f || !isnormal(output_scale)) {
-    pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g output scale: scale must be finite and positive",
-        output_scale);
     goto error;
   }
 
@@ -198,15 +175,11 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
         input_padding_right);
   }
 
-  const float convolution_scale = input_scale * kernel_scale / output_scale;
-  if (convolution_scale >= 1.0f) {
+  if (requantization_scale[0] >= 1.0f) {
     pytorch_qnnp_log_error(
-        "failed to create convolution with %.7g input scale, %.7g kernel scale, and %.7g output scale: "
+        "failed to create convolution with "
         "convolution scale %.7g is greater or equal to 1.0",
-        input_scale,
-        kernel_scale,
-        output_scale,
-        convolution_scale);
+        requantization_scale[0]);
     goto error;
   }
 
@@ -264,7 +237,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
               cr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
               input_zero_point,
-              kernel_zero_point,
+              kernel_zero_points[0],
 #endif
               kernel,
               bias,
@@ -357,7 +330,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
             sr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
             input_zero_point,
-            kernel_zero_point,
+            kernel_zero_points[0],
 #endif
             kernel + group * group_output_channels * group_input_channels,
             bias + group * group_output_channels,
@@ -384,7 +357,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
       }
       memset(
           convolution->packed_weights,
-          kernel_zero_point,
+          kernel_zero_points[0],
           packed_group_weights_size * groups);
 
       switch (ukernel_type) {
@@ -398,7 +371,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
                 kr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
                 input_zero_point,
-                kernel_zero_point,
+                kernel_zero_point[0],
 #endif
                 kernel + group * group_output_channels * group_input_channels,
                 bias + group * group_output_channels,
@@ -415,7 +388,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
                 kr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
                 input_zero_point,
-                kernel_zero_point,
+                kernel_zero_points[0],
 #endif
                 kernel +
                     group * group_output_channels * kernel_size *
@@ -468,12 +441,12 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
   convolution->group_input_channels = group_input_channels;
   convolution->group_output_channels = group_output_channels;
 
-  convolution->kernel_zero_point = kernel_zero_point;
+  convolution->kernel_zero_point = kernel_zero_points;
 
   if (ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     convolution->requantization_params =
         pytorch_qnnp_compute_requantization_params(
-            convolution_scale, output_zero_point, output_min, output_max);
+            requantization_scale[0], output_zero_point, output_min, output_max);
   } else {
     // Passing address of kernel_zero_scale and convolution_scale
     // is not safe as they are stack variables. However for now just staging this change.
@@ -482,8 +455,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
     convolution->conv_quantization_params =
         pytorch_qnnp_compute_conv_quantization_params(
             input_zero_point,
-            &kernel_zero_point,
-            &convolution_scale,
+            kernel_zero_points,
+            requantization_scale,
             output_zero_point,
             output_min,
             output_max);

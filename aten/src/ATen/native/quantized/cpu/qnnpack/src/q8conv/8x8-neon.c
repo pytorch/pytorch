@@ -20,12 +20,14 @@ void pytorch_q8conv_ukernel_8x8__neon(
     const void* restrict w,
     uint8_t* restrict c,
     size_t c_stride,
+    size_t output_channel_index,
     const union pytorch_qnnp_conv_quantization_params
         quantization_params[restrict static 1]) {
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
   const uint8x8_t vb_zero_point =
-      vld1_dup_u8((const uint8_t*)&quantization_params->neon.kernel_zero_point);
+      vld1_u8((const uint8_t*)&quantization_params->neon.kernel_zero_points
+          [output_channel_index]);
 
   int32x4_t vacc0x0123 = vld1q_s32(w);
   w = (void*)((uintptr_t)w + sizeof(int32x4_t));
