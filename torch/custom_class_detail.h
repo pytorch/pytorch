@@ -14,19 +14,51 @@ struct types {
   using type = types;
 };
 
-template <class Sig>
-struct args;
+template <typename Method>
+struct WrapMethod;
 
-// Method
-template <class R, class CurClass, class... Args>
-struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
+template <typename R, typename CurrClass, typename... Args>
+struct WrapMethod<R (CurrClass::*)(Args...)> {
+  WrapMethod(R (CurrClass::*m)(Args...)) : m(std::move(m)) {}
 
-// Const method
-template <class R, class CurClass, class... Args>
-struct args<R (CurClass::*)(Args...) const> : types<R, Args...> {};
+  R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
+    return c10::guts::invoke(m, *cur, args...);
+  }
 
-template <class Sig>
-using args_t = typename args<Sig>::type;
+  R (CurrClass::*m)(Args...);
+};
+
+template <typename R, typename CurrClass, typename... Args>
+struct WrapMethod<R (CurrClass::*)(Args...) const> {
+  WrapMethod(R (CurrClass::*m)(Args...) const) : m(std::move(m)) {}
+
+  R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
+    return c10::guts::invoke(m, *cur, args...);
+  }
+
+  R (CurrClass::*m)(Args...) const;
+};
+
+// Adapter for different callable types
+template <
+    typename CurClass,
+    typename Func,
+    std::enable_if_t<
+        std::is_member_function_pointer<std::decay_t<Func>>::value,
+        bool> = false>
+WrapMethod<Func> wrap_func(Func f) {
+  return WrapMethod<Func>(std::move(f));
+}
+
+template <
+    typename CurClass,
+    typename Func,
+    std::enable_if_t<
+        !std::is_member_function_pointer<std::decay_t<Func>>::value,
+        bool> = false>
+Func wrap_func(Func f) {
+  return f;
+}
 
 } // namespace detail
 
