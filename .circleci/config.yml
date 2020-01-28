@@ -1547,26 +1547,6 @@ jobs:
 workflows:
   build:
     jobs:
-      - smoke_mac_test:
-          name: smoke_macos_wheel_3_8_cpu_nightly
-          build_environment: "wheel 3.8 cpu"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
-      - smoke_mac_test:
-          name: smoke_macos_conda_3_8_cpu_nightly
-          build_environment: "conda 3.8 cpu"
-          requires:
-            - setup
-            - update_s3_htmls_for_nightlies
-            - update_s3_htmls_for_nightlies_devtoolset7
-          filters:
-            branches:
-              only: postnightly
       - binary_mac_build:
           name: binary_macos_wheel_3_8_cpu_nightly_build
           build_environment: "wheel 3.8 cpu"
