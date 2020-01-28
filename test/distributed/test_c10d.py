@@ -3274,7 +3274,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+            # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
+            with self.assertRaisesRegex(RuntimeError, "(Operation timed out!)|(NCCL error: unhandled system error)"):
                 c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
         else:
             # Ensure the other rank sleeps to trigger timeout.
