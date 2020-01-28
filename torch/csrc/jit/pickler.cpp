@@ -115,6 +115,17 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::BUILD);
   } else if (ivalue.isDevice()) {
     pushDevice(ivalue);
+  } else if (ivalue.isCapsule()) {
+    std::stringstream err;
+    err << "Cannot serialize custom bound C++ class";
+    if (memorized_class_types_ && memorized_class_types_->size()) {
+      if (auto qualname = memorized_class_types_->back()->name()) {
+        err << " " << qualname->qualifiedName();
+      }
+    }
+    err << ". Please define serialization methods via torch::jit::pickle_ for "
+           "this class.";
+    AT_ERROR(err.str());
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
