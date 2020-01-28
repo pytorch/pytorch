@@ -64,7 +64,6 @@ class C10_API intrusive_ptr_target {
   //    If it is not, you must report that the storage is dead.
   //
   mutable std::atomic<size_t> refcount_;
-  mutable std::atomic<size_t> weakcount_;
 
   template <typename T, typename NullType>
   friend class intrusive_ptr;
@@ -96,9 +95,6 @@ class C10_API intrusive_ptr_target {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         refcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        weakcount_.load() == 0,
-        "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #  pragma warning(pop)
 #else
@@ -106,7 +102,7 @@ class C10_API intrusive_ptr_target {
 #endif
   }
 
-  constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
+  constexpr intrusive_ptr_target() noexcept : refcount_(0) {}
 
   // intrusive_ptr_target supports copy and move: but refcount and weakcount don't
   // participate (since they are intrinsic properties of the memory location)
@@ -197,12 +193,7 @@ class intrusive_ptr final {
       // and a destructor always mutates the object, even for const objects.
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
 
-      // See comment above about weakcount. As long as refcount>0,
-      // weakcount is one larger than the actual number of weak references.
-      // So we need to decrement it here.
-      if (--target_->weakcount_ == 0) {
-        delete target_;
-      }
+      delete target_;
     }
     target_ = NullType::singleton();
   }
@@ -320,7 +311,7 @@ class intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->refcount_.load();
   }
 
   bool unique() const noexcept {
@@ -357,7 +348,6 @@ class intrusive_ptr final {
     // and because we allow raising these values from 0, which retain_()
     // has an assertion against.
     ++result.target_->refcount_;
-    ++result.target_->weakcount_;
 
     return result;
   }
@@ -441,7 +431,7 @@ class weak_intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_weakcount = ++target_->weakcount_;
+      size_t new_weakcount = ++target_->refcount_;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
@@ -449,7 +439,7 @@ class weak_intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->weakcount_ == 0) {
+    if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
       delete target_;
     }
     target_ = NullType::singleton();
@@ -575,7 +565,7 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->refcount_.load();
   }
 
   bool expired() const noexcept {
@@ -622,9 +612,7 @@ class weak_intrusive_ptr final {
     // if refcount == 0, weakcount only must be >0.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         owning_weak_ptr == NullType::singleton() ||
-        owning_weak_ptr->weakcount_.load() > 1 ||
-            (owning_weak_ptr->refcount_.load() == 0 &&
-             owning_weak_ptr->weakcount_.load() > 0),
+        owning_weak_ptr->refcount_.load() > 1,
         "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
     return weak_intrusive_ptr(owning_weak_ptr);
   }
@@ -726,7 +714,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    ++self->weakcount_;
+    ++self->refcount_;
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {
