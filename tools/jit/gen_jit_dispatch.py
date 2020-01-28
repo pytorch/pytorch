@@ -320,7 +320,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
     def requires_lvalue(arg):
         jit_type = jit_type_of(arg)
-        return  jit_type.startswith('Tensor') and '!' in jit_type
+        return jit_type.startswith('Tensor') and '!' in jit_type
 
     def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
