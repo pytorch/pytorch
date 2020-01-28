@@ -121,7 +121,10 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setSlot(0, capsule);
     };
-    defineMethod("__setstate__", detail::wrap_func<CurClass, decltype(setstate_wrapper)>(std::move(setstate_wrapper)));
+    defineMethod(
+        "__setstate__",
+        detail::wrap_func<CurClass, decltype(setstate_wrapper)>(
+            std::move(setstate_wrapper)));
 
     // type validation
     auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
@@ -158,7 +161,7 @@ class class_ {
   }
 
  private:
-  template<typename Func>
+  template <typename Func>
   void defineMethod(std::string name, Func func) {
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
