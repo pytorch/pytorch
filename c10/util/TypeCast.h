@@ -168,4 +168,21 @@ AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
 #undef DEFINE_UNCASTABLE
 #undef ERROR_UNSUPPORTED_CAST
 
+template <typename To, typename From>
+To convert(From f) {
+  return static_cast_with_inter_type<To, From>::apply(f);
+}
+
+template <typename To, typename From>
+To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
+    std::ostringstream oss;
+    oss << "value cannot be converted to type " << name
+        << " without overflow: " << f;
+    throw std::domain_error(oss.str());
+  }
+  return convert<To, From>(f);
+}
+
 }  // namespace c10
