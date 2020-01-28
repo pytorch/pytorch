@@ -245,16 +245,21 @@ class MyScriptClass:
     def __init__(self):
         self.a = 10
 
+@torch.jit.interface
+class MyModuleInterface(torch.nn.Module):
+    def forward(self):
+        # type: () -> Tensor
+        pass
 
 class MyScriptModule(torch.jit.ScriptModule):
     def __init__(self):
         super().__init__()
-        self.a = 10
+        self.a = torch.randn(10)
 
     @torch.jit.script_method
-    def my_method(self):
+    def forward(self):
+        # type: () -> Tensor
         return self.a
-
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -817,12 +822,7 @@ class RpcTest(RpcAgentTestFixture):
                 'worker{}'.format(dst_rank),
                 _qualified_name(MyScriptModule),
                 args=())
-
-        with self.assertRaisesRegex(RuntimeError, "attempted to get undefined function"):
-            ret = rpc._rpc_sync_torchscript(
-                'worker{}'.format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
-                args=())
+        '''
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
@@ -830,6 +830,7 @@ class RpcTest(RpcAgentTestFixture):
                 'worker{}'.format(dst_rank),
                 MyScriptModule().my_method,
                 args=())
+        '''
 
     @dist_init
     def test_nested_rpc(self):
@@ -1666,7 +1667,8 @@ class RpcJitTest(RpcAgentTestFixture):
         @torch.jit.script
         def rref_to_here(rref_var):
             # type: (RRef[Tensor]) -> Tensor
-            return rref_var.to_here()
+            t = rref_var.to_here()
+            return t + 1
 
         local_ret = rref_to_here(rref_var)
         rpc_ret = rpc.rpc_sync(
@@ -1680,17 +1682,21 @@ class RpcJitTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         ref_script_module = rpc.remote(
-            "worker{}".format(dst_rank),
+            "worker{}".format(self.rank),
             MyScriptModule,
             args=())
 
         @torch.jit.script
         def run_ref_script_module(ref_script_module):
+            # type: (RRef[MyModuleInterface]) -> Tensor
             module = ref_script_module.to_here()
-            return module.my_method()
+            return module.forward()
 
+        local_ret = run_ref_script_module(ref_script_module)
+        '''
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             run_ref_script_module,
             args=(ref_script_module,))
-        self.assertEqual(ret, MyScriptModule().my_method())
+        self.assertEqual(ret, local_ret)
+        '''
