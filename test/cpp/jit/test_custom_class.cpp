@@ -85,8 +85,16 @@ static auto testStack =
         .def("merge", &Stack<std::string>::merge)
         .def("__getstate__", &Stack<std::string>::__getstate__)
         .def("__setstate__", &Stack<std::string>::__setstate__)
-        .def("return_a_tuple", &Stack<std::string>::return_a_tuple);
-
+        .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
+        .def(
+            "top",
+            [](const c10::intrusive_ptr<Stack<std::string>>& self)
+                -> std::string { return self->stack_.back(); });
+// clang-format off
+        // The following will fail with a static assert telling you you have to
+        // take an intrusive_ptr<Stack> as the first argument.
+        // .def("foo", [](int64_t a) -> int64_t{ return 3;});
+// clang-format on
 } // namespace
 
 } // namespace jit
