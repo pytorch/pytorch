@@ -111,17 +111,27 @@ class class_ {
 
   // Pickle
   template <typename GetStateFn, typename SetStateFn>
-  class_& def(detail::pickle_factory<GetStateFn, SetStateFn> pickle) {
-    def("__getstate__", std::move(pickle.g));
+  class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
+    static_assert(
+        c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
+            c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
+        "torch::jit::pickle_ currently only supports lambdas as "
+        "__getstate__ and __setstate__ arguments.");
+    def("__getstate__", std::forward<GetStateFn>(get_state));
 
     // __setstate__ needs to be registered with some custom handling:
     // We need to wrap the invocation of of the user-provided function
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
-    auto s = pickle.s;
-    auto setstate_wrapper = [s](c10::tagged_capsule<CurClass> self,
-                                typename decltype(pickle)::arg_state_type arg) {
-      c10::intrusive_ptr<CurClass> classObj = at::guts::invoke(s, arg);
+    using SetStateTraits =
+        c10::guts::infer_function_traits_t<std::decay_t<SetStateFn>>;
+    using SetStateArg = typename c10::guts::typelist::head_t<
+        typename SetStateTraits::parameter_types>;
+    auto setstate_wrapper = [set_state = std::move(set_state)](
+                                c10::tagged_capsule<CurClass> self,
+                                SetStateArg&& arg) {
+      c10::intrusive_ptr<CurClass> classObj =
+          at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
       auto genericPtr =
           c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(
               classObj);
@@ -146,22 +156,21 @@ class class_ {
     TORCH_CHECK(
         *first_arg_type == *classTypePtr,
         "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->str());
+        first_arg_type->python_str());
     TORCH_CHECK(
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
     auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
-    TORCH_INTERNAL_ASSERT(setstate_schema.arguments().size() == 2);
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
         (*arg_type == *ser_type),
         "__setstate__'s argument should be the same type as the "
         "return value of __getstate__. Got ",
-        arg_type->str(),
+        arg_type->python_str(),
         " but expected ",
-        ser_type->str());
+        ser_type->python_str());
 
     return *this;
   }

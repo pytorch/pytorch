@@ -60,6 +60,11 @@ struct Stack : torch::jit::CustomClassHolder {
   }
 };
 
+struct PickleTester : torch::jit::CustomClassHolder {
+  PickleTester(std::vector<int64_t> vals) : vals(std::move(vals)) {}
+  std::vector<int64_t> vals;
+};
+
 static auto test = torch::jit::class_<Foo>("_TorchScriptTesting_Foo")
                        .def(torch::jit::init<int64_t, int64_t>())
                        // .def(torch::jit::init<>())
@@ -75,14 +80,14 @@ static auto testStack =
         .def("pop", &Stack<std::string>::pop)
         .def("clone", &Stack<std::string>::clone)
         .def("merge", &Stack<std::string>::merge)
-        .def(torch::jit::pickle_(
+        .def_pickle(
             [](const c10::intrusive_ptr<Stack<std::string>>& self) {
               return self->stack_;
             },
             [](std::vector<std::string> state) { // __setstate__
               return c10::make_intrusive<Stack<std::string>>(
                   std::vector<std::string>{"i", "was", "deserialized"});
-            }))
+            })
         .def("return_a_tuple", &Stack<std::string>::return_a_tuple)
         .def(
             "top",
@@ -93,6 +98,28 @@ static auto testStack =
         // take an intrusive_ptr<Stack> as the first argument.
         // .def("foo", [](int64_t a) -> int64_t{ return 3;});
 // clang-format on
+
+static auto testPickle =
+    torch::jit::class_<PickleTester>("_TorchScriptTesting_PickleTester")
+        .def(torch::jit::init<std::vector<int64_t>>())
+        .def_pickle(
+            [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
+              return std::vector<int64_t>{1, 3, 3, 7};
+            },
+            [](std::vector<int64_t> state) { // __setstate__
+              return c10::make_intrusive<PickleTester>(std::move(state));
+            })
+        .def(
+            "top",
+            [](const c10::intrusive_ptr<PickleTester>& self) {
+              return self->vals.back();
+            })
+        .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
+          auto val = self->vals.back();
+          self->vals.pop_back();
+          return val;
+        });
+
 } // namespace
 
 } // namespace jit
