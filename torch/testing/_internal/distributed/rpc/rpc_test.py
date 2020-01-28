@@ -1632,13 +1632,15 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
 
     @dist_init
-    def test_function_error(self):
-        setattr(self, "foo", foo_add)
+    def test_function_not_on_callee(self):
+        # test that if a function does not exist on a callee, we don't crash,
+        # instead we get an AttributeError indicating that the func does not exist.
         if self.rank != 0:
+            # Use delattr to remove the binding of a func on callee nodes
             import sys
             this_module = sys.modules[__name__]
             delattr(this_module, "foo_add")
         if self.rank == 0:
+            # func exists on caller, but not callee.
             with self.assertRaisesRegex(Exception, "AttributeError"):
-                ret = rpc.rpc_sync("worker1", self.foo, args=())
-
+                ret = rpc.rpc_sync("worker1", foo_add, args=())
