@@ -104,7 +104,7 @@ bool isSimpleMap(Node* node) {
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
-  if (!simple_mappable.find(node)) {
+  if (!node->isMemberOf(simple_mappable)) {
     return false;
   }
   for (Value* input : node->inputs()) {
