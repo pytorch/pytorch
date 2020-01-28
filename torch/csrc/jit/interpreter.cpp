@@ -17,7 +17,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
@@ -31,9 +30,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-// todo: windows
-#include <signal.h>
 
 namespace torch {
 namespace jit {
@@ -801,6 +797,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // minimizing the total number or register
   std::vector<IValue> registers;
 
+  // A Frame captures function's state
   // (e.g. `pc` and `base_pointer`)
   // Each Frame corresponds to a call to a `Frame::function`
   // which has not yet returned
@@ -1120,6 +1117,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
       }
     } catch (std::exception& e) {
+      frames.back().pc = af.pc;
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       handleError(ExceptionMessage(e), is_jit_exception);
       return false;

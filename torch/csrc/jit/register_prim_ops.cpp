@@ -19,7 +19,6 @@
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
-#include <torch/csrc/jit/hooks_for_testing.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -2329,10 +2328,10 @@ int hashValue(Stack& stack) {
 RegisterOperators reg2({
     Operator(
         "aten::breakpoint() -> ()",
-        [](Stack& stack) {
-          std::cout << "starting debugger from op\n";
+        [](Stack& stack) -> int {
+          // TODO: There's no way to communicate with the interpreter outside
+          // of throwing an exception
           throw DebuggerHookException();
-          return 0;
         },
         aliasAnalysisSpecialCase()),
 
