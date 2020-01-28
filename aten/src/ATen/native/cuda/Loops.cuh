@@ -226,11 +226,71 @@ inline int can_vectorize_up_to(array_t pointers) {
 
 }  // namespace detail
 
-template<typename func_t, typename array_t, typename policy_t>
-__device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
+template<int num_threads, int thread_work_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+
+  using traits = function_traits<func_t>;
+  using return_t = typename traits::result_type;
+  using arg_t = detail::arg_type::type<func_t>;
+  constexpr int arity = traits::arity;
+
+  // We need to create array to hold all the arguments, for nullary `f`, this means array of size 0.
+  // Unfortunately the compiler don't allow us to create array of 0 size, so for this case, we create
+  // an array of size 1 and just don't use it.
+  constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
+
+  int block_work_size = num_threads * thread_work_size;
+  int idx = block_work_size * blockIdx.x + threadIdx.x;
+
+  // compute base pointers
+  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
+  arg_t *args_base[nargs];
+  #pragma unroll
+  for (int i = 0; i < arity; i++) {
+    args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
+  }
+
+  // fetch data
+  return_t results[vt];
+  arg_t args[vt][nargs];
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      #pragma unroll
+      for (int j = 0; j < arity; j++) {
+        args[i][j] = *(args_base[j] + i * nt);
+      }
+    }
+  }
+
+  // compute
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+    }
+  }
+
+  // store data
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx + nt * i < N) {
+      *(result_base + i * nt) = results[i];
+    }
+  }
+}
+
+#ifndef __HIP_PLATFORM_HCC__
+template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
+__device__ inline void vectorized_elementwise_kernel(func_t f, array_t data) {
+  // Assumption:
+  // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
+  // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+  using vectorized = memory::vectorized_access<num_threads, thread_work_size, vec_size>;
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using arg_t = detail::arg_type::type<func_t>;
@@ -242,7 +302,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   // compute base pointers for this block
-  int idx = policy_t::block_work_size * blockIdx.x;
+  int idx = vectorized::block_work_size * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   arg_t *args_base[nargs];
   #pragma unroll
@@ -257,7 +317,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   #pragma unroll
   for (int i = 0; i < arity; i++) {
     auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
-    policy.load(args_accessor, args_base[i]);
+    vectorized::load(args_accessor, args_base[i]);
   }
 
   // compute
@@ -268,8 +328,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
 
   // store
   auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-  policy.store(result_accessor, result_base);
+  vectorized::store(result_accessor, result_base);
 }
+#endif
 
 template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
@@ -278,11 +339,15 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using policies = memory::policies<num_threads, thread_work_size>;
   int remaining = N - policies::common::block_work_size * blockIdx.x;
 
+#ifdef __HIP_PLATFORM_HCC__
+  unrolled_elementwise_kernel<num_threads, thread_work_size>(N, f, data);
+#else
   if (remaining < policies::common::block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, data, typename policies::checked_unroll(remaining));
+    unrolled_elementwise_kernel<num_threads, thread_work_size>(N, f, data);
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper(f, data, typename policies::template vectorized<vec_size>());
+    vectorized_elementwise_kernel<vec_size, num_threads, thread_work_size>(f, data);
   }
+#endif
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
