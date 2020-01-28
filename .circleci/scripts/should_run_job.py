@@ -13,13 +13,13 @@ default_set = set([
     # Selected oldest Python 2 version to ensure Python 2 coverage
     'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
-    'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    'pytorch-linux-xenial-cuda10.1-cudnn7-py3',
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
     'pytorch-linux-xenial-py3.6-gcc5.4',
     # LibTorch
-    'pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3',
+    'pytorch-libtorch-linux-xenial-cuda10.1-cudnn7-py3',
 
     # Caffe2 CPU
     'caffe2-py2-mkl-ubuntu16.04',
@@ -58,8 +58,10 @@ default_set = set([
     # Pytorch iOS builds
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
+    'pytorch-ios-11.2.1-arm64_custom_build',
     # PyTorch Mobile builds
     'pytorch-linux-xenial-py3-clang5-mobile-build',
+    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',

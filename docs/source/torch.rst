@@ -199,6 +199,7 @@ Pointwise Ops
 .. autofunction:: atan2
 .. autofunction:: bitwise_not
 .. autofunction:: bitwise_and
+.. autofunction:: bitwise_or
 .. autofunction:: bitwise_xor
 .. autofunction:: ceil
 .. autofunction:: clamp
@@ -310,6 +311,8 @@ Other Operations
 .. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
+.. autofunction:: cummax
+.. autofunction:: cummin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: diag

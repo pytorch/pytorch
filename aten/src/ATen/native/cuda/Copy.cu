@@ -117,7 +117,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
+  // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
   if (copy_requires_temporaries(iter, p2p_enabled)) {

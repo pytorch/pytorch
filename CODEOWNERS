@@ -10,7 +10,7 @@
 /test/test_c10d.py @pietern @mrshenli @zhaojuanmao
 /torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
 
-# Not there to stricly require the approval, but to be tagged as a reviewer
+# Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
 /torch/csrc/api/data/ @apaszke
 /torch/csrc/autograd/ @apaszke

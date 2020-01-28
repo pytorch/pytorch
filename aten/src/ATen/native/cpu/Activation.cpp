@@ -9,6 +9,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/Parallel.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -18,6 +19,66 @@ namespace at {
 namespace native {
 
 namespace {
+
+template <typename scalar_t>
+inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input) {
+  using Vec = Vec256<scalar_t>;
+  scalar_t* output_data = output.data_ptr<scalar_t>();
+  scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
+    int64_t size = end - begin;
+    int64_t d = 0;
+    for (; d < size - (size % Vec::size()); d += Vec::size()) {
+      Vec data_vec = Vec::loadu(input_data + begin+ d);
+      Vec max_vec = vec256::maximum(data_vec.neg(), Vec(scalar_t(0)));
+      Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
+      Vec output_vec = (max_vec + buffer_vec.log()).neg();
+      buffer_vec.store(buffer_data + begin + d);
+      output_vec.store(output_data + begin + d);
+    }
+    if (size - d > 0) {
+      Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
+      Vec max_vec = vec256::maximum(data_vec.neg(), Vec(scalar_t(0)));
+      Vec buffer_vec =  max_vec.neg().exp() + (data_vec.neg() - max_vec).exp();
+      Vec output_vec = (max_vec + buffer_vec.log()).neg();
+      buffer_vec.store(buffer_data + begin + d, size - d);
+      output_vec.store(output_data + begin + d, size - d);
+    }
+  });
+}
+
+static void log_sigmoid_cpu_kernel(Tensor& output, Tensor& buffer, const Tensor& input) {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
+    _vec_log_sigmoid<scalar_t>(output, buffer, input);
+  });
+}
+
+static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
+    auto zero_val = scalar_t(0);
+    auto zero_vec = Vec(zero_val);
+    auto one_val = scalar_t(1);
+    auto one_vec = Vec(one_val);
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        auto max_deriv_val = zero_val;
+        auto sign_val = -one_val;
+        if (a < zero_val) {
+          max_deriv_val = -one_val;
+          sign_val = one_val;
+        }
+        return (-max_deriv_val - sign_val * ((b - one_val) / b)) * c;
+      },
+      [=](Vec a, Vec b, Vec c) -> Vec {
+        auto mask = a < zero_vec;
+        auto max_deriv_vec = Vec::blendv(zero_vec, one_vec.neg(), mask);
+        auto sign_vec = Vec::blendv(one_vec.neg(), one_vec, mask);
+        return (max_deriv_vec + sign_vec * ((b - one_vec) / b)).neg() * c;
+      });
+  });
+}
 
 static void threshold_kernel(
     TensorIterator& iter,
@@ -311,8 +372,32 @@ static void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
   });
 }
 
+void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_cpu", [&]() {
+    auto beta = beta_.to<scalar_t>();
+    auto threshold = threshold_.to<scalar_t>();
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+      return (a * beta) > threshold ? a
+          : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
+    });
+  });
+}
+
+void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_backward_cpu", [&]() {
+    auto beta = beta_.to<scalar_t>();
+    auto threshold = threshold_.to<scalar_t>();
+    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
+      scalar_t z = std::exp(b * beta);
+      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+    });
+  });
+}
+
 } // namespace
 
+REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_cpu_stub, &log_sigmoid_backward_cpu_kernel);
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
@@ -324,6 +409,8 @@ REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
+REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 
 } // namespace native
 } // namespace at

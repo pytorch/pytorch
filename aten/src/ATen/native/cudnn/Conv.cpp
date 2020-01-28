@@ -125,15 +125,6 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   return t.narrow(dim, group_idx * group_size, group_size);
 }
 
-bool support_channels_last(const Tensor& input, const Tensor& weight, int groups) {
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) {
-    return false;
-  }
-  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-  return (groups == 1 || cudnn_version >= 7603) &&
-      (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
-}
-
 // ---------------------------------------------------------------------
 //
 // Checking
@@ -831,7 +822,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -875,7 +866,7 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto layout = support_channels_last(*input, *weight, groups) ?
+  auto layout = cudnn_conv_use_channels_last(*input, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
@@ -893,7 +884,10 @@ Tensor cudnn_convolution_forward(
 
   // See #4500
   Tensor weight_contig = weight->contiguous(layout);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), layout);
   Tensor input_contig = input->contiguous(layout);
+  input_contig.resize_(input_contig.sizes(), layout);
 
   raw_cudnn_convolution_forward_out(
       *output, input_contig, weight_contig,
@@ -965,7 +959,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, 0, grad_output.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1018,7 +1012,7 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto layout = support_channels_last(*grad_output, *weight, groups) ?
+  auto layout = cudnn_conv_use_channels_last(*grad_output, *weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   auto grad_input_t = at::empty(input_size, grad_output->options(), layout);
 
@@ -1028,7 +1022,11 @@ Tensor cudnn_convolution_backward_input(
 
   // See #4500
   Tensor weight_contig = weight->contiguous(layout);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), layout);
+
   Tensor grad_output_contig = grad_output->contiguous(layout);
+  grad_output_contig.resize_(grad_output_contig.sizes(), layout);
 
   raw_cudnn_convolution_backward_input_out(
       *grad_input, grad_output_contig, weight_contig,
@@ -1108,7 +1106,7 @@ Tensor cudnn_convolution_transpose(
 //
 // ---------------------------------------------------------------------
 
-void raw_cudnn_convolution_backward_weight_out(
+void raw_cudnn_convolution_backward_weight_out_32bit(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
@@ -1119,7 +1117,7 @@ void raw_cudnn_convolution_backward_weight_out(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight);
+  args.wdesc.set(grad_weight, 0, input.suggest_memory_format()==at::MemoryFormat::ChannelsLast);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1142,25 +1140,82 @@ void raw_cudnn_convolution_backward_weight_out(
       &zero, args.wdesc.desc(), grad_weight.data_ptr()));
 }
 
+void raw_cudnn_convolution_backward_weight_out(
+    const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
+  const int64_t ni = input.numel();
+  const int64_t no = grad_output.numel();
+  // Assume the shape of the tensor is (N, C, D1, D2, ...)
+  // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
+  if (ni <= int_max && no <= int_max) {
+    raw_cudnn_convolution_backward_weight_out_32bit(grad_weight, grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+    return;
+  }
+  // else, if C * D1 * D2 * ... <= int_max, then we just need to split across the N dimension
+  //
+  // Here we use a simple heuristics to determine the size of each split
+  // We don't max out the 2^31 address space because this number is super
+  // large and very likely to get an OOM.
+  int64_t n = grad_output.size(0);
+  int64_t max_inner_size = std::max<int64_t>(ni, no) / n;
+  int64_t split_size = std::max<int64_t>(1024 * 1024 * 512 / max_inner_size, 1L);
+  int64_t num_splits = (n + split_size - 1) / split_size;
+  if (split_size * max_inner_size < int_max) {
+    for (int64_t i = 0; i < num_splits; i++) {
+      int64_t start = split_size * i;
+      int64_t split_size_ = std::min<int64_t>(split_size, n - start);
+      Tensor input_ = input.narrow(0, start, split_size_);
+      Tensor grad_output_ = grad_output.narrow(0, start, split_size_);
+      Tensor grad_weight_ = at::empty_like(grad_weight);
+      raw_cudnn_convolution_backward_weight_out_32bit(grad_weight_, grad_output_, input_, padding, stride, dilation, groups, benchmark, deterministic);
+      grad_weight.add_(grad_weight_);
+    }
+    return;
+  }
+  // If control flow reaches here, this means even splitting N is not enough, then things starts to become complicated:
+  // For example, for conv2d, there following questions needs to be considered.
+  // - Is the memory layout NCHW or NHWC ?
+  // - If the conv is NCHW -> NC'H'W', then should we
+  //   - split only NC?
+  //   - split only N'C'?
+  //   - split both?
+  // - If the conv is NHWC, then we need to split across H, we need to be very careful about the boundary condition
+  //   to make sure that the boundary is handled correctly.
+  // - If we decide to make these splits, is the memory contiguous? Do we need to copy the memory?
+  // Considering the complexity of this issue, it is better not to use cuDNN for this case
+  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
+}
+
 Tensor cudnn_convolution_backward_weight(
     CheckedFrom c,
-    IntArrayRef weight_size, const TensorArg& grad_output, const TensorArg& input,
+    IntArrayRef weight_size, const Tensor& grad_output_t, const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
+  TensorArg input{ input_t, "input", 2};
 
-  checkAllSameType(c, {grad_output, input});
-  checkAllSameGPU(c, {grad_output, input});
+  auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
+      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
-  auto grad_weight_t = at::empty(weight_size, grad_output->options(), grad_output->suggest_memory_format());
+  Tensor grad_output_contig_t = grad_output_t.contiguous(layout);
+  // Make sure that NC11 strides follow formula
+  grad_output_contig_t.resize_(grad_output_contig_t.sizes(), layout);
+  TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
+
+  checkAllSameType(c, {grad_output_contig, input});
+  checkAllSameGPU(c, {grad_output_contig, input});
+
+  auto grad_weight_t = at::empty(weight_size, grad_output_contig->options(), layout);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
-  convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
+  convolution_shape_check(c, input, grad_weight, grad_output_contig, padding, stride, dilation, groups);
 
   raw_cudnn_convolution_backward_weight_out(
-      *grad_weight, *grad_output, *input,
+      *grad_weight, *grad_output_contig, *input,
       padding, stride, dilation, groups, benchmark, deterministic);
 
   return grad_weight_t;
@@ -1173,11 +1228,9 @@ Tensor cudnn_convolution_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
-  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
-            input{ input_t, "input", 2 };
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
-      weight_size, grad_output, input,
+      weight_size, grad_output_t, input_t,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
@@ -1188,11 +1241,9 @@ Tensor cudnn_convolution_transpose_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
-  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
-            input{ input_t, "input", 2 };
   return cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
-      weight_size, input, grad_output,
+      weight_size, input_t, grad_output_t,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 

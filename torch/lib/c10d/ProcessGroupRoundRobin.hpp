@@ -47,6 +47,11 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> allgather_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
   std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
