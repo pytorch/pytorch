@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import functools
 import logging
@@ -76,39 +77,56 @@ def _require_initialized(func):
     return wrapper
 
 
+class WaitAllWorkersStates(object):
+    def __init__(self):
+        # Each `intent_worker_names` is an empty set at beginning.
+        # It's only used by leader worker. Leader worker is user-specified or
+        # elected as the first worker in a sorted worker name list.
+        # Whenever there is a worker showing shutdown intention to the leader, by
+        # calling `_wait_all_workers()`, the leader adds this worker's name to the set.
+        # The leader also adds itself's name to the set on calling
+        # `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
+        # to be called only once, by examing if leader's name has been added to the set.
+        self.intent_worker_names = set()
+        # Once `intent_worker_names == _ALL_WORKER_NAMES`,
+        # we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
+        # to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
+        self.proceed_signal = threading.Event()
+
+
 # States used by `def _wait_all_workers()`.
 # `_ALL_WORKER_NAMES` is initialized on initiaizing RPC layer.
 _ALL_WORKER_NAMES = None
-# `_SHUTDOWN_INTENT_WORKER_NAMES` is an empty set at beginning.
-# It's only used by leader worker. Leader worker is elected as the first
-# worker in a sorted worker name list.
-# Whenever there is a worker showing shutdown intention to the leader, by
-# calling _wait_all_workers()`, the leader adds this worker's name to the set.
-# The leader also adds itself's name to the set on calling
-# `_wait_all_workers()`. We need this because, we confine `_wait_all_workers()`
-# to be called only once, by examing if leader's name has been added to the set.
-_SHUTDOWN_INTENT_WORKER_NAMES = set()
-# Once `_SHUTDOWN_INTENT_WORKER_NAMES == _ALL_WORKER_NAMES`,
-# we flip `_SHUTDOWN_PROCEED_SIGNAL` on the leader, and leader will send RPCs
-# to follower workers to flip their `_SHUTDOWN_PROCEED_SIGNAL`s.
-_SHUTDOWN_PROCEED_SIGNAL = threading.Event()
+_wait_all_workers_dict_lock = threading.Lock()
+_wait_all_workers_sequence_id = 0
+_wait_all_workers_sequence_id_to_states = collections.defaultdict(WaitAllWorkersStates)
 
 
-def _on_leader_follower_report_shutdown_intent(worker_name):
+def _on_leader_follower_report_shutdown_intent(sequence_id, worker_name):
     assert (
         worker_name in _ALL_WORKER_NAMES
     ), "{worker_name} is not expected by leader.".format(worker_name=worker_name)
+    intent_worker_names = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].intent_worker_names
     assert (
-        worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
-    ), "{worker_name} reported intent twice. ".format(worker_name=worker_name)
-    _SHUTDOWN_INTENT_WORKER_NAMES.add(worker_name)
-    if _ALL_WORKER_NAMES == _SHUTDOWN_INTENT_WORKER_NAMES:
-        _set_proceed_shutdown_signal()
+        worker_name not in intent_worker_names
+    ), "{worker_name} reported intent sequence id {sequence_id} twice. ".format(
+        worker_name=worker_name, sequence_id=sequence_id
+    )
+    intent_worker_names.add(worker_name)
+    if _ALL_WORKER_NAMES == intent_worker_names:
+        _set_proceed_shutdown_signal(sequence_id)
 
 
-def _set_proceed_shutdown_signal():
-    assert not _SHUTDOWN_PROCEED_SIGNAL.is_set(), "Termination signal got set twice."
-    _SHUTDOWN_PROCEED_SIGNAL.set()
+def _set_proceed_shutdown_signal(sequence_id):
+    proceed_signal = _wait_all_workers_sequence_id_to_states[sequence_id].proceed_signal
+    assert (
+        not proceed_signal.is_set()
+    ), "Termination signal sequence id {} got set twice.".format(
+        sequence_id=sequence_id
+    )
+    proceed_signal.set()
 
 
 @_require_initialized
@@ -126,24 +144,29 @@ def _wait_all_workers():
     leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
     self_worker_name = _agent.get_worker_info().name
-    assert (
-        self_worker_name not in _SHUTDOWN_INTENT_WORKER_NAMES
-    ), "Can not call `_wait_all_workers()` twice."
+
+    global _wait_all_workers_sequence_id
+    with _wait_all_workers_dict_lock:
+        sequence_id = _wait_all_workers_sequence_id
+        _wait_all_workers_sequence_id += 1
 
     is_leader_worker = leader_worker_name == self_worker_name
 
     # Phase 1: Followers send intents.
     # All followers report intents to the leader.
     if is_leader_worker:
-        _on_leader_follower_report_shutdown_intent(self_worker_name)
+        _on_leader_follower_report_shutdown_intent(sequence_id, self_worker_name)
     else:
         rpc_sync(
             leader_worker_name,
             _on_leader_follower_report_shutdown_intent,
-            args=(self_worker_name,),
+            args=(sequence_id, self_worker_name,),
         )
 
-    _SHUTDOWN_PROCEED_SIGNAL.wait()
+    proceed_signal = _wait_all_workers_sequence_id_to_states[
+        sequence_id
+    ].proceed_signal
+    proceed_signal.wait()
 
     # Phase 2: Leader asks followers to proceed.
     # Leader's signal is the first to be unblocked,
@@ -154,7 +177,9 @@ def _wait_all_workers():
         _set_rpc_timeout(timeout)
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=())
+            fut = rpc_async(
+                follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,)
+            )
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
@@ -760,6 +785,4 @@ def _remote_torchscript(to, qualified_name, args=None, kwargs=None):
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    return _invoke_remote_torchscript(
-        to, qualified_name, *args, **kwargs
-    )
+    return _invoke_remote_torchscript(to, qualified_name, *args, **kwargs)
