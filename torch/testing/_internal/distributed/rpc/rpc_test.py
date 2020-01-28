@@ -1557,12 +1557,12 @@ class RpcTest(RpcAgentTestFixture):
             # allow destination worker to exit without joining
             wait_until_node_failure(dst_rank)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
+            # Shutdown sequence is not very well defined and as a result
+            # we can see any of these error messages.
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else "(Request aborted during client shutdown)|"
-                "(worker.: Error in reponse from worker.: server shutting down)"
-            )
+                else get_shutdown_error_regex())
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.
@@ -1592,25 +1592,6 @@ class RpcTest(RpcAgentTestFixture):
         initialize_pg(self.init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
-        rpc.shutdown(graceful=False)
-
-    @dist_init(setup_rpc=False)
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_wait_all_workers_and_shutdown(self):
-        # This tests ensures that both rpc._wait_all_workers() and rpc.shutdown() can be
-        # called without errors being raised due to attempting to shut down
-        # multiple times.
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-        from torch.distributed.rpc.api import _wait_all_workers
-
-        # intentional call to internal _wait_all_workers.
-        _wait_all_workers()
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
