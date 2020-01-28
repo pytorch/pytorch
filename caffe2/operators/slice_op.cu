@@ -53,6 +53,7 @@ bool SliceImplGpu(
     const Tensor& data,
     const TensorCPU& starts,
     const TensorCPU& ends,
+    const vector<int64_t>& axes,
     Context* context,
     Tensor* gdata = nullptr,
     const Tensor* go = nullptr) {
@@ -70,15 +71,37 @@ bool SliceImplGpu(
   std::vector<int> ends_idx(data.dim());
   std::vector<int> dst_sizes(data.dim());
 
+  std::unordered_map<int, int> axis_index;
+  for (int i = 0; i < axes.size(); ++i) {
+    auto axis = axes[i];
+    axis = data.canonical_axis_index(axis);
+    CAFFE_ENFORCE_GE(axis, 0);
+    CAFFE_ENFORCE_LT(axis, data.dim(), "axis should not exeed data dimension");
+    axis_index[axis] = i;
+  }
+
   for (int i = 0; i < data.dim(); ++i) {
-    if (i >= starts.numel()) {
+    // axes not provided, process eletment-wise
+    int idx = i;
+    if (!axis_index.empty()) {
+      const auto& it = axis_index.find(i);
+      if (it == axis_index.end()) {
+        // current dim is not specified in axes so do not slice
+        starts_idx[i] = 0;
+        ends_idx[i] = data.sizes()[i];
+        continue;
+      }
+      idx = it->second;
+    }
+    if (idx >= starts.numel()) {
+      // mapped index out of range for starts/ends
       starts_idx[i] = 0;
-      ends_idx[i] = data.size(i);
+      ends_idx[i] = data.sizes()[i];
       continue;
     }
-    if (data.size(i) > 0) {
-      auto start = starts_data[i];
-      auto end = ends_data[i];
+    if (data.sizes()[i] > 0) {
+      auto start = starts_data[idx];
+      auto end = ends_data[idx];
       if (start < 0) {
         start = data.sizes()[i] + 1 + start;
       }
@@ -239,6 +262,7 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
       : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
+        axes_(this->template GetRepeatedArgument<int64_t>("axes")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
@@ -279,11 +303,12 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
     }
 
     return SliceImplGpu<SIndex, CUDAContext>(
-        output, data, starts_host_, ends_host_, &context_);
+        output, data, starts_host_, ends_host_, axes_, &context_);
   }
  private:
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
+  std::vector<int64_t> axes_;
   bool statically_inited_;
   Tensor starts_host_;
   Tensor ends_host_;
@@ -300,6 +325,7 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
       : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
+        axes_(this->template GetRepeatedArgument<int64_t>("axes")),
         statically_inited_(false) {}
 
   C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
@@ -324,7 +350,7 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
       auto& go = Input(3);
 
       return SliceImplGpu<SIndex, CUDAContext>(
-          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+          nullptr, data, starts_host_, ends_host_, axes_, &context_, gdata, &go);
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
@@ -348,13 +374,14 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
       auto& go = Input(1);
 
       return SliceImplGpu<SIndex, CUDAContext>(
-          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+          nullptr, data, starts_host_, ends_host_, axes_, &context_, gdata, &go);
     }
   }
  private:
 
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
+  std::vector<int64_t> axes_;
   bool statically_inited_;
   Tensor starts_host_;
   Tensor ends_host_;
