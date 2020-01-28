@@ -185,8 +185,8 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
 
   if(src->size(dimension) == 1)
   {
-    at::DimVector newSize(self->dim() - 1);
-    at::DimVector newStride(self->dim() - 1);
+    at::DimVector newSize(static_cast<size_t>(self->dim() - 1));
+    at::DimVector newStride(static_cast<size_t>(self->dim() - 1));
     for (d = 0; d < dimension; d++)
     {
       newSize[d] = self->size(d);
@@ -213,8 +213,8 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
 
   THCTensor_set(state, self, src);
 
-  at::DimVector newSize(/* size */ self->dim()+1);
-  at::DimVector newStride(/* size */ self->dim()+1);
+  at::DimVector newSize(static_cast<size_t>(/* size */ self->dim()+1));
+  at::DimVector newStride(static_cast<size_t>(/* size */ self->dim()+1));
 
   for(d = self->dim(); d > dimension; d--)
   {
