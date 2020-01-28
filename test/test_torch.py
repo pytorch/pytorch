@@ -10176,6 +10176,18 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.dtype, torch.float)
         self.assertEqual(a.size(), torch.Size([1]))
 
+    def test_exponential(self, device):
+        a = torch.tensor([10], dtype=torch.float, device=device).exponential_(0.5)
+        self.assertEqual(a.dtype, torch.float)
+        self.assertEqual(a.size(), torch.Size([1]))
+        expected = torch.tensor([10], dtype=torch.float, device=device).exponential_(0)
+        actual = torch.tensor([0.0], dtype=torch.float, device=device)
+        self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0))
+        # fail with negative lambda
+        self.assertRaises(RuntimeError, lambda: torch.tensor(
+            [10], dtype=torch.float, device=device).exponential_(-0.5))
+
+
     def test_pairwise_distance_empty(self, device):
         shape = (2, 0)
         x = torch.randn(shape, device=device)
@@ -11066,7 +11078,7 @@ class TestTorchDeviceType(TestCase):
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
-                         torch.tensor((2, 1, 0), device=device, dtype=dtype), 
+                         torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
 
         # Check linspace for non-contiguous tensors.
