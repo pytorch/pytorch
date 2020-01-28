@@ -25,23 +25,24 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+                                                  suppress_warnings, slowTest,
+                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
-                                        create_input, unpack_variables,
-                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                        exclude_tensor_method,
-                                        mask_not_all_zeros,
-                                        S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+from torch.testing._internal.common_methods_invocations import (method_tests,
+                                                                create_input, unpack_variables,
+                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                                                exclude_tensor_method,
+                                                                mask_not_all_zeros,
+                                                                S)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2557,6 +2558,19 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def test_record_function_callbacks(self):
+        x = torch.randn(10, 10)
+        with profile() as p:
+            rf = torch.autograd._RecordFunction()
+            torch.autograd._run_before_callbacks(rf, "foo")
+            y = x * 2 + 4
+            # ensure that we run destructor for RecordFunction, which invokes
+            # end callbacks
+            del rf
+        function_events = p.function_events
+        foo_event = [event for event in function_events if "foo" in event.name][0]
+        self.assertEqual(foo_event.count, 1)
+
     def test_profiler_aggregation_fake(self):
         events = EventList()
         id = [0]
@@ -3004,14 +3018,14 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
         torch.autograd.grad(g.sum(), [x])
-        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+        self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
@@ -3455,16 +3469,14 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
+                 should_raise_tuple=(None, None, None))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
         leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-
 
     def test_autograd_simple_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -3630,8 +3642,6 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
             out.sum().backward()
 
-
-
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -3748,6 +3758,46 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
             # TODO: We are not rebasing the history and so the inplace computation is wrong
             gradcheck(fn, (a, b))
+
+    def test_grad_mode_restored_reentrant(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, go):
+                original = torch._C.is_grad_enabled()
+                with torch.enable_grad():
+                    self.assertTrue(torch._C.is_grad_enabled())
+                    foo = torch.rand(go.size(), requires_grad=True)
+                    grad, = torch.autograd.grad(
+                        foo ** 3, foo, grad_outputs=go
+                    )
+                    self.assertTrue(torch._C.is_grad_enabled())
+                self.assertTrue(torch._C.is_grad_enabled() == original)
+                return grad
+
+        inp = torch.rand(3, requires_grad=True)
+
+        # Case where original==False
+        MyFunction.apply(inp).sum().backward()
+        # Case where original==True
+        MyFunction.apply(inp).sum().backward(create_graph=True)
+
+    def test_power_function(self):
+        a = torch.tensor([0., 0., 0.])
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(a**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(s**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

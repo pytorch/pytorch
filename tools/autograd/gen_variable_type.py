@@ -187,14 +187,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(DispatchKey::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .kernel<${return_type} (${formal_types})>(DispatchKey::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -998,7 +998,7 @@ def unpack_args(env, declaration):
             ))
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
-            # although it's stll getting the non-variable from the variable
+            # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 

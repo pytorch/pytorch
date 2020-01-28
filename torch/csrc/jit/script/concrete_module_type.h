@@ -159,7 +159,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
   // Function attributes that are calls to builtin functions. These get de-sugared
-  // directly into the correpsonding aten:: call.
+  // directly into the corresponding aten:: call.
   // The map is attribute name -> aten symbol name
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules

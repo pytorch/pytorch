@@ -99,6 +99,9 @@ struct PythonArgParser {
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
+  // Formatted strings of non-hidden signatures
+  std::vector<std::string> get_signatures() const;
+
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
@@ -379,7 +382,7 @@ inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& de
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
+    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);

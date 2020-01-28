@@ -23,7 +23,7 @@ Tensor quantized_clamp_impl(
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
     TORCH_CHECK(
-        false, "Both min and max should be specifed for quantized clamp!");
+        false, "Both min and max should be specified for quantized clamp!");
   }
   return qy;
 }
@@ -53,7 +53,7 @@ class QClamp final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
     c10::RegisterOperators::options().kernel<QClamp>(
-        TensorTypeId::QuantizedCPUTensorId));
+        DispatchKey::QuantizedCPUTensorId));
 } // namespace
 
 } // namespace native
