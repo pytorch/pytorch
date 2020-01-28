@@ -389,9 +389,11 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return type_.type_;
   }
 
-  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
+  std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() const {
     return type_.cu_;
   }
+
+  c10::intrusive_ptr<Object> deepcopy() const;
 
  private:
   void resizeObject(size_t slot);

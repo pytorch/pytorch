@@ -95,5 +95,50 @@ void testModuleConstant() {
   ASSERT_EQ(m.attr(const_name).toInt(), 3);
 }
 
+void testModuleDeepcopy() {
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu, true);
+  auto int_attr = "int_attr";
+  auto tensor_attr = "tensor_attr";
+  cls->addAttribute(int_attr, IntType::get());
+  cls->addAttribute(tensor_attr, TensorType::get());
+  Module m(cu, cls);
+  m.setattr(int_attr, IValue(2));
+  m.setattr(tensor_attr, at::randn(5));
+
+  Module m2 = m.deepcopy();
+  Module m3 = m.clone_instance();
+  // Make sure copy works
+  ASSERT_EQ(m2.attr(int_attr).toInt(), 2);
+  ASSERT_EQ(m3.attr(int_attr).toInt(), 2);
+
+  // Both deepcopy and clone_instance will preserve the type
+  ASSERT_EQ(m.type(), m2.type());
+  ASSERT_EQ(m.type(), m3.type());
+
+  // change int value of copied instances
+  m2.setattr(int_attr, IValue(3));
+  m3.setattr(int_attr, IValue(4));
+  // Verify value of original instance doesn't change
+  ASSERT_EQ(m.attr(int_attr).toInt(), 2);
+  ASSERT_EQ(m2.attr(int_attr).toInt(), 3);
+  ASSERT_EQ(m3.attr(int_attr).toInt(), 4);
+
+  // change Tensor value of copied instances
+  at::Tensor t1 = m.attr(tensor_attr).toTensor();
+  at::Tensor t2 = m2.attr(tensor_attr).toTensor(); // deepcopy will copy the Tensor
+  at::Tensor t3 = m3.attr(tensor_attr).toTensor(); // clone_instance will not copy the Tensor
+  // check copy works
+  ASSERT_TRUE(t1.equal(t2));
+  ASSERT_TRUE(t1.equal(t3));
+
+  // zero out t1
+  t1.zero_();
+  // check that t2 is not affected because it is a deep copy
+  ASSERT_TRUE(!t1.equal(t2));
+  // check that t3 is the same as t1 since it is a shallow copy
+  ASSERT_TRUE(t1.equal(t3));
+}
+
 } // namespace jit
 } // namespace torch

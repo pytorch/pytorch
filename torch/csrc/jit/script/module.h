@@ -232,6 +232,10 @@ struct TORCH_API Module : public Object {
   // the current instance, it doesn't create new `ClassType`
   Module clone_instance() const;
 
+  // Copies all the states of the module recursively, including
+  // cloning Tensors without creating new `ClassType`
+  Module deepcopy() const;
+
   void clone_method(const Module& orig, const std::string& name);
 
   template <typename... Types>

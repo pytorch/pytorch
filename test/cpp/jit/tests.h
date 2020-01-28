@@ -58,6 +58,7 @@ namespace jit {
   _(SubgraphRewriter)                  \
   _(ModuleClone)                       \
   _(ModuleCloneInstance)               \
+  _(ModuleDeepcopy)                    \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \

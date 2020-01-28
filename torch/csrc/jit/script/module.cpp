@@ -239,6 +239,25 @@ Module Module::clone_instance() const {
   return r;
 }
 
+Module Module::deepcopy() const {
+  Module r(_ivalue()->compilation_unit(), type());
+
+  // Deepcopy slots. If a slot is a module - recursively copy it.
+  size_t N = type()->numAttributes();
+  for (size_t i = 0; i < N; ++i) {
+    IValue s = _ivalue()->getSlot(i);
+    if (type()->getAttribute(i)->is_module()) {
+      const Module& orig = Module(s.toObject());
+      Module copied = orig.deepcopy();
+      r._ivalue()->setAttr(type()->getAttributeName(i), copied._ivalue());
+    } else {
+      r._ivalue()->setAttr(type()->getAttributeName(i), s.deepcopy());
+    }
+  }
+
+  return r;
+}
+
 void Module::train(bool on) {
   for (Module m : modules()) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {

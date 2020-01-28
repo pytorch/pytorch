@@ -502,6 +502,8 @@ struct CAFFE2_API IValue final {
 
   TypePtr type() const;
 
+  IValue deepcopy() const;
+
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
   // this value different (e.g. using NaN boxing), and this would make it more

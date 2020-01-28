@@ -249,6 +249,41 @@ void IValue::dump() const {
   std::cout << *this << "\n";
 }
 
+IValue IValue::deepcopy() const {
+  switch(tag) {
+    case IValue::Tag::Tensor:
+      return IValue(toTensor().clone());
+    case IValue::Tag::Tuple: {
+      std::vector<IValue> copied_elements;
+      for (const auto& e : toTuple()->elements()) {
+        copied_elements.push_back(e.deepcopy());
+      }
+      return IValue(ivalue::Tuple::create(copied_elements));
+    }
+    case IValue::Tag::String:
+      return IValue(ivalue::ConstantString::create(toString()->string()));
+    case IValue::Tag::GenericList:
+      return IValue(toList().copy());
+    case IValue::Tag::GenericDict:
+      return IValue(toGenericDict().copy());
+    case IValue::Tag::Object: {
+      return IValue(toObject()->deepcopy());
+    case IValue::Tag::None:
+    case IValue::Tag::Double:
+    case IValue::Tag::Int:
+    case IValue::Tag::Bool:
+    case IValue::Tag::Device:
+    case IValue::Tag::Uninitialized:
+    case IValue::Tag::Blob:
+    case IValue::Tag::Capsule:
+    case IValue::Tag::Future:
+    case IValue::Tag::PyObject:
+      return *this;
+    }
+  }
+  AT_ERROR("Tag not found: ", tagKind());
+}
+
 
 std::string ivalue::Object::name() const {
   return this->type_.type_->name()->qualifiedName();
@@ -272,6 +307,14 @@ void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
 void ivalue::Object::resizeObject(size_t slot) {
   AT_ASSERT(slot < type()->numAttributes());
   slots_.resize(type()->numAttributes());
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
+  auto object = ivalue::Object::create(c10::StrongTypePtr(compilation_unit(), type()), type()->numAttributes());
+  for (auto i = 0; i < slots_.size(); ++i) {
+    object->setSlot(i, slots_[i].deepcopy());
+  }
+  return object;
 }
 
 
