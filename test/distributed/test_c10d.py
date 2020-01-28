@@ -3203,8 +3203,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
-                # Operation would time out in blocking mode.
+            with self.assertRaisesRegex(RuntimeError, "(Operation timed out!)|(NCCL error: unhandled system error)"):
+                # Operation would time out in blocking mode resulting in operation
+                # timed out error or NCCL error since watchdog would kill communicator
+                # on time out.
                 work.wait()
             # Run some GPU operations to make sure cuda does not stuck to
             # run new events. It was observed cuda could stuck if not
