@@ -312,7 +312,8 @@ class TestScript(JitTestCase):
             self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
         def test_str_join():
-            return (",".join(["a"]),
+            return (
+                ",".join(["a"]),
                 ",".join(["a", "b", "c"]),
                 ",".join(["aa", "bb", "cc"]),
                 ",".join(["a,a", "bb", "c,c"]),
