@@ -225,11 +225,16 @@ def build_param_list(ctx, py_args, self_name):
         expr = py_args.vararg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
         raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    if not PY2 and py_args.kw_defaults:
-        raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+    if not PY2 and len(py_args.kw_defaults) > 0:
+        # kw_defaults is a list of the values for the kwargs (which default to None),
+        # so they don't actually have line numbers.
+        for arg in py_args.kw_defaults:
+            if arg is not None:
+                ctx_range = build_expr(ctx, arg).range()
+                raise NotSupportedError(ctx_range, _vararg_kwarg_err)
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     if not PY2:
-        result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+        result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
     return result
 
 

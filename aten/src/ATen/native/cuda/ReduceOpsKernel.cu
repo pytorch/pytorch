@@ -73,6 +73,8 @@ void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<acc_t>(), 0);
   } else if (p == static_cast<float>(1)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<acc_t>(), 0);
+  } else if (p == static_cast<float>(2)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoOps<acc_t>(), 0);
   } else if (p == static_cast<float>(INFINITY)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<acc_t>(), std::numeric_limits<acc_t>::min());
   } else if (p == static_cast<float>(-INFINITY)) {

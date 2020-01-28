@@ -161,7 +161,7 @@ __global__ void THCudaTensor_scatterAddKernel(
     CUDA_KERNEL_ASSERT(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
-    atomicAdd(&tensor.data[tensorOffset], src.data[srcOffset]);
+    gpuAtomicAdd(&tensor.data[tensorOffset], src.data[srcOffset]);
   }
 }
 

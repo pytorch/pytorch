@@ -42,7 +42,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
 // nDimension                 corresponds to the "true" ATen dimension.
-// nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
+// nDimensionLegacyNoScalars  corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
 //
