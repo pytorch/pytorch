@@ -1138,8 +1138,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex()
-                error_regex = get_shutdown_error_regex()
-                with self.assertRaisesRegex(RuntimeError, error_regex):
+                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
@@ -1370,8 +1369,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex().
-                error_regex = get_shutdown_error_regex()
-                with self.assertRaisesRegex(RuntimeError, error_regex):
+                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
 
