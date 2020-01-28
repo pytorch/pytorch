@@ -40,7 +40,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_HCC__
 #include <ATen/native/cuda/ROCmWorkaround.cuh>
 #endif
 
@@ -257,14 +257,14 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  // fetch data
 #ifdef __HIP_PLATFORM_HCC__
   rocm::workaround::enable_default_constructor<arg_t> args[thread_work_size][nargs];
 #else
   arg_t args[thread_work_size][nargs];
 #endif
 
-#pragma unroll
+  // fetch data
+  #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     if (idx + num_threads * i < N) {
       #pragma unroll
