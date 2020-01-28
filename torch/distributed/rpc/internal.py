@@ -82,6 +82,7 @@ class _InternalRPCPickler:
         r"""
         Deserilize binary string + tensor table to original obj
         """
+        print("IN Deserialize")
         # save _thread_local_tensor_tables.recv_tables if it is in nested call
         global _thread_local_tensor_tables
         if hasattr(_thread_local_tensor_tables, "recv_tables"):
@@ -90,7 +91,11 @@ class _InternalRPCPickler:
             old_recv_tables = None
         _thread_local_tensor_tables.recv_tables = tensor_table
 
-        ret = pickle.loads(binary_data)
+        try:
+            ret = pickle.loads(binary_data)
+        except AttributeError as e:
+            except_str = str(e) + " Default RPC pickler does not serialize function code. Ensure that UDFs are defined on both caller and callee modules."
+            raise AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
         # from nested call, otherwise clean up the table
@@ -118,8 +123,8 @@ def _run_function(binary_data, tensor_table):
     Runs a Python UDF and returns its return value.
     Wraps any exception in ``RemoteException`` if the function raises.
     """
-    python_udf = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
     try:
+        python_udf = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
