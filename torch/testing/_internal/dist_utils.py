@@ -56,11 +56,6 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True):
         self.worker_id = self.rank
 
         if setup_rpc:
-            global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = {
-                "worker{}".format(rank) for rank in range(self.world_size)
-            }
-
             rpc.init_rpc(
                 name="worker%d" % self.rank,
                 backend=self.rpc_backend,

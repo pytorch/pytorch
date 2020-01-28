@@ -80,7 +80,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
   auto shouldProfileGIL =                                                \
-      RpcAgent::getDefaultRpcAgent()->isGILProfilingEnabled();           \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
   if (shouldProfileGIL) {                                                \
     startTime = std::chrono::high_resolution_clock::now();               \
   }                                                                      \
@@ -88,7 +88,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   if (shouldProfileGIL) {                                                \
     auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
         std::chrono::high_resolution_clock::now() - startTime);          \
-    RpcAgent::getDefaultRpcAgent()->addGilWaitTime(dur);                 \
+    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
   }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;

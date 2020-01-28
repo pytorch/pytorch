@@ -95,7 +95,7 @@ Message getMessageWithAutograd(
   AutogradMetadata autogradMetadata(
       autogradContext->contextId(), autogradContainer.newAutogradMessageId());
   auto rpcWithAutograd = std::make_unique<RpcWithAutograd>(
-      RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().id_,
       msgType,
       autogradMetadata,
       std::move(wrappedRpcMsg));

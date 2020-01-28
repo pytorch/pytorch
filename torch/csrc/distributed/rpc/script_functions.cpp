@@ -17,7 +17,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     std::vector<c10::IValue>& stack) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
 
@@ -83,7 +83,7 @@ std::shared_ptr<UserRRef> remoteTorchscript(
       userRRefPtr->rrefId(),
       userRRefPtr->forkId());
 
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   auto fm = torch::distributed::autograd::sendMessageWithAutograd(
       *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, nullptr);
 

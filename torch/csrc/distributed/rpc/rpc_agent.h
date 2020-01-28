@@ -132,11 +132,14 @@ class TORCH_API RpcAgent {
   // by terminating all RPC threads.
   virtual void shutdown() = 0;
 
-  // Set the default rpc agent.
-  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+  // Check if current RPC agent is set.
+  static bool isCurrentRpcAgentSet();
 
-  // Retrieve the default rpc agent.
-  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+  // Retrieve the valid current RPC agent.
+  static std::shared_ptr<RpcAgent> getCurrentRpcAgent();
+
+  // Set the current RPC agent.
+  static void setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent);
 
   // Retrieve metrics as KV map
   virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
@@ -158,7 +161,7 @@ class TORCH_API RpcAgent {
   std::atomic<bool> profilingEnabled_;
 
  private:
-  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
+  static std::shared_ptr<RpcAgent> currentRpcAgent_;
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
