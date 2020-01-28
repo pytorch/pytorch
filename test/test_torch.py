@@ -14628,142 +14628,178 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(output, expected)
 
 
-# Tests that ops which should return views do return views
+# Tests ops and indexing to ensure they return views (and new tensors) as
+# appropriate.
+# Note: these tests do not verify tensor storage is the same or different
+# because some device types, like XLA tensors, do not expose storage.
 class TestViewOps(TestCase):
 
     def test_diagonal_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = torch.diagonal(t)
         v[0] = 0
         self.assertEqual(t[0, 0], v[0])
 
-        t = torch.ones((3, 3, 3))
+        t = torch.ones((3, 3, 3), device=device)
         v = torch.diagonal(t, offset=1, dim1=1, dim2=2)
         v[0, 0] = 0
         self.assertEqual(t[0, 0, 1], v[0, 0])
 
     def test_select_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = t.select(0, 2)
         v[0] = 0
         self.assertEqual(t[2, 0], v[0])
 
     def test_unbind_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = torch.unbind(t)
         v[0][0] = 0
         self.assertEqual(t[0, 0], v[0][0])
 
     def test_expand_view(self, device):
-        t = torch.ones((5, 1))
+        t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
         v[2, 2] = 0
         self.assertEqual(t[2, 0], v[2, 2])
 
     def test_expand_as_view(self, device):
-        t = torch.ones((5, 1))
-        e = torch.empty((5, 5))
+        t = torch.ones((5, 1), device=device)
+        e = torch.empty((5, 5), device=device)
         v = t.expand_as(e)
         v[2, 2] = 0
         self.assertEqual(t[2, 0], v[2, 2])
 
     def test_narrow_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = torch.narrow(t, 1, 2, 2)
         v[0, 0] = 0
         self.assertEqual(t[0, 2], v[0, 0])
 
     def test_permute_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = t.permute(1, 0)
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_transpose_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = torch.transpose(t, 0, 1)
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_t_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = t.t()
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_T_view(self, device):
-        t = torch.ones((5, 5))
+        t = torch.ones((5, 5), device=device)
         v = t.T
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_unfold_view(self, device):
-        t = torch.ones(10)
+        t = torch.ones(10, device=device)
         v = t.unfold(0, 3, 2)
         v[1, 0] = 0
         self.assertEqual(t[2], v[1, 0])
 
     def test_squeeze_view(self, device):
-        t = torch.ones(5, 1, 5)
+        t = torch.ones(5, 1, 5, device=device)
         v = torch.squeeze(t)
         v[0, 1] = 0
         self.assertEqual(t[0, 0, 1], v[0, 1])
 
     def test_unsqueeze_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         v = torch.unsqueeze(t, 1)
         v[0, 0, 1] = 0
         self.assertEqual(t[0, 1], v[0, 0, 1])
 
     def test_as_strided_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         v = torch.as_strided(t, (25,), (1,))
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_view_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         v = t.view(25)
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_view_as_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         e = torch.empty((25,))
         v = t.view_as(e)
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_contiguous_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         v = t.contiguous()
         v[0, 0] = 0
         self.assertEqual(t[0, 0], v[0, 0])
 
     def test_contiguous_nonview(self, device):
-        t = torch.ones(5, 5)
-        v = t.t().contiguous()
-        v[0, 0] = 0
-        self.assertNotEqual(t[0, 0], v[0, 0])
+        t = torch.ones(5, 5, device=device)
+        nv = t.t().contiguous()
+        nv[0, 0] = 0
+        self.assertNotEqual(t[0, 0], nv[0, 0])
 
     def test_reshape_view(self, device):
-        t = torch.ones(5, 5)
+        t = torch.ones(5, 5, device=device)
         v = torch.reshape(t, (25,))
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_reshape_as_view(self, device):
-        t = torch.ones(5, 5)
-        e = torch.empty((25,))
+        t = torch.ones(5, 5, device=device)
+        e = torch.empty((25,), device=device)
         v = t.reshape_as(e)
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_reshape_nonview(self, device):
-        t = torch.ones(5, 5)
-        v = torch.reshape(t.t(), (25,))
-        v[6] = 0
-        self.assertNotEqual(t[1, 1], v[6])
+        t = torch.ones(5, 5, device=device)
+        nv = torch.reshape(t.t(), (25,))
+        nv[6] = 0
+        self.assertNotEqual(t[1, 1], nv[6])
+
+    def test_basic_indexing_slice_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t[:2, :3]
+        v[0, 0] = 1
+        self.assertEqual(t[0, 0], v[0, 0])
+
+    def test_basic_indexing_ellipses_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t[..., :2]
+        v[0, 0] = 1
+        self.assertEqual(t[0, 0], v[0, 0])
+
+    def test_basic_indexing_newaxis_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t[None, :2, 3]
+        v[0, 0] = 1
+        self.assertEqual(t[0, 2], v[0, 0])
+
+    def test_advanced_indexing_nonview(self, device):
+        t = torch.ones(3, 3, device=device)
+        rows = torch.tensor([[0, 0], [2, 2]], device=device)
+        cols = torch.tensor([[0, 1], [2, 2]], device=device)
+        nv = t[rows, cols]
+        nv[1, 1] = 0
+        self.assertNotEqual(t[2, 2], nv[1, 1])
+
+    def test_advanced_indexing_assignment(self, device):
+        t = torch.ones(3, 3, device=device)
+        rows = torch.tensor([[0, 0], [2, 2]], device=device)
+        cols = torch.tensor([[0, 1], [2, 2]], device=device)
+        t[rows, cols] = 0
+        self.assertEqual(t[2, 2], 0)
 
 
 # Below are fixtures and functions that generate tensor op comparison tests
