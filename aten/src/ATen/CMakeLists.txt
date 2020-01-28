@@ -24,7 +24,7 @@ else()
   set(CAFFE2_STATIC_LINK_CUDA_INT 0)
 endif()
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
+# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortunately,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen
 # files, which are compiled even if we are doing a vanilla CUDA build.
 # Once we properly split CUDA and HIP in ATen, we can remove this code.
@@ -101,7 +101,7 @@ IF(USE_CUDA)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu} ${native_quantized_cuda_cu})
   set(all_cuda_cpp ${native_sparse_cuda_cpp} ${native_quantized_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
-  IF(CUDNN_FOUND)
+  IF(CAFFE2_USE_CUDNN)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
 endif()
@@ -320,9 +320,9 @@ IF(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_curand_LIBRARY})
   ENDIF()
 
-  if(CUDNN_FOUND)
+  if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
-  endif(CUDNN_FOUND)
+  endif()
 
   IF(USE_MAGMA)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})

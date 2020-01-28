@@ -137,7 +137,9 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
-      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
+      .def(
+          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
+          PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -376,20 +378,22 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
           })
-      .def("_jit_pass_onnx_unpack_quantized_weights",
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                UnpackQuantizedWeights(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_quantization_insert_permutes",
+             std::map<std::string, at::Tensor>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_quantization_insert_permutes",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                insertPermutes(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move);
+             std::map<std::string, at::Tensor>& paramsDict) {
+            insertPermutes(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -400,13 +404,20 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
-    std::vector<GraphExecutorState> states;
-    for (auto& e : c.grad_executors()) {
-      states.emplace_back(e->getDebugState());
-    }
-    return states;
-  });
+  py::class_<Code>(m, "Code")
+      .def(
+          "grad_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
+      .def("request_bailout", [](Code& c, size_t index) {
+        c.request_bailout(index);
+      });
 
   py::class_<ExecutionPlan>(m, "ExecutionPlan")
       .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
@@ -636,7 +647,7 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
+        // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toTypeInferredIValue(py_func_output);

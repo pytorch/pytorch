@@ -93,7 +93,7 @@ Value* TracingState::getValue(const IValue& var) {
         ->insertNode(graph->createList(
             TensorType::get(),
             fmap(
-                var.toTensorListRef(),
+                var.toTensorVector(),
                 [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
@@ -205,7 +205,7 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
         ->insertNode(graph->createList(
             TensorType::get(),
             fmap(
-                iv.toTensorListRef(),
+                iv.toTensorVector(),
                 [&](const IValue& ival) { return getOutput(ival, i); })))
         ->output();
   } else if (iv.isTuple()) {
@@ -265,8 +265,8 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 
     return std::move(dict);
   } else if (auto list_type = type->cast<ListType>()) {
-    size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
-                                             : input.toTensorListRef().size();
+    size_t num_elems = input.isList() ? input.toListRef().size()
+                                             : input.toTensorVector().size();
     auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
     auto unpack_outputs = list_unpack->outputs();
 
@@ -277,7 +277,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
       }
       return elems;
     } else {
-      auto elems = input.toGenericList();
+      auto elems = input.toList();
       for (size_t i = 0; i < num_elems; i++) {
         elems[i] = addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]);
       }
@@ -401,8 +401,8 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValue(outputs[i], unpack_node->outputs()[i]);
     }
-  } else if (v.isGenericList()) {
-    auto elements = v.toGenericListRef();
+  } else if (v.isList()) {
+    auto elements = v.toListRef();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {

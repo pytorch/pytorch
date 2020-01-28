@@ -838,6 +838,13 @@ cummax(dim) -> (Tensor, Tensor)
 See :func:`torch.cummax`
 """)
 
+add_docstr_all('cummin',
+               r"""
+cummin(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummin`
+""")
+
 add_docstr_all('cumprod',
                r"""
 cumprod(dim, dtype=None) -> Tensor
