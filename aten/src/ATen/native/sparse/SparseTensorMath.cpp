@@ -9,6 +9,10 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+#include <unordered_map>
+#include <map>
 
 #include <TH/THBlasUtils.h>
 
@@ -1418,17 +1422,13 @@ Tensor any_sparse(const Tensor& self) {
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
   Tensor result;
-  result = at::zeros({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
+  result = at::empty({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
   return bmm_out_sparse_cpu(result, self, mat2);
 }
 
-
 // batched sparse x dense matrix worker based on s_addmm_out_sparse_dense_worker
 template <typename scalar_t>
-void s_bmm_out_sparse_dense_worker(int64_t nnz, Tensor& result, const Tensor& indices, const Tensor& values, const Tensor& mat2) {
-  auto indices_accessor = indices.accessor<int64_t, 2>();
-  auto values_accessor = values.accessor<scalar_t, 1>();
-
+void s_bmm_out_sparse_dense_worker(int64_t nnz, int64_t self_rows, int64_t self_cols, Tensor& result, const Tensor& indices, const Tensor& values, const Tensor& mat2) {
   int64_t mat2_num_cols = mat2.size(2);
 
   scalar_t* mat2_ptr = mat2.data_ptr<scalar_t>();
@@ -1442,9 +1442,8 @@ void s_bmm_out_sparse_dense_worker(int64_t nnz, Tensor& result, const Tensor& in
   int64_t result_stride1 = result.stride(1);
   int64_t result_stride2 = result.stride(2);
 
-  int64_t cur_mat_idx = -1;
-  scalar_t* mat2_matrix_ptr;
-  scalar_t* result_matrix_ptr;
+  auto indices_accessor = indices.accessor<int64_t, 2>();
+  auto values_accessor = values.accessor<scalar_t, 1>();
 
   for (int64_t nnz_idx = 0; nnz_idx < nnz; nnz_idx++) {
     scalar_t val = values_accessor[nnz_idx];
@@ -1452,21 +1451,12 @@ void s_bmm_out_sparse_dense_worker(int64_t nnz, Tensor& result, const Tensor& in
     int64_t row = indices_accessor[1][nnz_idx];
     int64_t col = indices_accessor[2][nnz_idx];
 
-    if (mat_idx != cur_mat_idx) {
-      cur_mat_idx = mat_idx;
-      mat2_matrix_ptr = mat2_ptr + (mat_idx * mat2_stride0);
-      result_matrix_ptr = result_ptr + (mat_idx * result_stride0);
-    }
-
     THBlas_axpy<scalar_t> (
       mat2_num_cols,
       val,
-      // mat2_ptr + (mat_idx * mat2_stride0) + (col * mat2_stride1), mat2_stride2,
-      // result_ptr + (mat_idx * result_stride0) + (row * result_stride1), result_stride2
-      mat2_matrix_ptr + (col * mat2_stride1), mat2_stride2,
-      result_matrix_ptr + (row * result_stride1), result_stride2
+      mat2_ptr + (mat_idx * mat2_stride0) + (col * mat2_stride1), mat2_stride2,
+      result_ptr + (mat_idx * result_stride0) + (row * result_stride1), result_stride2
     );
-
   }
 }
 
@@ -1480,18 +1470,107 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
-  SparseTensor self_coalesced = coalesce_sparse_cpu(self);
+
+  /*
+  // This option uses a new implementation of sparse x dense which takes the
+  // batched dimension into account. But it might be better practice to build a solution
+  // that uses the existing un-batched function underneath. Can that be done
+  // efficiently?
+
+  result.fill_(0);
+
+  int64_t nnz =        self._nnz();
+  LongTensor indices = self._indices();
+  Tensor values =      self._values();
+
+  AT_DISPATCH_ALL_TYPES(
+      values.scalar_type(), "bmm_sparse_dense", [&] {
+        s_bmm_out_sparse_dense_worker<scalar_t>(nnz, self.size(1), self.size(2), result, indices, values, mat2);
+      }
+  );
+  */
+
+  // This option uses the existing un-batched sparse x dense operation
+
+  // First need to coalesce to get all of the first dimension indices
+  // in order since we'll be sending each matrix into the MM operation
+  SparseTensor self_coalesced;
+
+  if (!self.is_coalesced()){
+    self_coalesced = self.coalesce();
+  } else {
+    self_coalesced = self;
+  }
 
   int64_t nnz =        self_coalesced._nnz();
   LongTensor indices = self_coalesced._indices();
   Tensor values =      self_coalesced._values();
 
-  AT_DISPATCH_ALL_TYPES(
-      values.scalar_type(), "bmm_sparse_dense", [&] {
-        s_bmm_out_sparse_dense_worker<scalar_t>(nnz, result, indices, values, mat2);
-      }
-  );
+  auto indices_accessor = indices.accessor<int64_t, 2>();
+  int64_t cur_mat_num = indices_accessor[0][0];
 
+  int64_t cur_el_idx = 0;
+  int64_t mat_el_begin_idx = cur_el_idx;
+  int64_t mat_el_end_idx = cur_el_idx+1;
+
+  int64_t dim_i = self.size(1);
+  int64_t dim_j = self.size(2);
+  int64_t dim_k = mat2.size(2);
+
+  Scalar beta = 0;
+  Tensor t = at::ones({self.size(1)});
+  Scalar alpha = 1;
+
+  LongTensor indices_no_first_dim = indices.slice(0, 1, 3);
+
+  while (cur_el_idx < nnz) {
+    int64_t next_mat_num = indices_accessor[0][cur_el_idx];
+    bool need_mat_dispatch = false;
+    bool need_setup_next_mat = false;
+
+    if (next_mat_num == cur_mat_num) {
+      mat_el_end_idx = cur_el_idx+1;
+
+      if ((cur_el_idx + 1) >= nnz) {
+        need_mat_dispatch = true;
+      }
+    } else {
+      need_mat_dispatch = true;
+      need_setup_next_mat = true;
+    }
+
+    if (need_mat_dispatch) {
+      // We now know the full range of indices from self that describes
+      // one entire matrix, so it is time to dispatch it to the MM operation
+      const Tensor dense_matrix = mat2[cur_mat_num];
+      Tensor result_matrix = result[cur_mat_num];
+
+      LongTensor sparse_indices = indices_no_first_dim.slice(1, mat_el_begin_idx, mat_el_end_idx);
+      Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
+      int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
+      AT_DISPATCH_ALL_TYPES(
+          sparse_values.scalar_type(), "addmm_sparse_dense", [&] {
+            s_addmm_out_sparse_dense_worker<scalar_t>(
+              sparse_nnz,
+              dim_i, dim_j, dim_k,
+              result_matrix,
+              beta, t, alpha,
+              sparse_indices, sparse_values,
+              dense_matrix
+            );
+          }
+      );
+    }
+
+    if (need_setup_next_mat) {
+      cur_mat_num = next_mat_num;
+      mat_el_begin_idx = cur_el_idx;
+      mat_el_end_idx = cur_el_idx+1;
+    }
+
+    cur_el_idx++;
+  }
   return result;
 }
 
