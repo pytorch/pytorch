@@ -113,6 +113,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
+        model_ = model.copy() if hasattr(model, 'copy') else model
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
@@ -121,9 +122,9 @@ class TestONNXRuntime(unittest.TestCase):
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size)
         if self.is_script_test_enabled:
-            script_model = torch.jit.script(model)
+            script_model = torch.jit.script(model_)
             _run_test(script_model)
-        _run_test(model)
+        _run_test(model_)
 
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           example_outputs=None, do_constant_folding=True,
@@ -2247,6 +2248,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PixelShuffle(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @enableScriptTest()
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
