@@ -36,9 +36,14 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
+
+#ifndef __HIP_PLATFORM_HCC__
+#include <ATen/native/cuda/MemoryAccess.cuh>
+#else
+#include <ATen/native/cuda/ROCmWorkaround.cuh>
+#endif
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -254,8 +259,13 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
   }
 
   // fetch data
+#ifdef __HIP_PLATFORM_HCC__
+  rocm::workaround::enable_default_constructor<arg_t> args[thread_work_size][nargs];
+#else
   arg_t args[thread_work_size][nargs];
-  #pragma unroll
+#endif
+
+#pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     if (idx + num_threads * i < N) {
       #pragma unroll
