@@ -279,7 +279,7 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     if (idx + num_threads * i < N) {
-      *(result_base + i * num_threads) = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
+      *(result_base + i * num_threads) = detail::invoke_with_array(f, args[i]);
     }
   }
 }
