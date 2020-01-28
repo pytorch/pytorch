@@ -334,7 +334,7 @@ If the future completes with an error, an exception is thrown.
           py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_invoke_rpc_script",
+      "_invoke_rpc_torchscript",
       [](const std::string& dst,
          const std::string& qualifiedName,
          const py::args& args,
