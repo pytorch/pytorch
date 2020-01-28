@@ -4983,6 +4983,29 @@ def foo(x):
         for expected in ["deserialized", "was", "i"]:
             assert eic.f.pop() == expected
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_getstate(self):
+        class FooBar4321(torch.nn.Module):
+            def __init__(self):
+                super(FooBar4321, self).__init__()
+                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+
+            def forward(self):
+                return self.f.top()
+
+        inst = FooBar4321()
+        scripted = torch.jit.script(inst)
+        eic = self.getExportImportCopy(scripted)
+        # NB: we expect the values {7, 3, 3, 1} as __getstate__ is defined to
+        # return {1, 3, 3, 7}. I tried to make this actually depend on the
+        # values at instantiation in the test with some transformation, but
+        # because it seems we serialize/deserialize multiple times, that
+        # transformation isn't as you would it expect it to be.
+        assert eic() == 7
+        for expected in [7, 3, 3, 1]:
+            assert eic.f.pop() == expected
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
