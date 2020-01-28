@@ -227,7 +227,6 @@ inline int can_vectorize_up_to(array_t pointers) {
 }  // namespace detail
 
 template<int num_threads, int thread_work_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
 __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -278,8 +277,8 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
   // store data
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
+    if (idx + num_threads * i < N) {
+      *(result_base + i * num_threads) = results[i];
     }
   }
 }
@@ -336,8 +335,6 @@ template<int vec_size, int num_threads, int thread_work_size, typename func_t, t
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int block_work_size = num_threads * thread_work_size;
-  using return_t = typename function_traits<func_t>::result_type;
-  using policies = memory::policies<num_threads, thread_work_size>;
   int remaining = N - block_work_size * blockIdx.x;
 
 #ifdef __HIP_PLATFORM_HCC__
