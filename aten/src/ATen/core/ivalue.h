@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
+
 struct Function;
 namespace script {
 struct CompilationUnit;
@@ -29,6 +30,7 @@ struct Future;
 struct ConstantString;
 struct GenericDict;
 struct Object;
+struct PyObjectHolder;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -52,6 +54,7 @@ struct Object;
   _(Future) \
   _(Device) \
   _(Object) \
+  _(PyObject) \
   _(Uninitialized) \
   _(Capsule)
 
@@ -273,7 +276,7 @@ struct CAFFE2_API IValue final {
   bool isIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const &;
-  std::vector<int64_t> toIntListRef() const;
+  std::vector<int64_t> toIntVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
@@ -288,7 +291,7 @@ struct CAFFE2_API IValue final {
   bool isDoubleList() const;
   c10::List<double> toDoubleList() &&;
   c10::List<double> toDoubleList() const &;
-  std::vector<double> toDoubleListRef() const;
+  std::vector<double> toDoubleVector() const;
 
   // BoolList
   bool isBoolList() const;
@@ -299,14 +302,14 @@ struct CAFFE2_API IValue final {
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
-  std::vector<at::Tensor> toTensorListRef() const;
+  std::vector<at::Tensor> toTensorVector() const;
 
   //GenericList
   IValue(c10::List<IValue> v);
-  bool isGenericList() const { return Tag::GenericList == tag; }
-  c10::List<IValue> toGenericList() &&;
-  c10::List<IValue> toGenericList() const &;
-  c10::ArrayRef<IValue> toGenericListRef() const;
+  bool isList() const { return Tag::GenericList == tag; }
+  c10::List<IValue> toList() &&;
+  c10::List<IValue> toList() const &;
+  c10::ArrayRef<IValue> toListRef() const;
 
   template<class T>
   IValue(c10::List<T> v);
@@ -343,6 +346,13 @@ struct CAFFE2_API IValue final {
 
   torch::jit::script::Module toModule() const;
   bool isModule() const;
+
+  // PyObject
+  IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v);
+  bool isPyObject() const { return tag == Tag::PyObject; }
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
+  PyObject* toPyObject() const;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}

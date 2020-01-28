@@ -231,7 +231,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    auto kernel_zp = pack_ptr.w_zp;
+    // Adjust weight zero point, similar to weight data.
+    auto kernel_zp = pack_ptr.w_zp + 128;
     auto kernel_scale = pack_ptr.w_scale;
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);

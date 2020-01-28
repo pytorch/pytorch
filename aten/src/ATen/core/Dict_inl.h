@@ -19,12 +19,12 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
   } else if (lhs.isBool()) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
-  } else if (lhs.isGenericList()) {
-    if (!rhs.isGenericList()) {
+  } else if (lhs.isList()) {
+    if (!rhs.isList()) {
       return false;
     }
-    auto l = lhs.toGenericListRef();
-    auto r = rhs.toGenericListRef();
+    auto l = lhs.toListRef();
+    auto r = rhs.toListRef();
     if (l.size() != r.size()) {
       return false;
     }
