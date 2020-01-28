@@ -6004,8 +6004,8 @@ class TestNN(NNTestCase):
             loss_too_positive = bceloss(output_too_positive, target)
 
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
-        x_size = 64 * 1024
-        y_size = 1024
+        x_size = 1024
+        y_size = 256
         target = torch.rand(x_size, y_size)
 
         for reduction in ['none', 'mean', 'sum']:
