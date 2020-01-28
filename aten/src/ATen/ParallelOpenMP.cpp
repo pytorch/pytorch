@@ -1,4 +1,4 @@
-#ifdef AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 
 #include <atomic>

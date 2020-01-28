@@ -1,6 +1,9 @@
 #include "module.h"
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#if defined(PYTORCH_MOBILE_OBSERVER)
+#include <torch/csrc/jit/mobile/observer.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -20,10 +23,29 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
 }
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
+#if defined(PYTORCH_MOBILE_OBSERVER)
+  auto debug_info = std::make_shared<MobileDebugInfo>();
+  debug_info->setModelName(name());
+  debug_info->setMethodName(method_name);
+  at::setThreadLocalDebugInfo(debug_info);
+
+  auto observer = torch::observerConfig().getModuleObserver();
+  if (observer) {
+    observer->onEnter();
+  }
+#endif
+
   auto m = find_method(method_name);
   stack.insert(stack.begin(), object_);
   m->run(stack);
-  return stack.front();
+  c10::IValue result = stack.front();
+
+#if defined(PYTORCH_MOBILE_OBSERVER)
+  if (observer) {
+    observer->onExit();
+  }
+#endif
+  return result;
 }
 
 Function* Module::find_method(const std::string& basename) const {

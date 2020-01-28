@@ -88,6 +88,9 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
   # Install psutil for dataloader tests
   as_jenkins pip install psutil
 
+  # Install dill for serialization tests
+  as_jenkins pip install "dill>=0.3.1"
+
   # Cleanup package manager
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

@@ -8,21 +8,6 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-
-namespace {
-
-// Constants below are used in PyRRef pickling and unpickling. PyRRef is
-// converted into a py::tuple in pickling, and reconstructed from the py::tuple
-// in unpickling.
-constexpr int RFD_IDX = 0; // index of RRefForkData
-constexpr int TYPE_IDX = 1; // index of type (py::object or IValue)
-
-// number of data fields in the py::tuple.
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RREF_TUPLE_SIZE = 2;
-
-} // namespace
-
 ///////////////////////////  PyRRef  //////////////////////////////////
 
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
@@ -31,9 +16,11 @@ PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
 
 PyRRef::PyRRef(const py::object& value)
     : PyRRef([&value]() {
-        auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+        auto rref =
+            RRefContext::getInstance().createOwnerRRef(PyObjectType::get());
         py::object copy(value); // increases refcount
-        rref->setValue(std::move(copy));
+        IValue py_ivalue = jit::toIValue(std::move(copy), PyObjectType::get());
+        rref->setValue(std::move(py_ivalue));
         return rref;
       }()) {}
 
@@ -52,15 +39,15 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+      return jit::toPyObject(
+          std::static_pointer_cast<UserRRef>(rref_)->toHere());
     } else {
-      IValue value =
-          std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+      IValue value = std::static_pointer_cast<UserRRef>(rref_)->toHere();
 
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object
         // without grabbing the GIL.
-        AutoGIL ag;
+        pybind11::gil_scoped_acquire ag;
         return torch::jit::toPyObject(std::move(value));
       }
     }
@@ -71,29 +58,39 @@ py::object PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      RRefContext::getInstance().getWorkerName());
+      owner().name_);
 
   if (rref_->isPyObj()) {
-    const py::object& value =
-        std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-
+    const py::object& value = jit::toPyObject(
+        std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue());
     PythonRpcHandler::getInstance().handleException(value);
     {
       // acquiring GIL as the return statement construct a new py::object from
       // a const reference.
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return value;
     }
   } else {
-    auto value =
-        std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
+    auto value = std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
     {
       // acquiring GIL as torch::jit::toPyObject creates new py::object without
       // grabbing the GIL.
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return torch::jit::toPyObject(std::move(value));
     }
   }
+}
+
+std::string PyRRef::str() const {
+  std::stringstream ss;
+  if (rref_->isOwner()) {
+    ss << "OwnerRRef(" << rref_->rrefId() << ")";
+  } else {
+    ss << "UserRRef(RRefId = " << rref_->rrefId()
+       << ", ForkId = " << std::static_pointer_cast<UserRRef>(rref_)->forkId()
+       << ")";
+  }
+  return ss.str();
 }
 
 py::tuple PyRRef::pickle() const {
@@ -103,21 +100,16 @@ py::tuple PyRRef::pickle() const {
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
   auto rfd = ctx.prepareChildFork(rref_);
-  return py::make_tuple(rfd.toPyTuple(), rref_->isPyObj());
+  return rfd.toPyTuple();
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& t) {
-  TORCH_INTERNAL_ASSERT(
-      t.size() == RREF_TUPLE_SIZE, "Pickled RRef must contain 2 numbers.");
   auto& ctx = RRefContext::getInstance();
-  auto rfd = RRefForkData::fromPyTuple(t[RFD_IDX].cast<py::tuple>());
+  auto rfd = RRefForkData::fromPyTuple(t.cast<py::tuple>());
   std::shared_ptr<RRef> rref = nullptr;
-  bool isPyObj = t[TYPE_IDX].cast<bool>();
-  if (isPyObj) {
-    rref = ctx.getOrCreateRRef<py::object>(rfd);
-  } else {
-    rref = ctx.getOrCreateRRef<IValue>(rfd);
-  }
+  TypePtr rref_type =
+      PythonRpcHandler::getInstance().parseTypeFromStr(rfd.type_str_);
+  rref = ctx.getOrCreateRRef(rfd, rref_type);
 
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));

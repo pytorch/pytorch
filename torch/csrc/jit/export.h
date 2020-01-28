@@ -31,6 +31,7 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool strip_doc_string = true,
     bool keep_initializers_as_inputs = true,
+    const std::map<std::string, int>& custom_opsets = {},
     bool add_node_names = true);
 
 // For testing purposes
@@ -43,6 +44,7 @@ TORCH_API std::string pretty_print_onnx(
         ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false,
     bool keep_initializers_as_inputs = true,
+    const std::map<std::string, int>& custom_opsets = {},
     bool add_node_names = true);
 
 TORCH_API void ExportModule(
@@ -77,6 +79,9 @@ TORCH_API void writeArchiveAndTensors(
 using ExportModuleExtraFilesHook =
     std::function<script::ExtraFilesMap(const script::Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
+
+// Returns a list of names of all operators in the module and its submodules.
+TORCH_API std::vector<std::string> export_opnames(const script::Module& m);
 
 } // namespace jit
 } // namespace torch

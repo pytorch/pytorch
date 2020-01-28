@@ -37,12 +37,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
 #include <ATen/mkldnn/Runtime.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/ConvUtils.h>
 
 using namespace mkldnn;
 
 namespace {
 // Helper function for getting an ideep tensor out of an aten Tensor.
-// Note in case the aten Tensor is a dense tensor, the retured ideep
+// Note in case the aten Tensor is a dense tensor, the returned ideep
 // tensor is just a view of the storage of the aten dense tensor, so
 // caller needs to make sure the aten dense tensor's lifetime is
 // longer than the ideep tensor.

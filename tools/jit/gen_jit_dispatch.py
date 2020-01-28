@@ -28,7 +28,7 @@ from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 #      | Tensor # any tensor, as defined by at::Tensor
 #      | Type[] # a dynamically sized list[ of a type
 #      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
-#      | (Type1, Type2, ...) # a heterogenous tuple
+#      | (Type1, Type2, ...) # a heterogeneous tuple
 #      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
 
 # clean up the variety of C++ types in the ATen declarations
@@ -63,6 +63,7 @@ TYPE_MAP = {
     'int64_t': 'int',
     'int64_t?': 'int?',
     'double': 'float',
+    'double?': 'float?',
     'bool': 'bool',
     'bool?': 'bool?',
     'Generator': 'Generator?',
@@ -98,7 +99,7 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntListRef()',
+    'IntArrayRef': '{}.toIntVector()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -111,10 +112,11 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorListRef()',
+    'TensorList': '{}.toTensorVector()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
+    'double?': '{}.toOptional<double>()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',

@@ -259,9 +259,9 @@ void initializeStreamsEvents(
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data(), streams[i]);
+            tensors[i].indices().storage().data_ptr(), streams[i]);
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data(), streams[i]);
+            tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
@@ -269,7 +269,7 @@ void initializeStreamsEvents(
       }
     } else {
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data(), streams[i]);
+          tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -315,7 +315,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data(), streams[i]);
+          tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -976,6 +976,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1210,6 +1211,12 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
+
+    // Copy outputs back to inputs after synchronization, so that users can
+    // access all reduce results from input tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(outputs[i]);
+    }
   }
 
   std::vector<at::Tensor> tmp;
@@ -1297,7 +1304,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   // tensors must have the same device, layout and type.
   assertLayoutMatch(invalidArgument, tensors);
   if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
-        return t.type() == tensors[0].type();
+        return t.options().type_equal(tensors[0].options());
       })) {
     invalidArgument("tensors must all have the same type");
   }
@@ -1670,11 +1677,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   assertDense(invalidArgument, inputs);
 
   // Expect all input/output tensors to have the same type and sizes
-  const auto& type = inputs[0].type();
+  const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
-  assertTypeAndSizesMatch(invalidArgument, inputs, type, sizes);
+  assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
   for (size_t i = 0; i < outputs.size(); i++) {
-    assertTypeAndSizesMatch(invalidArgument, outputs[i], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[i], options, sizes);
   }
 
   const auto& device = inputs[0].device();
@@ -1807,11 +1814,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
             " (expected length " + toString(expected) + ", got " +
             toString(actual) + ")");
       }
-      if (input_list[i].type() != output_list[i].type()) {
+      if (!input_list[i].options().type_equal(output_list[i].options())) {
         invalidArgument(
             "invalid tensor type at index " + std::to_string(i) +
-            " (expected " + input_list[i].type().toString() + ", got " +
-            output_list[i].type().toString() + ")");
+            " (expected " + input_list[i].toString() + ", got " +
+            output_list[i].toString() + ")");
       }
     }
   }
@@ -1824,6 +1831,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag);
   enqueue(work);
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in Gloo process group");
 }
 
 namespace {
@@ -1992,9 +2007,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
       invalidArgument(ss.str());
     }
 
-    const auto& type = inputs[0].type();
+    const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, outputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
     if (outputs.size() != 0) {
       invalidArgument("requires empty output on non-root");
@@ -2178,9 +2193,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
          << ", same as size of the process group.";
       invalidArgument(ss.str());
     }
-    const auto& type = outputs[0].type();
+    const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, inputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
     if (inputs.size() != 0) {
       invalidArgument("requires empty input on non-root");

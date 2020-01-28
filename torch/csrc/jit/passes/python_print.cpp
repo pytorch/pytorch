@@ -188,7 +188,7 @@ struct PythonPrintImpl {
   //     and would appear in the same order when the expression tree is
   //     reparsed.
   // The last case can be checked
-  // becuase when we emit a expresion tree in the parser,
+  // because when we emit a expresion tree in the parser,
   // we do a left-to-right postorder traversal of the expression tree (emit
   // children, then emit op). The reverse of this is a right-to-left preorder
   // traversal of the tree. By doing a right-to-left preorder traversal of the
@@ -296,7 +296,7 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
         return i;
       }
     }
@@ -777,48 +777,17 @@ struct PythonPrintImpl {
     }
   }
 
-  void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
-      const IValue& the_list) {
-    if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
-    } else {
-      stmt << the_list;
-    }
-  }
-
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
-    std::stringstream ss;
-    if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if (v.isString()) {
-      c10::printQuotedString(ss, v.toStringRef());
-    } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      c10::printQuotedString(ss, device_stream.str());
-      ss << ")";
-    } else if (v.isTensorList()) {
-      ss << "[";
-      const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-        delim = ", ";
+    const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isTensor()) {
+        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+        return true;
       }
-      ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
-    } else {
-      ss << v;
-    }
+      return false;
+    };
+
+    std::stringstream ss;
+    v.repr(ss, customFormatter);
     stmt << ss.str();
   }
 
@@ -937,32 +906,38 @@ struct PythonPrintImpl {
       case prim::ListConstruct: {
         ListTypePtr list_type = node->output()->type()->expect<ListType>();
         TypePtr elem_type = list_type->getElementType();
-        if (!elem_type->isSubtypeOf(TensorType::get())) {
-          // when the list is empty and is not a list of tensors,
-          // we need to annotate it, otherwise it won't be possible
-          // to infer the type on import
-          if (node->inputs().size() == 0) {
-            stmt << "annotate(" << node->output()->type()->python_str()
-                 << ", [])";
-          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-            stmt << "annotate(" << node->output()->type()->python_str() << ",";
-            printValueList(stmt, node->inputs(), "[", "]");
-            stmt << ")";
-          } else {
-            printValueList(stmt, node->inputs(), "[", "]");
-          }
+        // Empty lists must be annotated with their type so the compiler knows
+        // what type is supposed to be inside them
+        if (node->inputs().size() == 0) {
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", [])";
+          // If we can't infer the type based on what's inside, explicitly
+          // annotate it to disambiguate.
+          // This happens for List[Tensor] vs. List[Optional[Tensor]]
+        } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printValueList(stmt, node->inputs(), "[", "]");
+          stmt << ")";
+          // Otherwise just print a list
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        bool is_default_type =
-            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
-        if (node->inputs().size() == 0 && !is_default_type) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
+        // There are cases where we must annotate the dict with an explicit type
+        // to help the compiler out:
+        //   - the dict is empty
+        //   - the dict has potentially ambiguous element types
+        //       (e.g. Tensor vs. Optional[Tensor])
+        if (
+            node->inputs().size() == 0 ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printDict(stmt, node->inputs());
+          stmt << ")";
+          // Otherwise just print a dict
         } else {
           printDict(stmt, node->inputs());
         }
@@ -1113,22 +1088,38 @@ struct PythonPrintImpl {
     return body_;
   }
 
+  template <typename dtype>
+  IValue createBroadList(dtype value, const int64_t& N) {
+    c10::List<dtype> repeated;
+    repeated.reserve(N);
+    for (int i = 0; i < N; ++i) {
+      repeated.push_back(value);
+    }
+    return repeated;
+  }
+
   void printDefaultValue(
-      const TypePtr& typ,
+      const Argument& arg,
       TaggedStringStream& stmt,
       const IValue& value) {
-    // xxx - many weak script modules store default values for broadcasting
-    // lists that are not actually the same type as the argument. We can only
-    // serialize default values that will implicitly convert to their declared
-    // return type since we do not need to serialize these built-in modules with
-    // their defaults, we just drop them for now.
-    if (typ->kind() == ListType::Kind &&
-        (value.isInt() || value.isDouble() || value.isBool())) {
-      return;
-    }
     stmt << "=";
-    printConstant(stmt, value);
+    // handle broadcasting lists
+    if (arg.type()->kind() == ListType::Kind &&
+        (value.isInt() || value.isDouble() || value.isBool())) {
+      TORCH_INTERNAL_ASSERT(arg.N(), "expected broadcastinglist");
+      if (value.isInt()) {
+        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *arg.N()));
+      } else if (value.isBool()) {
+        printConstant(stmt, createBroadList<bool>(value.toBool(), *arg.N()));
+      } else if (value.isDouble()) {
+        printConstant(
+            stmt, createBroadList<double>(value.toDouble(), *arg.N()));
+      }
+    } else {
+      printConstant(stmt, value);
+    }
   }
+
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
@@ -1176,7 +1167,7 @@ struct PythonPrintImpl {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
       }
       if (arg.default_value()) {
-        printDefaultValue(arg.type(), body_, *arg.default_value());
+        printDefaultValue(arg, body_, *arg.default_value());
       }
       assignValue(*param_it++, arg_name);
     }
@@ -1217,7 +1208,7 @@ struct PythonPrintImpl {
 
     for (size_t i = 0; i < numAttrs; i++) {
       const auto& name = moduleType->getAttributeName(i);
-      const auto& type = moduleType->getAttribute(name);
+      const auto& type = moduleType->getAttribute(i);
       registerClassDependencies(type);
 
       indent();
@@ -1239,6 +1230,18 @@ struct PythonPrintImpl {
         //   foo : SomeType
         body_ << name << " : " << type->python_str() << "\n";
       }
+    }
+
+    size_t numConstants = moduleType->numConstants();
+    for (size_t i = 0; i < numConstants; i++) {
+      const auto& name = moduleType->getConstantName(i);
+      IValue v = moduleType->getConstant(i);
+
+      indent();
+      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
+      auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+      printConstant(*ss, v);
+      body_ << ss->str() << "\n";
     }
   }
 
@@ -1360,10 +1363,6 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
-}
-
-void PythonPrint::LEGACY_printOpVersion() {
-  pImpl->body_ << "op_version_set = 1\n";
 }
 
 PythonPrint::~PythonPrint() = default;

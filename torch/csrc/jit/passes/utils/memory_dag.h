@@ -59,8 +59,8 @@ class TORCH_API MemoryDAG {
   bool mayContainAlias(Element* a, Element* b) const;
 
   bool mayContainAlias(
-      const at::ArrayRef<Element*>& a,
-      const at::ArrayRef<Element*>& b) const;
+      const at::ArrayRef<Element*> a,
+      const at::ArrayRef<Element*> b) const;
 
   // Converts from the compressed index representation
   const Element* fromIndex(unsigned x) const;

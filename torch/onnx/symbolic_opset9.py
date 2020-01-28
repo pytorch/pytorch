@@ -108,6 +108,33 @@ def div(g, self, other):
     return g.op("Div", self, other)
 
 
+def floor_divide(g, self, other):
+    out = div(g, self, other)
+    # the correct operation is truncate, which is not supported in ONNX,
+    # we cannot call floor since it will behave differently for negative numbers
+    # (eg. -0.1 should become -0 )
+    # - if scalar_type information are not available, assume that
+    # we need to call floor (treat as float)
+    out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+    # Matching PyTorch's behavior:
+    # - if self is fp the output's type is self's type
+    # - if self is not fp and other is fp, the output is of type 'Float'
+    # - self is not fp and other is not fp, the output's type is self's output type
+    # - the output type defaults to Float
+    scalar_type = self.type().scalarType()
+    if scalar_type is not None:
+        if not sym_help._is_fp(self) and \
+           other.type().scalarType() is not None and \
+           sym_help._is_fp(other):
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        else:
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx[scalar_type])
+    else:
+        out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    return out
+
+
 def reciprocal(g, self):
     return g.op("Div", torch.ones(1), self)
 
@@ -290,7 +317,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -298,7 +325,8 @@ def embedding_bag(g,
                   scale_grad_by_freq,
                   mode,
                   sparse,
-                  per_sample_weights):
+                  per_sample_weights,
+                  include_last_offset):
     if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
@@ -310,7 +338,8 @@ def embedding_bag(g,
                 outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
-                sparse_i=sparse)
+                sparse_i=sparse,
+                include_last_offset_i=include_last_offset)
 
 
 def size(g, self, dim):
@@ -376,8 +405,16 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def split(g, self, split_size_or_sizes, dim):
+    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
+                           .format('split_size_or_sizes', split_size_or_sizes))
+    split_val = split_size_or_sizes.node()['value']
+    if split_val.dim() > 0:
+        return split_with_sizes(g, self, split_size_or_sizes, dim)
+    split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -734,12 +771,14 @@ replication_pad3d = replication_pad
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
+        if scales is None:
+            scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
@@ -752,7 +791,7 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
@@ -868,13 +907,25 @@ def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     # TODO: remove this as onnx opset 11 spec allows negative axes
+    input_dim = input.type().dim()
+    if input_dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
     if dim < 0:
-        dim = input.type().dim() + dim
-    if input.type().dim() != dim + 1:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
+        dim = input_dim + dim
+    is_transpose_required = (input_dim != dim + 1)
+    # ONNX only supports log_softmax with dim = -1. Transpose must be added before and after log_softmax to support other cases.
+    if is_transpose_required:
+        axes = list(range(input_dim))
+        axes[dim], axes[-1] = axes[-1], axes[dim]
+        input = g.op("Transpose", input, perm_i=axes)
+        dim = input_dim - 1
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != 'prim::Constant':
         return_op = g.op("Cast", return_op, to_i=sym_help.scalar_type_to_onnx[dtype])
+    if is_transpose_required:
+        return_op = g.op("Transpose", return_op, perm_i=axes)
     return return_op
 
 
@@ -910,6 +961,36 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
         return g.op("Add", n, bias)
     else:
         return n
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
+def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose1d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
+
+
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
+def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
@@ -1716,7 +1797,9 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
     if not input.isCompleteTensor():
-        return _unimplemented("flatten", "input size not accessible")
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     input_dims = input.type().sizes()
     output_dims = []
     for i in range(0, dim):
@@ -2103,7 +2186,7 @@ def _weight_norm(g, weight_v, weight_g, dim):
         # This conflicts the logic for negative axes to access dims backwards
         # TODO: Might need a fix in torch group_norm module
         axes = list(range(rank))
-        if dim:
+        if dim is not None:
             if dim < -1:
                 dim += rank
             if dim != -1:
@@ -2113,3 +2196,9 @@ def _weight_norm(g, weight_v, weight_g, dim):
         return g.op("Mul", div, weight_g)
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
+
+def dim(g, self):
+    '''Implement the dim functionality available for a pytorch tensor in ONNX'''
+    # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    shape = g.op('Shape', self)
+    return g.op('Size', shape)

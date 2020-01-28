@@ -1,6 +1,6 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     output: "4"
@@ -51,11 +51,6 @@ graph {
     }
   }
   name: "torch-jit-export"
-  initializer {
-    data_type: 7
-    name: "num_batches_tracked"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
   initializer {
     dims: 128
     data_type: 1
@@ -112,16 +107,6 @@ graph {
           dim {
             dim_value: 128
           }
-        }
-      }
-    }
-  }
-  input {
-    name: "num_batches_tracked"
-    type {
-      tensor_type {
-        elem_type: 7
-        shape {
         }
       }
     }

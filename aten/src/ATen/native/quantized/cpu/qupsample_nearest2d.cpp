@@ -19,9 +19,11 @@ static void upsample_nearest2d_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float height_scale = (float)input_height / output_height;
-  const float width_scale = (float)input_width / output_width;
+    int64_t channels,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
 
   channels = channels * nbatch;
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
@@ -62,9 +64,12 @@ static void upsample_nearest2d_out_frame_nhwc(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float height_scale = (float)input_height / output_height;
-  const float width_scale = (float)input_width / output_width;
+    int64_t channels,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+
   for (int b = 0; b < nbatch; b++) {
     auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_height * input_width * channels);
     auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_height * output_width * channels);
@@ -92,7 +97,9 @@ static void upsample_nearest2d_out_frame_nhwc(
 
 Tensor quantized_upsample_nearest2d_cpu(
     const Tensor& input,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -130,7 +137,9 @@ Tensor quantized_upsample_nearest2d_cpu(
           output_height,
           output_width,
           nbatch,
-          channels);
+          channels,
+          scales_h,
+          scales_w);
     });
     return output;
   } else {
@@ -153,7 +162,9 @@ Tensor quantized_upsample_nearest2d_cpu(
           output_height,
           output_width,
           nbatch,
-          channels);
+          channels,
+          scales_h,
+          scales_w);
     });
     return output;
   }

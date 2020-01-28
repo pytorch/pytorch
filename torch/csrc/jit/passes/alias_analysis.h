@@ -52,8 +52,8 @@ class AliasDb {
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
-      const at::ArrayRef<Value*>& a,
-      const at::ArrayRef<Value*>& b) const;
+      const at::ArrayRef<Value*> a,
+      const at::ArrayRef<Value*> b) const;
 
   // Do `a` and `b` potentially share a memory location?
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
@@ -74,10 +74,15 @@ class AliasDb {
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
 
+  // Is it safe to change whether `a` and `b` alias each other ?
+  TORCH_API bool safeToChangeAliasingRelationship(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
+
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two gurantees about the postcondition of the node list:
+  // make two guarantees about the postcondition of the node list:
   //   - `n` is directly after `movePoint`.
   //   - only nodes between `n` and `movePoint` have been moved.
   //
@@ -92,6 +97,9 @@ class AliasDb {
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
+
+  static bool mutableType(const Value* v);
+  static bool mutableType(const TypePtr& type);
 
  private:
   // Helper for topologically-safe node moves.
@@ -133,6 +141,8 @@ class AliasDb {
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
 
+  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
+
   /**
    * Special analysis methods
    */
@@ -168,8 +178,6 @@ class AliasDb {
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
-  static bool shouldAnnotate(const Value* v);
-  static bool shouldAnnotate(const TypePtr& type);
   static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
 
   static bool isContainerType(const TypePtr& type);
@@ -185,6 +193,8 @@ class AliasDb {
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
   bool mayAliasWildcard(const Value* v) const;
+  bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   /**
    * State for tracking write info.

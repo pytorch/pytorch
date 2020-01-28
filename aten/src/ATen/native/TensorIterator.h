@@ -9,10 +9,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
-// arithmetic, comparisions, and trigonometric functions. It handles
+// arithmetic, comparisons, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
 // This is inspired by NumPy's Array Iterator API (NpyIter).
@@ -304,6 +303,16 @@ struct CAFFE2_API TensorIterator {
     return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
   }
 
+  bool has_contiguous_first_dim() const {
+    int num_tensors = ntensors();
+    for (int i = 0; i < num_tensors; i++) {
+      if (strides(i)[0] != element_size(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
   }
@@ -361,19 +370,15 @@ protected:
   void allocate_outputs();
   void fast_set_up();
   bool can_use_fast_set_up();
-#ifdef BUILD_NAMEDTENSOR
   void compute_names();
   void propagate_names_to_outputs();
-#endif
   void coalesce_dimensions();
   void analyze_memory_format();
 
 protected:
   DimVector shape_;
   DimVector perm_;
-#ifdef BUILD_NAMEDTENSOR
   NameVector names_;
-#endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;

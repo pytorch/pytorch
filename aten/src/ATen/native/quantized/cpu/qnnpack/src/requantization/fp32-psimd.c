@@ -46,7 +46,7 @@ void pytorch_qnnp_requantize_fp32__psimd(
      * - Large int32_t values can't be exactly represented as FP32. We expect
      * that conversion instruction would round it to nearest FP32 value with
      * ties to even, but Clang documentation for __builtin_convertvector does
-     *   not guaratee that.
+     *   not guarantee that.
      * - Product of two FP32 values is generally not exactly representation as
      * an FP32 value, and will be rounded to nearest FP32 value with ties to
      * even.
