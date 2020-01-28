@@ -67,6 +67,7 @@ void div_kernel(TensorIterator& iter) {
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
       });
     });
