@@ -1548,24 +1548,6 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_wait_all_workers_and_shutdown(self):
-        # This tests ensures that both rpc._wait_all_workers() and rpc.shutdown() can be
-        # called without errors being raised due to attempting to shut down
-        # multiple times.
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options
-        )
-        from torch.distributed.rpc.api import _wait_all_workers
-        # intentional call to internal _wait_all_workers.
-        _wait_all_workers()
-        rpc.shutdown(graceful=False)
-
-    @dist_init(setup_rpc=False)
     def test_get_rpc_timeout(self):
         timeout = timedelta(seconds=1)
 
