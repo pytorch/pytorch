@@ -262,23 +262,21 @@ class DWConvMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(outputScale);
-      // Passing address of kernel_zero_scale and convolution_scale
-      // is not safe as they are stack variables. However for now just staging this change.
-      // TODO: Eventually, we will find a better way to handle this.
-      std::vector<uint8_t> kernel_zero_points(channels(), this->kernelZeroPoint_);
+      std::vector<float> requantization_scale(1, 1.0f / float(outputScale));
+      // Per channel quantization is not supported for depth wise.
+      std::vector<uint8_t> kernel_zero_points(1, this->kernelZeroPoint_);
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
               kernel_zero_points.data(),
-              &requantizationScale,
+              requantization_scale.data(),
               outputZeroPoint,
               qmin(),
               qmax());
       const union pytorch_qnnp_q31_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_requantization_params(
-                  requantizationScale, outputZeroPoint, qmin(), qmax());
+                  requantization_scale[0], outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
           channels(),
@@ -440,22 +438,21 @@ class DWConvMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      const float requantizationScale = 1.0f / float(outputScale);
-    // Passing address of kernel_zero_scale and convolution_scale
-    // is not safe as they are stack variables. However for now just staging this change.
-    // TODO: Eventually, we will find a better way to handle this.
+      std::vector<float> requantization_scale(1, 1.0f / float(outputScale));
+      // Per channel quantization is not supported for depth wise.
+      std::vector<uint8_t> kernel_zero_points(1, this->kernelZeroPoint_);
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
-              &this->kernelZeroPoint_,
-              &requantizationScale,
+              kernel_zero_points.data(),
+              requantization_scale.data(),
               outputZeroPoint,
               qmin(),
               qmax());
       const union pytorch_qnnp_q31_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_requantization_params(
-                  requantizationScale, outputZeroPoint, qmin(), qmax());
+                  requantization_scale[0], outputZeroPoint, qmin(), qmax());
 
       q8dwconv(
           channels(),

@@ -371,7 +371,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
                 kr,
 #if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
                 input_zero_point,
-                kernel_zero_point[0],
+                kernel_zero_points[0],
 #endif
                 kernel + group * group_output_channels * group_input_channels,
                 bias + group * group_output_channels,
@@ -441,7 +441,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
   convolution->group_input_channels = group_input_channels;
   convolution->group_output_channels = group_output_channels;
 
-  convolution->kernel_zero_point = kernel_zero_points;
+  convolution->kernel_zero_point = kernel_zero_points[0];
 
   if (ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
     convolution->requantization_params =

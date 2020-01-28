@@ -45,7 +45,12 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     # Load kernel zero point:
     # - d31 = vkernel_zero_point
-    VLD1.8 {d31[]}, [r12], r4
+    # Load the address zero_point array.
+    # For depth wise kernels the array is of single element.
+    LDR r5, [r12]
+    VLD1.8 {d31[]}, [r5]
+    # Advance r12 by 4 since the first element is a pointer
+    ADD r12, r12, 4
 
     # Load input zero point:
     # - d30 = vinput_zero_point
