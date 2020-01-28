@@ -310,8 +310,8 @@ __device__ inline void vectorized_elementwise_kernel(func_t f, array_t data) {
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-  return_t results[policy_t::thread_work_size];
-  arg_t args[policy_t::thread_work_size][nargs];
+  return_t results[thread_work_size];
+  arg_t args[thread_work_size][nargs];
 
   // load
   #pragma unroll
@@ -322,7 +322,7 @@ __device__ inline void vectorized_elementwise_kernel(func_t f, array_t data) {
 
   // compute
   #pragma unroll
-  for (int i = 0; i < policy_t::thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size; i++) {
     results[i] = detail::invoke_with_array(f, args[i]);
   }
 
