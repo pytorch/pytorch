@@ -16,14 +16,17 @@ from . import (
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _destroy_rref_context,
+    _get_current_rpc_agent,
     _invoke_remote_builtin,
     _invoke_remote_python_udf,
     _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
     _invoke_rpc_script,
+    _is_current_rpc_agent_set,
+    _reset_current_rpc_agent,
     _set_rpc_timeout,
-    _start_rpc_agent,
+    _set_and_start_rpc_agent,
     backend_registry,
 )
 from .internal import (
@@ -37,7 +40,6 @@ from .internal import (
 logging.basicConfig()
 logger = logging.getLogger(__name__)
 
-_agent = None
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
 # make sure there is no references to any RRef in the application code and
 # Python GC has done its job to delete those RRefs. This is could result in bad
@@ -67,7 +69,7 @@ def _use_rpc_pickler(rpc_pickler):
 def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if _agent is None:
+        if not _is_current_rpc_agent_set():
             raise RuntimeError(
                 "RPC has not been initialized. Call "
                 "torch.distributed.rpc.init_rpc first."
@@ -143,7 +145,7 @@ def _wait_all_workers():
     ), "`_ALL_WORKER_NAMES` is not initialized for `def _wait_all_workers`."
     leader_worker_name = sorted(_ALL_WORKER_NAMES)[0]
 
-    self_worker_name = _agent.get_worker_info().name
+    self_worker_name = _get_current_rpc_agent().get_worker_info().name
 
     global _wait_all_workers_sequence_id
     with _wait_all_workers_dict_lock:
@@ -234,16 +236,14 @@ def shutdown(graceful=True):
         >>> # wait for worker 0 to finish work, and then shutdown.
         >>> rpc.shutdown()
     """
-    global _agent
-
     if graceful:
         _wait_all_workers()
-        _agent.join()
+        _get_current_rpc_agent().join()
     try:
         # This raises a `TORCH_CHECK()` exception on RRef leak detected.
         _destroy_rref_context(_ignore_rref_leak)
     finally:
-        _agent.shutdown()
+        _get_current_rpc_agent().shutdown()
         # clean up python rpc handler in shutdown(), see comments in
         # PythonRpcHandler::cleanup(), call it in python API because the
         # cleanup() function has python dependency, it assumes python
@@ -251,7 +251,7 @@ def shutdown(graceful=True):
         # No matter if RRef leak exception is raised, this clean-up code
         # must run to avoid destruction segfault in Python 3.5.
         _cleanup_python_rpc_handler()
-        _agent = None
+        _reset_current_rpc_agent()
 
 
 # TODO: add a context manager to wrap _init_rpc_backend and shutdown
@@ -269,13 +269,11 @@ def _init_rpc_backend(
 
     _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
 
-    global _agent
-
-    if _agent:
+    if _is_current_rpc_agent_set():
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    _agent = backend_registry.init_backend(
+    rpc_agent = backend_registry.init_backend(
         backend,
         store=store,
         name=name,
@@ -284,11 +282,11 @@ def _init_rpc_backend(
         rpc_backend_options=rpc_backend_options,
     )
 
-    worker_infos = _agent.get_worker_infos()
+    worker_infos = rpc_agent.get_worker_infos()
     global _ALL_WORKER_NAMES
     _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
 
-    _start_rpc_agent(_agent)
+    _set_and_start_rpc_agent(rpc_agent)
 
 
 @_require_initialized
@@ -308,9 +306,9 @@ def get_worker_info(worker_name=None):
         current worker if ``worker_name`` is ``None``.
     """
     if worker_name:
-        return _agent.get_worker_info(worker_name)
+        return _get_current_rpc_agent().get_worker_info(worker_name)
     else:
-        return _agent.get_worker_info()
+        return _get_current_rpc_agent().get_worker_info()
 
 
 def _to_worker_info(name_or_info):
@@ -425,7 +423,7 @@ def remote(to, func, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(_get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         return _remote_torchscript(
             info, torch._jit_internal._qualified_name(func), args, kwargs
@@ -434,7 +432,7 @@ def remote(to, func, args=None, kwargs=None):
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        return _invoke_remote_python_udf(_agent, info, pickled_python_udf, tensors, rf)
+        return _invoke_remote_python_udf(_get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -458,12 +456,12 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(_agent, info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(_get_current_rpc_agent(), info, qualified_name, rf, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(_agent, info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(_get_current_rpc_agent(), info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -476,7 +474,7 @@ def enable_gil_profiling(flag):
     Arguments:
         flag (bool): True to set metrics profiling, False to disable.
     """
-    _agent.enable_gil_profiling(flag)
+    _get_current_rpc_agent().enable_gil_profiling(flag)
 
 
 @_require_initialized
