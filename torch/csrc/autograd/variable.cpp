@@ -25,8 +25,8 @@ namespace torch {
 namespace autograd {
 
 
-DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, bool allow_rebase_history)
-    : AutogradMeta(self_impl), allow_rebase_history(allow_rebase_history) {
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base)
+    : AutogradMeta(self_impl, false) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
@@ -72,13 +72,12 @@ namespace impl {
   }
 
   void rebase_history(const Variable& self, Edge gradient_edge) {
-    TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
+    AT_ASSERT(gradient_edge.function != nullptr);
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-      TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history);
-      TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
-      TORCH_INTERNAL_ASSERT(gradient_edge.function);
+      AT_ASSERT(gradient_edge.input_nr == 0);
+      AT_ASSERT(gradient_edge.function);
       TORCH_CHECK(
           gradient_edge.function->num_inputs() == 1,
           "Functions which modify views in-place must return a single Variable");
