@@ -50,6 +50,12 @@ public:
     : repr_(t == DispatchKey::Undefined
               ? 0
               : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
+  explicit DispatchKeySet(std::initializer_list<DispatchKey> ks)
+    : DispatchKeySet() {
+    for (auto k : ks) {
+      repr_ |= DispatchKeySet(k).repr_;
+    }
+  }
   // Test if a DispatchKey is in the set
   bool has(DispatchKey t) const {
     TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -106,23 +112,18 @@ private:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-// Historically, every tensor only had a single DispatchKey, and it was
-// always something like CPUTensorId and not something weird like VariableId.
-// For the foreseeable future, it will still be possible to extract /that/
-// DispatchKey, and that's what this function does.  It should be used
-// for legacy code that is still using DispatchKey for things like instanceof
-// checks; if at all possible, refactor the code to stop using DispatchKey
-// in those cases.
-//
-// What's the difference between 'legacyExtractDispatchKey(s) == id'
-// and 's.has(id)'?  legacyExtractDispatchKey will NEVER return VariableTensorId;
-// but s.has(VariableTensorId) will evaluate to true if s has VariableTensorId.
-// For non-VariableTensorId equality tests, they are indistinguishable.
-//
-// NB: If you add other non-VariableTensorId other keys to this set, you'll
-// have to adjust this some more (sorry.)
+// Historically, every tensor only had a single DispatchKey, and it was always
+// something like CPUTensorId, and there wasn't any of this business where TLS
+// could cause the DispatchKey of a tensor to change.  But we still have some
+// legacy code that is still using DispatchKey for things like instanceof
+// checks; if at all possible, refactor the code to stop using DispatchKey in
+// those cases.
 static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
-  return s.remove(DispatchKey::VariableTensorId).highestPriorityTypeId();
+  // NB: If you add any extra keys that can be stored in TensorImpl on
+  // top of existing "normal" keys like CPU/CUDA, you need to add it
+  // here.  At the moment, RequiresGrad (replacement for Variable)
+  // is the most likely key that will need this treatment.
+  return s.highestPriorityTypeId();
 }
 
 }

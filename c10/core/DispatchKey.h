@@ -47,11 +47,6 @@ enum class DispatchKey : uint8_t {
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
 
-  // WARNING! If you add more "wrapper" style tensor ids (tensor
-  // ids which don't get kernels directly defined in native_functions.yaml;
-  // examples are tracing or profiling) here, you need to also adjust
-  // legacyExtractDispatchKey in c10/core/DispatchKeySet.h to mask them out.
-
   VariableTensorId,
 
   // TESTING: This is intended to be a generic testing tensor type id.
