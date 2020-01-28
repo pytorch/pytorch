@@ -286,6 +286,347 @@ binary_mac_params: &binary_mac_params
 ##############################################################################
 # Job specs
 ##############################################################################
+jobs:
+  pytorch_linux_build:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # Pull Docker image and run build
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+
+          # NB: Temporarily disable the rebase logic in v1.4.0, don't merge this change into master
+          # # TODO We may want to move the rebase logic to a separate step after checkout
+          # # Rebase to master only if in xenial_py3_6_gcc5_4 case
+          # if [[ "${CIRCLE_BRANCH}" != "master" && "${BUILD_ENVIRONMENT}" == *"gcc5"* ]]; then
+          #   echo "Merge master branch into $CIRCLE_BRANCH before build in environment $BUILD_ENVIRONMENT"
+          #   set -x
+          #   git config --global user.email "circleci.ossci@gmail.com"
+          #   git config --global user.name "CircleCI"
+          #   git config remote.origin.url https://github.com/pytorch/pytorch.git
+          #   git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+          #   git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+          #   export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+          #   echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+          #   export GIT_COMMIT=${CIRCLE_SHA1}
+          #   echo "GIT_COMMIT: " ${GIT_COMMIT}
+          #   git checkout -f ${GIT_COMMIT}
+          #   git reset --hard ${GIT_COMMIT}
+          #   git merge --allow-unrelated-histories --no-edit --no-ff ${GIT_MERGE_TARGET}
+          #   set +x
+          # else
+          #   echo "Do NOT merge master branch into $CIRCLE_BRANCH in environment $BUILD_ENVIRONMENT"
+          # fi
+
+          git submodule sync && git submodule update -q --init --recursive
+
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
+          fi
+          echo "Parallel backend flags: "${PARALLEL_FLAGS}
+
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            # Note [Special build images]
+            # The xla build uses the same docker image as
+            # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
+            # distinguish between them so the test can pick up the correct image.
+            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-xla
+            elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v7a
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v8a"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
+            else
+              export COMMIT_DOCKER_IMAGE=$output_image
+            fi
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  pytorch_linux_test:
+    <<: *pytorch_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "90m"
+        command: |
+          set -e
+          # See Note [Special build images]
+          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+          else
+            export COMMIT_DOCKER_IMAGE=$output_image
+          fi
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+
+          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
+          fi
+          echo "Parallel backend flags: "${PARALLEL_FLAGS}
+
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+
+          retrieve_test_reports() {
+            echo "retrieving test reports"
+            docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          }
+          trap "retrieve_test_reports" ERR
+
+          if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          else
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          fi
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          retrieve_test_reports
+    - store_test_results:
+        path: test-reports
+  caffe2_linux_build:
+    <<: *caffe2_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - checkout
+    - setup_ci_environment
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          cat >/home/circleci/project/ci_build_script.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+          # Reinitialize submodules
+          git submodule sync && git submodule update -q --init --recursive
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+            sudo chown -R jenkins:jenkins '/opt/conda'
+          fi
+
+          # Build
+          ./.jenkins/caffe2/build.sh
+
+          # Show sccache stats if it is running
+          if pgrep sccache > /dev/null; then
+            sccache --show-stats
+          fi
+          # =================== The above code will be executed inside Docker container ===================
+          EOL
+          chmod +x /home/circleci/project/ci_build_script.sh
+
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+          # Push intermediate Docker image for next phase to use
+          if [ -z "${BUILD_ONLY}" ]; then
+            if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+            else
+              export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            fi
+            docker commit "$id" ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
+          fi
+
+  caffe2_linux_test:
+    <<: *caffe2_params
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
+    - run:
+        name: Test
+        no_output_timeout: "1h"
+        command: |
+          set -e
+          # TODO: merge this into Caffe2 test.sh
+          cat >/home/circleci/project/ci_test_script.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+
+          export BUILD_ENVIRONMENT="$BUILD_ENVIRONMENT"
+
+          # libdc1394 (dependency of OpenCV) expects /dev/raw1394 to exist...
+          sudo ln /dev/null /dev/raw1394
+
+          # conda must be added to the path for Anaconda builds (this location must be
+          # the same as that in install_anaconda.sh used to build the docker image)
+          if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+            export PATH=/opt/conda/bin:$PATH
+          fi
+
+          # Upgrade SSL module to avoid old SSL warnings
+          pip -q install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
+
+          pip -q install --user -b /tmp/pip_install_onnx "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+
+          # Build
+          ./.jenkins/caffe2/test.sh
+
+          # Remove benign core dumps.
+          # These are tests for signal handling (including SIGABRT).
+          rm -f ./crash/core.fatal_signal_as.*
+          rm -f ./crash/core.logging_test.*
+          # =================== The above code will be executed inside Docker container ===================
+          EOL
+          chmod +x /home/circleci/project/ci_test_script.sh
+
+          if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-cmake-${CIRCLE_SHA1}
+          else
+            export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          fi
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          else
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          fi
+          docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+
+          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+  caffe2_macos_build:
+    <<: *caffe2_params
+    macos:
+      xcode: "9.0"
+    steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - should_run_job
+      - checkout
+      - run_brew_for_macos_build
+      - run:
+          name: Build
+          no_output_timeout: "1h"
+          command: |
+            set -e
+
+            export IN_CIRCLECI=1
+
+            brew install cmake
+
+            # Reinitialize submodules
+            git submodule sync && git submodule update -q --init --recursive
+
+            # Reinitialize path (see man page for path_helper(8))
+            eval `/usr/libexec/path_helper -s`
+
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
+
+            # Install Anaconda if we need to
+            if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+              rm -rf ${TMPDIR}/anaconda
+              curl -o ${TMPDIR}/conda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
+              chmod +x ${TMPDIR}/conda.sh
+              /bin/bash ${TMPDIR}/conda.sh -b -p ${TMPDIR}/anaconda
+              rm -f ${TMPDIR}/conda.sh
+              export PATH="${TMPDIR}/anaconda/bin:${PATH}"
+              source ${TMPDIR}/anaconda/bin/activate
+            fi
+
+            pip -q install numpy
+
+            # Install sccache
+            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
+
+            # This IAM user allows write access to S3 bucket for sccache
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
+
+            export SCCACHE_BIN=${PWD}/sccache_bin
+            mkdir -p ${SCCACHE_BIN}
+            if which sccache > /dev/null; then
+              printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${SCCACHE_BIN}/clang++"
+              chmod a+x "${SCCACHE_BIN}/clang++"
+
+              printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${SCCACHE_BIN}/clang"
+              chmod a+x "${SCCACHE_BIN}/clang"
+
+              export PATH="${SCCACHE_BIN}:$PATH"
+            fi
+
+            # Build
+            if [ "${BUILD_IOS:-0}" -eq 1 ]; then
+              unbuffer scripts/build_ios.sh 2>&1 | ts
+            elif [ -n "${CAFFE2_USE_ANACONDA}" ]; then
+              # All conda build logic should be in scripts/build_anaconda.sh
+              unbuffer scripts/build_anaconda.sh 2>&1 | ts
+            else
+              unbuffer scripts/build_local.sh 2>&1 | ts
+            fi
+
+            # Show sccache stats if it is running
+            if which sccache > /dev/null; then
+              sccache --show-stats
+            fi
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
