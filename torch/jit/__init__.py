@@ -1973,8 +1973,7 @@ def _add_script_class(cls, name):
 def _get_script_class(name):
     global _script_classes
     if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
+        return None
     return _script_classes[name]
 
 # overloads are registered in _jit_internal and compiled here so that _overload
