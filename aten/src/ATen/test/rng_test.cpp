@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <torch/extension.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
