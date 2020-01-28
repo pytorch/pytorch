@@ -739,7 +739,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value* tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     // Note that we check the contents of the grad_map instead of
-    // tmp->requires_grad(), becuase it's actually a more faithful source.
+    // tmp->requires_grad(), because it's actually a more faithful source.
     // tmp->requires_grad() is really an overapproximation (i.e. it can have
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real

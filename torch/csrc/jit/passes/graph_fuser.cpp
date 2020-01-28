@@ -1098,7 +1098,7 @@ struct GraphFuser {
 
   void run() {
     // Run the pass until no changes are made.
-    // This is neccessary, because the algorithm can miss out on certain fusion
+    // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
     //
     // %1 = f(...)
