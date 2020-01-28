@@ -35,13 +35,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      assert(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -61,7 +61,7 @@ void renormRows(Tensor& t) {
   int64_t cols = t.size(1);
 
   auto props = at::cuda::getCurrentDeviceProperties();
-  assert(props != NULL);
+  CUDA_ALWAYS_ASSERT(props != NULL);
   int numSM = props->multiProcessorCount;
   int maxThreads = props->maxThreadsPerBlock;
 
@@ -84,7 +84,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
   int start = 0;
   int end = size;
   // cumdist[size - 1] = 0 => all zero prob dist
-  assert(cumdist[size - 1] > static_cast<scalar_t>(0));
+  CUDA_ALWAYS_ASSERT(cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -240,9 +240,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      assert(val >= zero);
-      assert(!THCNumerics<scalar_t>::isinf(val));
-      assert(!THCNumerics<scalar_t>::isnan(val));
+      CUDA_ALWAYS_ASSERT(val >= zero);
+      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::isinf(val));
+      CUDA_ALWAYS_ASSERT(!THCNumerics<scalar_t>::isnan(val));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -252,8 +252,8 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      assert(!THCNumerics<accscalar_t>::isinf(sum));
-      assert(sum > accZero);
+      CUDA_ALWAYS_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
+      CUDA_ALWAYS_ASSERT(sum > accZero);
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
@@ -363,7 +363,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
-    assert(props != NULL);
+    CUDA_ALWAYS_ASSERT(props != NULL);
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;

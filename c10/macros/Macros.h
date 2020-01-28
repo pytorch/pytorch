@@ -192,6 +192,10 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_WARP_SIZE 32
 #endif
 
+#if defined(_MSC_VER) && _MSC_VER <= 1900
+#define __func__ __FUNCTION__
+#endif
+
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
@@ -199,6 +203,26 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define CUDA_KERNEL_ASSERT(...)
 #else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
+// CUDA_ALWAYS_ASSERT is similar to CUDA_KERNEL_ASSERT but checks the assertion
+// even when NDEBUG is defined. This is useful for important assertions in CUDA
+// code that when building Release.
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#define CUDA_ALWAYS_ASSERT(cond)
+#else // __APPLE__
+#if defined(NDEBUG)
+extern "C" {
+[[noreturn]] void __assert_fail(const char *assertion, const char *file,
+                                unsigned int line, const char *function)
+                                throw();
+}
+#endif // NDEBUG
+#define CUDA_ALWAYS_ASSERT(cond)                                         \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__),  \
+                  __func__);                                             \
+  }
 #endif // __APPLE__
 
 #ifdef __APPLE__
