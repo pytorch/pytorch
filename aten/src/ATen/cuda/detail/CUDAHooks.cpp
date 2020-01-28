@@ -152,7 +152,8 @@ int64_t CUDAHooks::current_device() const {
 }
 
 void CUDAHooks::set_device(int64_t idx) const {
-  AT_CUDA_CHECK(cudaSetDevice(static_cast<int>(idx)));
+  // We ignore error code to stay consistent with the non-CUDA implementation
+  cudaSetDevice(static_cast<int>(idx));
 }
 
 bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
