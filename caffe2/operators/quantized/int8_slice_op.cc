@@ -38,6 +38,7 @@ Example:
     .Arg("Y_zero_point", "Output tensor quantization offset")
     .Arg("starts", "List of starting indices")
     .Arg("ends", "List of ending indices")
+    .Arg("axes", "1-D tensor: axes that `starts` and `ends` apply to")
     .Arg(
         "dim",
         "(Optional) The dimension to slice over. If specified start_idx and end_idx should also be given and it takes precedence over starts and ends")
