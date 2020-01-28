@@ -49,7 +49,7 @@ def _stub_construct_rpc_backend_options_handler(
     return mock.Mock()  # RpcBackendOptions.
 
 
-def _stub_start_rpc_backend_handler(
+def _stub_init_rpc_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
     return StubRpcAgent(world_size=world_size)
@@ -267,6 +267,26 @@ load_tests = load_tests
     "Pytorch distributed rpc package " "does not support python2",
 )
 class RpcTest(RpcAgentTestFixture):
+    @dist_init
+    def test_nested_rref(self):
+        n = self.rank + 1
+        dst_rank1 = n % self.world_size
+        dst_rank2 = (n + 1) % self.world_size
+        rref_of_rrefs = rpc.remote(
+            "worker{}".format(dst_rank1),
+            nested_rref,
+            args=("worker{}".format(dst_rank2),),
+        )
+
+        # Say C has 2 OwnerRRefs.
+        # B has 2 UserRRefs to those 2 OwnerRRefs, respectively.
+        # This call is effectively A asking B to share it's 2 UserRRefs.
+        rrefs = rref_of_rrefs.to_here()
+
+        self.assertEqual(len(rrefs), 2)
+        self.assertEqual(rrefs[0].to_here(), torch.ones(2, 2) + 1)
+        self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
+
     @dist_init
     def test_nested_rref_stress(self):
         # if self.rank != 0:
