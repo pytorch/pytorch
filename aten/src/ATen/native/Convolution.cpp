@@ -405,7 +405,7 @@ static void check_shape_forward(const at::Tensor& input,
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
-           "-dimensional weight [", weight_sizes, "], but got ", k, "-dimensional input of size ",
+           "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
            input.sizes(), " instead");
   TORCH_CHECK(weight_sizes[0] >= groups,
            "Given groups=", groups, ", expected weight to be at least ", groups,
