@@ -4971,6 +4971,25 @@ def foo(x):
         scripted = torch.jit.script(foo)
         self.getExportImportCopy(scripted)
 
+    def test_class_as_attribute(self):
+        @torch.jit.script
+        class Foo321(object):
+            def __init__(self):
+                self.x = 3
+
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = Foo321()
+
+            def forward(self, x):
+                return x + self.f.x
+
+        scripted = torch.jit.script(FooBar1234())
+        eic = self.getExportImportCopy(scripted)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted(x), eic(x))
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
