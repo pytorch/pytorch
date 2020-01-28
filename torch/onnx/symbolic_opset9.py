@@ -1753,7 +1753,7 @@ def rand(g, *shapes):
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
