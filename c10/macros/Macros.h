@@ -241,6 +241,9 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
 #define C10_HOST_CONSTEXPR_VAR
+#elif defined(_MSC_VER)
+#define C10_HOST_CONSTEXPR
+#define C10_HOST_CONSTEXPR_VAR
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
@@ -256,7 +259,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif
 
 #if defined(__CUDA_ARCH__)
-#if defined(_MSC_VER) && defined(__CUDACC__)
+#if defined(_MSC_VER)
 #define CONSTEXPR_EXCEPT_WIN_CUDA
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
@@ -264,7 +267,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #endif
 #else
-#if defined(_MSC_VER) && defined(__CUDACC__)
+#if defined(_MSC_VER)
 #define CONSTEXPR_EXCEPT_WIN_CUDA
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
