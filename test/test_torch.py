@@ -5949,6 +5949,38 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(output3, output1)
             self.assertEqual(output3, output2)
 
+    def test_tensoriterator_output_setup(self):
+        # Test whether the output's memory layout is correct
+        def test_memory_layout(x, y, out):
+            self.assertEqual(x.dim(), 4)
+            self.assertEqual(x.size(), y.size())
+            self.assertEqual(y.size(), out.size())
+
+            shape = x.size()
+            for n in range(shape[0]):
+                for c in range(shape[1]):
+                    for h in range(shape[2]):
+                        for w in range(shape[3]):
+                            self.assertEqual(out[n][c][h][w], x[n][c][h][w] + y[n][c][h][w])
+
+        xraw = torch.rand(2, 3, 4, 4)
+        yraw = torch.rand(2, 3, 4, 4)
+
+        # contiguous case fast setup
+        test_memory_layout(xraw, yraw, xraw + yraw)
+        # channels last case fast setup
+        x = xraw.contiguous(memory_format=torch.channels_last)
+        y = yraw.contiguous(memory_format=torch.channels_last)
+        test_memory_layout(x, y, x + y)
+        # non contiguous case fast setup (dense, non-overlapping, same shape and sizes)
+        x = xraw.permute(0, 2, 3, 1)
+        y = yraw.permute(0, 2, 3, 1)
+        test_memory_layout(x, y, x + y)
+        # non contiguous case non fast setup
+        x = xraw.permute(0, 2, 3, 1)
+        y = yraw.permute(0, 3, 2, 1)
+        test_memory_layout(x, y, x + y)
+
     def test_tensor_grad_warnings(self):
         dummy = torch.empty(1)
 
@@ -11066,7 +11098,7 @@ class TestTorchDeviceType(TestCase):
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
-                         torch.tensor((2, 1, 0), device=device, dtype=dtype), 
+                         torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
 
         # Check linspace for non-contiguous tensors.
