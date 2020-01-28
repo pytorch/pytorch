@@ -254,7 +254,6 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
   }
 
   // fetch data
-  return_t results[thread_work_size];
   arg_t args[thread_work_size][nargs];
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
@@ -266,19 +265,11 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
     }
   }
 
-  // compute
+  // compute and store
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     if (idx + num_threads * i < N) {
-      results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
-    }
-  }
-
-  // store data
-  #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
-      *(result_base + i * num_threads) = results[i];
+      *(result_base + i * num_threads) = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 }
