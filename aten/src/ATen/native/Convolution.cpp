@@ -405,15 +405,15 @@ static void check_shape_forward(const at::Tensor& input,
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
-           "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
+           "-dimensional weight [", weight_sizes, "], but got ", k, "-dimensional input of size ",
            input.sizes(), " instead");
   TORCH_CHECK(weight_sizes[0] >= groups,
            "Given groups=", groups, ", expected weight to be at least ", groups,
            " at dimension 0, but got weight of size ", weight_sizes, " instead");
   TORCH_CHECK(weight_sizes[0] % groups == 0,
            "Given groups=", groups, ", expected weight to be divisible by ",
-           groups, " at dimension 0, but got weight of size ", weight_sizes,
-           " instead");
+           groups, " at dimension 0, but got weight of size [", weight_sizes,
+           "] instead");
 
   if (!transposed) {
     std::vector<int64_t> input_shape;
@@ -596,26 +596,20 @@ at::Tensor _convolution(
   if (input.size(0) == 0 || input.size(1) == 0) {    
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
-    int64_t size0, size1;
-    if (input_is_mkldnn && weight.ndimension() == input.ndimension() + 1) {
-      size0 = weight.size(0) * weight.size(1);
-      size1 = weight.size(2);
-    } else {
-      size0 = weight.size(0);
-      size1 = weight.size(1);
-    }
-    at::Tensor weight_reduced = at::_unsafe_view(weight, {size0, size1, -1}).sum(-1);        
-    at::Tensor input_viewed = at::_unsafe_view(input, {input.size(0), input.size(1)});
+    std::vector<int64_t> o;
     if (!params.transposed) {
-      auto o = conv_output_size(input.sizes(), weight_sizes, params.padding,
+      o = conv_output_size(input.sizes(), weight_sizes, params.padding,
                            params.stride, params.dilation);
-      return input_viewed.mm(weight_reduced.t()).view(o) + reshape_bias(input.dim(), bias);
     } else {
-      auto o = conv_input_size(input.sizes(), weight_sizes, params.padding,
+      o = conv_input_size(input.sizes(), weight_sizes, params.padding,
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
-      return input_viewed.mm(weight_reduced).view(o) + reshape_bias(input.dim(), bias);
     }
+    auto weight_view = at::_unsafe_view(weight, -1);
+    auto out = input*weight_view[0];
+    if (bias.defined())
+      out = out + bias[0];
+    return out.view(o);
   }
 
   if (k == 3) {

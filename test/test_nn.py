@@ -9048,7 +9048,7 @@ class TestNNDeviceType(NNTestCase):
 
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
-        inp = torch.randn(0, 4, 4, 4)
+        inp = torch.randn(0, 4, 4, 4, device=device)
         self._test_module_empty_input(mod, inp, check_size=False)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
@@ -9056,7 +9056,7 @@ class TestNNDeviceType(NNTestCase):
 
     def test_ConvTranspose_empty(self, device):
         mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1).to(device)
-        inp = torch.randn(0, 4, 4, 4)
+        inp = torch.randn(0, 4, 4, 4, device=device)
         self._test_module_empty_input(mod, inp, check_size=False)
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
