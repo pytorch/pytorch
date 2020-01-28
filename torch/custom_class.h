@@ -112,7 +112,7 @@ class class_ {
   // Pickle
   template <typename GetStateFn, typename SetStateFn>
   class_& def(detail::pickle_factory<GetStateFn, SetStateFn> pickle) {
-    def("__getstate__", pickle.g);
+    def("__getstate__", std::move(pickle.g));
 
     // __setstate__ needs to be registered with some custom handling:
     // We need to wrap the invocation of of the user-provided function
