@@ -349,25 +349,25 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t>
+template<int num_threads, int thread_work_size, typename func_t, typename array_t>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  dim3 block(num_threads);
+  dim3 grid((N + block.x * thread_work_size - 1) / (block.x * thread_work_size));
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = detail::can_vectorize_up_to<func_t>(data);
   switch (vec_size) {
   case 4:
-    elementwise_kernel<4, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<4, num_threads, thread_work_size, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
     break;
   case 2:
-    elementwise_kernel<2, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<2, num_threads, thread_work_size, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
     break;
   case 1:
-    elementwise_kernel<1, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<1, num_threads, thread_work_size, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
     break;
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
