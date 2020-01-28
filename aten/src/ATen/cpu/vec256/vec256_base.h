@@ -153,11 +153,6 @@ public:
   }
   static Vec256<T> loadu(const void* ptr, int64_t count) {
     Vec256 vec;
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
-    for (auto i = 0; i < vec.size(); ++i) {
-      vec.values[i] = 0.0;
-    }
     std::memcpy(vec.values, ptr, count * sizeof(T));
     return vec;
   }
