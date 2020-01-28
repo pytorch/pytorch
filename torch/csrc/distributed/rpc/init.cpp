@@ -335,7 +335,7 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_rpc_torchscript",
-      [](const std::string& dst,
+      [](const std::string& dstWorkerName,
          const std::string& qualifiedName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -350,7 +350,7 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto fut = rpcTorchscript(dst, name, stack);
+        auto fut = rpcTorchscript(dstWorkerName, name, stack);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -367,7 +367,7 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_remote_torchscript",
-      [](const WorkerInfo& dst,
+      [](const std::string& dstWorkerName,
          const std::string& qualifiedName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -378,7 +378,7 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(dst, name, stack);
+        auto userRRefPtr = remoteTorchscript(dstWorkerName, name, stack);
         return PyRRef(userRRefPtr);
       },
       py::call_guard<py::gil_scoped_release>());

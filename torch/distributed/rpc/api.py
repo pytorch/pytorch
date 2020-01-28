@@ -403,7 +403,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
-    info = _to_worker_info(to)
+    dst_worker_info = _to_worker_info(to)
 
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
@@ -413,23 +413,23 @@ def remote(to, func, args=None, kwargs=None):
             RPCExecMode.REMOTE,
             str(qualified_name) if qualified_name is not None else func.__qualname__,
             get_worker_info().name,
-            info.name,
+            dst_worker_info.name,
         )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         return _remote_torchscript(
-            info, torch._jit_internal._qualified_name(func), args, kwargs
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        return _invoke_remote_python_udf(info, pickled_python_udf, tensors, rf)
+        return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -437,7 +437,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
-    info = _to_worker_info(to)
+    dst_worker_info = _to_worker_info(to)
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
     rf = None
@@ -446,23 +446,23 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
             rpc_type,
             str(qualified_name) if qualified_name is not None else func.__qualname__,
             get_worker_info().name,
-            info.name,
+            dst_worker_info.name,
         )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         fut = _invoke_rpc_torchscript(
-            info, torch._jit_internal._qualified_name(func), args, kwargs
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
     return fut
 
 
