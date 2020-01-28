@@ -2440,38 +2440,38 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    # @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModel_1(torch.nn.Module):
-            def forward(self, tensor_list):
+            def forward(self, *tensor_list):
                 eqn = '...ii ->...i'
-                return torch.einsum(eqn, tensor_list)
+                return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(3, 5, 5)
         self.run_test(EinsumModel_1(), input=(x,))
 
         class EinsumModel_2(torch.nn.Module):
-            def forward(self, tensor_list):
+            def forward(self, *tensor_list):
                 eqn = 'bij, bjk -> bik'
-                return torch.einsum(eqn, tensor_list)
+                return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(5, 2, 3)
         y = torch.randn(5, 3, 4)
         self.run_test(EinsumModel_2(), input=(x, y))
 
         class EinsumModel_3(torch.nn.Module):
-            def forward(self, tensor_list):
+            def forward(self, *tensor_list):
                 eqn = 'i,i'
-                return torch.einsum(eqn, tensor_list)
+                return torch.einsum(eqn, *tensor_list)
 
         x = np.random.randn(5)
         y = np.random.randn(5)
         self.run_test(EinsumModel_3(), input=(x, y))
 
         class EinsumModel_4(torch.nn.Module):
-            def forward(self, tensor_list):
+            def forward(self, *tensor_list):
                 eqn = 'ij->ji'
-                return torch.einsum(eqn, tensor_list)
+                return torch.einsum(eqn, *tensor_list)
 
         x = np.random.randn(3, 4)
         self.run_test(EinsumModel_4(), input=(x,))
