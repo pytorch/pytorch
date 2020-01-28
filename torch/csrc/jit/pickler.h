@@ -87,19 +87,6 @@ enum class PickleOpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t {
-  // A reference to the tensor table
-  TENSOR = 0,
-  // List[int]
-  INTLIST = 1,
-  // List[Tensor]
-  TENSORLIST = 2,
-  // List[float]
-  DOUBLELIST = 3,
-  // List[bool]
-  BOOLLIST = 4
-};
-
 using ::c10::IValue;
 
 struct WriteableTensorData {
@@ -170,10 +157,9 @@ class Pickler {
   void pushStorageOfTensor(const at::Tensor& tensor);
 
   void pushBinGet(uint32_t memo_id);
-  void pushClass(PicklerClass cls);
   void pushSpecializedList(
       const IValue& ivalue,
-      PicklerClass cls,
+      const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(
       const std::string& module_name,

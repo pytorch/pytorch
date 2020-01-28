@@ -21,6 +21,9 @@
 #     same length as the number of outputs from the forward function. The list
 #     should contain only booleans, specifying whether each of the output Tensor
 #     is differentiable.
+#     If it is not specified for a function that returns multiple elements but
+#     uses `grad` instead of `grads[idx]`, then all but the first output will
+#     be marked as non-differentiable.
 #     If None of the output is differentiable, you can also add the function
 #     name to `gen_variable_type.py`'s `DONT_REQUIRE_DERIVATIVE` list.
 #
@@ -90,6 +93,17 @@
 # (implemented using zeros_like).  These gradients are (hopefully) not
 # used by our frontend.  You MUST check the frontend code; search for
 # OpName.apply to see if it's still using a legacy Python style API.
+#
+# Note: Returning views.
+# The following cases exist:
+#     - If a function returns no view, it can have arbitrary outputs.
+#     - If a function return at least one Tensor that is a differentiable view
+#       of one of its input:
+#         - If there is only one differentiable output, this Tensor is marked as a
+#           differentiable view.
+#         - If there are more than one differentiable output, all the views are
+#           marked as differentiable views and created with allow_rebase_history=false.
+#           Meaning that any inplace operation on it will raise an error.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
@@ -260,6 +274,12 @@
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
+
+- name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  self: cummax_backward(indices, grad.to(self.scalar_type()), self, dim)
+
+- name: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
+  self: cummin_backward(indices, grad.to(self.scalar_type()), self, dim)
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -676,10 +696,10 @@
 
 - name: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   self: pow_backward_self(grad, self, exponent)
-  exponent: pow_backward_exponent(grad, self, result)
+  exponent: pow_backward_exponent(grad, self, exponent, result)
 
 - name: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
-  exponent: pow_backward_exponent(grad, self, result)
+  exponent: pow_backward_exponent(grad, self, exponent, result)
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result)
@@ -782,7 +802,7 @@
 - name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
-- name: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- name: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self) -> Tensor
@@ -982,7 +1002,7 @@
   grad_output: embedding_dense_double_backward(grad, indices)
   indices: non_differentiable
 
-- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   indices: non_differentiable
   offsets: non_differentiable
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)

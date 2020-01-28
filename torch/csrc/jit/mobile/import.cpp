@@ -30,7 +30,7 @@
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
-// suppot backward compatibility in future.
+// support backward compatibility in future.
 
 namespace torch {
 namespace jit {

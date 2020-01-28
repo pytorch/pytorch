@@ -337,7 +337,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail)
+        # otherwise expand will fail)
         variable_batch_size_init_input = make_input(1)
         # Constant folding works when model has parameters embedded. For this case, we need to disable it
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
@@ -382,7 +382,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail)
+        # otherwise expand will fail)
         variable_batch_size_init_input = make_input(1)
         # Constant folding works when model has parameters embedded. For this case, we need to disable it
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,
@@ -425,7 +425,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail)
+        # otherwise expand will fail)
         variable_batch_size_init_input = make_input(1)
         # Constant folding works when model has parameters embedded. For this case, we need to disable it
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True,

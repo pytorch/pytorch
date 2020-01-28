@@ -6,6 +6,9 @@
 - [Writing documentation](#writing-documentation)
   * [Building documentation](#building-documentation)
     + [Tips](#tips)
+    + [Building C++ Documentation](#building-c---documentation)
+  * [Previewing changes](#previewing-changes)
+    + [Submitting changes for review](#submitting-changes-for-review)
   * [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with--py-spy-)
 - [Managing multiple build trees](#managing-multiple-build-trees)
@@ -16,6 +19,7 @@
     + [Use Ninja](#use-ninja)
     + [Use CCache](#use-ccache)
     + [Use a faster linker](#use-a-faster-linker)
+  * [C++ frontend development tips](#c---frontend-development-tips)
 - [CUDA development tips](#cuda-development-tips)
 - [Windows development tips](#windows-development-tips)
   * [Known MSVC (and MSVC with NVCC) bugs](#known-msvc--and-msvc-with-nvcc--bugs)
@@ -221,19 +225,6 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
-For C++ documentation (https://pytorch.org/cppdocs), we use
-[Doxygen](http://www.doxygen.nl/) and then convert it to
-[Sphinx](http://www.sphinx-doc.org/) via
-[Breathe](https://github.com/michaeljones/breathe) and
-[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
-reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
-information on the documentation syntax. To build the documentation locally,
-`cd` into `docs/cpp` and then `make html`.
-
-We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
-commands. To run this check locally, run `./check-doxygen.sh` from inside
-`docs/cpp`.
-
 ### Building documentation
 
 To build the documentation:
@@ -259,28 +250,6 @@ cd docs
 make html
 ```
 
-4. To view HTML files, you must start an HTTP server. For example
-
-```bash
-# Start a server from the current directory (Python 3 only)
-cd docs/build/html
-python -m http.server
-```
-
-If you are developing on a remote machine, you can set up an SSH tunnel so that
-you can access the HTTP server on the remote machine on your local machine. To map
-remote port 8086 to local port 8086, use either of the following commands.
-
-```bash
-# For SSH
-ssh my_machine -L 8086:my_machine:8086
-
-# For Eternal Terminal
-et my_machine -t="8086:8086"
-```
-
-Then navigate to `localhost:8086` in your web browser.
-
 #### Tips
 
 The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
@@ -300,6 +269,78 @@ ls | grep rst | grep -v index | grep -v jit | xargs rm
 git add index.rst jit.rst
 ...
 ```
+
+#### Building C++ Documentation
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
+
+To build the documentation, follow the same steps as above, but run them from
+`docs/cpp` instead of `docs`.
+
+### Previewing changes
+
+To view HTML files locally, you can open the files in your web browser. For example,
+navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
+browser.
+
+If you are developing on a remote machine, you can set up an SSH tunnel so that
+you can access the HTTP server on the remote machine from your local machine. To map
+remote port 8000 to local port 8000, use either of the following commands.
+
+```bash
+# For SSH
+ssh my_machine -L 8000:my_machine:8000
+
+# For Eternal Terminal
+et my_machine -t="8000:8000"
+```
+
+Then navigate to `localhost:8000` in your web browser.
+
+#### Submitting changes for review
+
+It is helpful when submitting a PR that changes the docs to provide a rendered
+version of the result. If your change is small, you can add a screenshot of the
+changed docs to your PR.
+
+If your change to the docs is large and affects multiple pages, you can host
+the docs yourself with the following steps, then add a link to the output in your
+PR. These instructions use GitHub pages to host the docs
+you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
+to make a repo to host your changed documentation.
+
+GitHub pages expects to be hosting a Jekyll generated website which does not work
+well with the static resource paths used in the PyTorch documentation. To get around
+this, you must add an empty file called `.nojekyll` to your repo.
+
+```bash
+cd your_github_pages_repo
+touch .nojekyll
+git add .
+git commit
+git push
+```
+
+Then, copy built documentation and push the changes:
+
+```bash
+cd your_github_pages_repo
+cp -r ~/my_pytorch_path/docs/build/html/* .
+git add .
+git commit
+git push
+```
+
+Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
 
 
 ### Adding documentation tests
@@ -563,6 +604,16 @@ The easiest way to use `lld` this is download the
 ```
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
+
+### C++ frontend development tips
+
+We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
+tests are a great way to see how certain components are intended to be used.
+When compiling PyTorch from source, the test runner binary will be written to
+`build/bin/test_api`. The tests use the [GoogleTest](https://github.com/google/googletest/blob/master/googletest)
+framework, which you can read up about to learn how to configure the test runner. When
+submitting a new feature, we care very much that you write appropriate tests.
+Please follow the lead of the other tests to see how to write a new test case.
 
 ## CUDA development tips
 
