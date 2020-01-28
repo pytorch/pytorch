@@ -38,30 +38,35 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
+from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, PY3, to_gpu, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, TemporaryFileName
-from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
+    ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
+from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
-from common_device_type import instantiate_device_type_tests, dtypes, \
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf
+    skipCUDAIfRocm, skipCUDAIf, expectedFailureXLA
 
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
-import hypothesis_utils as hu
+import torch.testing._internal.hypothesis_utils as hu
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import dtype2prec
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
 TEST_LARGE_TENSOR = TEST_CUDA
+TEST_32GB_TENSOR = TEST_CUDA
 if TEST_CUDA:
-    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
+    total_memory_in_gb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024 * 1024)
+    TEST_LARGE_TENSOR = (total_memory_in_gb >= 12)
+    TEST_32GB_TENSOR = (total_memory_in_gb > 31)
 
 if TEST_SCIPY:
     from scipy import stats
@@ -74,11 +79,6 @@ NO_HALF_TENSORTYPES = [torch.float,
                        torch.double]
 
 DOUBLE_TENSORTYPES = [torch.double]
-
-dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2,
-              torch.bfloat16: 1e-1}
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -203,13 +203,6 @@ class PackedSequenceTest(TestCase):
         for param in m.parameters():
             if param.dim() == 4:
                 self.assertTrue(param.is_contiguous(memory_format=torch.channels_last))
-
-
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
-    # call assert function rather than returning a bool since it's nicer
-    # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
 class InputVariableMixin(object):
@@ -3199,6 +3192,17 @@ class TestNN(NNTestCase):
         self.assertRaisesRegex(RuntimeError, expected_err_msg,
                                lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
+        inputs = torch.rand(1, 3, 4, 4)
+        # assert that pad doesn't return a view into the input tensor
+        for mode in 'constant', 'reflect', 'replicate', 'circular':
+            out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(inputs < 2))
+
+            out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(inputs < 2))
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -3482,6 +3486,35 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
+
+    def test_multihead_attn_3d_attn_mask(self):
+        embed_dim = 8
+        num_heads = 4
+        batch_size = 8
+        src_len = 3
+        tgt_len = 2
+
+        query = torch.rand(batch_size, tgt_len, embed_dim)  # [N, T, D]
+        key = torch.rand(batch_size, src_len, embed_dim)  # [N, S, D]
+        value = key  # [N, S, D]
+        attn_mask = torch.randint(0, 2, (batch_size, tgt_len, src_len)).float()  # [N, T, S]
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)
+
+        # Generate 3D results
+        attn_mask_3d = torch.repeat_interleave(attn_mask, num_heads, dim=0)  # [N * H, T, S]
+        output_3d = mta_model(query.transpose(0, 1), key.transpose(0, 1), value.transpose(0, 1), attn_mask=attn_mask_3d)[0]
+        output_3d = output_3d.transpose(0, 1)  # [N, T, D]
+
+        for i in range(0, batch_size):
+            output_2d = mta_model(query[i].unsqueeze(0).transpose(0, 1),
+                                  key[i].unsqueeze(0).transpose(0, 1),
+                                  value[i].unsqueeze(0).transpose(0, 1),
+                                  attn_mask=attn_mask[i])[0]
+
+            # output_2d in shape of [T, 1, D]
+            self.assertEqual(output_3d[i].unsqueeze(0).transpose(0, 1), output_2d)
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -4291,19 +4324,6 @@ class TestNN(NNTestCase):
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
-
-    def test_nll_loss_mismatched_batch(self):
-        x = torch.randn((10, 3), requires_grad=True)
-        # t should have size (10,)
-        t = torch.zeros((3,), dtype=torch.int64)
-        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
-            F.nll_loss(x, t)
-
-    def test_nll_loss_out_of_bounds_ignore_index(self):
-        x = torch.randn(6, 3, requires_grad=True)
-        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64)
-        for reduction in ['mean', 'none']:
-            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
     def test_poisson_nll_loss_reduction_modes(self):
         input = torch.tensor([0.5, 1.5, 2.5])
@@ -6177,6 +6197,11 @@ class TestNN(NNTestCase):
         bn = nn.BatchNorm1d(1).to('cuda', dtype)
         data = torch.rand(131072, 1, device="cuda", dtype=dtype)
         out = bn(data).sum().backward()
+
+    def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.BatchNorm1d(10)(x)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -8982,6 +9007,11 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.InstanceNorm1d(10)(x).to(device)
+
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
@@ -8993,6 +9023,11 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_groupnorm_raises_error_if_less_than_one_value_per_channel(self, device):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.GroupNorm(10, 10)(x).to(device)
 
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
@@ -9320,8 +9355,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
-    @unittest.skipIf(sys.platform == "win32", "See https://github.com/pytorch/pytorch/issues/31650")
+    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -9338,7 +9372,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff3, 0)
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -9708,7 +9742,7 @@ class TestNNDeviceType(NNTestCase):
                 es(input, offsets, per_sample_weights)
 
     def _embedding_bag_reference_impl(self, input, weight, offsets=None, mode='sum',
-                                      per_sample_weights=None):
+                                      per_sample_weights=None, include_last_offset=False):
         assert mode == 'sum'
         assert offsets is not None
         if per_sample_weights is None:
@@ -9717,13 +9751,20 @@ class TestNNDeviceType(NNTestCase):
 
         bags = []
         embeddings = weight.index_select(0, input) * per_sample_weights.unsqueeze(1)
-        for index, offset in enumerate(offsets):
-            if index + 1 < len(offsets):
+        if include_last_offset:
+            for index in range(len(offsets) - 1):
+                offset = offsets[index]
                 next_offset = offsets[index + 1]
-            else:
-                next_offset = len(input)
-            length = next_offset - offset
-            bags.append(embeddings.narrow(0, offset, length).sum(0))
+                length = next_offset - offset
+                bags.append(embeddings.narrow(0, offset, length).sum(0))
+        else:
+            for index, offset in enumerate(offsets):
+                if index + 1 < len(offsets):
+                    next_offset = offsets[index + 1]
+                else:
+                    next_offset = len(input)
+                length = next_offset - offset
+                bags.append(embeddings.narrow(0, offset, length).sum(0))
         return torch.stack(bags)
 
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device):
@@ -9761,6 +9802,47 @@ class TestNNDeviceType(NNTestCase):
         trainable_scale = (True, False)
         for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
             test_per_sample_weights(mode, dtype, trainable)
+
+    def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device):
+        def test_per_sample_weights_new_offsets(mode, dtype, trainable_scale, include_last_offset):
+            es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtype, device=device)
+            es.weight.data.copy_(
+                torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
+            input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
+            offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
+
+            if include_last_offset is True and mode == 'sum':
+                offsets = torch.cat((offsets, torch.tensor([input.size(0)], device=device, dtype=torch.long)), 0)
+
+            per_sample_weights = torch.randn_like(input, device=device, dtype=dtype) \
+                                      .requires_grad_(trainable_scale)
+            ref_per_sample_weights = \
+                per_sample_weights.detach().requires_grad_(trainable_scale)
+            reference_weights = es.weight.detach().requires_grad_()
+
+            expected = self._embedding_bag_reference_impl(
+                input, reference_weights, offsets, mode, ref_per_sample_weights, include_last_offset)
+            result = es(input, offsets, per_sample_weights)
+            self.assertEqual(result, expected, prec=dtype2prec[dtype])
+
+            grad = torch.randn_like(expected)
+            result.backward(grad)
+            expected.backward(grad)
+            self.assertEqual(es.weight.grad, reference_weights.grad,
+                             dtype2prec[dtype])
+            if trainable_scale:
+                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights.grad,
+                                 prec=dtype2prec[dtype])
+
+        if device == 'cuda':
+            dtypes = (torch.float, torch.double, torch.half)
+        else:
+            dtypes = (torch.float, torch.double)
+        modes = ('sum',)
+        trainable_scale = (True, False)
+        include_last_offset = (True, False)
+        for dtype, mode, trainable, include_last_offset in itertools.product(dtypes, modes, trainable_scale, include_last_offset):
+            test_per_sample_weights_new_offsets(mode, dtype, trainable, include_last_offset)
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
@@ -10531,6 +10613,70 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    def test_nll_loss_mismatched_batch(self, device):
+        x = torch.randn((10, 3), requires_grad=True, device=device)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self, device):
+        x = torch.randn(6, 3, requires_grad=True, device=device)
+        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+        for reduction in ['mean', 'none']:
+            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
+
+    def _nll_loss_helper(self, input_size, reduction, expected, device):
+        input = torch.rand(input_size, requires_grad=True, device=device)
+        num_channels = input_size[1]
+        target_size = (input_size[0], ) + tuple(input_size[2:])
+        target = torch.randint(num_channels, target_size, device=device)
+
+        output = F.nll_loss(input, target, reduction=reduction)
+        self.assertEqual(output, expected)
+
+        output.sum().backward()
+        self.assertEqual(input.grad.size(), input.size())
+
+    def test_nll_loss_empty_tensor_reduction_none(self, device):
+        self._nll_loss_helper([0, 3], "none", torch.empty([0], device=device), device)
+        self._nll_loss_helper([0, 3, 5, 7], "none", torch.empty([0, 5, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 0, 7], "none", torch.empty([2, 0, 7], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
+
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    @expectedFailureXLA  # https://github.com/pytorch/xla/issues/1539
+    def test_nll_loss_empty_tensor_reduction_mean(self, device):
+        nan = torch.tensor(float('nan'), device=device)
+        self._nll_loss_helper([0, 3], "mean", nan, device)
+        self._nll_loss_helper([0, 3, 5, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 0, 7], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 0], "mean", nan, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "mean", nan, device)
+
+    def test_nll_loss_empty_tensor_reduction_sum(self, device):
+        zero = torch.tensor(0, device=device)
+        self._nll_loss_helper([0, 3], "sum", zero, device)
+        self._nll_loss_helper([0, 3, 5, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 0, 7], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
+        self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
+
+    def test_nll_loss_total_weight_is_zero(self, device):
+
+        def helper(input_size):
+            input = torch.ones(input_size, requires_grad=True, device=device)
+            num_channels = input_size[1]
+            target_size = (input_size[0], ) + tuple(input_size[2:])
+            target = torch.zeros(target_size, dtype=torch.long, device=device)
+            weight = torch.zeros([num_channels], device=device)
+            self.assertEqual(F.nll_loss(input, target, weight).item(), 0)
+
+        helper([2, 3])
+        helper([2, 3, 5, 7])
+        helper([2, 3, 5, 7, 9])
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

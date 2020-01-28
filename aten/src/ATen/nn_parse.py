@@ -287,21 +287,6 @@ def backward_declaration(base, thnn_functions, backend_types):
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
 
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
-        for output_size_idx, arg in enumerate(arguments):
-            if arg['name'] == 'output_size':
-                break
-        arguments.insert(output_size_idx + 1, input_size_arg)
-
-    if 'im2col' in base['name']:
-        # Add input_size as parameter to im2col backwards function
-        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': 2}
-        arguments.insert(2, input_size_arg)
-
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:

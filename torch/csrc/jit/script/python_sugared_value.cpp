@@ -46,6 +46,11 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
+    if (param_names.size() == 0) {
+      throw ErrorReport(loc)
+          << "Non-static method does not have a self argument";
+    }
+
     // If there is a `self` parameter on the callable, skip it on the names list
     args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
     ++names_it;
@@ -562,6 +567,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
+  }
+
+  if (py::isinstance<ScriptClass>(obj)) {
+    auto script_class = py::cast<ScriptClass>(obj);
+    return std::make_shared<PythonClassValue>(
+        script_class.class_type_.type_, obj);
   }
 
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
