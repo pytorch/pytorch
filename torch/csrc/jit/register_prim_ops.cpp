@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/debugger.h>
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/vararg_functions.h>
@@ -2330,7 +2331,7 @@ RegisterOperators reg2({
         "aten::breakpoint() -> ()",
         [](Stack& stack) {
           std::cout << "starting debugger from op\n";
-          getDebuggerHook()();
+          throw DebuggerHookException();
           return 0;
         },
         aliasAnalysisSpecialCase()),
