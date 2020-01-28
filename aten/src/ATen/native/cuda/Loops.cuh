@@ -36,12 +36,11 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
 
 #ifndef __HIP_PLATFORM_HCC__
-#include <ATen/native/cuda/MemoryAccess.cuh>
-#else
 #include <ATen/native/cuda/ROCmWorkaround.cuh>
 #endif
 
