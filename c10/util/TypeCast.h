@@ -149,16 +149,16 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
-#define DEFINE_UNCASTABLE(T, scalartype_)                                         \
-template<>                                                                        \
+#define DEFINE_UNCASTABLE(T, scalartype_)                                                         \
+template<>                                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                    \
-  return *(const T *)ptr;                                                         \
-}                                                                                 \
-template<>                                                                        \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == src_type);                                        \
+  return *(const T *)ptr;                                                                         \
+}                                                                                                 \
+template<>                                                                                        \
 C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
-  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                   \
-  *(T *)ptr = value;                                                              \
+  CUDA_KERNEL_ASSERT(ScalarType::scalartype_ == dest_type);                                       \
+  *(T *)ptr = value;                                                                              \
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
