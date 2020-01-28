@@ -146,7 +146,7 @@ private:
   impl::KernelFunctionTable backendFallbackKernels_;
   // Set of backends which have specified they do NOT want fallthrough behavior
   // (we store the inverse because it avoids a negation when we use this for
-  // maskign)
+  // masking)
   DispatchKeySet backendsWithoutFallthrough_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
@@ -222,14 +222,14 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   kernel.callBoxed(op, stack);
 }
 
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey) const {
-  const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatchKey) const {
+  const KernelFunction* backendKernel = dispatchTable.lookup(dispatchKey);
 
   if (nullptr != backendKernel) {
     return *backendKernel;
   }
 
-  const auto& backendFallbackKernel = backendFallbackKernels_[*dispatchKey];
+  const auto& backendFallbackKernel = backendFallbackKernels_[dispatchKey];
   if (backendFallbackKernel.isValid()) {
     return backendFallbackKernel;
   }

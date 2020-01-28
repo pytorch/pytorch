@@ -11,7 +11,7 @@ namespace c10 {
 
 namespace impl {
 
-// Take a DispatchKeySet for a Tensor and determine the actual dispatch
+// Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
 // fall through.
 //
@@ -19,17 +19,20 @@ namespace impl {
 // on TLS.
 static inline DispatchKey dispatchTypeId(
     DispatchKeySet ks,
-    // Backends without fallthrough are the only backends we should consider
-    // for dispatch; backends that do have fallthrough should be skipped
-    // under consideration.  These excluded backends are NOT tracked in the TLS,
-    // but must be applied AFTER TLS (since the backend may have been introduced
-    // for consideration by the included TLS), which is why you have to pass
-    // them in to this function (as opposed to just applying it to the input
-    // 'ts').
-    DispatchKeySet backendsWithoutFallthrough
+    // The key mask lets us eliminate (by zero entries) keys which should not
+    // be considered for dispatch.  There is one case when we use this:
+    // if there is no operator registered for a backend whose fallback behavior
+    // is to fallthrough, we eliminate that backend from consideration (since
+    // we want to "fallthrough" to the next valid key.)
+    //
+    // These excluded backends are NOT tracked in the TLS, but must be applied
+    // AFTER TLS (since the backend may have been introduced for consideration
+    // by the included TLS), which is why you have to pass them in to this
+    // function (as opposed to just applying it to the input 'ks').
+    DispatchKeySet key_mask
 ) {
   c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
-  return (((ks | local.included_) - local.excluded_) & backendsWithoutFallthrough).highestPriorityTypeId();
+  return (((ks | local.included_) - local.excluded_) & key_mask).highestPriorityTypeId();
 }
 
 }
@@ -110,7 +113,7 @@ public:
 
   // Used by DispatchTable to maintain the fallthrough invariant, see
   // docs on operatorHasKernelForBackend_
-  void setOperatorHasKernelForBackend(DispatchKey k, bool is_overridden);
+  void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
 
 private:
   // NB: If there is no valid dispatch key, this will return UndefinedTensorId
@@ -118,10 +121,11 @@ private:
     // We must NOT respect the passed in backendsWithoutFallthrough if an operator has
     // specifically overridden the backend, since that means we've opted to
     // not fallthrough and instead apply some specific behavior (which we
-    // must dispatch to).  For now, we assume that operators NEVER are the
-    // fallthrough kernel (see https://github.com/pytorch/pytorch/issues/32454)
-    // which means we can just unconditionally fill in the mask when the
-    // operator tells us to, via operatorHasKernelForBackend_.
+    // must dispatch to).  For now, we assume that operators NEVER override
+    // a backend with a fallthrough kernel (see
+    // https://github.com/pytorch/pytorch/issues/32454) which means we can just
+    // unconditionally fill in the mask when the operator tells us to, via
+    // operatorHasKernelForBackend_.
     //
     // This scheme doesn't work if you want to also apply fallthrough on a
     // per-op basis, but while we could directly fix this by maintaining a
