@@ -503,78 +503,8 @@ class RpcTest(RpcAgentTestFixture):
             )
             self.assertEqual(ret, torch.ones(n, n) * 2)
 
-    def _run_uneven_workload(self, num_repeat=30):
-        # worker0 drives and waits for worker1 and worker2
-        # throughout the test.
-        if self.rank == 0:
-            self.assertTrue(self.world_size >= 3)
-
-            # Phase 1: Only worker1 has workload.
-            dst = "worker1"
-            futs = []
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                futs.append(fut)
-
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
-
-            # Phase 2: Only worker2 has workload.
-            # If join is not correctly implemented,
-            # worker2 should be closed by now.
-            dst = "worker2"
-            futs = []
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                futs.append(fut)
-
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
-
-    def test_wait_all_workers(self):
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-
-        self._run_uneven_workload()
-
-        # worker0 calls this at the end after waiting for RPC responses.
-        # worker1/2 calls this immediately and has some works after it.
-        # worker3 calls this immediately and has no more work.
-        rpc.api._wait_all_workers()
-        rpc.shutdown(graceful=False)
-
-    def test_wait_all_workers_twice(self):
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-
-        self._run_uneven_workload()
-
-        # worker0 calls this at the end after waiting for RPC responses.
-        # worker1/2 calls this immediately and has some works after it.
-        # worker3 calls this immediately and has no more work.
-        rpc.api._wait_all_workers()
-        rpc.api._wait_all_workers()
-        rpc.shutdown(graceful=False)
-
-    @dist_init
-    def test_graceful_shutdown_with_uneven_workload(self):
-        """Test graceful termination."""
-        self._run_uneven_workload(num_repeat=100)
-
     @dist_init(setup_rpc=False)
-    def test_shutdown_followed_by_rpc(self):
+    def test_shutdown(self):
         # Initialize RPC.
         rpc.init_rpc(
             name="worker%d" % self.rank,
@@ -600,6 +530,52 @@ class RpcTest(RpcAgentTestFixture):
                 torch.add,
                 args=(torch.ones(n, n), torch.ones(n, n)),
             )
+
+    def test_wait_all_workers(self):
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options,
+        )
+
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            self.assertTrue(self.world_size >= 3)
+
+            num_repeat = 30
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+        # worker0 calls this at the end after waiting for RPC responses.
+        # worker1/2 calls this immediately and has some works after it.
+        # worker3 calls this immediately and has no more work.
+        rpc.api._wait_all_workers()
+        rpc.shutdown(graceful=False)
 
     @dist_init
     def test_expected_src(self):
@@ -907,6 +883,40 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_asymmetric_load_with_join(self):
+        """Test graceful termination."""
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            assert self.world_size >= 3
+
+            num_repeat = 100
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
 
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10

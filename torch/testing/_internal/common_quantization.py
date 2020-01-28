@@ -114,12 +114,11 @@ class QuantizationTestCase(TestCase):
     def checkQuantizedLinear(self, mod):
         self.assertEqual(type(mod), nnq.Linear)
 
-    def checkDynamicQuantizedLinear(self, mod, dtype):
+    def checkDynamicQuantizedLinear(self, mod):
         r"""Checks that mod has been swapped for an nnqd.Linear
             module, the bias is float.
         """
         self.assertEqual(type(mod), nnqd.Linear)
-        self.assertEqual(mod._packed_params.dtype, dtype)
 
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)

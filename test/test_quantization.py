@@ -8,13 +8,12 @@ import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 from torch.nn.utils.rnn import PackedSequence
 from torch.quantization import \
-    get_observer_dict, default_weight_observer, \
+    QConfigDynamic, get_observer_dict, default_weight_observer, \
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, per_channel_dynamic_qconfig, HistogramObserver, MinMaxObserver, \
     PerChannelMinMaxObserver, RecordingObserver, MovingAverageMinMaxObserver, \
-    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn, \
-    float16_dynamic_qconfig
+    MovingAveragePerChannelMinMaxObserver, QuantWrapper, default_eval_fn
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
@@ -320,194 +319,187 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         make sure it is swapped to nnqd.Linear which is the quantized version of
         the module
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = SingleLayerLinearDynamicModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dict = {
-                'fc1': qconfig
-            }
-            prepare_dynamic(model, qconfig_dict)
-            convert_dynamic(model)
+        model = SingleLayerLinearDynamicModel().eval()
+        qconfig_dict = {
+            '': default_dynamic_qconfig
+        }
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
 
-            def checkQuantized(model):
-                self.checkDynamicQuantizedLinear(model.fc1, dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.fc1)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            checkQuantized(model)
+        checkQuantized(model)
 
-            # test one line API - out of place version
-            base = SingleLayerLinearDynamicModel()
-            keys_before = set(list(base.state_dict().keys()))
-            model = quantize_dynamic(base, qconfig_dict)
-            checkQuantized(model)
-            keys_after = set(list(base.state_dict().keys()))
-            self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
+        # test one line API - out of place version
+        base = SingleLayerLinearDynamicModel()
+        keys_before = set(list(base.state_dict().keys()))
+        model = quantize_dynamic(base, qconfig_dict)
+        checkQuantized(model)
+        keys_after = set(list(base.state_dict().keys()))
+        self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
-            # in-place version
-            model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, qconfig_dict, inplace=True)
-            checkQuantized(model)
+        # in-place version
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
+        checkQuantized(model)
 
-            # Test set qconfig
-            model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
-            checkQuantized(model)
+        # Test set qconfig
+        model = SingleLayerLinearDynamicModel()
+        quantize_dynamic(model, set([nn.Linear]), inplace=True)
+        checkQuantized(model)
 
     def test_two_layers(self):
         r"""TwoLayerLinearModel has two Linear modules but we only quantize the second one
         `fc2`, and `fc1`is not quantized
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = TwoLayerLinearModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dict = {
-                'fc2': qconfig
-            }
-            prepare_dynamic(model, qconfig_dict)
+        model = TwoLayerLinearModel().eval()
+        qconfig_dict = {
+            'fc2': default_dynamic_qconfig
+        }
+        prepare_dynamic(model, qconfig_dict)
 
-            convert_dynamic(model)
+        convert_dynamic(model)
 
-            def checkQuantized(model):
-                self.assertEqual(type(model.fc1), torch.nn.Linear)
-                self.checkDynamicQuantizedLinear(model.fc2, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        def checkQuantized(model):
+            self.assertEqual(type(model.fc1), torch.nn.Linear)
+            self.checkDynamicQuantizedLinear(model.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            checkQuantized(model)
+        checkQuantized(model)
 
-            # test one line API
-            model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
-            checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), qconfig_dict)
+        checkQuantized(model)
 
-            # Test set API
-            model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'}, dtype=dtype)
-            checkQuantized(model)
+        # Test set API
+        model = quantize_dynamic(TwoLayerLinearModel().eval(), {'fc2'})
+        checkQuantized(model)
 
     def test_nested1(self):
         r"""Test quantization for nested model, top level 'fc3' and
         'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = NestedModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dict = {
-                'fc3': qconfig,
-                'sub2.fc1': qconfig
-            }
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_dynamic_qconfig,
+            'sub2.fc1': default_dynamic_qconfig
+        }
 
-            prepare_dynamic(model, qconfig_dict)
-            convert_dynamic(model)
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
 
-            def checkQuantized(model):
-                self.checkLinear(model.sub1.fc)
-                self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
-                self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
-                self.checkLinear(model.sub2.fc2)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkLinear(model.sub2.fc2)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            checkQuantized(model)
+        checkQuantized(model)
 
-            # test one line API
-            model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
-            checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
 
-            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'}, dtype=dtype)
-            checkQuantized(model)
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2.fc1'})
+        checkQuantized(model)
 
     def test_nested2(self):
         r"""Another test case for quantized, we will quantize all submodules
         of submodule sub2
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = NestedModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dict = {
-                'fc3': qconfig,
-                'sub2': qconfig
-            }
-            prepare_dynamic(model, qconfig_dict)
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': default_dynamic_qconfig,
+            'sub2': default_dynamic_qconfig
+        }
+        prepare_dynamic(model, qconfig_dict)
 
-            convert_dynamic(model)
+        convert_dynamic(model)
 
-            def checkQuantized(model):
-                self.checkLinear(model.sub1.fc)
-                self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
-                self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
-                self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
-                self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        def checkQuantized(model):
+            self.checkLinear(model.sub1.fc)
+            self.assertEqual(type(model.sub1.relu), torch.nn.ReLU)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            checkQuantized(model)
+        checkQuantized(model)
 
-            # test one line API
-            model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
-            checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
 
-            # Test set API
-            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'}, dtype=dtype)
-            checkQuantized(model)
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2'})
+        checkQuantized(model)
 
     def test_nested3(self):
         r"""More complicated nested test case with child qconfig overrides
         parent qconfig
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = NestedModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dynamic_dict = {
-                'fc3': qconfig,
-                'sub2': qconfig,
-                'sub2.fc1': qconfig
-            }
-            prepare_dynamic(model, qconfig_dynamic_dict)
+        model = NestedModel().eval()
+        custum_options = {
+            'dtype': torch.quint8,
+            'qscheme': torch.per_tensor_affine
+        }
+        custom_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
+        qconfig_dynamic_dict = {
+            'fc3': default_dynamic_qconfig,
+            'sub2': default_dynamic_qconfig,
+            'sub2.fc1': custom_dynamic_qconfig
+        }
+        prepare_dynamic(model, qconfig_dynamic_dict)
 
-            convert_dynamic(model)
+        convert_dynamic(model)
 
-            def checkQuantized(model):
-                self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
-                self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
-                self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            checkQuantized(model)
+        checkQuantized(model)
 
-            # test one line API
-            model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
-            checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dynamic_dict)
+        checkQuantized(model)
 
-            # Test set API
-            model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'}, dtype=dtype)
-            checkQuantized(model)
+        # Test set API
+        model = quantize_dynamic(NestedModel().eval(), {'fc3', 'sub2', 'sub2.fc1'})
+        checkQuantized(model)
 
     def test_type_match_rule(self):
         r"""Test quantization for nested model, top level 'fc3' and
         'fc1' of submodule 'sub2', All 'torch.nn.Linear' modules are quantized
         """
-        for dtype in [torch.qint8, torch.float16]:
-            model = NestedModel().eval()
-            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
-            qconfig_dict = {
-                'fc3': None,
-                'sub2.fc1': None,
-                torch.nn.Linear: qconfig
-            }
+        model = NestedModel().eval()
+        qconfig_dict = {
+            'fc3': None,
+            'sub2.fc1': None,
+            torch.nn.Linear: default_dynamic_qconfig
+        }
 
-            prepare_dynamic(model, qconfig_dict)
+        prepare_dynamic(model, qconfig_dict)
+        test_only_eval_fn(model, self.calib_data)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkLinear(model.fc3)
+            self.checkLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
-            convert_dynamic(model)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
 
-            def checkQuantized(model):
-                self.checkDynamicQuantizedLinear(model.sub1.fc, dtype=dtype)
-                self.checkLinear(model.fc3)
-                self.checkLinear(model.sub2.fc1)
-                self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
-                test_only_eval_fn(model, self.calib_data)
-                self.checkScriptable(model, self.calib_data, check_save_load=True)
+        checkQuantized(model)
 
-            checkQuantized(model)
-
-            # test one line API
-            model = quantize_dynamic(NestedModel().eval(), qconfig_dict, dtype=dtype)
-            checkQuantized(model)
+        # test one line API
+        model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
+        checkQuantized(model)
 
     def test_per_channel_quantize(self):
         r"""Test quantization for per_channel dynamic quantization
@@ -522,10 +514,10 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         convert_dynamic(model)
 
         def checkQuantized(model):
-            self.checkDynamicQuantizedLinear(model.sub1.fc, dtype=torch.qint8)
-            self.checkDynamicQuantizedLinear(model.fc3, dtype=torch.qint8)
-            self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=torch.qint8)
-            self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=torch.qint8)
+            self.checkDynamicQuantizedLinear(model.sub1.fc)
+            self.checkDynamicQuantizedLinear(model.fc3)
+            self.checkDynamicQuantizedLinear(model.sub2.fc1)
+            self.checkDynamicQuantizedLinear(model.sub2.fc2)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data, check_save_load=True)
 
