@@ -55,11 +55,10 @@ template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   constexpr int thread_work_size = 4;
   using vectorized = vectorized_access<64, thread_work_size, vec_size>;
-  auto policy = vectorized();
   scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-  policy.load(accessor, src + 256 * blockIdx.x);
-  policy.store(accessor, dst + 256 * blockIdx.x);
+  vectorized::load(accessor, src + 256 * blockIdx.x);
+  vectorized::store(accessor, dst + 256 * blockIdx.x);
 }
 
 TEST(TestVectorizedMemoryAccess, CopyKernel) {
