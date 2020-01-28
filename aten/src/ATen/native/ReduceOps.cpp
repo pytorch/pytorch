@@ -976,10 +976,18 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
 }
 
 Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+
+  if (at::isfinite(self).logical_not().any().item<uint8_t>() || at::isfinite(other).logical_not().any().item<uint8_t>()){
+    Tensor result = at::empty({1}, self.options());
+    result[0] = std::numeric_limits<double>::infinity();
+    return result[0];
+  }
+
   Tensor result = at::empty_like(self, at::MemoryFormat::Contiguous);
   result = at::abs(self - other);
   result = at::pow_out(result, result, p);
   result = at::pow_out(result, at::sum(result), 1.0 / p.toDouble());
   return result;
+}
 
 }} // namespace at::native
