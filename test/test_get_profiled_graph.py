@@ -18,5 +18,5 @@ with enable_profiling_mode():
             # these are defined in python_ir.cpp
             # or can be inspected with dir()
             if o.type().kind() == "TensorType":
-                print ("type=", o.type().scalarType(), o.type().sizes())
+                print("type=", o.type().scalarType(), o.type().sizes())
     print(str(g))

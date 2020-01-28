@@ -114,6 +114,7 @@ class TestONNXRuntime(unittest.TestCase):
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
         model_ = model.copy() if hasattr(model, 'copy') else model
+
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
