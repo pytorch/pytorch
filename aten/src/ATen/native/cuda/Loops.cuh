@@ -243,7 +243,7 @@ __device__ inline void unrolled_elementwise_kernel(int N, func_t f, array_t data
   // an array of size 1 and just don't use it.
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
-  int block_work_size = num_threads * thread_work_size;
+  constexpr int block_work_size = num_threads * thread_work_size;
   int idx = block_work_size * blockIdx.x + threadIdx.x;
 
   // compute base pointers
@@ -335,14 +335,15 @@ __device__ inline void vectorized_elementwise_kernel(func_t f, array_t data) {
 template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
+  constexpr int block_work_size = num_threads * thread_work_size;
   using return_t = typename function_traits<func_t>::result_type;
   using policies = memory::policies<num_threads, thread_work_size>;
-  int remaining = N - policies::common::block_work_size * blockIdx.x;
+  int remaining = N - block_work_size * blockIdx.x;
 
 #ifdef __HIP_PLATFORM_HCC__
   unrolled_elementwise_kernel<num_threads, thread_work_size>(N, f, data);
 #else
-  if (remaining < policies::common::block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
+  if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
     unrolled_elementwise_kernel<num_threads, thread_work_size>(N, f, data);
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
     vectorized_elementwise_kernel<vec_size, num_threads, thread_work_size>(f, data);
