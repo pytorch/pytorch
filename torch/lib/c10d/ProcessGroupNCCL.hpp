@@ -277,8 +277,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
-  void ncclCommWatchdogInternal();
-
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -363,11 +361,6 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
-
-  // Outstanding work items for this process group.
-  std::vector<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> outstandingWork_;
-
-  std::mutex outstandingWorkMutex_;
 };
 
 } // namespace c10d

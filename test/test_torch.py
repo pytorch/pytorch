@@ -14257,6 +14257,14 @@ class TestTorchDeviceType(TestCase):
             torch.cat([x, y])
 
     @onlyCPU
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_div_zero(self, device, dtype):
+        a = torch.tensor([0, 1], dtype=dtype, device=device)
+        b = torch.tensor([0, 1], dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
+            a.div(b)
+
+    @onlyCPU
     def test_cat_bad_input_sizes(self, device):
         x = torch.randn(2, 1, device=device)
         y = torch.randn(2, 1, 1, device=device)

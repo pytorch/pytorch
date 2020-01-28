@@ -124,7 +124,7 @@ const ForkId& UserRRef::forkId() const {
 }
 
 IValue UserRRef::toHere() {
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
