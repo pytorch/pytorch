@@ -13,16 +13,16 @@
 #include <limits>
 #include <cmath>
 
-/** 
+/**
  * Distributions kernel adapted from THRandom.cpp
  * The kernels try to follow std::random distributions signature
  * For instance: in ATen
  *      auto gen = at::detail::createCPUGenerator();
  *      at::uniform_real_distribution<double> uniform(0, 1);
  *      auto sample = uniform(gen.get());
- *      
+ *
  *      vs std::random
- * 
+ *
  *      std::mt19937 gen;
  *      std::uniform_real_distribution uniform(0, 1);
  *      auto sample = uniform(gen);
@@ -99,7 +99,7 @@ struct uniform_real_distribution {
 
   private:
     T a;
-    T b; 
+    T b;
 };
 
 /**
@@ -213,6 +213,10 @@ struct exponential_distribution {
 
   template <typename RNG>
   inline T operator()(RNG* generator) {
+    // Follows numpy exponential for the case when lambda is zero.
+    if (lambda == static_cast<T>(0.0)) {
+      return static_cast<T>(0.0);
+    }
     uniform_real_distribution<T> uniform(0.0, 1.0);
     dist_acctype<T> sample = uniform(generator);
     return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
