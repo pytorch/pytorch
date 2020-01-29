@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 import glob
 
-import common_utils as common
+import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -840,6 +840,41 @@ class TestCppExtension(common.TestCase):
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 0)
+
+    def test_autograd_from_cpp(self):
+        source = '''
+        void run_back(at::Tensor x) {
+            x.backward({});
+        }
+
+        void run_back_no_gil(at::Tensor x) {
+            pybind11::gil_scoped_release no_gil;
+            x.backward({});
+        }
+        '''
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        test_backward_deadlock = torch.utils.cpp_extension.load_inline(name='test_backward_deadlock',
+                                                                       cpp_sources=[source],
+                                                                       functions=['run_back', 'run_back_no_gil'],)
+
+        # This used to deadlock
+        inp = torch.rand(20, requires_grad=True)
+        loss = MyFn.apply(inp).sum()
+        with self.assertRaisesRegex(RuntimeError, "The autograd engine was called while holding the GIL."):
+            test_backward_deadlock.run_back(loss)
+
+        inp = torch.rand(20, requires_grad=True)
+        loss = MyFn.apply(inp).sum()
+        test_backward_deadlock.run_back_no_gil(loss)
 
 
 class TestMSNPUTensor(common.TestCase):
