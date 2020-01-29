@@ -335,8 +335,8 @@ CHECKED_CAST = {
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
-            'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
+            'checked_dense_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
+            'DeviceType::${DeviceType}, ScalarType::${ScalarName})'),
     'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos})')
 }
 
