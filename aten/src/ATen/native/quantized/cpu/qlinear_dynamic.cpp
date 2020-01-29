@@ -405,10 +405,7 @@ static auto registry =
                 .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicFp16<true>>(DispatchKey::CPUTensorId))
-        .op("quantized::linear_relu_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
-            torch::RegisterOperators::options()
-                .kernel<QLinearDynamicFp16<true>>(DispatchKey::CPUTensorId));
+                .kernel<QLinearDynamicFp16<false>>(DispatchKey::CPUTensorId));
 
 } // namespace
 } // namespace native
