@@ -37,7 +37,7 @@ namespace c10 {
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
-  _(at::BFloat16, BFloat16) /* 15 */
+  _(c10::BFloat16, BFloat16) /* 15 */
 
 
 // If you want to support ComplexHalf for real, add ComplexHalf
@@ -123,18 +123,20 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
 // macro generate this; the examples here are just those we have found to be
 // necessary.
 
-template <typename scalar_t>
+template <typename>
 struct CPPTypeToScalarType {
   constexpr static c10::ScalarType value = c10::ScalarType::Undefined;
 };
 
-#define SPECIALIZE_CPPTypeToScalarType(scalar_t, scalar_type)                  \
+#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
   template <>                                                                  \
-  struct CPPTypeToScalarType<scalar_t> {                                       \
+  struct CPPTypeToScalarType<cpp_type> {                                       \
     constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;     \
   };
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType);
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
+
+#undef SPECIALIZE_CPPTypeToScalarType
 
 }
 
