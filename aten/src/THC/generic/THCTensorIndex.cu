@@ -399,7 +399,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
 
-  dim = at::maybe_wrap_dim(dim, dst);
+  dim = at::maybe_wrap_dim(dim, src);
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, src);

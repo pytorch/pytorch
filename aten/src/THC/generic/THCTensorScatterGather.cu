@@ -12,7 +12,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  dim = at::maybe_wrap_dim(dim, tensor);
+  dim = at::maybe_wrap_dim(dim, src);
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(tensor->sizes().equals(index->sizes()), 4,
