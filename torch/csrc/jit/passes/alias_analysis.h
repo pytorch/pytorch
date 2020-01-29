@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
+#include <torch/csrc/jit/type_hashing.h>
 
 namespace torch {
 namespace jit {
@@ -24,7 +25,14 @@ namespace jit {
  *
  * There is a special alias set called the "wildcard set", which indicates that
  * we're not sure what this value may alias. To be conservative, we consider
- * the wildcard alias set as potentially aliasing any value.
+ * the wildcard alias set as potentially aliasing any value within the same
+ * type class. Whenever a value becomes contained by another value, such as
+ * when a Tensor is appended to a List[Tensor], the contained element becomes
+ * part of the wildcard set.
+ *
+ * Values that contain other mutable types, such as List[Tensor], are
+ * initialized as containing the Wildcard set for all contained mutable types.
+ *
  */
 class AliasDb {
  public:
@@ -69,6 +77,9 @@ class AliasDb {
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
+
+  // Do any nodes write to `v`s memory location?
+  TORCH_API bool hasWriters(const Value* v) const;
 
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
@@ -118,8 +129,6 @@ class AliasDb {
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
   MemoryLocations getWrites(Node* n) const;
   void getWritesImpl(Node* n, MemoryLocations& ret) const;
-  // Do any nodes write to `v`s memory location?
-  TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
   void registerWrite(const Element* e, Node* n);
@@ -132,11 +141,7 @@ class AliasDb {
    * Wildcard methods
    */
   // Register `v` as a wildcard value.
-  void setWildcard(const Value* v);
-
-  // Is the element a wildcard or an unhandled container type,
-  // or does the element contain an element for which that's true
-  bool cannotCheckAliasContainment(const Value* elem) const;
+  c10::optional<Element*> setWildcard(const Value* v);
 
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
@@ -161,7 +166,6 @@ class AliasDb {
   void analyzeWait(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
-  void analyzeTupleConstruct(Node* node);
   void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
@@ -189,9 +193,14 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
-  std::map<TypeKind, Element*> wildcardIndex_;
+  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
-  Element* getOrCreateWildcard(const TypePtr& type);
+  c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
+  void addContainedTypesToFreshElement(
+      Element* container_elem,
+      const TypePtr& mut_type);
+
+  std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
   bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
   bool hasWriters(const at::ArrayRef<Value*>& values) const;

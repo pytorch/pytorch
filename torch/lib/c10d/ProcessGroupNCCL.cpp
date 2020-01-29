@@ -279,34 +279,17 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
-  try {
-    ncclCommWatchdogInternal();
-    LOG(ERROR) << "NCCL watchdog thread terminated";
-  } catch(std::exception& e) {
-    LOG(ERROR) << "NCCL watchdog thread terminated with: " << e.what();
-  } catch(...) {
-    LOG(ERROR) << "NCCL watchdog thread terminated with unknown exception";
-  }
-}
-
-void ProcessGroupNCCL::ncclCommWatchdogInternal() {
   while (!terminateWatchdog_.load()) {
     {
-      // Loop through all outstanding work and clean any work that has timed
-      // out or received any errors.
-      std::lock_guard<std::mutex> lock(outstandingWorkMutex_);
-      for (auto it = outstandingWork_.begin(); it != outstandingWork_.end();) {
-        auto work = *it;
-        auto currentTime = std::chrono::steady_clock::now();
-        bool timedOutOp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              currentTime - work->workStartTime_) > opTimeout_;
-
-        // Abort communicators if the op timed out or received errors.
-        if (timedOutOp || checkForNCCLErrors(work->ncclComms_)) {
-          LOG(INFO) << "Received NCCL " << (timedOutOp ? "timeout" : "errors")
-                    << " for communicators in the cache, "
+      // Loop through the cache of communicators for NCCL errors.
+      std::lock_guard<std::mutex> lock(devNCCLCommMapLock_);
+      for (auto it = devNCCLCommMap_.begin(); it != devNCCLCommMap_.end();) {
+        auto& ncclComms = it->second;
+        if (checkForNCCLErrors(ncclComms)) {
+          LOG(INFO) << "Received NCCL errors for communicators in the cache, "
                        "removing communicators from the cache and aborting the "
                        "communicators.";
+
           if (blockingWait_) {
             // We should not abort the communicators if we are performing a
             // non-blocking wait(). The reason for this is that if we abort the
@@ -315,28 +298,17 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
             // The current model is that when we call wait(), subsequent
             // operations only run after this work is done or we hang forever
             // waiting for the operation to complete.
-            // Now abort all the communicators.
-            for (auto& ncclComm : work->ncclComms_) {
+            for (const auto& ncclComm : ncclComms) {
               ncclComm->ncclCommAbort();
             }
           }
 
-          // Remove the communicators from the cache.
-          const auto key = getKeyFromDevices(work->devices_);
-          std::lock_guard<std::mutex> ncclCacheLock(devNCCLCommMapLock_);
-          if (devNCCLCommMap_.find(key) != devNCCLCommMap_.end()) {
-            devNCCLCommMap_.erase(key);
-          }
-        }
+          // Remove communicators from the cache.
+          it = devNCCLCommMap_.erase(it);
 
-        // Remove any work that has already completed (includes successfully
-        // completed or had any errors).
-        if (work->isCompleted() || timedOutOp) {
-          it = outstandingWork_.erase(it);
-          // Avoid incrementing the iterator.
-          continue;
+        } else {
+          it++;
         }
-        it++;
       }
     }
 
@@ -614,8 +586,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->opTimeout_ = opTimeout_;
   }
 
-  std::lock_guard<std::mutex> lock(outstandingWorkMutex_);
-  outstandingWork_.emplace_back(work);
   return work;
 }
 
