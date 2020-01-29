@@ -62,6 +62,10 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
         /*max=*/&x_max,
         /*len=*/input.numel());
 
+    TORCH_CHECK(
+        x_min <= x_max,
+        "In qlinear_dynamic.cpp, x_min should be less than or equal to x_max");
+
     // Input tensor is quantized as 8-bit unsigned values
     static constexpr int precision = 8;
     static constexpr bool is_signed = false;
