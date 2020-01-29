@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <sstream>
 

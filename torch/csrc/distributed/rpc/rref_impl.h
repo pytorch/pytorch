@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/utils/pybind.h>
 
 #include <atomic>
 
@@ -20,19 +19,11 @@ class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
 struct RRefForkData {
-  py::tuple toPyTuple() const;
-  static RRefForkData fromPyTuple(const py::tuple& obj);
-
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
   const worker_id_t parent_;
   const std::string type_str_;
-
- private:
-  friend class RRef;
-  friend class RRefContext;
-  friend class UserRRef;
 
   RRefForkData(
       worker_id_t ownerId,
@@ -40,6 +31,10 @@ struct RRefForkData {
       const ForkId& forkId_,
       worker_id_t parent,
       std::string type_str);
+
+  friend class RRef;
+  friend class RRefContext;
+  friend class UserRRef;
 };
 
 // Note [RRef Protocol]
