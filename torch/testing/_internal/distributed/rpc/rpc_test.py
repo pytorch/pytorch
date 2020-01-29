@@ -1642,5 +1642,7 @@ class RpcTest(RpcAgentTestFixture):
             delattr(this_module, "foo_add")
         if self.rank == 0:
             # func exists on caller, but not callee.
+            # TODO: Need to enhance RemoteException to return the correct
+            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
             with self.assertRaisesRegex(Exception, "AttributeError"):
-                ret = rpc.rpc_sync("worker1", foo_add, args=())
+                rpc.rpc_sync("worker1", foo_add, args=())
