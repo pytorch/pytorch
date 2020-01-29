@@ -8,6 +8,7 @@ import inspect
 import weakref
 import warnings
 import torch
+import sys
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
@@ -713,3 +714,14 @@ def _qualified_name(obj):
                            "'{}' is not a valid identifier".format(name, name))
 
     return module_name + "." + name
+
+def _try_get_module_class_from_qual_name(qual_name):
+    assert qual_name.find("__torch__.") == 0
+    qual_name = qual_name[len("__torch__."):]
+    attrs = qual_name.split(".")
+    if attrs[0] not in sys.modules:
+        return None
+    value = sys.modules[attrs[0]]
+    for i in range(1, len(attrs)):
+        value = getattr(value, attrs[i], None)
+    return value

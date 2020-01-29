@@ -72,6 +72,7 @@ def infer_concrete_type_builder(nn_module):
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
 
+    setattr(nn_module, "_original_qual_name", torch.jit._qualified_name(type(nn_module)))
     class_annotations = getattr(nn_module, '__annotations__', {})
 
     # try to infer the type from type annotation or from the object itself
@@ -297,6 +298,15 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
 
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
+def _add_copy_to_script_methods(nn_module_type, script_module):
+    # copy over python methods to script module if they aren't defined on the script module
+    # this is currently an internal api used only on module containers
+    for name in dir(nn_module_type):
+        item = getattr(nn_module_type, name, None)
+        if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
+            add_python_attr_to_scripted_model(script_module, nn_module_type, name)
+
+
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     Convert an nn.Module to a RecursiveScriptModule.
@@ -370,13 +380,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
-
-    # copy over python methods to script module if they aren't defined on the script module
-    # this is currently an internal api used only on module containers
-    for name in dir(nn_module):
-        item = getattr(nn_module, name, None)
-        if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
-            add_python_attr_to_scripted_model(script_module, nn_module, name)
+    _add_copy_to_script_methods(type(nn_module), script_module)
 
     return script_module
 
@@ -384,18 +388,24 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 # We define shims of certain attributes on the RecursiveScriptModule to support
 # magic methods. To check if a script model defines an attribute we need
 # to also check that the attribute is not the shim
-def script_model_defines_attr(script_model, attr):
+def script_model_doesnt_define_attr(script_model, attr):
     script_attr = getattr(script_model, attr, None)
     if script_attr is None:
-        return False
+        return True
     default_attr = get_function_from_type(torch.jit.RecursiveScriptModule, attr)
     if default_attr is None:
         return False
     return script_attr != default_attr
 
-def add_python_attr_to_scripted_model(script_model, orig, attr):
-    if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
-        setattr(script_model, attr, getattr(orig, attr))
+def add_python_attr_to_scripted_model(script_model, nn_module_type, attr):
+    if hasattr(nn_module_type, attr) and script_model_doesnt_define_attr(script_model, attr):
+        unbound_method = getattr(nn_module_type, attr)
+        # function should be unbound
+        assert not hasattr(unbound_method, "__self__")
+
+        def add_self_arg(*args, **kwargs):
+            return unbound_method(script_model, *args, **kwargs)
+        setattr(script_model, attr, add_self_arg)
 
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
@@ -551,7 +561,7 @@ def try_compile_fn(fn, loc):
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
-def wrap_cpp_module(cpp_module):
+def wrap_cpp_module(cpp_module_inner):
     """
     Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
     """
@@ -559,7 +569,12 @@ def wrap_cpp_module(cpp_module):
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
-    return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
+        if cpp_module_inner.hasattr("_original_qual_name"):
+            nn_module = torch._jit_internal._try_get_module_class_from_qual_name(cpp_module_inner._original_qual_name)
+            if nn_module:
+                _add_copy_to_script_methods(nn_module, script_module)
+
+    return torch.jit.RecursiveScriptModule._construct(cpp_module_inner, init_fn)
 
 def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
