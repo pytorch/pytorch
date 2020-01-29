@@ -47,6 +47,16 @@ enum class DispatchKey : uint8_t {
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
 
+  // Custom pseudorandom number generator dispatch key.
+  // To enable PyTorch users to have custom PRNGs, we added support for
+  // dispatching on at::Generator* parameters.
+  // This key must be used in two places:
+  //  1) as a second parameter of at::Generator constructor call in
+  //     the user-defined PRNG class.
+  //  2) as a dispatch key while registering custom kernels
+  //     (templatized kernels specialized for user-defined PRNG class)
+  CustomRNGKeyId,
+
   // WARNING! If you add more "wrapper" style tensor ids (tensor
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust

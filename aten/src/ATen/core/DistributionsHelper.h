@@ -6,8 +6,9 @@
 #include <math.h>
 #endif
 
-#include <ATen/CPUGenerator.h>
 #include <ATen/core/Array.h>
+#include <c10/util/Half.h>
+#include <c10/util/Optional.h>
 #include <type_traits>
 #include <limits>
 #include <cmath>
@@ -85,7 +86,8 @@ struct uniform_real_distribution {
     b = b_in;
   }
 
-  inline dist_acctype<T> operator()(at::CPUGenerator* generator){
+  template <typename RNG>
+  inline dist_acctype<T> operator()(RNG* generator){
     dist_acctype<T> x;
     if(std::is_same<T, double>::value) {
       x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
@@ -115,7 +117,8 @@ struct normal_distribution {
     stdv = stdv_in;
   }
 
-  inline dist_acctype<T> operator()(at::CPUGenerator* generator){
+  template <typename RNG>
+  inline dist_acctype<T> operator()(RNG* generator){
     dist_acctype<T> ret;
     // return cached values if available
     if (std::is_same<T, double>::value) {
@@ -166,7 +169,8 @@ struct bernoulli_distribution {
     p = p_in;
   }
 
-  inline int operator()(at::CPUGenerator* generator) {
+  template <typename RNG>
+  inline int operator()(RNG* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return uniform(generator) < p;
   }
@@ -186,7 +190,8 @@ struct geometric_distribution {
     p = p_in;
   }
 
-  inline int operator()(at::CPUGenerator* generator) {
+  template <typename RNG>
+  inline int operator()(RNG* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     dist_acctype<T> sample = uniform(generator);
     return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
@@ -206,7 +211,8 @@ struct exponential_distribution {
     lambda = lambda_in;
   }
 
-  inline T operator()(at::CPUGenerator* generator) {
+  template <typename RNG>
+  inline T operator()(RNG* generator) {
     // Follows numpy exponential for the case when lambda is zero.
     if (lambda == static_cast<T>(0.0)) {
       return static_cast<T>(0.0);
@@ -231,7 +237,8 @@ struct cauchy_distribution {
     sigma = sigma_in;
   }
 
-  inline T operator()(at::CPUGenerator* generator) {
+  template <typename RNG>
+  inline T operator()(RNG* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return median + sigma * ::tan(static_cast<T>(M_PI) * (uniform(generator)-static_cast<T>(0.5)));
   }
@@ -255,7 +262,8 @@ struct lognormal_distribution {
     stdv = stdv_in;
   }
 
-  inline T operator()(at::CPUGenerator* generator){
+  template<typename RNG>
+  inline T operator()(RNG* generator){
     normal_distribution<T> normal(mean, stdv);
     return ::exp(normal(generator));
   }

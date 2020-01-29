@@ -34,7 +34,7 @@ if(USE_ROCM)
 endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
+FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")
 FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
@@ -65,6 +65,7 @@ FILE(GLOB native_quantized_cpp
             "native/quantized/cpu/*.cpp")
 FILE(GLOB native_h "native/*.h")
 FILE(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
+FILE(GLOB native_cpu_h "native/cpu/*.h")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
@@ -379,7 +380,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 if(INTERN_BUILD_MOBILE)
   set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 else()
-  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
