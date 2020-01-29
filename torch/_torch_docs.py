@@ -904,7 +904,8 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks.
+Splits a tensor into a specific number of chunks. Each chunk is a view of
+the input tensor.
 
 Last chunk will be smaller if the tensor size along the given dimension
 :attr:`dim` is not divisible by :attr:`chunks`.

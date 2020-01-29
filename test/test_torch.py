@@ -11066,7 +11066,7 @@ class TestTorchDeviceType(TestCase):
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
-                         torch.tensor((2, 1, 0), device=device, dtype=dtype), 
+                         torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
 
         # Check linspace for non-contiguous tensors.
@@ -14664,36 +14664,59 @@ class TestDevicePrecision(TestCase):
 
 # Tests ops and indexing to ensure they return views (and new tensors) as
 # appropriate.
-# Note: these tests do not verify tensor storage is the same or different
-# because some device types, like XLA tensors, do not expose storage.
 class TestViewOps(TestCase):
+    def is_view_of(self, base, other):
+        if (not other._is_view() or
+                other._base is not base or
+                base.device != other.device):
+            return False
+
+        # Note: only validates storage on native device types
+        # because some accelerators, like XLA, do not expose storage
+        if base.device.type == 'cpu' or base.device.type == 'cuda':
+            if base.storage().data_ptr() != other.storage().data_ptr():
+                return False
+
+        return True
 
     def test_diagonal_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = torch.diagonal(t)
+        assert self.is_view_of(t, v)
+
         v[0] = 0
         self.assertEqual(t[0, 0], v[0])
 
         t = torch.ones((3, 3, 3), device=device)
         v = torch.diagonal(t, offset=1, dim1=1, dim2=2)
+        assert self.is_view_of(t, v)
+
         v[0, 0] = 0
         self.assertEqual(t[0, 0, 1], v[0, 0])
 
     def test_select_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.select(0, 2)
+        assert self.is_view_of(t, v)
+
         v[0] = 0
         self.assertEqual(t[2, 0], v[0])
 
     def test_unbind_view(self, device):
-        t = torch.ones((5, 5), device=device)
-        v = torch.unbind(t)
-        v[0][0] = 0
-        self.assertEqual(t[0, 0], v[0][0])
+        t = torch.zeros((5, 5), device=device)
+        tup = torch.unbind(t)
+
+        for idx, v in enumerate(tup):
+            assert self.is_view_of(t, v)
+
+            v[0] = idx + 1
+            self.assertEqual(t[idx, 0], v[0])
 
     def test_expand_view(self, device):
         t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
+        assert self.is_view_of(t, v)
+
         v[2, 2] = 0
         self.assertEqual(t[2, 0], v[2, 2])
 
@@ -14701,66 +14724,87 @@ class TestViewOps(TestCase):
         t = torch.ones((5, 1), device=device)
         e = torch.empty((5, 5), device=device)
         v = t.expand_as(e)
+        assert self.is_view_of(t, v)
+
         v[2, 2] = 0
         self.assertEqual(t[2, 0], v[2, 2])
 
     def test_narrow_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = torch.narrow(t, 1, 2, 2)
+        assert self.is_view_of(t, v)
+
         v[0, 0] = 0
         self.assertEqual(t[0, 2], v[0, 0])
 
     def test_permute_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.permute(1, 0)
+        assert self.is_view_of(t, v)
+
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_transpose_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = torch.transpose(t, 0, 1)
+        assert self.is_view_of(t, v)
+
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_t_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.t()
+        assert self.is_view_of(t, v)
+
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_T_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.T
+        assert self.is_view_of(t, v)
+
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_unfold_view(self, device):
         t = torch.ones(10, device=device)
         v = t.unfold(0, 3, 2)
+        assert self.is_view_of(t, v)
+
         v[1, 0] = 0
         self.assertEqual(t[2], v[1, 0])
 
     def test_squeeze_view(self, device):
         t = torch.ones(5, 1, 5, device=device)
         v = torch.squeeze(t)
+        assert self.is_view_of(t, v)
         v[0, 1] = 0
-        self.assertEqual(t[0, 0, 1], v[0, 1])
+        self.assertEqual(t, v._base)
 
     def test_unsqueeze_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.unsqueeze(t, 1)
+        assert self.is_view_of(t, v)
+
         v[0, 0, 1] = 0
         self.assertEqual(t[0, 1], v[0, 0, 1])
 
     def test_as_strided_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.as_strided(t, (25,), (1,))
+        assert self.is_view_of(t, v)
+
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_view_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = t.view(25)
+        assert self.is_view_of(t, v)
+
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
@@ -14768,24 +14812,29 @@ class TestViewOps(TestCase):
         t = torch.ones(5, 5, device=device)
         e = torch.empty((25,))
         v = t.view_as(e)
+        assert self.is_view_of(t, v)
+
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
-    def test_contiguous_view(self, device):
+    def test_contiguous_self(self, device):
         t = torch.ones(5, 5, device=device)
-        v = t.contiguous()
-        v[0, 0] = 0
-        self.assertEqual(t[0, 0], v[0, 0])
+        s = t.contiguous()
+        assert s is t
 
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
+        assert not self.is_view_of(t, nv)
+
         nv[0, 0] = 0
         self.assertNotEqual(t[0, 0], nv[0, 0])
 
     def test_reshape_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.reshape(t, (25,))
+        assert self.is_view_of(t, v)
+
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
@@ -14793,38 +14842,50 @@ class TestViewOps(TestCase):
         t = torch.ones(5, 5, device=device)
         e = torch.empty((25,), device=device)
         v = t.reshape_as(e)
+        assert self.is_view_of(t, v)
+
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
+        assert not self.is_view_of(t, nv)
+
         nv[6] = 0
         self.assertNotEqual(t[1, 1], nv[6])
 
     def test_basic_indexing_slice_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = t[:2, :3]
-        v[0, 0] = 1
+        assert self.is_view_of(t, v)
+
+        v[0, 0] = 0
         self.assertEqual(t[0, 0], v[0, 0])
 
     def test_basic_indexing_ellipses_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = t[..., :2]
-        v[0, 0] = 1
+        assert self.is_view_of(t, v)
+
+        v[0, 0] = 0
         self.assertEqual(t[0, 0], v[0, 0])
 
     def test_basic_indexing_newaxis_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = t[None, :2, 3]
-        v[0, 0] = 1
-        self.assertEqual(t[0, 2], v[0, 0])
+        assert self.is_view_of(t, v)
+
+        v[0, 0] = 0
+        self.assertEqual(t[0, 3], v[0, 0])
 
     def test_advanced_indexing_nonview(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
         cols = torch.tensor([[0, 1], [2, 2]], device=device)
         nv = t[rows, cols]
+        assert not self.is_view_of(t, nv)
+
         nv[1, 1] = 0
         self.assertNotEqual(t[2, 2], nv[1, 1])
 
@@ -14834,6 +14895,28 @@ class TestViewOps(TestCase):
         cols = torch.tensor([[0, 1], [2, 2]], device=device)
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
+
+    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    def test_chunk_view(self, device):
+        t = torch.zeros(3, 3, device=device)
+        l = torch.chunk(t, 3)
+
+        for idx, v in enumerate(l):
+            assert self.is_view_of(t, v)
+
+            v[0, 0] = idx + 1
+            self.assertEqual(t[idx, 0], v[0, 0])
+
+    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    def test_split_view(self, device):
+        t = torch.zeros(3, 3, device=device)
+        l = torch.split(t, [1, 1, 1])
+
+        for idx, v in enumerate(l):
+            assert self.is_view_of(t, v)
+
+            v[0, 0] = idx + 1
+            self.assertEqual(t[idx, 0], v[0, 0])
 
 
 # Below are fixtures and functions that generate tensor op comparison tests
