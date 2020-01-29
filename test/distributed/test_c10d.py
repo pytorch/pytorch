@@ -1877,6 +1877,33 @@ class QuadraGpuNet(nn.Module):
         return F.softmax(x, dim=1).to(dev0)
 
 
+class MixedCpuGpuNet(nn.Module):
+    def __init__(self, gpus):
+        super(MixedCpuGpuNet, self).__init__()
+        self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
+        self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[0])
+        self.fc3 = nn.Linear(50, 4, bias=False).cpu()
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        dev0 = self.fc1.weight.device
+        dev1 = self.fc2.weight.device
+        dev2 = self.fc3.weight.device
+        x = self.relu(self.fc1(x.to(dev0)))
+        x = self.relu(self.fc2(x.to(dev1)))
+        x = self.fc3(x.to(dev2))
+        return F.softmax(x, dim=1).to(dev0)
+
+
+from enum import Enum
+
+
+class ModelType(Enum):
+    SINGLE_DEVICE = 1  # model is on a single CUDA device
+    MULTI_DEVICE = 2  # model spans multiple CUDA devices
+    MIXED_DEVICE = 3  # model spans both CPU and CUDA
+
+
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
@@ -1931,7 +1958,19 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         return model, ddp_model, input, target
 
-    def _test_ddp_with_process_group(self, process_group, devices, device_ids, multi_device=False):
+    def _prepare_mixed_device_module(self, process_group, devices, global_batch_size):
+        model = MixedCpuGpuNet(devices)
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(model),
+            device_ids=None,
+            process_group=process_group,
+            bucket_cap_mb=0.001)
+        input = torch.randn(global_batch_size, 2).cuda(devices[0])
+        target = torch.randn(global_batch_size, 4)
+
+        return model, ddp_model, input, target
+
+    def _test_ddp_with_process_group(self, process_group, devices, device_ids, model_type=ModelType.SINGLE_DEVICE):
         """
         Note: we pass down `device_ids` all the way to DistributedDataParallel
         as part of the test. Below you find tests that either use a list of
@@ -1942,14 +1981,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         local_batch_size = len(devices)
         global_batch_size = self.world_size * local_batch_size
 
-        if multi_device:
-            model, ddp_model, input, target = \
-                self._prepare_multi_device_module(
-                    process_group, devices, device_ids, global_batch_size)
-        else:
+        if model_type == ModelType.SINGLE_DEVICE:
             model, ddp_model, input, target = \
                 self._prepare_single_device_module(
                     process_group, devices, device_ids, global_batch_size)
+        elif model_type == ModelType.MULTI_DEVICE:
+            model, ddp_model, input, target = \
+                self._prepare_multi_device_module(
+                    process_group, devices, device_ids, global_batch_size)
+        elif model_type == ModelType.MIXED_DEVICE:
+            model, ddp_model, input, target = \
+                self._prepare_mixed_device_module(
+                    process_group, devices, global_batch_size)
+        else:
+            self.fail("Unrecognized ModelType {}".formard(model_type))
 
         def step_model(model, input, target):
             model.train()
@@ -1976,6 +2021,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             update_parameters(model)
             update_parameters(ddp_model)
             self.assertEqual(len(list(model.parameters())), len(list(ddp_model.parameters())))
+
             for i, j in zip(model.parameters(), ddp_model.parameters()):
                 self.assertEqual(i, j)
 
@@ -1983,12 +2029,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    def _test_gloo_backend(self, devices, device_ids, multi_device=False):
+    def _test_gloo_backend(self, devices, device_ids, model_type=ModelType.SINGLE_DEVICE):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
+        self._test_ddp_with_process_group(process_group, devices, device_ids, model_type)
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
@@ -2009,23 +2055,30 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_gloo_backend(devices, devices)
 
     @requires_gloo()
+    @skip_if_not_multigpu
+    def test_gloo_backend_mixed_module(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, [], model_type=ModelType.MIXED_DEVICE)
+
+    @requires_gloo()
     @skip_if_lt_x_gpu(4)
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, [], model_type=ModelType.MULTI_DEVICE)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, [], model_type=ModelType.MULTI_DEVICE)
 
-    def _test_nccl_backend(self, devices, device_ids, multi_device=False):
+    def _test_nccl_backend(self, devices, device_ids, model_type=ModelType.SINGLE_DEVICE):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
+        self._test_ddp_with_process_group(process_group, devices, device_ids, model_type)
 
     @requires_nccl()
     @skip_if_not_multigpu
@@ -2047,7 +2100,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, [], model_type=ModelType.MULTI_DEVICE)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
@@ -2055,7 +2108,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, [], model_type=ModelType.MULTI_DEVICE)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

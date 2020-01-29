@@ -263,12 +263,6 @@ class DistributedDataParallel(Module):
 
             self.output_device = _get_device_index(output_device, True)
 
-        if self.is_multi_device_module:
-            assert self.is_cuda, (
-                "DistributedDataParallel with multi-device module only works "
-                "with CUDA devices, but module parameters locate in {}."
-            ).format({p.device for p in module.parameters()})
-
         if process_group is None:
             self.process_group = _get_default_group()
         else:
