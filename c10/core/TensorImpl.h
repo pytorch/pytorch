@@ -677,7 +677,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void set_stride(int64_t dim, int64_t new_stride) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_tensor_metadata_change_not_allowed);
     strides_[dim] = new_stride;
-    refresh_numel();
     refresh_contiguous();
   }
 
