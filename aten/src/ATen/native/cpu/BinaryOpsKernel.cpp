@@ -67,6 +67,7 @@ void div_kernel(TensorIterator& iter) {
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
       });
     });
@@ -414,6 +415,52 @@ void ne_kernel(TensorIterator& iter) {
   }
 }
 
+void max_elementwise_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a || b;
+      });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_lementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "max_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::max(a, b);
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+    });
+  }
+}
+
+void min_elementwise_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a && b;
+      });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::min(a, b);
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+    });
+  }
+}
+
 void smooth_l1_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
     cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -485,6 +532,8 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
+REGISTER_DISPATCH(max_elementwise_stub, &max_elementwise_kernel);
+REGISTER_DISPATCH(min_elementwise_stub, &min_elementwise_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);

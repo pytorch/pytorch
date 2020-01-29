@@ -11,22 +11,23 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
+c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dst,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
-  auto agent = RpcAgent::getDefaultRpcAgent();
+  auto agent = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
       *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
+
   // Get function return type to construct c10::ivalue::Future.
-  // Script call only allows single IValue returned.
   auto returns = PythonRpcHandler::getInstance()
                      .jitCompilationUnit()
                      ->get_function(qualifiedName)
                      .getSchema()
                      .returns();
+  // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
       "Return value of an annotated torchScript function should be a single "
@@ -48,6 +49,48 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
     }
   });
   return futPtr;
+}
+
+std::shared_ptr<UserRRef> remoteTorchscript(
+    const WorkerInfo& dst,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack) {
+  auto& ctx = RRefContext::getInstance();
+  // TODO: support creating RRefs on a local object.
+  TORCH_INTERNAL_ASSERT(
+      ctx.getWorkerId() != dst.id_,
+      "Does not support creating RRef on self yet.");
+
+  // Get function return type to construct UserRRef.
+  auto returns = PythonRpcHandler::getInstance()
+                     .jitCompilationUnit()
+                     ->get_function(qualifiedName)
+                     .getSchema()
+                     .returns();
+  // Script call only allows single IValue returned.
+  TORCH_INTERNAL_ASSERT(
+      returns.size() == 1,
+      "Return value of an annotated torchScript function should be a single "
+      "IValue.",
+      returns.size());
+  auto returnType = returns.at(0).type();
+
+  auto userRRefPtr = ctx.createUserRRef(dst.id_, returnType);
+
+  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+      qualifiedName,
+      std::move(stack),
+      userRRefPtr->rrefId(),
+      userRRefPtr->forkId());
+
+  auto agent = RpcAgent::getCurrentRpcAgent();
+  auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+      *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, nullptr);
+
+  ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
+  fm->addCallback(callback::confirmPendingUser);
+
+  return userRRefPtr;
 }
 
 } // namespace rpc

@@ -48,6 +48,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(DeviceObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
+  _(PyObjectType)           \
   _(CapsuleType)            \
   _(InterfaceType)          \
   _(QSchemeType)            \
@@ -457,6 +458,7 @@ struct CAFFE2_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
+  bool isCompatibleWithInCurrentExecutionContext(at::Tensor& t) const;
 
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != kind()) {
@@ -581,6 +583,10 @@ struct CAFFE2_API TensorType : public Type {
         strides_(tensor.sizes().size()),
         requires_grad_(tensor.requires_grad()),
         undefined_(!tensor.defined()) {
+    // any updates to `isSubtypeOf`, TensorType c-tor or
+    // `isCompatibleWithInCurrentExecutionContext` need to maintain the
+    // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+    //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
       sizes_ = tensor.sizes().vec();
       strides_ = tensor.strides().vec();
@@ -668,6 +674,7 @@ struct CAFFE2_API ListType
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofBools();
+  static ListTypePtr ofStrings();
 
  private:
   ListType(TypePtr elem) : SingleElementType(elem) {}
@@ -1166,7 +1173,8 @@ struct VarType : public Type {
 
 struct CapsuleType;
 using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
-// This type represents a Python Capsule
+// This type represents a Python Capsule.
+// It does not appear in the IR and is only used during runtime
 struct CAFFE2_API CapsuleType : public Type {
   static CapsuleTypePtr create() {
     return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
@@ -1183,6 +1191,27 @@ struct CAFFE2_API CapsuleType : public Type {
 private:
   CapsuleType()
   : Type(TypeKind::CapsuleType) {}
+};
+
+struct PyObjectType;
+using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
+// This type represents a PyObject Type
+struct CAFFE2_API PyObjectType : public Type {
+  static PyObjectTypePtr create() {
+    return PyObjectTypePtr(new PyObjectType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "PyObject";
+  }
+  static const TypeKind Kind = TypeKind::PyObjectType;
+  // global singleton
+  static PyObjectTypePtr get();
+private:
+  PyObjectType()
+  : Type(TypeKind::PyObjectType) {}
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
