@@ -25,8 +25,7 @@ struct PythonTypeResolver : public jit::script::Resolver {
     if (name == "PyObject") {
       return PyObjectType::get();
     }
-    auto python_cu = torch::jit::get_python_cu();
-    return python_cu->get_type(name);
+    return PythonRpcHandler::getInstance().jitCompilationUnit()->get_type(name);
   }
 };
 
@@ -61,6 +60,7 @@ void PythonRpcHandler::cleanup() {
   pySerialize_ = py::none();
   pyHandleException_ = py::none();
   jitCompilationUnit_ = nullptr;
+  typeParser_ = nullptr;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
