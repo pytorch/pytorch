@@ -119,9 +119,7 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   static type t;
 };
 
-// These are used to map C++ types to ScalarTypes. Feel free to add more or even
-// macro generate this; the examples here are just those we have found to be
-// necessary.
+// These are used to map C++ types to ScalarTypes.
 
 template <typename>
 struct CPPTypeToScalarType {
