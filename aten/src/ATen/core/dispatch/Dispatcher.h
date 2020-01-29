@@ -89,7 +89,6 @@ public:
 
   /**
    * Register a kernel to the dispatch table for an operator.
-   * If dispatch_key is nullopt, then this registers a fallback kernel.
    *
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
@@ -97,13 +96,13 @@ public:
   RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
 
   /**
-   * Register a fallback kernel for an operator.
-   * After this, when trying to lookup a kernel for an unknown dispatch key,
-   * it will not fail anymore, but return the fallback kernel instead.
+   * Register a kernel to the dispatch table for an operator at the
+   * dispatch key CompoundOp.
    *
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
+  C10_DEPRECATED_MESSAGE("This function now registers the kernel under the CompoundOp key, which may subtly differ from the old catchall behavior if you also registered some but not all kernels.  Replace this with registerKernel(DispatchKey::CompoundOp, kernel) to explicitly acknowledge the change in semantics")
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   /**
@@ -232,11 +231,6 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
   const auto& backendFallbackKernel = backendFallbackKernels_[dispatchKey];
   if (backendFallbackKernel.isValid()) {
     return backendFallbackKernel;
-  }
-
-  const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
-  if (C10_LIKELY(nullptr != catchallKernel)) {
-    return *catchallKernel;
   }
 
   reportError(dispatchTable, dispatchKey);

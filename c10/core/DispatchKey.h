@@ -49,6 +49,14 @@ enum class DispatchKey : uint8_t {
 
   VariableTensorId,
 
+  // Compound ops denote operators which don't directly have a Variable
+  // definition for them, but instead are conventionally implemented as
+  // a series of calls to operations which do support autograd.  We can't
+  // register these operators directly to VariableTensorId because
+  // VariableTensorId is disabled in some circumstances (but compound
+  // ops must keep working).
+  CompoundOp,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
