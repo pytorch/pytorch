@@ -25,23 +25,24 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+                                                  suppress_warnings, slowTest,
+                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
-                                        create_input, unpack_variables,
-                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                        exclude_tensor_method,
-                                        mask_not_all_zeros,
-                                        S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+from torch.testing._internal.common_methods_invocations import (method_tests,
+                                                                create_input, unpack_variables,
+                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                                                exclude_tensor_method,
+                                                                mask_not_all_zeros,
+                                                                S)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3017,14 +3018,14 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
         torch.autograd.grad(g.sum(), [x])
-        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+        self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
