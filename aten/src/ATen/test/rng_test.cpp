@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/all.h>
 #include <stdexcept>
 
 using namespace at;
