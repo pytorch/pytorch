@@ -142,13 +142,7 @@ c10::optional<Value*> tryInsertConstant(
 
 RegisterOperators reg({
     Operator(
-        FunctionSchema(
-            prim::Constant,
-            "",
-            {},
-            {},
-            /*is_vararg=*/false,
-            /*is_varret=*/true),
+        prim::Constant,
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
           if (type->isSubtypeOf(TensorType::get())) {
