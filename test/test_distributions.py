@@ -36,8 +36,8 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
-from common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -65,7 +65,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
 from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 

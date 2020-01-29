@@ -279,7 +279,8 @@
 [[
   name: _th_gather
   cname: gather
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants:
     - function
@@ -1300,36 +1301,6 @@
     - double std
     - THGenerator* generator
 ]]
-[[
-  name: _th_log_normal_
-  cname: logNormal
-  variants: function
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: self
-  arguments:
-    - THTensor* self
-    - double mean
-    - double std
-    - THGenerator* generator
-]]
-[[
-  name: _th_exponential_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: exponential
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double lambd
-    - THGenerator* generator
-]]
-
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps

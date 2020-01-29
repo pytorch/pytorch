@@ -541,29 +541,37 @@ void testWriteTracking() {
 void testContainerAliasing() {
   {
     auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
     script::parseIR(
         R"IR(
-  graph():
+  graph(%inp: Tensor[]):
     %x : str = prim::Constant[value="a"]()
     %y : Tensor = prim::Constant()
+    %z : Tensor = prim::Constant()
     %a : (Tensor) = prim::TupleConstruct(%y)
     %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
     %c : Tensor[] = prim::ListConstruct(%y)
     return (%a, %b, %c)
     )IR",
-        &*graph);
+        &*graph,
+        vmap);
 
-    auto node_iter = graph->block()->nodes().begin();
-    auto str_node = node_iter++; // string
-    Node* ten_node = *node_iter++;
+    auto str_output = vmap["x"];
+    auto ten_output = vmap["y"];
+    auto local_var = vmap["z"];
     AliasDb aliasDb(graph);
 
     AT_ASSERT(graph->outputs().size() == 3);
     for (auto out : graph->outputs()) {
-      AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
+      AT_ASSERT(aliasDb.mayContainAlias(ten_output, out));
+      AT_ASSERT(!aliasDb.mayContainAlias(local_var, out));
     }
-    AT_ASSERT(aliasDb.mayContainAlias({ten_node->output()}, graph->outputs()));
-    AT_ASSERT(!aliasDb.mayContainAlias(str_node->output(), graph->outputs()));
+
+    AT_ASSERT(aliasDb.mayContainAlias(ten_output, graph->inputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(local_var, graph->inputs()));
+
+    AT_ASSERT(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(str_output, graph->outputs()));
   }
 
   {
@@ -705,6 +713,31 @@ graph():
     AT_ASSERT(aliasDb.mayContainAlias(first_st, tup_st));
     AT_ASSERT(!aliasDb.mayContainAlias(first_st, second_st));
     AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %c : Tensor[] = prim::ListConstruct(%y)
+    %d : Tensor[] = prim::ListConstruct(%y)
+    return (%c, %d)
+    )IR",
+        &*graph, vmap);
+
+    AliasDb aliasDb(graph);
+    auto x = vmap["x"];
+    auto c = vmap["c"];
+    AT_ASSERT(!aliasDb.mayContainAlias(x, c));
+    AT_ASSERT(!aliasDb.mayContainAlias(c, x));
+
+    auto d = vmap["d"];
+
+    AT_ASSERT(aliasDb.mayContainAlias(d, c));
+    AT_ASSERT(aliasDb.mayContainAlias(c, d));
   }
   {
     // Test list container aliasing
@@ -914,6 +947,94 @@ void testWildcards() {
     ASSERT_TRUE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{a}));
     ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
+
+  // test that wildcards are correctly divided by type
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%ten_list : Tensor[], %int_list : int[], %opt_ten_list : Tensor[]?):
+    %ten : Tensor = prim::Constant()
+    %4 : Tensor[] = aten::append(%ten_list, %ten)
+    %ten_ten_list : Tensor[][] = prim::Constant()
+    %int_int_list : int[][] = prim::Constant()
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    auto opt_ten_list = vmap["opt_ten_list"];
+    auto ten_list = vmap["ten_list"];
+    auto int_list = vmap["int_list"];
+    AT_ASSERT(!aliasDb.hasWriters(int_list));
+    AT_ASSERT(aliasDb.hasWriters(opt_ten_list));
+    AT_ASSERT(aliasDb.hasWriters(ten_list));
+    AT_ASSERT(!aliasDb.mayContainAlias(int_list, opt_ten_list));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, opt_ten_list));
+    AT_ASSERT(aliasDb.mayAlias(ten_list, opt_ten_list));
+
+    auto list_of_tensor_lists = vmap["ten_ten_list"];
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, list_of_tensor_lists));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, vmap["ten"]));
+
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(vmap["int_int_list"], list_of_tensor_lists));
+  }
+
+  // test invariant container aliasing
+  // the containers of different type cannot alias each other,
+  // however they may contain elements which alias each other
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%ten_list : Tensor[], %ten_opt_list : Tensor?[]):
+    %ten : Tensor = prim::Constant()
+    %4 : Tensor[] = aten::append(%ten_list, %ten)
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    auto ten_opt_list = vmap["ten_opt_list"];
+    auto ten_list = vmap["ten_list"];
+    AT_ASSERT(!aliasDb.hasWriters(ten_opt_list));
+    AT_ASSERT(aliasDb.hasWriters(ten_list));
+    AT_ASSERT(aliasDb.mayContainAlias(ten_list, ten_opt_list));
+    AT_ASSERT(!aliasDb.mayAlias(ten_list, ten_opt_list));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%float_3D : Float(*, *, *), %float_2D : Float(*, *)):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D"], vmap["float_2D"]));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+  graph(%float_3D_list : Float(*, *, *)[], %float_2D_list : Float(*, *)[], %ten: Tensor):
+    return ()
+    )IR",
+        &*graph,
+        vmap);
+    AliasDb aliasDb(graph);
+    AT_ASSERT(aliasDb.mayAlias(vmap["float_3D_list"], vmap["float_2D_list"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_3D_list"], vmap["ten"]));
+    AT_ASSERT(aliasDb.mayContainAlias(vmap["float_2D_list"], vmap["ten"]));
   }
 }
 

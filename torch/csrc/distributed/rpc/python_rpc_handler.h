@@ -2,6 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -59,9 +60,36 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit();
 
+  // Parse the string to recover the jit_type, this is used for RRef python
+  // pickling/unpickling type recovery. The type string inference rule is as
+  // follows:
+  // 1. first try to parse if this is primitive types.
+  //    i.e. TensorType, IntType, PyObjectType, etc.
+  // 2. if not primitive type, we query the python_cu to see if it is a
+  //    class type or interface type registered in python
+  // We use a ScriptTypeParser instance with custom PythonTypeResolver
+  // to resolve types according to the above rules.
+  TypePtr parseTypeFromStr(const std::string& typeStr);
+
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
+
+// A macro that grabs the GIL, profiling the acquisition time. The average GIL
+// acquisition time will be recorded in RpcAgent's getMetrics().
+#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
+  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
+  auto shouldProfileGIL =                                                \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
+  if (shouldProfileGIL) {                                                \
+    startTime = std::chrono::high_resolution_clock::now();               \
+  }                                                                      \
+  pybind11::gil_scoped_acquire ag;                                       \
+  if (shouldProfileGIL) {                                                \
+    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
+        std::chrono::high_resolution_clock::now() - startTime);          \
+    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
+  }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
@@ -86,6 +114,10 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // We import the compilation unit here only once for less cost and thread
   // safety.
   std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
+
+  // jit type parser to parse type_str back to TypePtr for RRef type
+  // recovery when pickling and unpickling RRef
+  std::shared_ptr<jit::script::ScriptTypeParser> typeParser_;
 };
 
 } // namespace rpc

@@ -16,7 +16,13 @@ DTYPES = {
 
 
 def benchmark_sparse_lengths_sum(
-    dtype_str, categorical_limit, embedding_size, average_len, batch_size, iterations, flush_cache
+    dtype_str,
+    categorical_limit,
+    embedding_size,
+    average_len,
+    batch_size,
+    iterations,
+    flush_cache,
 ):
     print("Preparing lookup table. " + str(datetime.datetime.now()))
 
@@ -39,13 +45,16 @@ def benchmark_sparse_lengths_sum(
     # Python operator in the net to generate them.
     def f(_, outputs):
         lengths = np.random.randint(
-            int(average_len * 0.75), int(average_len * 1.25), batch_size
+            int(np.round(average_len * 0.75)),
+            int(np.round(average_len * 1.25)) + 1,
+            batch_size,
         ).astype(np.int32)
         indices = np.random.randint(0, categorical_limit, np.sum(lengths)).astype(
             np.int64
         )
         outputs[0].feed(indices)
         outputs[1].feed(lengths)
+
     init_net = core.Net("init_net")
     init_net.Python(f)([], ["indices", "lengths"])
     workspace.RunNetOnce(init_net)

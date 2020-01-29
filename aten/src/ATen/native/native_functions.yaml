@@ -1041,9 +1041,9 @@
 # applying indices = indices.contiguous().
 # The backward functions apply a check that these input tensors are contiguous.
 
-- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
 
-- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
@@ -4288,16 +4288,10 @@
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_log_normal_
-    CUDA: log_normal_cuda_
   supports_named_tensor: True
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_exponential_
-    CUDA: exponential_cuda_
   supports_named_tensor: True
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -5005,16 +4999,10 @@
     CUDA: legacy::cuda::_th_remainder
 
 - func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_min_out
-    CUDA: legacy::cuda::_th_min_out
 
 - func: min.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_min
-    CUDA: legacy::cuda::_th_min
 
 - func: min(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -5026,16 +5014,10 @@
   supports_named_tensor: True
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_max_out
-    CUDA: legacy::cuda::_th_max_out
 
 - func: max.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_max
-    CUDA: legacy::cuda::_th_max
 
 - func: max(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -5259,11 +5241,13 @@
   dispatch:
     CPU: legacy::cpu::_th_cat
     CUDA: legacy::cuda::_th_cat
+    QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_cat_out
     CUDA: legacy::cuda::_th_cat_out
+    QuantizedCPU: quantized_cat_out
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:

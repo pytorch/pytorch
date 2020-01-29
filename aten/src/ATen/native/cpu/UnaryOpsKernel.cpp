@@ -322,6 +322,17 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
+static void exponential_kernel(TensorIterator& iter, double lambda, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    at::exponential_distribution<double> exponential(lambda);
+    cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
+      return static_cast<scalar_t>(exponential(generator));
+    });
+  });
+}
+
 static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -329,6 +340,17 @@ static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
     cpu_serial_kernel(iter, [p, generator]() -> scalar_t {
       at::geometric_distribution<double> geometric(p);
       return (scalar_t)geometric(generator);
+    });
+  });
+}
+
+static void log_normal_kernel(TensorIterator& iter, double mean, double std, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_normal_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
+      at::lognormal_distribution<double> logNormal(mean, std);
+      return (scalar_t)logNormal(generator);
     });
   });
 }
@@ -414,7 +436,9 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
