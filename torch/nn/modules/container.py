@@ -130,6 +130,7 @@ class ModuleList(Module):
         if modules is not None:
             self += modules
 
+    @_copy_to_script_wrapper
     def _get_abs_string_index(self, idx):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)

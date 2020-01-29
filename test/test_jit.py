@@ -9863,6 +9863,24 @@ a")
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print([val for val in m])
 
+        # test magic methods save load
+        m = M()
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        m = torch.jit.load(buffer)
+        with torch.jit.optimized_execution(False):
+            i = torch.Tensor(2)
+            m = M()
+            o = m(i)
+            v = i
+            for sub in m.mods:
+                v = sub(v)
+            self.assertEqual(o, v)
+
+            with self.assertRaisesRegex(Exception, ""):
+                print([val for val in m])
+
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
             def __init__(self):
