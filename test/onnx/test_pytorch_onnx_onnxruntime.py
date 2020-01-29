@@ -919,6 +919,16 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.randn(1, 2)
         self.run_test(CopyModel3(), (x, update))
 
+        class CopyModel4(torch.nn.Module):
+            def forward(self, x, ind, data):
+                x[ind] = data
+                return x
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor(2)
+        data = torch.randn(4)
+        self.run_test(CopyModel4(), (x, ind, data))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_ellipsis(self):
         class CopyModel(torch.nn.Module):
