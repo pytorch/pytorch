@@ -213,7 +213,9 @@ test_custom_script_ops() {
 
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  export XRT_WORKERS="localservice:0;grpc://localhost:40934"
+  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
+  XLA_PORT=`shuf -i 40701-40999 -n 1`
+  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
   pushd xla
   echo "Running Python Tests"
   ./test/run_tests.sh
