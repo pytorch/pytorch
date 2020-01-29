@@ -593,7 +593,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
 
-  if (input.size(0) == 0 || input.size(1) == 0) {    
+  if (input.size(0) == 0) {    
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
