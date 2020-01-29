@@ -5,7 +5,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <cmath>
 #include <limits>
-#include <cuda.h>
 
 #include <ATen/native/cuda/Loops.cuh>
 
