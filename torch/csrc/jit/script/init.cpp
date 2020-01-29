@@ -765,6 +765,15 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "_save_for_mobile",
+          [](Module& m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m._save_for_mobile(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1315,6 +1324,12 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
+  m.def("_check_onnx_proto",
+     [](const std::string& proto_string) {
+            check_onnx_proto(proto_string);
+        },
+        py::arg("proto_string")
+      );
 }
 } // namespace script
 } // namespace jit

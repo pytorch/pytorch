@@ -210,11 +210,21 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
 
-
-
-
-
-
+pytorch_windows_params: &pytorch_windows_params
+  parameters:
+    test_name:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+    SCCACHE_BUCKET: "ossci-compiler-cache"
+    CUDA_VERSION: "10"
+    VC_VERSION: "14.11"
+    VC_YEAR: "2017"
+    VC_PRODUCT: "BuildTools"
+    USE_CUDA: "1"
+    TORCH_CUDA_ARCH_LIST: "7.5"
+    JOB_BASE_NAME: <<parameters.test_name>>
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -442,13 +452,8 @@ jobs:
         path: test-reports
 
   pytorch_windows_build:
+    <<: *pytorch_windows_params
     executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      USE_CUDA: "1"
-      TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
       - run:
@@ -479,16 +484,12 @@ jobs:
             set -x
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
-    executor: windows-with-nvidia-gpu
+    <<: *pytorch_windows_params
     parameters:
       test_name:
         type: string
         default: ""
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      JOB_BASE_NAME: <<parameters.test_name>>
+    executor: windows-with-nvidia-gpu
     steps:
       - checkout
       - run:
@@ -2599,6 +2600,17 @@ workflows:
               only: postnightly
           docker_image: "pytorch/conda-cuda"
       - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cpu_devtoolset7_nightly
+          build_environment: "conda 3.8 cpu devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+      - smoke_linux_test:
           name: smoke_linux_conda_2_7_cu92_devtoolset7_nightly
           build_environment: "conda 2.7 cu92 devtoolset7"
           requires:
@@ -2640,6 +2652,19 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu92_devtoolset7_nightly
           build_environment: "conda 3.7 cu92 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu92_devtoolset7_nightly
+          build_environment: "conda 3.8 cu92 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -2703,6 +2728,19 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu100_devtoolset7_nightly
+          build_environment: "conda 3.8 cu100 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
           name: smoke_linux_conda_2_7_cu101_devtoolset7_nightly
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
@@ -2744,6 +2782,19 @@ workflows:
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cu101_devtoolset7_nightly
           build_environment: "conda 3.7 cu101 devtoolset7"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_conda_3_8_cu101_devtoolset7_nightly
+          build_environment: "conda 3.8 cu101 devtoolset7"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3227,6 +3278,16 @@ workflows:
             branches:
               only: postnightly
       - smoke_mac_test:
+          name: smoke_macos_wheel_3_8_cpu_nightly
+          build_environment: "wheel 3.8 cpu"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
           name: smoke_macos_conda_2_7_cpu_nightly
           build_environment: "conda 2.7 cpu"
           requires:
@@ -3259,6 +3320,16 @@ workflows:
       - smoke_mac_test:
           name: smoke_macos_conda_3_7_cpu_nightly
           build_environment: "conda 3.7 cpu"
+          requires:
+            - setup
+            - update_s3_htmls_for_nightlies
+            - update_s3_htmls_for_nightlies_devtoolset7
+          filters:
+            branches:
+              only: postnightly
+      - smoke_mac_test:
+          name: smoke_macos_conda_3_8_cpu_nightly
+          build_environment: "conda 3.8 cpu"
           requires:
             - setup
             - update_s3_htmls_for_nightlies
@@ -3493,6 +3564,15 @@ workflows:
               only: nightly
           docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
+          name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cpu devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
           name: binary_linux_conda_2_7_cu92_devtoolset7_nightly_build
           build_environment: "conda 2.7 cu92 devtoolset7"
           requires:
@@ -3522,6 +3602,15 @@ workflows:
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu92_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu92 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cu92_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu92 devtoolset7"
           requires:
             - setup
           filters:
@@ -3565,6 +3654,15 @@ workflows:
               only: nightly
           docker_image: "pytorch/conda-cuda"
       - binary_linux_build:
+          name: binary_linux_conda_3_8_cu100_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu100 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
           name: binary_linux_conda_2_7_cu101_devtoolset7_nightly_build
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
@@ -3594,6 +3692,15 @@ workflows:
       - binary_linux_build:
           name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
           build_environment: "conda 3.7 cu101 devtoolset7"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_build:
+          name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
+          build_environment: "conda 3.8 cu101 devtoolset7"
           requires:
             - setup
           filters:
@@ -3953,6 +4060,14 @@ workflows:
             branches:
               only: nightly
       - binary_mac_build:
+          name: binary_macos_wheel_3_8_cpu_nightly_build
+          build_environment: "wheel 3.8 cpu"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+      - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_nightly_build
           build_environment: "conda 2.7 cpu"
           requires:
@@ -3979,6 +4094,14 @@ workflows:
       - binary_mac_build:
           name: binary_macos_conda_3_7_cpu_nightly_build
           build_environment: "conda 3.7 cpu"
+          requires:
+            - setup
+          filters:
+            branches:
+              only: nightly
+      - binary_mac_build:
+          name: binary_macos_conda_3_8_cpu_nightly_build
+          build_environment: "conda 3.8 cpu"
           requires:
             - setup
           filters:
@@ -4355,6 +4478,16 @@ workflows:
               only: nightly
           docker_image: "pytorch/conda-cuda"
       - binary_linux_test:
+          name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_test
+          build_environment: "conda 3.8 cpu devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cpu_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+      - binary_linux_test:
           name: binary_linux_conda_2_7_cu92_devtoolset7_nightly_test
           build_environment: "conda 2.7 cu92 devtoolset7"
           requires:
@@ -4396,6 +4529,18 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_7_cu92_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_conda_3_8_cu92_devtoolset7_nightly_test
+          build_environment: "conda 3.8 cu92 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu92_devtoolset7_nightly_build
           filters:
             branches:
               only: nightly
@@ -4451,6 +4596,18 @@ workflows:
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
+          name: binary_linux_conda_3_8_cu100_devtoolset7_nightly_test
+          build_environment: "conda 3.8 cu100 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu100_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
           name: binary_linux_conda_2_7_cu101_devtoolset7_nightly_test
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
@@ -4492,6 +4649,18 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
+          filters:
+            branches:
+              only: nightly
+          docker_image: "pytorch/conda-cuda"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_test
+          build_environment: "conda 3.8 cu101 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
           filters:
             branches:
               only: nightly
@@ -5150,6 +5319,16 @@ workflows:
               only: nightly
           context: org-member
       - binary_linux_upload:
+          name: binary_linux_conda_3_8_cpu_devtoolset7_nightly_upload
+          build_environment: "conda 3.8 cpu devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cpu_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_linux_upload:
           name: binary_linux_conda_2_7_cu92_devtoolset7_nightly_upload
           build_environment: "conda 2.7 cu92 devtoolset7"
           requires:
@@ -5185,6 +5364,16 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_7_cu92_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_linux_upload:
+          name: binary_linux_conda_3_8_cu92_devtoolset7_nightly_upload
+          build_environment: "conda 3.8 cu92 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu92_devtoolset7_nightly_test
           filters:
             branches:
               only: nightly
@@ -5230,6 +5419,16 @@ workflows:
               only: nightly
           context: org-member
       - binary_linux_upload:
+          name: binary_linux_conda_3_8_cu100_devtoolset7_nightly_upload
+          build_environment: "conda 3.8 cu100 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu100_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_linux_upload:
           name: binary_linux_conda_2_7_cu101_devtoolset7_nightly_upload
           build_environment: "conda 2.7 cu101 devtoolset7"
           requires:
@@ -5265,6 +5464,16 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_test
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_linux_upload:
+          name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_upload
+          build_environment: "conda 3.8 cu101 devtoolset7"
+          requires:
+            - setup
+            - binary_linux_conda_3_8_cu101_devtoolset7_nightly_test
           filters:
             branches:
               only: nightly
@@ -5662,6 +5871,16 @@ workflows:
               only: nightly
           context: org-member
       - binary_mac_upload:
+          name: binary_macos_wheel_3_8_cpu_nightly_upload
+          build_environment: "wheel 3.8 cpu"
+          requires:
+            - setup
+            - binary_macos_wheel_3_8_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_mac_upload:
           name: binary_macos_conda_2_7_cpu_nightly_upload
           build_environment: "conda 2.7 cpu"
           requires:
@@ -5697,6 +5916,16 @@ workflows:
           requires:
             - setup
             - binary_macos_conda_3_7_cpu_nightly_build
+          filters:
+            branches:
+              only: nightly
+          context: org-member
+      - binary_mac_upload:
+          name: binary_macos_conda_3_8_cpu_nightly_upload
+          build_environment: "conda 3.8 cpu"
+          requires:
+            - setup
+            - binary_macos_conda_3_8_cpu_nightly_build
           filters:
             branches:
               only: nightly
@@ -5776,6 +6005,9 @@ workflows:
       - docker_build_job:
           name: "pytorch-linux-xenial-py3.5"
           image_name: "pytorch-linux-xenial-py3.5"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.8"
+          image_name: "pytorch-linux-xenial-py3.8"
       - docker_build_job:
           name: "pytorch-linux-xenial-py3.6-clang7"
           image_name: "pytorch-linux-xenial-py3.6-clang7"
