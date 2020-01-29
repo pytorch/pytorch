@@ -30,15 +30,16 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
-# A map: function name => name of the argument that all outputs are view of
+# A map: function name => two options:
+#      1. name of the argument that all outputs are view of
+#      2. map: output idx => name of the argument that this result is view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
+    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
@@ -64,21 +65,8 @@ VIEW_FUNCTIONS = {
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'narrow'})
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
 
-# note: For functions that return multiple views, we make a distinction between the
-# functions that only perform viewing (called pure views here) versus all others (like
-# user-defined Functions). This list is used to know which functions are pure views.
-# A function should NOT be added to this list if:
-# - Your backward function does more than just the backward of the views. For example if your
-# function makes changes to the layout both in forward and backward.
-# A function should be added to this list if:
-# - You want to allow inplace modification of the result.
-# - You are aware that inplace modification of the output will change the memory usage of the
-#   backward as the multiple Nodes we create will force the gradient buffer to be created
-#   for each Node, instead of once in the original multi-output Node.
-# If you update this list, please update "test_multi_view_methods" in test_autograd.py
-PURE_VIEW_FUNCTIONS = ['split', 'split_with_sizes', 'unbind']
 
 def format_return_type(returns):
     if len(returns) == 0:
