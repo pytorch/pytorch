@@ -45,14 +45,14 @@ function_ref(std::nullptr_t) {}
 
 template <typename Callable>
 function_ref(Callable &&callable,
-            typename std::enable_if<
-                !std::is_same<typename std::remove_reference<Callable>::type,
-                                function_ref>::value>::type * = nullptr,
-            typename std::enable_if<
+            std::enable_if_t<
+                !std::is_same<std::remove_reference_t<Callable>,
+                                function_ref>::value>* = nullptr,
+            std::enable_if_t<
                  std::is_convertible<
-                   typename std::result_of<Callable&&(Params&&...)>::type,
-                   Ret>::value>::type * = nullptr)
-    : callback(callback_fn<typename std::remove_reference<Callable>::type>),
+                   std::result_of_t<Callable&&(Params&&...)>,
+                   Ret>::value>* = nullptr)
+    : callback(callback_fn<std::remove_reference_t<Callable>>),
         callable(reinterpret_cast<intptr_t>(&callable)) {}
 
 Ret operator()(Params ...params) const {

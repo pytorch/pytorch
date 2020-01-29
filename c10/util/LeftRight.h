@@ -60,7 +60,7 @@ public:
     }
 
     template <typename F>
-    auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
+    auto read(F&& readFunc) const -> std::result_of_t<F(const T&)> {
         detail::IncrementRAII _increment_counter(&_counters[_foregroundCounterIndex.load()]);
 
         return readFunc(_data[_foregroundDataIndex.load()]);
@@ -69,7 +69,7 @@ public:
     // Throwing an exception in writeFunc is ok but causes the state to be either the old or the new state,
     // depending on if the first or the second call to writeFunc threw.
     template <typename F>
-    auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
+    auto write(F&& writeFunc) -> std::result_of_t<F(T&)> {
         std::unique_lock<std::mutex> lock(_writeMutex);
 
         return _write(writeFunc);
@@ -77,7 +77,7 @@ public:
 
 private:
     template <class F>
-    auto _write(const F& writeFunc) -> typename std::result_of<F(T&)>::type {
+    auto _write(const F& writeFunc) -> std::result_of_t<F(T&)> {
         /*
          * Assume, A is in background and B in foreground. In simplified terms, we want to do the following:
          * 1. Write to A (old background)
@@ -137,7 +137,7 @@ private:
     }
 
     template<class F>
-    auto _callWriteFuncOnBackgroundInstance(const F& writeFunc, uint8_t localDataIndex) -> typename std::result_of<F(T&)>::type {
+    auto _callWriteFuncOnBackgroundInstance(const F& writeFunc, uint8_t localDataIndex) -> std::result_of_t<F(T&)> {
         try {
             return writeFunc(_data[localDataIndex ^ 1]);
         } catch (...) {

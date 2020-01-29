@@ -10,7 +10,7 @@
 // ATen: modified from llvm::ArrayRef.
 // removed llvm-specific functionality
 // removed some implicit const -> non-const conversions that rely on
-// complicated std::enable_if meta-programming
+// complicated std::enable_if_t meta-programming
 // removed a bunch of slice variants for simplicity...
 
 #pragma once
@@ -203,7 +203,7 @@ class ArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
+  std::enable_if_t<std::is_same<U, T>::value, ArrayRef<T>>&
   operator=(U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
@@ -211,7 +211,7 @@ class ArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
+  std::enable_if_t<std::is_same<U, T>::value, ArrayRef<T>>&
   operator=(std::initializer_list<U>) = delete;
 
   /// @}

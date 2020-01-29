@@ -343,13 +343,13 @@
  /// to keep MSVC from (incorrectly) warning on isUInt<64> that we're shifting
  /// left too many places.
  template <unsigned N>
- constexpr inline typename std::enable_if<(N < 64), bool>::type
+ constexpr inline std::enable_if_t<(N < 64), bool>
  isUInt(uint64_t X) {
    static_assert(N > 0, "isUInt<0> doesn't make sense");
    return X < (UINT64_C(1) << (N));
  }
  template <unsigned N>
- constexpr inline typename std::enable_if<N >= 64, bool>::type
+ constexpr inline std::enable_if_t<N >= 64, bool>
  isUInt(uint64_t X) {
    return true;
  }
@@ -773,7 +773,7 @@
  /// Subtract two unsigned integers, X and Y, of type T and return the absolute
  /// value of the result.
  template <typename T>
- typename std::enable_if<std::is_unsigned<T>::value, T>::type
+ std::enable_if_t<std::is_unsigned<T>::value, T>
  AbsoluteDifference(T X, T Y) {
    return std::max(X, Y) - std::min(X, Y);
  }
@@ -782,7 +782,7 @@
  /// maximum representable value of T on overflow.  ResultOverflowed indicates if
  /// the result is larger than the maximum representable value of type T.
  template <typename T>
- typename std::enable_if<std::is_unsigned<T>::value, T>::type
+ std::enable_if_t<std::is_unsigned<T>::value, T>
  SaturatingAdd(T X, T Y, bool *ResultOverflowed = nullptr) {
    bool Dummy;
    bool &Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
@@ -799,7 +799,7 @@
  /// maximum representable value of T on overflow.  ResultOverflowed indicates if
  /// the result is larger than the maximum representable value of type T.
  template <typename T>
- typename std::enable_if<std::is_unsigned<T>::value, T>::type
+ std::enable_if_t<std::is_unsigned<T>::value, T>
  SaturatingMultiply(T X, T Y, bool *ResultOverflowed = nullptr) {
    bool Dummy;
    bool &Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
@@ -845,7 +845,7 @@
  /// overflow. ResultOverflowed indicates if the result is larger than the
  /// maximum representable value of type T.
  template <typename T>
- typename std::enable_if<std::is_unsigned<T>::value, T>::type
+ std::enable_if_t<std::is_unsigned<T>::value, T>
  SaturatingMultiplyAdd(T X, T Y, T A, bool *ResultOverflowed = nullptr) {
    bool Dummy;
    bool &Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;

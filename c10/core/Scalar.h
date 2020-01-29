@@ -34,10 +34,7 @@ class C10_API Scalar {
   // Value* is both implicitly convertible to SymbolicVariable and bool which
   // causes ambiguosity error. Specialized constructor for bool resolves this
   // problem.
-  template <
-      typename T,
-      typename std::enable_if<std::is_same<T, bool>::value, bool>::type* =
-          nullptr>
+  template <typename T, std::enable_if_t<std::is_same<T, bool>::value, bool>* = nullptr>
   Scalar(T vv) : tag(Tag::HAS_b) {
     v.i = convert<int64_t, bool>(vv);
   }
@@ -99,15 +96,12 @@ class C10_API Scalar {
 
  private:
     template<typename T,
-             typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =
-                 nullptr>
+             std::enable_if_t<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>* = nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_i) {
       v.i = convert<decltype(v.i), T>(vv);
     }
 
-    template<typename T,
-             typename std::enable_if<!std::numeric_limits<T>::is_integer, bool>::type* =
-                 nullptr>
+    template<typename T, std::enable_if_t<!std::numeric_limits<T>::is_integer, bool>* = nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_d) {
       v.d = convert<decltype(v.d), T>(vv);
     }

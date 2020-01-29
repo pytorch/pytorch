@@ -32,7 +32,7 @@ namespace c10 { namespace guts {
 
 
 template <typename Base, typename Child, typename... Args>
-typename std::enable_if<!std::is_array<Base>::value && !std::is_array<Base>::value && std::is_base_of<Base, Child>::value, std::unique_ptr<Base>>::type
+std::enable_if_t<!std::is_array<Base>::value && !std::is_array<Base>::value && std::is_base_of<Base, Child>::value, std::unique_ptr<Base>>
 make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
@@ -141,17 +141,17 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
+std::enable_if_t<
+    std::is_member_pointer<std::decay_t<Functor>>::value,
+    std::result_of_t<Functor && (Args && ...)>>
 invoke(Functor&& f, Args&&... args) {
   return std::mem_fn(f)(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
-typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
-    typename std::result_of<Functor && (Args && ...)>::type>::type
+std::enable_if_t<
+    !std::is_member_pointer<std::decay_t<Functor>>::value,
+    std::result_of_t<Functor && (Args && ...)>>
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }

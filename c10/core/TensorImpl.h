@@ -1406,9 +1406,7 @@ private:
   // handle both ArrayRefs of different types (there are some uses of
   // Resize in Caffe2 which pass in int, not int64_t.)
 
-  template <
-      typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+  template <typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());

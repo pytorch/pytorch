@@ -511,7 +511,7 @@ public:
 
         // the template automatically disables the operator when value_type is already
         // const, because that would cause a lot of compiler warnings otherwise.
-        template<class target_type = const value_type, class = typename std::enable_if<std::is_same<target_type, const value_type>::value && !std::is_same<target_type, value_type>::value>::type>
+        template<class target_type = const value_type, class = std::enable_if_t<std::is_same<target_type, const value_type>::value && !std::is_same<target_type, value_type>::value>>
         operator templated_iterator<target_type>() const
         {
             return { current };

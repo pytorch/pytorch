@@ -52,18 +52,18 @@ namespace std {
   }
 
   // Define integral versions the same way as more recent libstdc++
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type acosh(T x) { return __builtin_acosh(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type asinh(T x) { return __builtin_asinh(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type atanh(T x) { return __builtin_atanh(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type erf(T x) { return __builtin_erf(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type erfc(T x) { return __builtin_erfc(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type expm1(T x) { return __builtin_expm1(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type lgamma(T x) { return __builtin_lgamma(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type log1p(T x) { return __builtin_log1p(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type nearbyint(T x) { return __builtin_nearbyint(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type round(T x) { return __builtin_round(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type tgamma(T x) { return __builtin_tgamma(x); }
-  template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type trunc(T x) { return __builtin_trunc(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> acosh(T x) { return __builtin_acosh(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> asinh(T x) { return __builtin_asinh(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> atanh(T x) { return __builtin_atanh(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> erf(T x) { return __builtin_erf(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> erfc(T x) { return __builtin_erfc(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> expm1(T x) { return __builtin_expm1(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> lgamma(T x) { return __builtin_lgamma(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> log1p(T x) { return __builtin_log1p(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> nearbyint(T x) { return __builtin_nearbyint(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> round(T x) { return __builtin_round(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> tgamma(T x) { return __builtin_tgamma(x); }
+  template<typename T> std::enable_if_t<std::is_integral<T>::value, double> trunc(T x) { return __builtin_trunc(x); }
 
   // Convoluted definition of these binary functions for overloads other than
   // (float,float) and (double,double).  Using a template from __gnu_cxx
@@ -105,7 +105,7 @@ namespace std {
     return ::log(arg) / ::log(2.0);
   }
   template<typename T>
-  typename std::enable_if<std::is_integral<T>::value, double>::type
+  std::enable_if_t<std::is_integral<T>::value, double>
   log2(T x) {
     return ::log(x) / ::log(2.0);
   }

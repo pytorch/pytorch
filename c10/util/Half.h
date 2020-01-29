@@ -410,8 +410,7 @@ template <typename To, typename FromV>
 struct Converter<
     To,
     std::complex<FromV>,
-    typename std::enable_if<
-        guts::negation<is_complex_t<To>>::value>::type> {
+    std::enable_if_t<guts::negation<is_complex_t<To>>::value>> {
   To operator()(std::complex<FromV> f) {
     return static_cast<To>(f.real());
   }
@@ -441,14 +440,14 @@ struct Converter<
 // `error: comparison of constant '255' with boolean expression is always false`
 // for `f > limit::max()` below
 template <typename To, typename From>
-typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
+std::enable_if_t<std::is_same<From, bool>::value, bool> overflows(
     From f) {
   return false;
 }
 
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
-typename std::enable_if<std::is_integral<From>::value && !std::is_same<From, bool>::value, bool>::type overflows(
+std::enable_if_t<std::is_integral<From>::value && !std::is_same<From, bool>::value, bool> overflows(
     From f) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
@@ -463,7 +462,7 @@ typename std::enable_if<std::is_integral<From>::value && !std::is_same<From, boo
 }
 
 template <typename To, typename From>
-typename std::enable_if<std::is_floating_point<From>::value, bool>::type
+std::enable_if_t<std::is_floating_point<From>::value, bool>
 overflows(From f) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
@@ -484,7 +483,7 @@ overflows(From f) {
 #endif
 
 template <typename To, typename From>
-typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
+std::enable_if_t<is_complex_t<From>::value, bool> overflows(
     From f) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
