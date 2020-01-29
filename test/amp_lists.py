@@ -117,6 +117,13 @@ class AmpLists(object):
             ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((8,), device="cuda", dtype=torch.float16),)),
             ("triplet_margin_loss", mat0_fp16 + mat1_fp16 + mat2_fp16),
             ("binary_cross_entropy_with_logits", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
+            ("cumprod", pointwise0_fp16 + (0,)),
+            ("cumsum", pointwise0_fp16 + (0,)),
+            ("dist", pointwise0_fp16 + pointwise1_fp16),
+            ("pdist", mat0_fp16),
+            ("cdist", mat0_fp16 + mat1_fp16),
+            ("prod", pointwise0_fp16),
+            ("prod", pointwise0_fp16 + (0,)),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []

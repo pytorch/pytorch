@@ -41,7 +41,7 @@ enum class CastPolicy : uint8_t {
   fp16_with_tensorlist, // Separate from CastPolicy::fp16 due to lifetime concerns of data
                         // viewed by TensorLists.  Maybe some C++ guru can help me unify them.
   fp32, // Cast all inputs to fp32 before running the op.
-  fp32_set_dtype, // fp32_set_dtype and fp32_append_dtype handle functions that should
+  fp32_set_opt_dtype, // fp32_set_opt_dtype and fp32_append_dtype handle functions that should
   fp32_append_dtype, // output in fp32 and support an output dtype flag.  The policy is:
                      // If the user has explicity specified a dtype, respect it.
                      // Otherwise, set the flag (if present in arglist) or append it
@@ -278,9 +278,9 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
   }
 };
 
-// CastPolicy::fp32_set_dtype
+// CastPolicy::fp32_set_opt_dtype
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32_set_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
     return (*F)(set_opt_dtype(at::kFloat, args)...);
@@ -291,7 +291,6 @@ struct WrapFunction_<CastPolicy::fp32_set_dtype, Redispatch, F, Ret, guts::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    std::cout << "fp32_append_dtype" << std::endl;
     c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
     return (*F)(args..., at::kFloat);
   }
@@ -511,16 +510,26 @@ auto register_out_of_place = torch::RegisterOperators()
   KERNEL(at::triplet_margin_loss, "aten::triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, double, double, double, bool, int64_t), fp32)
   KERNEL_UNBOXED_ONLY(at::multi_margin_loss, "aten::multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, Scalar, Scalar, const Tensor &, int64_t), fp32)
   KERNEL_UNBOXED_ONLY(at::binary_cross_entropy_with_logits, "aten::binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, int64_t), fp32)
-  // fp32_set_dtype
-  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_dtype)
-  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_dtype)
-  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_dtype)
-  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_dtype)
+  KERNEL(at::dist, "aten::dist(Tensor self, Tensor other, Scalar p=2) -> Tensor", Tensor (const Tensor &, const Tensor &, Scalar), fp32)
+  KERNEL(at::pdist, "aten::pdist(Tensor self, float p=2) -> Tensor", Tensor (const Tensor &, double), fp32)
+  KERNEL(at::cdist, "aten::cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor", Tensor (const Tensor &, const Tensor &, double, c10::optional<int64_t>), fp32)
+  KERNEL_UNBOXED_ONLY(at::prod, "aten::prod(Tensor self, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, c10::optional<ScalarType>), fp32)
+  KERNEL_UNBOXED_ONLY(at::prod, "aten::prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>), fp32)
+  KERNEL_UNBOXED_ONLY(at::prod, "aten::prod.dim_Dimname(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, bool, c10::optional<ScalarType>), fp32)
+  // fp32_set_opt_dtype
+  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::softmax, "aten::softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::log_softmax, "aten::log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::cumprod, "aten::cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::cumprod, "aten::cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::cumsum, "aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, int64_t, c10::optional<ScalarType>), fp32_set_opt_dtype)
+  KERNEL_UNBOXED_ONLY(at::cumsum, "aten::cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor", Tensor (const Tensor &, Dimname, c10::optional<ScalarType>), fp32_set_opt_dtype)
   // commenting these out because they accept an explicit (not-optional) dtype, and we shouldn't try to flip that even
   // when autocasting.
-  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_dtype)
-  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_dtype)
-  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_dtype)
+  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_set_opt_dtype)
+  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_set_opt_dtype)
+  // KERNEL_UNBOXED_ONLY(at::norm, "aten::norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, DimnameList, bool, ScalarType), fp32_set_opt_dtype)
   // fp32_append_dtype
   KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "aten::norm.Scalar(Tensor self, Scalar p=2) -> Tensor", Tensor (const Tensor &, Scalar), Tensor (const Tensor &, c10::optional<Scalar>, ScalarType), fp32_append_dtype)
   KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(at::norm, "aten::norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor", Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool), Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType), fp32_append_dtype)
