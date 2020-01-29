@@ -224,3 +224,72 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   iter.add_input(at::ones({1,1}, at::dtype(at::kInt)));
   ASSERT_ANY_THROW(iter.build());
 }
+
+TEST(TensorIteratorTest, NeedsDynamicCasting) {
+  if (!at::hasCUDA()) {
+    return;
+  }
+
+  //---------------------------- Binary Ops ---------------------------
+  { // Binary ops with same dtypes should not have dynamic casting
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    Tensor out;
+    auto iter = at::TensorIterator::binary_op(out, tensor1, tensor2);
+    ASSERT_FALSE(iter.needs_dynamic_casting());
+  }
+  { // Binary ops with same dtypes should not have dynamic casting
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto out = at::empty({5, 5}, at::device(kCUDA).dtype(kFloat));;
+    auto iter = at::TensorIterator::binary_op(out, tensor1, tensor2);
+    ASSERT_FALSE(iter.needs_dynamic_casting());
+  }
+  { // Binary ops with different dtypes should have dynamic casting
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kDouble));
+    auto out = at::empty({5, 5}, at::device(kCUDA).dtype(kFloat));;
+    auto iter = at::TensorIterator::binary_op(out, tensor1, tensor2);
+    ASSERT_TRUE(iter.needs_dynamic_casting());
+  }
+  { // Binary ops with different dtypes should have dynamic casting
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto out = at::empty({5, 5}, at::device(kCUDA).dtype(kDouble));;
+    auto iter = at::TensorIterator::binary_op(out, tensor1, tensor2);
+    ASSERT_TRUE(iter.needs_dynamic_casting());
+  }
+  { // Binary ops with CPU scalar should not have dynamic casting
+    auto tensor = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto scalar = at::randn({}, at::device(kCPU).dtype(kDouble));
+    Tensor out;
+    auto iter = at::TensorIterator::binary_op(out, tensor, scalar);
+    iter.remove_operand(2);  // simulate `gpu_kernel_with_scalars`
+    ASSERT_FALSE(iter.needs_dynamic_casting());
+  }
+  { // Binary ops with CPU scalar should not have dynamic casting
+    auto tensor = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto scalar = at::randn({}, at::device(kCPU).dtype(kDouble));
+    Tensor out;
+    auto iter = at::TensorIterator::binary_op(out, scalar, tensor);
+    iter.remove_operand(1);  // simulate `gpu_kernel_with_scalars`
+    ASSERT_FALSE(iter.needs_dynamic_casting());
+  }
+
+  //-------------------------- Comparison Ops --------------------------
+  { // Comparison ops should not have dynamic casting if inputs are
+    // same dtype and output is bool
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto out = at::empty({5, 5}, at::device(kCUDA).dtype(kBool));
+    auto iter = at::TensorIterator::comparison_op(out, tensor1, tensor2);
+    ASSERT_FALSE(iter.needs_dynamic_casting());
+  }
+  { // Comparison ops should have dynamic casting if output is not bool
+    auto tensor1 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto tensor2 = at::randn({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto out = at::empty({5, 5}, at::device(kCUDA).dtype(kFloat));
+    auto iter = at::TensorIterator::comparison_op(out, tensor1, tensor2);
+    ASSERT_TRUE(iter.needs_dynamic_casting());
+  }
+}

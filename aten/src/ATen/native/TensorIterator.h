@@ -300,7 +300,19 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
   bool needs_dynamic_casting() const {
-    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
+    if (force_dynamic_casting_) {
+      return true;
+    }
+    if (common_dtype_strategy_ == CommonDTypeStrategy::NONE) {
+      return false;
+    }
+    auto operands = (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS) ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
+    for (auto &op : operands) {
+      if (op.tensor.defined() && op.current_dtype != common_dtype_) {
+        return true;
+      }
+    }
+    return false;
   }
 
   bool has_contiguous_first_dim() const {
@@ -391,7 +403,6 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
-  bool have_differing_types_ = false;
   bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
