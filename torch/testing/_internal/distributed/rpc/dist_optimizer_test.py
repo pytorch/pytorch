@@ -1,15 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import threading
 import unittest
 
-from torch.testing._internal.dist_utils import dist_init
-from torch import optim
-from torch.distributed.optim import DistributedOptimizer
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import threading
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch import optim
+from torch.distributed.optim import DistributedOptimizer
+from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
+    RpcAgentTestFixture,
+)
 
 
 class MyModule:
@@ -34,13 +36,13 @@ class FailingOptimizer(optim.Optimizer):
         super(FailingOptimizer, self).__init__(params, {})
 
     def step(self, closure=None):
-        raise ValueError('Error running optimizer.')
+        raise ValueError("Error running optimizer.")
 
 
 class OptimizerFailingOnConstructor(optim.Optimizer):
     def __init__(self, params):
         super(OptimizerFailingOnConstructor, self).__init__(params, {})
-        raise ValueError('Error creating optimizer.')
+        raise ValueError("Error creating optimizer.")
 
     def step(self, closure=None):
         raise NotImplementedError
@@ -66,7 +68,7 @@ def remote_method(method, obj_rref, *args, **kwargs):
         obj_rref.owner(),
         _call_method,
         args=[method, obj_rref] + list(args),
-        kwargs=kwargs
+        kwargs=kwargs,
     )
 
 
@@ -86,7 +88,7 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
         obj_rref.owner(),
         _call_method,
         args=[method, obj_rref] + list(args),
-        kwargs=kwargs
+        kwargs=kwargs,
     )
 
 
@@ -94,12 +96,11 @@ def rpc_async_method(method, obj_rref, *args, **kwargs):
     not torch._six.PY3, "Pytorch distributed optim does not support python2"
 )
 class DistOptimizerTest(RpcAgentTestFixture):
-
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
-        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
-        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -107,8 +108,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         remote_param2 = remote_method(MyModule.get_w, remote_module2)
 
         dist_optim = DistributedOptimizer(
-            FailingOptimizer,
-            [remote_param1, remote_param2],
+            FailingOptimizer, [remote_param1, remote_param2]
         )
 
         with dist_autograd.context():
@@ -116,8 +116,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
-            output2 = rpc_async_method(
-                MyModule.forward, remote_module2, output1.wait())
+            output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1).sum()
 
             dist_autograd.backward([loss])
@@ -127,8 +126,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
-        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
-        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -137,8 +136,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(Exception, "Error creating optimizer."):
             dist_optim = DistributedOptimizer(
-                OptimizerFailingOnConstructor,
-                [remote_param1, remote_param2],
+                OptimizerFailingOnConstructor, [remote_param1, remote_param2]
             )
 
     @dist_init()
@@ -163,8 +161,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = 'worker%d' % ((self.rank + 1) % self.world_size)
-        owner2 = 'worker%d' % ((self.rank + 2) % self.world_size)
+        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
+        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -178,9 +176,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
         self.assertEqual(old_w2, remote_param2.to_here())
 
         dist_optim = DistributedOptimizer(
-            optim.SGD,
-            [remote_param1, remote_param2],
-            lr=0.05,
+            optim.SGD, [remote_param1, remote_param2], lr=0.05
         )
 
         with dist_autograd.context():
@@ -188,8 +184,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
             output1 = rpc_async_method(MyModule.forward, remote_module1, t2)
-            output2 = rpc_async_method(
-                MyModule.forward, remote_module2, output1.wait())
+            output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1)
 
             dist_autograd.backward([loss.sum()])
