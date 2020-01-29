@@ -62,10 +62,6 @@ Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<Memo
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, const TensorOptions &, c10::optional<MemoryFormat>>(key, size, options, memory_format);
 }
 
-Tensor empty_names(IntArrayRef size, c10::optional<DimnameList> names, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
-  return at::native::empty(size, names, options, memory_format);
-}
-
 Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions & options) {
   DispatchKey key = options.computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::empty_strided", "");
@@ -82,10 +78,6 @@ Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scal
   DispatchKey key = options.computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_empty_per_channel_affine_quantized", "");
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, const Tensor &, const Tensor &, int64_t, const TensorOptions &, c10::optional<MemoryFormat>>(key, size, scales, zero_points, axis, options, memory_format);
-}
-
-Tensor empty_like(const Tensor & self, const TensorOptions & options, c10::optional<MemoryFormat> memory_format) {
-  return at::native::empty_like(self, options, memory_format);
 }
 
 Tensor eye(int64_t n, const TensorOptions & options) {
@@ -413,14 +405,6 @@ static auto registry = torch::RegisterOperators()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
     .impl_unboxedOnlyKernel<decltype(empty), &empty>(DispatchKey::BackendSelect)
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(empty_like), &empty_like>(DispatchKey::BackendSelect)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(empty_names), &empty_names>(DispatchKey::BackendSelect)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor")
     .impl_unboxedOnlyKernel<decltype(_empty_per_channel_affine_quantized), &_empty_per_channel_affine_quantized>(DispatchKey::BackendSelect)
