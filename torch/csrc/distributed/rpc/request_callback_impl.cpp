@@ -183,8 +183,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-            jit::toPyObject(rref->getValue()));
+        auto value = rref->getValue();
+        py::object pyValue;
+        {
+          pybind11::gil_scoped_acquire ag;
+          pyValue = torch::jit::toPyObject(std::move(value));
+        }
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(pyValue);
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
       }
 
@@ -197,9 +203,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
             if (!error) {
+              auto value = rref->getValue();
+              py::object pyValue;
+              {
+                pybind11::gil_scoped_acquire ag;
+                pyValue = torch::jit::toPyObject(std::move(value));
+              }
               SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(
-                      jit::toPyObject(rref->getValue()));
+                  PythonRpcHandler::getInstance().serialize(pyValue);
               Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
