@@ -116,9 +116,9 @@ static std::vector<TensorIndex> indexToTensorIndexList(const Variable& self, PyO
     PyObject* obj = PyTuple_GET_ITEM(holder.get(), i);
     if (THPUtils_checkLong(obj)) {
       if (THPVariable_Check(obj)) {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(obj), THPVariable_Unpack(obj)));
+        tensor_index_list.emplace_back(TensorIndex(THPUtils_unpackLong(obj), THPVariable_Unpack(obj)));
       } else {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(obj)));
+        tensor_index_list.emplace_back(TensorIndex(THPUtils_unpackLong(obj)));
       }
     } else if (PySlice_Check(obj)) {
       Py_ssize_t start, stop, step;
@@ -138,19 +138,19 @@ static std::vector<TensorIndex> indexToTensorIndexList(const Variable& self, PyO
         step_tensor = THPVariable_Unpack(sliceobj->step);
       }
 
-      tensor_index_list.push_back(TensorIndex({start, stop, step}, {start_tensor, stop_tensor, step_tensor}));
+      tensor_index_list.emplace_back(TensorIndex({start, stop, step}, {start_tensor, stop_tensor, step_tensor}));
     } else if (obj == Py_Ellipsis) {
-      tensor_index_list.push_back(TensorIndex(at::indexing::Ellipsis));
+      tensor_index_list.emplace_back(TensorIndex(at::indexing::Ellipsis));
     } else if (obj == Py_None) {
-      tensor_index_list.push_back(TensorIndex(at::indexing::None));
+      tensor_index_list.emplace_back(TensorIndex(at::indexing::None));
     } else if (PyBool_Check(obj)) {
-      tensor_index_list.push_back(TensorIndex(obj == Py_True));
+      tensor_index_list.emplace_back(TensorIndex(obj == Py_True));
     } else if (THPVariable_Check(obj)) {
-      tensor_index_list.push_back(TensorIndex(THPVariable_Unpack(obj)));
+      tensor_index_list.emplace_back(TensorIndex(THPVariable_Unpack(obj)));
     } else if (PySequence_Check(obj)) {
       // TODO: Naughty naughty get out of jail free
       // (Fixing this means I have to fix the call chain though :/)
-      tensor_index_list.push_back(TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj)));
+      tensor_index_list.emplace_back(TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj)));
     } else {
       auto ind = THPObjectPtr(PyNumber_Index(obj));
       if (!ind) {
@@ -158,9 +158,9 @@ static std::vector<TensorIndex> indexToTensorIndexList(const Variable& self, PyO
         invalid_index(obj);
       }
       if (THPVariable_Check(ind)) {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(ind), THPVariable_Unpack(ind)));
+        tensor_index_list.emplace_back(TensorIndex(THPUtils_unpackLong(ind), THPVariable_Unpack(ind)));
       } else {
-        tensor_index_list.push_back(TensorIndex(THPUtils_unpackLong(ind)));
+        tensor_index_list.emplace_back(TensorIndex(THPUtils_unpackLong(ind)));
       }
     }
   }
