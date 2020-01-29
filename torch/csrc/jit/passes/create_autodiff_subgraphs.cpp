@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
 #include <c10/util/Exception.h>
@@ -17,10 +19,14 @@ class SubgraphSlicer {
   SubgraphSlicer(
       Block* block,
       std::shared_ptr<Graph> graph,
-      size_t minSubgraphSize)
+      size_t minSubgraphSize,
+      bool strict_check,
+      size_t max_iterations)
       : block_(block),
         graph_(std::move(graph)),
-        minSubgraphSize_(minSubgraphSize) {}
+        minSubgraphSize_(minSubgraphSize),
+        strict_check_(strict_check),
+        max_iterations_(max_iterations) {}
 
   void run(std::vector<Node*>& diffGraphs) {
     // We need to run the slicer multiple times in order to get all merge
@@ -38,7 +44,7 @@ class SubgraphSlicer {
     //   e = f(d)  <- iter still here
     //   d = f(c)  <- this was node moved on the other side.
     bool any_changed = true;
-    while (any_changed) {
+    while (any_changed && max_iterations_--) {
       any_changed = false;
       AliasDb aliasDb(graph_);
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
@@ -54,7 +60,9 @@ class SubgraphSlicer {
     auto curNode = *block_->nodes().rbegin();
     while (curNode != *block_->nodes().rend()) {
       for (auto subBlock : curNode->blocks()) {
-        SubgraphSlicer(subBlock, graph_, minSubgraphSize_).run(diffGraphs);
+        SubgraphSlicer(
+            subBlock, graph_, minSubgraphSize_, strict_check_, max_iterations_)
+            .run(diffGraphs);
       }
 
       // Save the previous node, since we might delete `curNode` in next block
@@ -118,7 +126,22 @@ class SubgraphSlicer {
     if (node->kind() == prim::Constant) {
       return false;
     }
-    return isDifferentiable(node);
+
+    bool requires_grad = !strict_check_;
+    if (strict_check_) {
+      bool output_needs_grad = std::any_of(
+          node->outputs().begin(), node->outputs().end(), [](Value* o) {
+            if (auto tt = o->type()->cast<TensorType>()) {
+              return !tt->requiresGrad().has_value() ||
+                  tt->requiresGrad().value();
+            }
+            return false;
+          });
+
+      requires_grad &= output_needs_grad;
+    }
+
+    return requires_grad && isDifferentiable(node);
   }
 
   std::pair<graph_node_list::iterator, bool> scanNode(
@@ -164,14 +187,24 @@ class SubgraphSlicer {
   Block* block_;
   std::shared_ptr<Graph> graph_;
   size_t minSubgraphSize_;
+  bool strict_check_;
+  size_t max_iterations_;
 };
 } // anonymous namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,
-    size_t threshold) {
+    size_t threshold,
+    bool strict_requires_grad_check,
+    size_t max_iterations) {
   std::vector<Node*> diff_nodes;
-  SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
+  SubgraphSlicer(
+      graph->block(),
+      graph,
+      threshold,
+      strict_requires_grad_check,
+      max_iterations)
+      .run(diff_nodes);
   return diff_nodes;
 }
 } // namespace jit
