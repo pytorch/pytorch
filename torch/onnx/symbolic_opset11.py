@@ -253,8 +253,8 @@ def __getitem_(g, self, i):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
     else:
-        from torch.onnx.symbolic_opset9 import select
-        return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
+        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        return getitem(g, self, i)
 
 
 def append(g, self, tensor):
