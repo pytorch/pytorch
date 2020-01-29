@@ -5,7 +5,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <cmath>
 #include <limits>
-#include <cuda.h> 
+#include <cuda.h>
 
 #include <ATen/native/cuda/Loops.cuh>
 
@@ -96,7 +96,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
           scalar_t inc = step * ind;
-          scalar_t val = ::pow(scalar_base, scalar_start + inc);
+          scalar_t val = std::pow(scalar_base, scalar_start + inc);
           return val;
         });
     });
