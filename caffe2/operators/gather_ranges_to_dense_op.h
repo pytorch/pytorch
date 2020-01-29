@@ -163,23 +163,21 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
     // Check whether the empty and mismatch ratio exceeded the threshold.
     totalRanges_ += batchSize;
-    if (totalRanges_ >= minObservation_) {
-      for (int j = 0; j < OutputSize(); ++j) {
-        CAFFE_ENFORCE_GT(
-            totalRanges_ * maxMismatchedRatio_,
-            mismatchedRanges_[j],
-            "Ratio of range length mismatch for feature at index ",
-            j,
-            " is ",
-            (static_cast<double>(mismatchedRanges_[j]) /
-             static_cast<double>(totalRanges_)),
-            " (",
-            mismatchedRanges_[j],
-            "/",
-            totalRanges_,
-            ") which exceeds ",
-            maxMismatchedRatio_);
-      }
+    for (int j = 0; j < OutputSize(); ++j) {
+      CAFFE_ENFORCE_GT(
+          std::max(totalRanges_, minObservation_) * maxMismatchedRatio_,
+          mismatchedRanges_[j],
+          "Ratio of range length mismatch for feature at index ",
+          j,
+          " is ",
+          (static_cast<double>(mismatchedRanges_[j]) /
+           static_cast<double>(totalRanges_)),
+          " (",
+          mismatchedRanges_[j],
+          "/",
+          totalRanges_,
+          ") which exceeds ",
+          maxMismatchedRatio_);
     }
 
     return true;
