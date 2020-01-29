@@ -241,9 +241,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #if defined(__CUDA_ARCH__)
 #define C10_HOST_CONSTEXPR __host__
 #define C10_HOST_CONSTEXPR_VAR
-#elif defined(_MSC_VER)
-#define C10_HOST_CONSTEXPR
-#define C10_HOST_CONSTEXPR_VAR
 #else
 #define C10_HOST_CONSTEXPR constexpr
 #define C10_HOST_CONSTEXPR_VAR constexpr
