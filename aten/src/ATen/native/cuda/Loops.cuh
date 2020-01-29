@@ -135,38 +135,6 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
   return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
-// similar to above code but work on lambda using index for calculation
-template <typename traits, typename func_t, typename index_t, size_t... INDEX>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx,
-                       std::index_sequence<INDEX...>) {
-  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])..., idx);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], int i, int idx) {
-  // index at last position
-  using Indices = std::make_index_sequence<traits::arity-1>;
-  return invoke_with_index_impl<traits>(f, data, strides, i, idx, Indices{});
-}
-
-template <typename traits, typename func_t, typename index_t, size_t... I>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index_impl(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
-                       int i, int idx, std::index_sequence<I...>) {
-  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])..., idx);
-}
-
-template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
-C10_HOST_DEVICE typename traits::result_type
-invoke_with_index(const func_t &f, char* const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[],
-                  int i, int idx) {
-  // index at last position
-  using Indices = std::make_index_sequence<traits::arity-1>;
-  return invoke_with_index_impl<traits>(f, data, strides, dtypes, i, idx, Indices{});
-}
-
 } // namespace legacy
 
 // See the note for namespace legacy above.
@@ -403,56 +371,25 @@ template <typename func_t>
 void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
-  // need to +1(output) and -1(index)
-  constexpr int ntensors = traits::arity;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity);
+  static_assert(traits::arity = 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 1);
 
-  at::detail::Array<char*, ntensors> data;
-  for (int i = 0; i < ntensors; i++) {
-    data[i] = (char*)iter.data_ptr(i);
-  }
-
-  at::detail::Array<ScalarType, ntensors> dtypes;
-  for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
-  }
+  char* data = (char*)iter.data_ptr(0);
 
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
-    auto inner_strides = iter.get_inner_strides();
-    at::detail::Array<int, ntensors> strides;
-    for (int i = 0; i < ntensors; i++) {
-      strides[i] = inner_strides[i];
-    }
-
-    if (iter.needs_dynamic_casting()) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        void* out = data[0] + strides[0] * idx;
-        arg0_t result = legacy::invoke_with_index(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx, idx);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = legacy::invoke_with_index(f, &data.data[1], &strides.data[1], idx, idx);
-      });
-    }
+    int stride = iter.get_inner_strides()[0];
+    legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      arg0_t* out = (arg0_t*)(data[0] + stride * idx);
+      *out = f(idx);
+    });
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
-    if (iter.needs_dynamic_casting()) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        void* out = data[0] + offsets[0];
-        arg0_t result = legacy::invoke_with_index(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1, idx);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = legacy::invoke_with_index(f, &data.data[1], &offsets.data[1], 1, idx);
-      });
-    }
+    legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      auto offsets = offset_calc.get(idx);
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      *out = f(idx);
+    });
   }
 }
 
@@ -460,9 +397,7 @@ template <typename func_t>
 void gpu_kernel_with_index(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
-  for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda(), "gpu_kernel_with_index only support cuda tensor.");
-  }
+  TORCH_INTERNAL_ASSERT(iter.device(0).is_cuda(), "gpu_kernel_with_index only support cuda tensor.");
 
   if (iter.numel() == 0) {
     return;
