@@ -167,16 +167,30 @@ static std::vector<TensorIndex> indexToTensorIndexList(const Variable& self, PyO
   return tensor_index_list;
 }
 
+Tensor dispatch_index_no_gil(Tensor & self, ArrayRef<TensorIndex> tensor_index_list) {
+  pybind11::gil_scoped_release no_gil;
+  return self.index(tensor_index_list);
+}
+
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(self_, index);
 
-  pybind11::gil_scoped_release no_gil;
-  return wrap(self_.index(tensor_index_list));
+  return wrap(dispatch_index_no_gil(self_, tensor_index_list));
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+void dispatch_index_put_no_gil(Tensor & self, ArrayRef<TensorIndex> tensor_index_list, Tensor const & rhs) {
+  pybind11::gil_scoped_release no_gil;
+  self.index_put_(tensor_index_list, rhs);
+}
+
+void dispatch_index_put_no_gil(Tensor & self, ArrayRef<TensorIndex> tensor_index_list, Scalar v) {
+  pybind11::gil_scoped_release no_gil;
+  self.index_put_(tensor_index_list, v);
 }
 
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
@@ -187,17 +201,16 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   std::vector<TensorIndex> tensor_index_list = indexToTensorIndexList(self_, index);
 
-  pybind11::gil_scoped_release no_gil;
   if (THPVariable_Check(py_value)) {
-    self_.index_put_(tensor_index_list, reinterpret_cast<THPVariable*>(py_value)->cdata);
+    dispatch_index_put_no_gil(self_, tensor_index_list, reinterpret_cast<THPVariable*>(py_value)->cdata);
     return 0;
   } else if (THPUtils_checkLong(py_value) || PyBool_Check(py_value)) {
     Scalar v = Scalar(THPUtils_unpackLong(py_value));
-    self_.index_put_(tensor_index_list, v);
+    dispatch_index_put_no_gil(self_, tensor_index_list, v);
     return 0;
   } else if (PyFloat_Check(py_value)) {
     Scalar v = Scalar(THPUtils_unpackDouble(py_value));
-    self_.index_put_(tensor_index_list, v);
+    dispatch_index_put_no_gil(self_, tensor_index_list, v);
     return 0;
   } else {
     throw TypeError(
