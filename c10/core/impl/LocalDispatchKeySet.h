@@ -61,6 +61,10 @@ C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 class C10_API IncludeDispatchKeyGuard {
 public:
   IncludeDispatchKeyGuard(DispatchKey);
+  IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard operator=(const IncludeDispatchKeyGuard&) = delete;
+  IncludeDispatchKeyGuard(IncludeDispatchKeyGuard&&) = delete;
+  IncludeDispatchKeyGuard operator=(IncludeDispatchKeyGuard&&) = delete;
   ~IncludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
@@ -73,6 +77,10 @@ private:
 class C10_API ExcludeDispatchKeyGuard {
 public:
   ExcludeDispatchKeyGuard(DispatchKey);
+  ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
+  ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
+  ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
   ~ExcludeDispatchKeyGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
