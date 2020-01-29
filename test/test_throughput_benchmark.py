@@ -4,7 +4,7 @@ import torch
 from torch.utils import ThroughputBenchmark
 from torch.testing import assert_allclose
 
-from common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TwoLayerNet(torch.jit.ScriptModule):
     def __init__(self, D_in, H, D_out):
