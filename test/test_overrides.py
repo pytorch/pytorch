@@ -4,10 +4,12 @@ import unittest
 import inspect
 import functools
 import pprint
+import types
 
-Tensor = torch.Tensor
 from torch.testing._internal.common_utils import TestCase
 from torch._overrides import handle_torch_function, has_torch_function
+
+Tensor = torch.Tensor
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -862,32 +864,42 @@ TENSOR_LIKE_OVERRIDES = tuple(t[0] for t in TENSOR_LIKE_TORCH_IMPLEMENTATIONS)
 def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
-    for func_name in torch.__all__ + dir(torch._C._VariableFunctions):
-        # ignore private functions or functions that are deleted in torch.__init__
-        if func_name.startswith('_') or func_name == 'unique_dim':
-            continue
-        func = getattr(torch, func_name)
-        # IGNORED_TORCH_FUNCTIONS are functions that are public but cannot be
-        # overriden by __torch_function__
-        if func in IGNORED_TORCH_FUNCTIONS:
-            msg = "torch.{} is in IGNORED_TORCH_FUNCTIONS but still has an explicit override"
-            assert func not in TENSOR_LIKE_OVERRIDES, msg.format(func.__name__)
-            continue
-        # ignore in-place operators
-        if func_name.endswith('_'):
-            continue
-        # only consider objects with lowercase names
-        if not func_name.islower():
-            continue
-        if func not in TENSOR_LIKE_OVERRIDES:
-            untested_funcs.append("torch.{}".format(func.__name__))
-    msg = (
-        "The following functions are not tested for __torch_function__ "
-        "support, please either add an entry in "
-        "TENSOR_LIKE_TORCH_IMPLEMENTATIONS for this function or if a "
-        "__torch_function__ override does not make sense, add an entry to "
-        "IGNORED_TORCH_FUNCTIONS.\n\n{}"
-    )
+    tested_namespaces = [
+        (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        (torch.functional, torch.functional.__all__),
+        (torch.nn.functional, dir(torch.nn.functional)),
+    ]
+    for namespace, ns_funcs in tested_namespaces:
+        for func_name in ns_funcs:
+            # ignore private functions or functions that are deleted in torch.__init__
+            if func_name.startswith('_') or func_name == 'unique_dim':
+                continue
+            # ignore in-place operators
+            if func_name.endswith('_'):
+                continue
+            # only consider objects with lowercase names
+            if not func_name.islower():
+                continue
+            func = getattr(namespace, func_name)
+            # ignore re-exported modules
+            if isinstance(func, types.ModuleType):
+                continue
+            qualname = "{}.{}".format(namespace.__name__, func_name)
+            # IGNORED_TORCH_FUNCTIONS are functions that are public but cannot be
+            # overriden by __torch_function__
+            if func in IGNORED_TORCH_FUNCTIONS:
+                msg = "{} is in IGNORED_TORCH_FUNCTIONS but still has an explicit override"
+                assert func not in TENSOR_LIKE_OVERRIDES, msg.format(qualname)
+                continue
+            if func not in TENSOR_LIKE_OVERRIDES:
+                untested_funcs.append(qualname)
+            msg = (
+                "The following functions are not tested for __torch_function__ "
+                "support, please either add an entry in "
+                "TENSOR_LIKE_TORCH_IMPLEMENTATIONS for this function or if a "
+                "__torch_function__ override does not make sense, add an entry to "
+                "IGNORED_TORCH_FUNCTIONS.\n\n{}"
+            )
 
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
