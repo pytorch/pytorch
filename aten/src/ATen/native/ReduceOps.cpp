@@ -488,9 +488,10 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0);
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-              "norm only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
-
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "norm only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "norm only supports strided layout, got: ", self.layout());
 
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
@@ -513,8 +514,10 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   if (self.is_sparse()) {
     return at::native_norm(self, p);
   } else {
-    TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-                "norm only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+    TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+                "norm only supports CPU AND CUDA device type, got: ", self.device().type());
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "norm only supports strided layout, got: ", self.layout());
     TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
                 "norm only supports floating-point dtypes");
 
@@ -565,9 +568,10 @@ inline Tensor & _all(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor all(const Tensor& self) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU ||
-    self.options().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
-    "backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "all only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "all only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
 
@@ -583,9 +587,10 @@ Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU ||
-    self.options().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
-    "backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "all only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "all only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -609,11 +614,10 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor any(const Tensor& self) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU ||
-    self.options().backend() == Backend::CUDA ||
-    self.options().backend() == Backend::SparseCPU ||
-    self.options().backend() == Backend::SparseCUDA, "any only supports CPU, CUDA, "
-    "SparseCPU and SparseCUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "any only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
+              "any only supports strided AND sparse layout, got: ", self.layout());
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
 
@@ -629,9 +633,10 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU ||
-    self.options().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
-    "backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "any only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "any only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 and torch.bool dtypes");
   dim = maybe_wrap_dim(dim, self.dim());
@@ -730,8 +735,10 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-           "std and var only support CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "std and var only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating-point dtypes");
 
@@ -769,8 +776,12 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA, fname, " only support CPU AND CUDA backend, got: ", toString(self.options().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()), fname, " only support floating-point dtypes");
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              fname, " only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              fname, " only support floating-point dtypes");
   TORCH_CHECK(result1.scalar_type() == result2.scalar_type(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.scalar_type()),
@@ -856,8 +867,10 @@ std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-              "var only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "var only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "var only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
@@ -874,8 +887,10 @@ Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-              "std only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "std only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "std only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());

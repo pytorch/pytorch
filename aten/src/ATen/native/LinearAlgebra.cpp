@@ -513,7 +513,11 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   if (dim.size() == 1) {
     return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
+  if (self.is_complex()){
+    return at::sqrt(at::sum((self.conj() * self).real(), dim, keepdim));
+  } else {
+    return at::sqrt(at::sum((self * self), dim, keepdim));
+  }
 }
 
 Tensor &frobenius_norm_out(
@@ -529,7 +533,11 @@ Tensor &frobenius_norm_out(
   if (dim.size() == 1) {
     return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
-  return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
+  if (self.is_complex()){
+    return at::sqrt_out(result, at::sum((self.conj() * self).real(), dim, keepdim));
+  } else {
+    return at::sqrt_out(result, at::sum((self * self), dim, keepdim));
+  }
 }
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
