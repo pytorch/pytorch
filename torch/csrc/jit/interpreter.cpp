@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/jit_log.h>
 
 #include <exception>
 #include <iostream>
@@ -496,6 +497,92 @@ struct CodeImpl {
     }
   }
 
+
+  //emitLoadInputs-> emitUse -> emitNode -> emitOperator -> emitLoadInputs
+
+  static bool isIterEmitNodeSupported(Node* node) {
+    switch (node->kind()) {
+      default:
+        return true;
+      case prim::Drop:
+        return false;
+      case prim::Constant:
+        return false;
+      case prim::If:
+        return false;
+      case prim::Loop:
+        return false;
+      case aten::wait:
+        return false;
+      case prim::Param:
+        return false;
+      case prim::CallFunction:
+        return false;
+      case prim::CallMethod:
+        return false;
+      case prim::BailOut:
+        return false;
+      case prim::GetAttr:
+        return false;
+      case prim::SetAttr:
+        return false;
+    }
+  }
+
+  void emitOperatorIter(Node* start) {
+
+    GRAPH_DEBUG("emitOperatorIter for ", getHeader(start));
+    if (!preprocess_.can_emit_inline[start]) {
+      // fallback on the original implementation
+
+      GRAPH_DEBUG("can't emit inline node ", getHeader(start));
+      emitOperator(start);
+      return;
+    }
+
+    std::vector<Value*> stack;
+    std::unordered_set<Node*> seen;
+    // can_emit_inline are single-output/single use nodes only
+    stack.push_back(start->output());
+    while (!stack.empty()) {
+      auto val = stack.back();
+      GRAPH_DEBUG("emitting value ", val->debugName());
+      stack.pop_back();
+      auto node = val->node();
+      if (!preprocess_.can_emit_inline[node]) {
+        // this means that node has already been emitted
+        // and we only emit register loads
+        emitUse(val, false);
+        GRAPH_DEBUG("can't emit inline value ", val->debugName());
+      } else {
+        if (seen.count(node) != 0) {
+          insertInstruction(OP, operator_table_.size());
+          GRAPH_DEBUG("inserting ", operator_table_.size());
+          operator_table_.emplace_back(getOperation(node));
+        } else {
+          // for simplicity we only support iterative emitOperator
+          // we can add emitCall and emitMethodCall and GetAttr later
+          // as needed by adding emitNodeIter
+          if (isIterEmitNodeSupported(node)) {
+            seen.insert(node);
+            stack.push_back(val);
+            GRAPH_DEBUG("pushing second time ", val->debugName());
+            //arguments in reverse order
+            for (int i = node->inputs().size() - 1; i >= 0; i--) {
+                GRAPH_DEBUG("pushing ", node->input(i)->debugName());
+                stack.push_back(node->input(i));
+            }
+          }
+          else {
+            GRAPH_DEBUG("iterative not supported for ", val->debugName());
+            emitUse(val, false);
+          }
+        }
+      }
+    }
+  }
+
+
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
@@ -663,11 +750,12 @@ struct CodeImpl {
     auto method_name = insertConstant(std::move(method_name_str));
     insertInstruction(INTERFACE_CALL, method_name, inputs.size());
   }
+
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
-        emitOperator(node);
+        emitOperatorIter(node);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -856,8 +944,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-//         std::cout << "RUNNING ";
-//         frames.back().function->dump(std::cout, af.pc);
+        std::cout << "RUNNING ";
+        frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
