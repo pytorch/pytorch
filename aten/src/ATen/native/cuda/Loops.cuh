@@ -371,7 +371,7 @@ template <typename func_t>
 void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
-  static_assert(traits::arity = 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
+  static_assert(traits::arity == 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 1);
 
   char* data = (char*)iter.data_ptr(0);
