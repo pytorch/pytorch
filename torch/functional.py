@@ -133,6 +133,11 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>> torch.norm(A_ - A)
         tensor(2.9802e-08)
     """
+    tens_ops = (LU_data, LU_pivots)
+    if any (type(t) is not Tensor for t in tens_ops) and has_torch_function(tens_ops):
+        return handle_torch_function(
+            lu_unpack, tens_ops, LU_data, LU_pivots, unpack_data=unpack_data,
+            unpack_pivots=unpack_pivots)
     shape = LU_data.shape
     # In generalized LU factorization, the following shape relations hold:
     #   A.shape[-2:] == (m, n)

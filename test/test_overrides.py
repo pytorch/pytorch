@@ -508,6 +508,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.fmod, lambda input, other, out=None: -1),
     (torch.frac, lambda input, out=None: -1),
     (torch.full_like, lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1),
+    (torch.functional.lu_unpack, lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1),
     (torch.gather, lambda input, dim, index, out=None, sparse_grad=False: -1),
     (torch.ge, lambda input, other, out=None: -1),
     (torch.geqrf, lambda input, out=None: -1),
