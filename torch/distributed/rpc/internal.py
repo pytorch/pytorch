@@ -93,7 +93,11 @@ class _InternalRPCPickler:
         try:
             ret = pickle.loads(binary_data)
         except AttributeError as e:
-            except_str = str(e) + " Default RPC pickler does not serialize function code. Ensure that UDFs are defined on both caller and callee modules."
+            # Occurs when function is not found on module/class during
+            # unpickling.
+            except_str = str(e) + """ Default RPC pickler does not serialize
+            function code. Ensure that UDFs are defined on both caller and
+            callee modules."""
             raise AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
