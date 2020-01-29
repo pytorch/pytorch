@@ -10,8 +10,9 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
-#define EPSILON 1e-12
+constexpr float EPSILON = 1e-12;
 #define _USE_MATH_DEFINES
 
 
@@ -101,6 +102,86 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
     return grad_input / input.numel();
   }
   return grad_input;
+}
+
+Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss = at::empty_like(input);
+    return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor loss_squeezed = at::squeeze(loss);
+
+    auto iter = TensorIterator();
+    iter.add_output(loss_squeezed);
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
+    iter.build();
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(loss.scalar_type(), "binary_cross_entropy", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t input_val, scalar_t target_val) {
+                TORCH_CHECK(
+                    (input_val >= 0) && (input_val <= 1),
+                    "all elements of input should be between 0 and 1"
+                );
+
+                // Binary cross entropy tensor is defined by the equation:
+                // L = -w (y ln(x) + (1-y) ln(1-x))
+                return (target_val - scalar_t(1))
+                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100)) 
+                    - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
+            }
+        );
+    });
+    if (weight.defined()) {
+        loss.mul_(weight);
+    }
+    if (reduction != at::Reduction::None) {
+        Tensor loss_reduced = apply_loss_reduction(loss, reduction);
+        loss.resize_as_(loss_reduced).copy_(loss_reduced);
+    }
+    return loss;
+}
+
+Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input = at::empty_like(input);
+    return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
+}
+
+Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+    Tensor grad_input_squeezed = at::squeeze(grad_input);
+
+    auto iter = TensorIterator();
+    iter.add_output(grad_input_squeezed);
+    iter.add_input(at::squeeze(grad));
+    iter.add_input(at::squeeze(input));
+    iter.add_input(at::squeeze(target));
+    iter.build();
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
+        at::native::cpu_kernel(
+            iter,
+            [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
+                // The gradient is the partial derivative of BCELoss
+                // with respect to x
+                // d(L)/d(x) = -w (y - x) / (x - x^2)
+                return grad_val * (input_val - target_val)
+                    / (scalar_t(std::max(
+                        (scalar_t(1) - input_val) * input_val,
+                        scalar_t(EPSILON)
+                    )));
+            }
+        );
+    });
+    if (weight.defined()) {
+        grad_input.mul_(weight);
+    }
+    if (reduction == at::Reduction::Mean) {
+        grad_input.div_(input.numel());
+    }
+    return grad_input;
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
