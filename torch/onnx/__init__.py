@@ -32,7 +32,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True):
+           enable_onnx_checker=True, use_large_model_format=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -155,7 +155,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, enable_onnx_checker)
+                        custom_opsets, enable_onnx_checker, use_large_model_format)
 
 
 def export_to_pretty_string(*args, **kwargs):

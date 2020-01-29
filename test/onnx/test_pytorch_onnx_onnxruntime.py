@@ -124,6 +124,70 @@ class TestONNXRuntime(unittest.TestCase):
             _run_test(script_model)
         _run_test(model)
 
+    def run_large_model_test(self, model, input, rtol=0.001, atol=1e-7,
+                   example_outputs=None, do_constant_folding=True,
+                   dynamic_axes=None, input_names=None, output_names=None):
+        import os
+        import tempfile
+
+        model.eval()
+        with torch.no_grad():
+            if isinstance(input, torch.Tensor):
+                input = (input,)
+            # In-place operators will update input tensor data as well.
+            # Thus inputs are replicated before every forward call.
+            input_copy = copy.deepcopy(input)
+            output = model(*input_copy)
+            if isinstance(output, torch.Tensor):
+                output = (output,)
+
+            # export the model to ONNX
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                model_file_name = os.path.join(tmpdirname, 'model.onnx')
+                import pdb
+                pdb.set_trace()
+                input_copy = copy.deepcopy(input)
+                torch.onnx.export(model, input_copy, model_file_name,
+                                opset_version=self.opset_version,
+                                example_outputs=output,
+                                verbose=False,
+                                do_constant_folding=do_constant_folding,
+                                keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                                dynamic_axes=dynamic_axes,
+                                input_names=input_names, output_names=output_names,
+                                use_large_model_format=True)
+                # compute onnxruntime output prediction
+                ort_sess = onnxruntime.InferenceSession(model_file_name)
+                input_copy = copy.deepcopy(input)
+                ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
+
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_large_model_export_embed(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 15
+                n = 4 * 100
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([2], dtype=torch.long)
+        self.run_large_model_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_large_model_export_mobilenet_v2(self):
+        model = torchvision.models.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_large_model_test(model, x, rtol=1e-3, atol=1e-5)
+
     # Export Torchvision models
 
     def test_alexnet(self):
