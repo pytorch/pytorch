@@ -37,7 +37,7 @@ namespace c10 {
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
-  _(c10::BFloat16, BFloat16) /* 15 */
+  _(at::BFloat16, BFloat16) /* 15 */
 
 
 // If you want to support ComplexHalf for real, add ComplexHalf
