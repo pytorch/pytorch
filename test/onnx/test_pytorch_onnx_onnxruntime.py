@@ -20,6 +20,7 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 import torchvision
+import onnx
 
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
@@ -2455,6 +2456,25 @@ class TestONNXRuntime(unittest.TestCase):
                 return out
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+
+    def test_onnx_proto_checker(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                return 2 * x
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(Model(), x, f)
+        model = onnx.load(f)
+        model.ir_version = 0
+
+        def check_proto():
+            torch._C._check_onnx_proto(model.SerializeToString())
+        self.assertRaises(RuntimeError, check_proto)
+
+
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
