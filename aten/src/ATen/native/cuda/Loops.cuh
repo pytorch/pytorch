@@ -380,14 +380,14 @@ void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
   if (iter.is_trivial_1d()) {
     int stride = iter.get_inner_strides()[0];
     legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-      arg0_t* out = (arg0_t*)(data[0] + stride * idx);
+      arg0_t* out = (arg0_t*)(data + stride * idx);
       *out = f(idx);
     });
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
     legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      arg0_t* out = (arg0_t*)(data + offsets[0]);
       *out = f(idx);
     });
   }
