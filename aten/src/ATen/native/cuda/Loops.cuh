@@ -325,8 +325,6 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     dtypes[i] = iter.tensor(i).scalar_type();
   }
 
-  std::cout << "needs_dynamic_casting = " << needs_dynamic_casting<func_t>::check(iter) << std::endl;
-
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
