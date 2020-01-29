@@ -84,7 +84,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    r.fill_(::pow(base, start.to<double>()));
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "logspace_cuda", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
@@ -95,7 +95,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
           scalar_t inc = step * ind;
-          scalar_t val = std::pow(scalar_base, scalar_start + inc);
+          scalar_t val = ::pow(scalar_base, scalar_start + inc);
           return val;
         });
     });
