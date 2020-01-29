@@ -3,6 +3,7 @@ import numpy as np
 import unittest
 import inspect
 import functools
+import pprint
 
 Tensor = torch.Tensor
 from torch.testing._internal.common_utils import TestCase
@@ -748,12 +749,7 @@ def generate_tensor_like_torch_implementations():
         "IGNORED_TORCH_FUNCTIONS.\n\n{}"
     )
 
-    # The assertion below is disabled temporarily while we land the rest
-    # of this functionality, it will be re-enabled later when there is a
-    # smaller chance that enabling this test will land simultaneously
-    # with a new operator being added to the torch namespace.
-
-    # assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
+    assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
         # decorate the overrides with implements_tensor_like
         implements_tensor_like(func)(override)
