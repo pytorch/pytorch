@@ -287,7 +287,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
 
 } // namespace modern
 
-template<func_t>
+template<typename func_t>
 bool needs_dynamic_casting(TensorIterator& iter) {
   using traits = function_traits<func_t>;
   if (iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value) {
