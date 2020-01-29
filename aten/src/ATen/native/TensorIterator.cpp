@@ -909,33 +909,51 @@ bool TensorIterator::fast_set_up() {
     return false;
   }
   // allocate memory for output, memory format depends on setup_type
-  // find the index of a defined tensor in operands which will be used for NON_CONTIGUOUS case
-  int i_defined;
-  for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
-    if (operands_[i_defined].tensor.defined()) break;
-  }
-
-  for (int i = 0; i < num_outputs_; i++){
-    auto& op = operands_[i];
-    if (!op.tensor.defined()) {
-      TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-      switch (setup_type)
-      {
-        case FastSetupType::CONTIGUOUS:
+  switch (setup_type) {
+    case FastSetupType::CONTIGUOUS:
+    {
+      for (int i = 0; i < num_outputs_; i++){
+        auto& op = operands_[i];
+        if (!op.tensor.defined()) {
+          TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
-          break;
-        case FastSetupType::CHANNELS_LAST:
-          op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
-          break;
-        case FastSetupType::NON_CONTIGUOUS:
-          TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
-          op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
-          break;
-        default:
-          TORCH_CHECK(false, "Unsupported fast setup type", std::to_string((int)setup_type));
+          op.current_dtype = op.target_dtype;
+        }
       }
-      op.current_dtype = op.target_dtype;
+      break;
     }
+    case FastSetupType::CHANNELS_LAST:
+    {
+      for (int i = 0; i < num_outputs_; i++){
+        auto& op = operands_[i];
+        if (!op.tensor.defined()) {
+          TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+          op.current_dtype = op.target_dtype;
+        }
+      }
+      break;
+    }
+    case FastSetupType::NON_CONTIGUOUS:
+    {
+      // find the index of a defined tensor in operands_
+      int i_defined;
+      for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
+        if (operands_[i_defined].tensor.defined()) break;
+      }
+      TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
+      for (int i = 0; i < num_outputs_; i++){
+        auto& op = operands_[i];
+        if (!op.tensor.defined()) {
+          TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+          op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
+          op.current_dtype = op.target_dtype;
+        }
+      }
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported fast setup type", std::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
