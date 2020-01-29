@@ -34,13 +34,13 @@
 #  And after pushing r4-r8 and d8-d15 on stack
 #  |-----------|
 #  |d8 - d15   | 0
-#  |r4 - r8    | 64
-#  |a_stride   | 84
-#  |w          | 88
-#  |c          | 92
-#  |c_stride   | 96
-#  |out ch indx| 100
-#  |params     | 104
+#  |r4 - r7    | 64
+#  |a_stride   | 80
+#  |w          | 84
+#  |c          | 88
+#  |c_stride   | 92
+#  |out ch indx| 96
+#  |params     | 100
 #  |-----------|
 #  
 
@@ -64,33 +64,33 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
-    PUSH {r4, r5, r6, r7, r8}
+    PUSH {r4, r5, r6, r7}
 
     VPUSH {d8-d15}
     # Load quantization params
     # - r7 = quantization_params
-    LDR r7, [sp, 104]
+    LDR r7, [sp, 100]
 
     # Load output channel index
-    LDR r8, [sp, 100]
+    LDR r5, [sp, 96]
     # Load pointer to per channel zero points array
     LDR r4, [r7]
     # Add offset to the base pointer
-    ADD r8, r4, r8
+    ADD r5, r4, r5
 
     # Load bias0123, bias4567
     VLDM ip!, {d16-d19}
 
     # Load a_stride
     # - r6 = a_stride
-    LDR r6, [sp, 84]
+    LDR r6, [sp, 80]
     CMP r0, 2
 
     ADD r4, r3, r6
 
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15}, [r8]
+    VLD1.8 {d15}, [r5]
     ADD r7, r7, 4
 
     # Load a_zero_point:
@@ -99,7 +99,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
 
     MOVLO r4, r3
 
-    ADD r7, r7, 2
+    ADD r7, r7, 4
     ADD r5, r4, r6
 
     # q10 := vacc1x0123
@@ -738,7 +738,7 @@ BEGIN_FUNCTION pytorch_q8gemm_ukernel_4x8__aarch32_neon
     # Load c, c_stride:
     # - r2 = c
     # - r2 = c_stride
-    LDRD r2, r3, [sp, 96]
+    LDRD r2, r3, [sp, 88]
 
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9

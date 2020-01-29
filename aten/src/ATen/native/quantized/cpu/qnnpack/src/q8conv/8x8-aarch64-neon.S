@@ -50,7 +50,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
 
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
-    MOV x9, 2
 
     # Load output channel index
     # Note since this is an offset into a byte pointer
@@ -70,7 +69,8 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     LD1 {v25.8b}, [x19]
     ADD x8, x8, 4
     # Load a_zero_point
-    LD1R {v24.8b}, [x8], x9
+    LD1R {v24.8b}, [x8]
+    ADD x8, x8, 4
 
     # v12 := vacc2x0123
     MOV v12.16b, v8.16b

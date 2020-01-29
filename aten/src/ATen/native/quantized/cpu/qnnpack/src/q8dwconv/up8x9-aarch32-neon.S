@@ -37,8 +37,6 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
     STR r0, [sp, #-8]
     STR r3, [sp, #-4]
 
-    MOV r4, 2
-
     # Load o:
     # - lr = o = output
     LDR lr, [sp, 100]
@@ -54,7 +52,8 @@ BEGIN_FUNCTION pytorch_q8dwconv_ukernel_up8x9__aarch32_neon
 
     # Load input zero point:
     # - d30 = vinput_zero_point
-    VLD1.8 {d30[]}, [r12], r4
+    VLD1.8 {d30[]}, [r12]
+    ADD r12, r12, 4
 
     # Load multiplier:
     # - q14 = d28:d29 = vmultiplier

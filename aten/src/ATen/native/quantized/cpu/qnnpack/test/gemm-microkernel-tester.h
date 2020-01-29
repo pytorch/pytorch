@@ -268,7 +268,8 @@ class GemmMicrokernelTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       std::vector<float> requantization_scale(1, 1.0f / float(cScale));
-      std::vector<uint8_t> kernel_zero_points(nr(), bZeroPoint());
+      size_t num_zero_points_padded = ((nr() + 7) / 8) * 8;
+      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, bZeroPoint());
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),

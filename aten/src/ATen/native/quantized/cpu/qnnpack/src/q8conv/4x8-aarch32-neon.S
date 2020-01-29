@@ -34,13 +34,13 @@
 #  And after pushing r4-r8 and d8-d15 on stack
 #  |-----------|
 #  |d8 - d15   | 0
-#  |r4 - r12   | 64
-#  |a          | 100 96
-#  |w          | 104 100
-#  |c          | 108 104
-#  |c_stride   | 112 108
-#  |out ch indx| 116 112
-#  |params     | 120 116
+#  |r4 - r11   | 64
+#  |a          | 96
+#  |w          | 100
+#  |c          | 104
+#  |c_stride   | 108
+#  |out ch indx| 112
+#  |params     | 116
 #  |-----------|
 #  
 
@@ -63,7 +63,7 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load w
     # - ip = w
     LDR ip, [sp, 4]
-    PUSH {r4, r5, r6, r7, r8, r9, r10, r11, r12}
+    PUSH {r4, r5, r6, r7, r8, r9, r10, r11}
 
     VPUSH {d8-d15}
 
@@ -72,23 +72,22 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
 
     # Load params:
     # - r9 = params
-    LDR r9, [sp, 120]
+    LDR r9, [sp, 116]
 
     # Load output channel index
-    LDR r12, [sp, 116]
+    LDR r5, [sp, 112]
     # Load pointer to per channel zero points array
     LDR r4, [r9]
     # Add offset to the base pointer
-    ADD r12, r4, r12
+    ADD r5, r4, r5
 
     # q10 := vacc1x0123
     VMOV.I32 q10, q8
-    MOV r4, 2
     # q11 := vacc1x4567
     VMOV.I32 q11, q9
     # Load a
     # - r8 = a
-    LDR r8, [sp, 100]
+    LDR r8, [sp, 96]
     # q12 := vacc2x0123
     VMOV.I32 q12, q8
     # q13 := vacc2x4567
@@ -97,13 +96,13 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     VMOV.I32 q14, q8
     # Load b_zero_point:
     # - d15 = b_zero_point
-    VLD1.8 {d15[]}, [r9], r4
-    VLD1.8 {d15}, [r12]
+    VLD1.8 {d15}, [r5]
     ADD r9, r9, 4
 
     # Load a_zero_point:
     # - d14 = a_zero_point
-    VLD1.8 {d14[]}, [r9], r4
+    VLD1.8 {d14[]}, [r9]
+    ADD r9, r9, 4
     # q15 := vacc3x4567
     VMOV.I32 q15, q9
     # Load multiplier:
@@ -739,7 +738,7 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_4x8__aarch32_neon
     # Load c, c_stride:
     # - r2 = c
     # - r3 = c_stride
-    LDRD r2, r3, [sp, 108]
+    LDRD r2, r3, [sp, 104]
 
     VQMOVN.S32 d16,  q8
     VQMOVN.S32 d17,  q9
