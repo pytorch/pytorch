@@ -12,40 +12,57 @@ import hypothesis.strategies as st
 import numpy as np
 import random
 import six
-import unittest
-
 
 class TestUtilityOps(serial.SerializedTestCase):
 
-    @serial.given(X=hu.tensor(), args=st.booleans(), **hu.gcs)
-    def test_slice(self, X, args, gc, dc):
+    @serial.given(X=hu.tensor(), args=st.booleans(), default_axes=st.booleans(), negative_axes=st.booleans(), **hu.gcs)
+    def test_slice(self, X, args, default_axes, negative_axes, gc, dc):
         X = X.astype(dtype=np.float32)
         dim = random.randint(0, X.ndim - 1)
-        slice_start = random.randint(0, X.shape[dim] - 1)
-        slice_end = random.randint(slice_start, X.shape[dim] - 1)
         starts = np.array([0] * X.ndim).astype(np.int32)
         ends = np.array([-1] * X.ndim).astype(np.int32)
+
+        kwargs = dict()
+        if default_axes:
+            slice_start = random.randint(0, X.shape[dim] - 1)
+            slice_end = random.randint(slice_start, X.shape[dim])
+        else:
+            if negative_axes:
+                axes = [int(x) - X.ndim for x in np.random.permutation(X.ndim)]
+            else:
+                axes = np.random.permutation(X.ndim).astype(np.int32)
+            kwargs["axes"] = axes
+
+            slice_start = random.randint(0, X.shape[axes[dim]] - 1)
+            slice_end = random.randint(slice_start, X.shape[axes[dim]])
+
         starts[dim] = slice_start
         ends[dim] = slice_end
 
         if args:
             op = core.CreateOperator(
-                "Slice", ["X"], ["Y"], starts=starts, ends=ends, device_option=gc
+                "Slice", ["X"], ["Y"], starts=starts, ends=ends, device_option=gc, **kwargs
             )
 
-            def slice_ref(X):
-                slc = [slice(None)] * X.ndim
-                slc[dim] = slice(slice_start, slice_end)
-                return [X[slc]]
+            def slice_ref(x):
+                slc = [slice(None)] * x.ndim
+                if default_axes:
+                    slc[dim] = slice(slice_start, slice_end)
+                else:
+                    slc[axes[dim]] = slice(slice_start, slice_end)
+                return [x[slc]]
             inputs = [X]
         else:
             op = core.CreateOperator(
-                "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc
+                "Slice", ["X", "starts", "ends"], ["Y"], device_option=gc, **kwargs
             )
 
             def slice_ref(x, starts, ends):
                 slc = [slice(None)] * x.ndim
-                slc[dim] = slice(slice_start, slice_end)
+                if default_axes:
+                    slc[dim] = slice(slice_start, slice_end)
+                else:
+                    slc[axes[dim]] = slice(slice_start, slice_end)
                 return [x[slc]]
             inputs = [X, starts, ends]
 
