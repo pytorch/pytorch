@@ -2071,28 +2071,6 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
-    def test_logspace(self):
-        _from = random.random()
-        to = _from + random.random()
-        res1 = torch.logspace(_from, to, 137)
-        res2 = torch.Tensor()
-        torch.logspace(_from, to, 137, out=res2)
-        self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
-        self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
-
-        # Check non-default base=2
-        self.assertEqual(torch.logspace(1, 1, 1, 2), torch.ones(1) * 2)
-        self.assertEqual(torch.logspace(0, 2, 3, 2), torch.Tensor((1, 2, 4)))
-
-        # Check logspace_ for generating with start > end.
-        self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
-
-        # Check logspace_ for non-contiguous tensors.
-        x = torch.zeros(2, 3)
-        y = torch.logspace(0, 3, 4, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.Tensor(((0, 1, 10), (0, 100, 1000))), 0)
-
     def test_rand(self):
         torch.manual_seed(123456)
         res1 = torch.rand(SIZE, SIZE)
@@ -10409,6 +10387,43 @@ class TestTorchDeviceType(TestCase):
             sz = list(x.size())
             sz[d] = 0
             self.assertEqual(sz, y.size())
+
+    @precisionOverride({torch.half: 1e-1, torch.float: 1e-5, torch.double: 1e-10})
+    @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
+    def test_logspace(self, device, dtype):
+        _from = random.random()
+        to = _from + random.random()
+        res1 = torch.logspace(_from, to, 137, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.logspace(_from, to, 137, device=device, dtype=dtype, out=res2)
+        self.assertEqual(res1, res2, 0)
+        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1, device=device, dtype=dtype))
+        self.assertEqual(torch.logspace(0, 1, 1, device=device, dtype=dtype),
+                         torch.ones(1, device=device, dtype=dtype), 0)
+
+        # Check precision - start, stop and base are chosen to avoid overflow
+        # steps is chosen so that step size is not subject to rounding error
+        # a tolerance is needed for gpu tests due to differences in computation
+        tol = 0. if device == 'cpu' else self.precision
+        self.assertEqual(torch.tensor([2. ** (i / 8.) for i in range(49)], device=device, dtype=dtype),
+                         torch.logspace(0, 6, steps=49, base=2, device=device, dtype=dtype),
+                         tol)
+
+        # Check non-default base=2
+        self.assertEqual(torch.logspace(1, 1, 1, 2, device=device, dtype=dtype),
+                         torch.ones(1, device=device, dtype=dtype) * 2)
+        self.assertEqual(torch.logspace(0, 2, 3, 2, device=device, dtype=dtype),
+                         torch.tensor((1, 2, 4), device=device, dtype=dtype))
+
+        # Check logspace_ for generating with start > end.
+        self.assertEqual(torch.logspace(1, 0, 2, device=device, dtype=dtype),
+                         torch.tensor((10, 1), device=device, dtype=dtype), 0)
+
+        # Check logspace_ for non-contiguous tensors.
+        x = torch.zeros(2, 3, device=device, dtype=dtype)
+        y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
+        self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), 0)
 
     @dtypes(torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
