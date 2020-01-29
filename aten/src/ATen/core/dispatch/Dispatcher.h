@@ -96,16 +96,6 @@ public:
   RegistrationHandleRAII registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel);
 
   /**
-   * Register a kernel to the dispatch table for an operator at the
-   * dispatch key CompoundOp.
-   *
-   * @return A RAII object that manages the lifetime of the registration.
-   *         Once that object is destructed, the kernel will be deregistered.
-   */
-  C10_DEPRECATED_MESSAGE("This function now registers the kernel under the CompoundOp key, which may subtly differ from the old catchall behavior if you also registered some but not all kernels.  Replace this with registerKernel(DispatchKey::CompoundOp, kernel) to explicitly acknowledge the change in semantics")
-  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
-
-  /**
    * Register a fallback kernel for a backend.
    * If an operator is called but there is no concrete kernel for the dispatch
    * key of the given operator arguments, it will check if there is such a

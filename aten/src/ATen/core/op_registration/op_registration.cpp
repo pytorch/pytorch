@@ -16,11 +16,9 @@ public:
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
-      if (dispatch_key.has_value()) {
-        kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, *dispatch_key, std::move(*kernel));
-      } else {
-        kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.second, std::move(*kernel));
-      }
+      // The choice of CompoundOp here as the default is a bit suspicious.
+      // Probably better if the caller explicitly asks for this
+      kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key.value_or(DispatchKey::CompoundOp), std::move(*kernel));
     }
   }
 
