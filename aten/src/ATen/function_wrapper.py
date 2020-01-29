@@ -217,11 +217,6 @@ if (${check_name}.dim() == 0) {
     return ${api_name}(${zero_dim_actuals});
 }""")
 
-SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.is_sparse()) {
-    return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
-}""")
-
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
 if (${name}.defined()) {
     ${initializer}
@@ -423,6 +418,8 @@ TopEnvironment = TypedDict('TopEnvironment', {
 
 # A Declarations.cwrap formal argument
 # type can contain THTensor* types
+# NOTE: this must contain all 'AtFormal' attributes, because FunctionOption
+# doesn't differentiate between whether we have AtFormals or THFormals
 THFormal = TypedDict('THFormal', {
     'name': str,
     'type': str,
@@ -559,8 +556,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_definition_dispatch': str,
     'type_method_formals': List[str],
     'variants': str,
-    'when_spares_dispatch': str,
-    'when_sparse_dispatch': str,
     'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
 })
@@ -715,8 +710,6 @@ def create_generic(top_env, declarations):
             'type': type_str,
             'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
         }  # type: AtFormal
-        if 'kwarg_only' in argument:
-            translated['kwarg_only'] = argument['kwarg_only']
         if 'default' in argument:
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
@@ -738,10 +731,8 @@ def create_generic(top_env, declarations):
             # type: (THFormal) -> None
             if argument['name'] not in seen:
                 seen.add(argument['name'])
-                if argument.get('kwarg_only', False):
-                    kwd_args.append(argument)
-                else:
-                    pos_args.append(argument)
+                # there are no kwarg_only THFormals
+                pos_args.append(argument)
 
         def has_output_mask(argument):
             # type: (THFormal) -> bool
@@ -1348,17 +1339,10 @@ def create_derived(backend_type_env, declarations):
         else:
             return argument['name']
 
-    def drop_argument(argument, option):
-        # type: (THFormal, FunctionOption) -> bool
-        # Devices are handled in the body of the function.
-        if argument['name'] == 'device':
-            return True
-        return False
-
     def get_arguments(env, arguments, option):
         # type: (Environment, List[THFormal], FunctionOption) -> List[str]
         return [get_argument(env, argument, option)
-                for argument in arguments if not drop_argument(argument, option)]
+                for argument in arguments]
 
     def is_actual_return_long(env, ret):
         # type: (Environment, ReturnDecl) -> bool
@@ -1504,9 +1488,6 @@ def create_derived(backend_type_env, declarations):
                                 size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
-                        if drop_argument(arg, option):
-                            case_body.append(
-                                "(void) {}_; //silence unused warning".format(arg['name']))
 
                         initializers = []
 
