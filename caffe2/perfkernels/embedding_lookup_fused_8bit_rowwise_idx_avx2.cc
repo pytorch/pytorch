@@ -405,7 +405,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float_false__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float__avx2_fma<false>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_float_float__avx2_fma<
+      false>(
       block_size,
       output_size,
       index_size,
@@ -837,7 +838,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int64_t_float_float_false__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_float_float__avx2_fma<false>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_float_float__avx2_fma<
+      false>(
       block_size,
       output_size,
       index_size,
@@ -2516,7 +2518,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float_false__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma<false>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma<
+      false>(
       block_size,
       output_size,
       index_size,
@@ -2539,7 +2542,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float_true__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma<true>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma<
+      true>(
       block_size,
       output_size,
       index_size,
@@ -3091,7 +3095,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float_false__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma<false>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma<
+      false>(
       block_size,
       output_size,
       index_size,
@@ -3114,7 +3119,8 @@ bool Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float_true__avx2_fma(
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma<true>(
+  return Fused8BitRowwiseEmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma<
+      true>(
       block_size,
       output_size,
       index_size,

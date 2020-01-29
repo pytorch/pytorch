@@ -213,8 +213,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         elif dtype == torch.float16:
             qconfig_spec = {
-                # TODO: uncomment when float16 Linear support is added
-                # nn.Linear : default_dynamic_qconfig,
+                nn.Linear : float16_dynamic_qconfig,
                 nn.LSTM : float16_dynamic_qconfig,
             }
         else:
