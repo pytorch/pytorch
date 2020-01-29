@@ -1650,10 +1650,7 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if (
-            dist_utils.TEST_CONFIG.rpc_backend_name
-            == "PROCESS_GROUP"
-        ):
+        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):

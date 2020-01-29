@@ -29,7 +29,7 @@ class PyRRef {
 };
 
 namespace rrefforkdata {
-py::tuple toPyTuple(const RRefForkData&);
+py::tuple toPyTuple(const RRefForkData& forkData);
 RRefForkData fromPyTuple(const py::tuple& pyTuple);
 } // namespace rrefforkdata
 

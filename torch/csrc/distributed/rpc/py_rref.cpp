@@ -99,19 +99,20 @@ py::tuple PyRRef::pickle() const {
   // install the dispatch table only when there are indeed RPC activities. As
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
-  auto rfd = ctx.prepareChildFork(rref_);
-  return rrefforkdata::toPyTuple(rfd);
+  auto rrefForkData = ctx.prepareChildFork(rref_);
+  return rrefforkdata::toPyTuple(rrefForkData);
 }
 
-PyRRef PyRRef::unpickle(const py::tuple& t) {
+PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   auto& ctx = RRefContext::getInstance();
-  auto rfd = rrefforkdata::fromPyTuple(t.cast<py::tuple>());
+  auto rrefForkData = rrefforkdata::fromPyTuple(pyTuple);
   std::shared_ptr<RRef> rref = nullptr;
-  TypePtr rref_type =
-      PythonRpcHandler::getInstance().parseTypeFromStr(rfd.type_str_);
-  rref = ctx.getOrCreateRRef(rfd, rref_type);
+  TypePtr rrefType =
+      PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
+  rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
 
-  ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
+  ctx.notifyOwnerAndParentOfFork(
+      rrefForkData.forkId_, rrefForkData.parent_, rref);
   return PyRRef(std::move(rref));
 }
 
@@ -138,7 +139,7 @@ py::tuple toPyTuple(const RRefForkData& forkData) {
       forkData.forkId_.createdOn_,
       forkData.forkId_.localId_,
       forkData.parent_,
-      forkData.type_str_);
+      forkData.typeStr_);
 }
 RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   TORCH_INTERNAL_ASSERT(

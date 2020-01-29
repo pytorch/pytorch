@@ -3469,8 +3469,9 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
+        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, None))
+                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
         leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,

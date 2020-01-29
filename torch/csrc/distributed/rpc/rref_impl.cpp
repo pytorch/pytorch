@@ -21,12 +21,12 @@ RRefForkData::RRefForkData(
     const RRefId& rrefId,
     const ForkId& forkId,
     worker_id_t parent,
-    std::string type_str)
+    std::string typeStr)
     : ownerId_(ownerId),
       rrefId_(rrefId),
       forkId_(forkId),
       parent_(parent),
-      type_str_(std::move(type_str)) {}
+      typeStr_(std::move(typeStr)) {}
 
 //////////////////////////////  RRef  /////////////////////////////////////
 

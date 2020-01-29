@@ -23,18 +23,14 @@ struct RRefForkData {
   const RRefId rrefId_;
   const ForkId forkId_;
   const worker_id_t parent_;
-  const std::string type_str_;
+  const std::string typeStr_;
 
   RRefForkData(
       worker_id_t ownerId,
       const RRefId& rrefId_,
       const ForkId& forkId_,
       worker_id_t parent,
-      std::string type_str);
-
-  friend class RRef;
-  friend class RRefContext;
-  friend class UserRRef;
+      std::string typeStr);
 };
 
 // Note [RRef Protocol]
