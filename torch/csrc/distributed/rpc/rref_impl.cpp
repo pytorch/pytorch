@@ -43,6 +43,8 @@ RRefForkData::RRefForkData(
       type_str_(std::move(type_str)) {}
 
 py::tuple RRefForkData::toPyTuple() const {
+  // add GIL as it is contructing a py::object
+  pybind11::gil_scoped_acquire ag;
   return py::make_tuple(
       ownerId_,
       rrefId_.createdOn_,
