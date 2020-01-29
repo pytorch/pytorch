@@ -180,10 +180,10 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
 
   auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), dummyTensor(DispatchKey::CUDATensorId), dummyTensor(DispatchKey::CPUTensorId));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toTensorListRef().size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorListRef()[0]));
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensorListRef()[1]));
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorListRef()[2]));
+  EXPECT_EQ(3, result[0].toTensorVector().size());
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensorVector()[1]));
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[0].toTensorVector()[2]));
 }
 
 std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
@@ -199,10 +199,10 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
 
   auto result = callOp(*op, dummyTensor(DispatchKey::CPUTensorId), 2, 4, 6);
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toIntListRef().size());
-  EXPECT_EQ(2, result[0].toIntListRef()[0]);
-  EXPECT_EQ(4, result[0].toIntListRef()[1]);
-  EXPECT_EQ(6, result[0].toIntListRef()[2]);
+  EXPECT_EQ(3, result[0].toIntVector().size());
+  EXPECT_EQ(2, result[0].toIntVector()[0]);
+  EXPECT_EQ(4, result[0].toIntVector()[1]);
+  EXPECT_EQ(6, result[0].toIntVector()[2]);
 }
 
 std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
@@ -229,9 +229,9 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMultiple
   EXPECT_EQ(5, result.size());
   EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[0].toTensor()));
   EXPECT_EQ(5, result[1].toInt());
-  EXPECT_EQ(2, result[2].toTensorListRef().size());
-  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[2].toTensorListRef()[0]));
-  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[2].toTensorListRef()[1]));
+  EXPECT_EQ(2, result[2].toTensorVector().size());
+  EXPECT_EQ(DispatchKey::CPUTensorId, extractDispatchKey(result[2].toTensorVector()[0]));
+  EXPECT_EQ(DispatchKey::CUDATensorId, extractDispatchKey(result[2].toTensorVector()[1]));
   EXPECT_EQ(0, result[3].toInt());
   auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());
@@ -423,13 +423,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
-void kernelWithLegacyTensorListRefInputWithoutOutput(const std::vector<Tensor>& input1) {
+void kernelWithLegacyTensorVectorInputWithoutOutput(const std::vector<Tensor>& input1) {
   captured_input_list_size = input1.size();
 }
 
-TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListRefInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorVectorInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListRefInputWithoutOutput);
+      .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorVectorInputWithoutOutput);
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -440,13 +440,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-int64_t kernelWithLegacyTensorListRefInputWithOutput(const std::vector<Tensor>& input1) {
+int64_t kernelWithLegacyTensorVectorInputWithOutput(const std::vector<Tensor>& input1) {
   return input1.size();
 }
 
-TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorListRefInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTensorVectorInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListRefInputWithOutput);
+      .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorVectorInputWithOutput);
 
   auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
@@ -503,7 +503,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringLi
   c10::List<std::string> list({"value1", "value2"});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  auto output = std::move(outputs[0]).toGenericList();
+  auto output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ("value1", output.get(0).toString()->string());
@@ -717,7 +717,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   c10::List<c10::Dict<string, int64_t>> list({dict1, dict2});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  c10::impl::GenericList output = std::move(outputs[0]).toGenericList();
+  c10::impl::GenericList output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(2, output.get(0).toGenericDict().size());
@@ -748,22 +748,22 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   c10::List<c10::Dict<string, c10::List<int64_t>>> list({ dict1, dict2 });
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  c10::impl::GenericList output = std::move(outputs[0]).toGenericList();
+  c10::impl::GenericList output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(2, output.get(0).toGenericDict().size());
-  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntListRef().size());
-  EXPECT_EQ(1, output.get(0).toGenericDict().at("1").toIntListRef()[0]);
-  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntListRef()[1]);
-  EXPECT_EQ(2, output.get(0).toGenericDict().at("3").toIntListRef().size());
-  EXPECT_EQ(3, output.get(0).toGenericDict().at("3").toIntListRef()[0]);
-  EXPECT_EQ(4, output.get(0).toGenericDict().at("3").toIntListRef()[1]);
-  EXPECT_EQ(2, output.get(1).toGenericDict().at("5").toIntListRef().size());
-  EXPECT_EQ(5, output.get(1).toGenericDict().at("5").toIntListRef()[0]);
-  EXPECT_EQ(6, output.get(1).toGenericDict().at("5").toIntListRef()[1]);
-  EXPECT_EQ(2, output.get(1).toGenericDict().at("7").toIntListRef().size());
-  EXPECT_EQ(7, output.get(1).toGenericDict().at("7").toIntListRef()[0]);
-  EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntListRef()[1]);
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntVector().size());
+  EXPECT_EQ(1, output.get(0).toGenericDict().at("1").toIntVector()[0]);
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntVector()[1]);
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("3").toIntVector().size());
+  EXPECT_EQ(3, output.get(0).toGenericDict().at("3").toIntVector()[0]);
+  EXPECT_EQ(4, output.get(0).toGenericDict().at("3").toIntVector()[1]);
+  EXPECT_EQ(2, output.get(1).toGenericDict().at("5").toIntVector().size());
+  EXPECT_EQ(5, output.get(1).toGenericDict().at("5").toIntVector()[0]);
+  EXPECT_EQ(6, output.get(1).toGenericDict().at("5").toIntVector()[1]);
+  EXPECT_EQ(2, output.get(1).toGenericDict().at("7").toIntVector().size());
+  EXPECT_EQ(7, output.get(1).toGenericDict().at("7").toIntVector()[0]);
+  EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntVector()[1]);
 }
 
 bool called = false;

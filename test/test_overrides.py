@@ -4,11 +4,9 @@ import unittest
 import inspect
 import functools
 
-from common_utils import TestCase
-
-from torch._overrides import handle_torch_function, has_torch_function
-
 Tensor = torch.Tensor
+from torch.testing._internal.common_utils import TestCase
+from torch._overrides import handle_torch_function, has_torch_function
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather

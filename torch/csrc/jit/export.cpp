@@ -8,7 +8,9 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/instruction.h>
 
+#include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
+#include <onnx/proto_utils.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
@@ -120,7 +122,7 @@ class EncoderBase {
 
  protected:
   // Using std::map instead of std::unordered_map for initializers
-  // in EncodeGraph cosntructor so that the order in which initializers
+  // in EncodeGraph constructor so that the order in which initializers
   // get written to the ONNX graph is always the deterministic and
   // predictable. While this is not a ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
@@ -808,6 +810,15 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
   return std::make_tuple(
       graph_encoder.get_model_proto().SerializeAsString(),
       graph_encoder.get_raw_data_export_map());
+}
+
+void check_onnx_proto(const std::string& proto_string) {
+    onnx::ModelProto model;
+    if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
+        throw std::runtime_error("Invalid ONNX proto string.");
+        return;
+    }
+    onnx::checker::check_model(model);
 }
 
 namespace {

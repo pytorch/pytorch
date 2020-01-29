@@ -174,7 +174,7 @@ private:
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toGenericList(List<T> list);
+template<class T> List<IValue> toList(List<T> list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
 template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
@@ -417,7 +417,7 @@ private:
   explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toGenericList(List<T_>);
+  template<class T_> friend List<IValue> impl::toList(List<T_>);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
 };
 

@@ -99,7 +99,7 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
     // into that list. currently, this means that only tensors from that list
     // are accessible as inputs. any hypothetical input tensors that come after
     // the list are not accessible.
-    return inputs[0].toTensorListRef().size();
+    return inputs[0].toTensorVector().size();
   }
   // it's not a tensor list. Count the number of tensor inputs and return them.
   size_t num_tensor_inputs = 0;

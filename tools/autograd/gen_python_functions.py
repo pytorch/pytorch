@@ -409,7 +409,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         def unpack_variable(name, unpack_expr, typename):
             # optional<ArrayRef<T>> are special. The PythonArgParser returns an
-            # optional<vector<T>>, which cannot be implictly converted to
+            # optional<vector<T>>, which cannot be implicitly converted to
             # optional<ArrayRef<T>>. One needs to unwrap the optional and rewrap.
             if typename == 'c10::optional<DimnameList>':
                 result = """\
