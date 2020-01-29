@@ -11,7 +11,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-import torch.testing._internal.dist_utils
+import torch.testing._internal.dist_utils as dist_utils
 from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
@@ -19,6 +19,7 @@ from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
+    get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
 )
@@ -30,9 +31,7 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            == "PROCESS_GROUP",
-            message,
+            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -1539,9 +1538,7 @@ class RpcTest(RpcAgentTestFixture):
         # exception instead of just crashing.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1562,7 +1559,8 @@ class RpcTest(RpcAgentTestFixture):
             error_str = (
                 "Encountered exception in ProcessGroupAgent::enqueueSend"
                 if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else get_shutdown_error_regex())
+                else get_shutdown_error_regex()
+            )
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.
@@ -1653,7 +1651,7 @@ class RpcTest(RpcAgentTestFixture):
             return "expected result"
 
         if (
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+            dist_utils.TEST_CONFIG.rpc_backend_name
             == "PROCESS_GROUP"
         ):
             self.assertEqual(test_func(), "expected result")
