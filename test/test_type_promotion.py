@@ -462,6 +462,8 @@ class TestTypePromotion(TestCase):
             # very low precision for uncoalesced float16 sparse tensors since
             # ops like (s1 + s2).to_dense() will add four low-precision
             # floating point values.
+            return 5e-2
+        if dtype == torch.half:
             return 1e-3
         # uses default
         return None
@@ -529,7 +531,7 @@ class TestTypePromotion(TestCase):
             sparse = op(s1, scalar)
             dense_scalar = op(d1, scalar)
             self.assertEqual(sparse.dtype, dense_scalar.dtype)
-            self.assertEqual(dense_scalar, sparse.to_dense(), message=err)
+            self.assertEqual(dense_scalar, sparse.to_dense(), prec=precision, message=err)
         else:
             # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
             # "mul_cpu" / "div_cpu" not implemented for 'Half'
