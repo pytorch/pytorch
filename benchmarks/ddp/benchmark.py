@@ -9,7 +9,6 @@
 #
 
 import argparse
-import gc
 import io
 import itertools
 import json
@@ -160,7 +159,7 @@ def sweep(benchmark):
         # Turn range into materialized list.
         ranks = list(ranks)
         measurements = run_benchmark(benchmark, ranks, opts)
-        if not "warmup" in prefix:
+        if "warmup" not in prefix:
             print_measurements(prefix, benchmark.batch_size, measurements)
             results.append({"ranks": ranks, "measurements": measurements})
 
