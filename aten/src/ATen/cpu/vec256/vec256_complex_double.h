@@ -75,6 +75,11 @@ public:
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
     __at_align32__ double tmp_values[2*size()];
+    // Ensure uninitialized memory does not change the output value
+    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    for (auto i = 0; i < 2*size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
