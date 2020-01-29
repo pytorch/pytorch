@@ -1443,7 +1443,7 @@ def create_derived(backend_type_env, declarations):
         cases = []
         for scalar_name, c_type, accreal, _ in scalar_types:
             if scalar_name in scalar_type_cases:
-                case_body = []
+                case_body = []  # type: List[str]
                 # arguments are potentially duplicated because of one argument
                 # referencing another
                 seen_names = set()  # type: Set[str]
