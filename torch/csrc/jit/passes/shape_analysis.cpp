@@ -494,7 +494,7 @@ class ShapePropagator {
       list_type = input_base_type->cast<ListType>();
     }
 
-    at::ScalarType default_type = scalarTypeFromJitType(input_base_type);
+    at::optional<at::ScalarType> default_type = tryScalarTypeFromJitType(input_base_type);
     if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
       auto inp = toIValue(node->inputs().at(*grad_index));
       if (inp == c10::nullopt) {

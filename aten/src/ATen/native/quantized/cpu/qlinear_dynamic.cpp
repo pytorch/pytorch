@@ -336,6 +336,65 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
   }
 };
 
+template <bool ReluFused>
+class QLinearDynamicFp16 final : public torch::OperatorKernel {
+ public:
+#ifdef USE_FBGEMM
+  at::Tensor operator()(at::Tensor input, at::Tensor packed_weight) {
+    // We make a strong guarantee that models using these operators will have
+    // the same numerics across different machines. Therefore, we do not provide
+    // a fallback path and rather fail loudly if we cannot run FBGEMM.
+    TORCH_CHECK(
+        fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+
+    const Tensor input_contig = input.contiguous();
+    const float* input_ptr = input_contig.data_ptr<float>();
+
+    // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
+    auto& packed_param_struct =
+        cpp_custom_type_hack::cast<PackedLinearWeightFp16>(packed_weight);
+    auto& packed_weight_fp16 = *packed_param_struct.w;
+    auto& bias = packed_param_struct.bias;
+
+    TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
+    TORCH_CHECK(input.dim() >= 2);
+
+    const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+    const int64_t N = packed_weight_fp16.numCols();
+    std::vector<int64_t> output_size = input.sizes().vec();
+    output_size.back() = N;
+    Tensor output = at::empty(output_size, input.options().dtype(at::kFloat));
+
+    // Call the fp16 gemm interface
+    fbgemm::cblas_gemm_compute(
+        fbgemm::matrix_op_t::NoTranspose,
+        M,
+        input_ptr,
+        packed_weight_fp16,
+        0.0f,
+        output.data_ptr<float>());
+
+    // Add bias term
+    if (bias.has_value()) {
+      TORCH_CHECK(bias->dim() == 1);
+      output.add_(*bias);
+    }
+
+    return output;
+  }
+#else // USE_FBGEMM
+  at::Tensor operator()(
+      at::Tensor /* input */,
+      at::Tensor /* packed_weight */) {
+    // We make a strong guarantee that models using these operators will have
+    // the same numerics across different machines. Therefore, we do not provide
+    // a fallback path and rather fail loudly if we cannot run FBGEMM.
+    TORCH_CHECK(
+        false, "This PyTorch installation was not built with FBGEMM operators");
+  }
+#endif // USE_FBGEMM
+};
+
 static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
@@ -343,7 +402,14 @@ static auto registry =
                 .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
-                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId));
+                .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
+        .op("quantized::linear_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
+            torch::RegisterOperators::options()
+                .kernel<QLinearDynamicFp16<true>>(DispatchKey::CPUTensorId))
+        .op("quantized::linear_relu_dynamic_fp16(Tensor X, Tensor W_prepack) -> Tensor Y",
+            torch::RegisterOperators::options()
+                .kernel<QLinearDynamicFp16<true>>(DispatchKey::CPUTensorId));
+
 } // namespace
 } // namespace native
 } // namespace at

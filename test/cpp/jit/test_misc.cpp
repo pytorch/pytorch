@@ -8,6 +8,7 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/type_hashing.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
