@@ -74,6 +74,9 @@ Y:
         "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
     .Arg("starts", "(*Tuple(int)*): list of starting indices")
     .Arg("ends", "(*Tuple(int)*): list of ending indices")
+    .Arg(
+        "axes",
+        "(*Tuple(int)*): 1-D tensor of axes that `starts` and `ends` apply to")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       if (in.size() > 1) {
@@ -86,6 +89,7 @@ Y:
       ArgumentHelper helper(def);
       auto starts = helper.GetRepeatedArgument<int>("starts", vector<int>());
       auto ends = helper.GetRepeatedArgument<int>("ends", vector<int>());
+      auto axes = helper.GetRepeatedArgument<int>("axes", vector<int>());
       vector<int> dst_sizes(data.dims_size());
 
       for (int i = 0; i < data.dims_size(); ++i) {
@@ -123,16 +127,18 @@ struct GetSliceGradient : public GradientMakerBase {
           "SliceGradient",
           "",
           std::vector<string>{I(0), I(1), I(2), GO(0)},
-          std::vector<string>{GI(0)})};
+          std::vector<string>{GI(0)},
+          {})};
     } else {
       return vector<OperatorDef>{CreateOperatorDef(
           "SliceGradient",
           "",
           std::vector<string>{I(0), GO(0)},
-          std::vector<string>{GI(0)})};
+          std::vector<string>{GI(0)},
+          {})};
     }
   }
 };
-}
+} // namespace
 REGISTER_GRADIENT(Slice, GetSliceGradient);
 } // namespace caffe2
