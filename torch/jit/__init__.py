@@ -1653,7 +1653,7 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
-        def save_for_mobile(self, *args, **kwargs):
+        def _save_for_mobile(self, *args, **kwargs):
             r"""
             _save_for_mobile(f)
 
