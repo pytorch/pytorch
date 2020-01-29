@@ -654,25 +654,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Change the dimensionality of a tensor.  This is truly a resize:
-   * old sizes, if they are still valid, are preserved (this invariant
-   * is utilized by some call-sites, e.g., the implementation of squeeze, which
-   * mostly wants the sizes to stay the same).  New dimensions are given zero
-   * size and zero stride; this is probably not what you want--you should
-   * set_size/set_stride afterwards.
-   *
-   * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
-   * which is harder to misuse.
-   */
-  virtual void resize_dim(int64_t ndim) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim ", err_msg_tensor_metadata_change_not_allowed);
-    sizes_.resize(ndim, 0);
-    strides_.resize(ndim, 0);
-    refresh_numel();
-    refresh_contiguous();
-  }
-
-  /**
    * Change the size at some dimension.  This DOES NOT update strides;
    * thus, most changes to size will not preserve contiguity.  You probably
    * also want to call set_stride() when you call this.
