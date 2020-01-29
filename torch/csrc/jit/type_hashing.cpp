@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-size_t HashType::operator()(const TypePtr& type) const noexcept {
+size_t HashType::operator()(const TypePtr& type) const {
   if (auto named_type = type->cast<ClassType>()) {
     return get_hash(named_type->name().value());
   }
@@ -20,7 +20,7 @@ size_t HashType::operator()(const TypePtr& type) const noexcept {
   return get_hash(typekind_hash, hashes);
 };
 
-bool EqualType::operator()(const TypePtr& a, const TypePtr& b) const noexcept {
+bool EqualType::operator()(const TypePtr& a, const TypePtr& b) const {
   return *a == *b;
 };
 

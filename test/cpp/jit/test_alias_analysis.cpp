@@ -547,6 +547,7 @@ void testContainerAliasing() {
   graph(%inp: Tensor[]):
     %x : str = prim::Constant[value="a"]()
     %y : Tensor = prim::Constant()
+    %z : Tensor = prim::Constant()
     %a : (Tensor) = prim::TupleConstruct(%y)
     %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
     %c : Tensor[] = prim::ListConstruct(%y)
@@ -557,14 +558,17 @@ void testContainerAliasing() {
 
     auto str_output = vmap["x"];
     auto ten_output = vmap["y"];
+    auto local_var = vmap["z"];
     AliasDb aliasDb(graph);
 
     AT_ASSERT(graph->outputs().size() == 3);
     for (auto out : graph->outputs()) {
       AT_ASSERT(aliasDb.mayContainAlias(ten_output, out));
+      AT_ASSERT(!aliasDb.mayContainAlias(local_var, out));
     }
 
     AT_ASSERT(aliasDb.mayContainAlias(ten_output, graph->inputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(local_var, graph->inputs()));
 
     AT_ASSERT(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
     AT_ASSERT(!aliasDb.mayContainAlias(str_output, graph->outputs()));
@@ -967,12 +971,16 @@ void testWildcards() {
     AT_ASSERT(!aliasDb.hasWriters(int_list));
     AT_ASSERT(aliasDb.hasWriters(opt_ten_list));
     AT_ASSERT(aliasDb.hasWriters(ten_list));
+    AT_ASSERT(!aliasDb.mayContainAlias(int_list, opt_ten_list));
     AT_ASSERT(aliasDb.mayContainAlias(ten_list, opt_ten_list));
     AT_ASSERT(aliasDb.mayAlias(ten_list, opt_ten_list));
 
     auto list_of_tensor_lists = vmap["ten_ten_list"];
     AT_ASSERT(aliasDb.mayContainAlias(ten_list, list_of_tensor_lists));
     AT_ASSERT(aliasDb.mayContainAlias(ten_list, vmap["ten"]));
+
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(vmap["int_int_list"], list_of_tensor_lists));
   }
 
   // test invariant container aliasing

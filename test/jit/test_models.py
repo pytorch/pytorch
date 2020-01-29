@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode
+from torch.testing._internal.common_utils import enable_profiling_mode, GRAPH_EXECUTOR, ProfilingMode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -226,6 +226,7 @@ class TestModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_neural_style(self, device='cuda', check_export_import=False)
 
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "Bug found in deprecated executor")
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic

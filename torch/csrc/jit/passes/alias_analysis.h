@@ -143,10 +143,6 @@ class AliasDb {
   // Register `v` as a wildcard value.
   c10::optional<Element*> setWildcard(const Value* v);
 
-  // Is the element a wildcard or an unhandled container type,
-  // or does the element contain an element for which that's true
-  bool cannotCheckAliasContainment(const Value* elem) const;
-
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
 
