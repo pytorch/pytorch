@@ -10946,20 +10946,34 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(nz.requires_grad)
 
     def test_pdist_norm(self, device):
-        def test_pdist_single(shape, device, p, dtype, trans):
+        def test_pdist_single(shape, device, p, dtype, trans, grad_check=False):
             x = torch.randn(shape, dtype=dtype, device=device)
             if trans:
                 x.transpose_(-2, -1)
+            if grad_check:
+                x.requires_grad_()
+                y = x.detach().clone().requires_grad_()
+            else:
+                y = x
             actual = torch.pdist(x, p=p)
-            expected = brute_pdist(x, p=p)
+            expected = brute_pdist(y, p=p)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(torch.allclose(expected, actual))
+            if grad_check and expected.size() != torch.Size([0]):
+                g0 = torch.rand_like(actual)
+                actual.backward(g0)
+                expected.backward(g0)
+                print('shape {}, device {}, p {}, trans {}'.format(
+                    shape, device, p, dtype, trans))
+                print('grad.abs().max(): {}'.format((x.grad - y.grad).abs().max()))
+                self.assertTrue(torch.allclose(x.grad, y.grad))
 
         for shape in [(4, 5), (3, 2), (2, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        test_pdist_single(shape, device, p, dtype, trans)
+                        grad_check = dtype == torch.float64
+                        test_pdist_single(shape, device, p, dtype, trans, grad_check=grad_check)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
