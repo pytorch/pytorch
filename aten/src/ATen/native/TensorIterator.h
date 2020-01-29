@@ -299,10 +299,6 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
-  bool needs_dynamic_casting() const {
-    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
-  }
-
   bool has_contiguous_first_dim() const {
     int num_tensors = ntensors();
     for (int i = 0; i < num_tensors; i++) {
@@ -352,10 +348,6 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
-  void dynamic_cast_if(bool condition) {
-    force_dynamic_casting_ = force_dynamic_casting_ || condition;
-  }
-
   void build();
 
 protected:
@@ -391,8 +383,6 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
-  bool have_differing_types_ = false;
-  bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
 };

@@ -37,6 +37,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
@@ -286,6 +287,21 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
 
 } // namespace modern
 
+template<func_t>
+bool needs_dynamic_casting(TensorIterator& iter) {
+  using traits = function_traits<func_t>;
+  if (iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value) {
+    return true;
+  }
+  #pragma unroll
+  for (int i = 0; i < traits::arity; i++) {
+    if (iter.dtype(i + 1) != c10::impl::CPPTypeToScalarType<typename traits::template arg<i>::type>::value) {
+      return true;
+    }
+  }
+  return false;
+}
+
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
@@ -305,6 +321,8 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     dtypes[i] = iter.tensor(i).scalar_type();
   }
 
+  std::cout << "needs_dynamic_casting = " << needs_dynamic_casting<func_t>(iter) << std::endl;
+
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
@@ -313,7 +331,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t>(iter)) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
@@ -329,7 +347,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t>(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
