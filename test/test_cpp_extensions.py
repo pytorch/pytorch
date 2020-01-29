@@ -21,7 +21,7 @@ try:
 except ImportError:
     warnings.warn(
         "test_cpp_extensions.py cannot be invoked directly. Run "
-        "`python run_test.py -i cpp_extensions` instead."
+        "`python run_test.py -i test_cpp_extensions` instead."
     )
 
 
