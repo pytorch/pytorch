@@ -84,7 +84,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(::pow(base, start.to<double>()));
+    r.fill_(std::pow(base, start.to<double>()));
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "logspace_cuda", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
