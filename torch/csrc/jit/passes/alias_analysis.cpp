@@ -843,20 +843,6 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return false;
 }
 
-bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
-  if (isContainerType(elem->type())) {
-    if (elem->node()->kind() != prim::TupleConstruct) {
-      return true;
-    }
-    auto inps = elem->node()->inputs();
-    return std::any_of(inps.begin(), inps.end(), [&](const Value* v) {
-      return cannotCheckAliasContainment(v);
-    });
-  }
-
-  return false;
-}
-
 bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   const std::vector<Value*> a_vec = {a};
   const std::vector<Value*> b_vec = {b};
@@ -877,43 +863,8 @@ std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
 bool AliasDb::mayContainAlias(
     const at::ArrayRef<Value*> a,
     const at::ArrayRef<Value*> b) const {
-  std::vector<Element*> a_elements;
-  bool a_cannot_check_containment = false;
-  for (const auto& val : a) {
-    if (cannotCheckAliasContainment(val)) {
-      a_cannot_check_containment = true;
-      break;
-    }
-    if (mutableType(val)) {
-      a_elements.push_back(elementMap_.at(val));
-    }
-  }
-
-  std::vector<Element*> b_elements;
-  bool b_cannot_check_containment = false;
-  for (const auto& val : b) {
-    if (cannotCheckAliasContainment(val)) {
-      b_cannot_check_containment = true;
-      break;
-    }
-    if (mutableType(val)) {
-      b_elements.push_back(elementMap_.at(val));
-    }
-  }
-  // if we can check all elements of one value set and it doesn't contain any
-  // mutable types, then we can safely return false
-  if (!a_cannot_check_containment && a_elements.size() == 0) {
-    return false;
-  }
-  if (!b_cannot_check_containment && b_elements.size() == 0) {
-    return false;
-  }
-  // now both elements must contain mutable elements, so if we cannot check
-  // containment we must return true
-  if (a_cannot_check_containment || b_cannot_check_containment) {
-    return true;
-  }
-  return memoryDAG_->mayContainAlias(a_elements, b_elements);
+  auto a_elems = getElements(a);
+  return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
