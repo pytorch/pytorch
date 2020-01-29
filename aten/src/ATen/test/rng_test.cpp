@@ -34,7 +34,7 @@ Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator 
   return self;
 }
 
-} 
+}
 
 TEST(RNGTest, RegisterCustomRNG) {
   static auto registry = torch::RegisterOperators()
