@@ -54,11 +54,11 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # Load output channel index
     # Note since this is an offset into a byte pointer
     # We do not need to multiply with size of pointer type
-    LDR x18, [sp]
+    LDR x9, [sp]
     # Load pointer to per channel zero points array
-    LDR x19, [x8]
+    LDR x10, [x8]
     # Add offset to the base pointer
-    ADD x19, x19, x18
+    ADD x10, x10, x9
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -66,8 +66,8 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # v11 := vacc1x4567
     MOV v11.16b, v9.16b
     # Load b_zero_point
-    LD1 {v25.8b}, [x19]
-    ADD x8, x8, 4
+    LD1 {v25.8b}, [x10]
+    ADD x8, x8, 8
     # Load a_zero_point
     LD1R {v24.8b}, [x8]
     ADD x8, x8, 4
