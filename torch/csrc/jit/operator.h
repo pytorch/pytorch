@@ -75,7 +75,9 @@ struct TORCH_API Operator {
       c10::OperatorOptions options = c10::OperatorOptions())
       : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
         op_creator_(std::move(op_creator)),
-        options_(std::move(options)) {}
+        options_(std::move(options)) {
+          std::cout << "USES NODE: " << *schema_ << "\n";
+        }
 
   Operator(
       const std::string& schema,
@@ -83,7 +85,9 @@ struct TORCH_API Operator {
       c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
         op_creator_(std::move(op_creator)),
-        options_(std::move(options)) {}
+        options_(std::move(options)) {
+          std::cout << "USES NODE: " << schema << "\n";
+        }
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
