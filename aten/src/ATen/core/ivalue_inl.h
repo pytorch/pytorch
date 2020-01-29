@@ -350,7 +350,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
   const IValue& getSlot(size_t slot) const {
-    return slots_.at(slot);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(slot >= 0 && slot < slots_.size());
+    // NOTE: This lookup is fairly hot, so we use unchecked access to the
+    // vector.  Errors should still be detectable with ASan.
+    return slots_[slot];
   }
 
   void unsafeRemoveSlot(size_t slot) {
