@@ -18,10 +18,8 @@
 #   ideally in a data structure rather than code if possible. See e.g.
 #   SCHEMA_DEFAULT_CONVERSION_HACKS, etc.
 #
-# - similarly, conversions from one format to another should happen all at
-#   once in a single place, not be spread around. see e.g. get_python_args()
-#   which preps an arg list in Declarations.yaml format for use in
-#   PythonArgParser code.
+# - similarly, conversions from one format to another should ideally happen
+#   all at once in a single place.
 #
 # - no nontrivial nested functions. couple-liners are ok but please no more.
 #   especially avoid functions that read/write outer variables defined far away.
@@ -1207,7 +1205,12 @@ def get_python_signature(declaration, is_python_method, skip_outputs=False):
 #
 
 def get_python_args(decl):
-    return [arg for args in decl['python_arglists'].values() for arg in args]
+    arglists = decl['python_arglists']
+    return \
+        arglists['input_args'] + \
+        arglists['input_kwargs'] + \
+        arglists['output_args'] + \
+        arglists['python_binding_args']
 
 
 def get_python_argc(decl):
@@ -1252,8 +1255,8 @@ def make_python_arglists(declaration, is_python_method):
     input_args = [arg for arg in input_args if include(arg)]
 
     # keyword inputs:
-    # - filter options. after loading the yaml, an upstream step gethered dtype, layout et al
-    #   into a single tensor options arg. here we reintroduce the originals (see below)
+    # - filter options. after loading the yaml, an upstream step has gathered dtype,
+    #   layout et al into a single tensor options arg. here we reintroduce the originals
     input_kwargs = [arg for arg in input_kwargs if not is_tensor_options(arg)]
 
     # outputs:
