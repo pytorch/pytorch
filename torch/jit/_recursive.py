@@ -89,18 +89,16 @@ def infer_concrete_type_builder(nn_module):
     for name, item in nn_module._parameters.items():
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
-        if item is None:
-            # We currently have the invariant in various places in our code
-            # that parameters must be Tensors. However, the nn.Module API also
-            # allows NoneType parameters. These parameters are not returned as
-            # part of `parameters()` and its variants, but are available
-            # through direct attribute access.
-            #
-            # So to achieve the nn.Module behavior, add the NoneType parameters
-            # as an attribute.
-            concrete_type_builder.add_attribute(name, attr_type, False)
-        else:
-            concrete_type_builder.add_attribute(name, attr_type, True)
+        # We currently have the invariant in various places in our code
+        # that parameters must be Tensors. However, the nn.Module API also
+        # allows NoneType parameters. These parameters are not returned as
+        # part of `parameters()` and its variants, but are available
+        # through direct attribute access.
+        #
+        # So to achieve the nn.Module behavior, add the NoneType parameters
+        # as an attribute.
+        should_register_as_parameter = item is not None
+        concrete_type_builder.add_attribute(name, attr_type, should_register_as_parameter)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
