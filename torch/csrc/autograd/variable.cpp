@@ -323,6 +323,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
     }
     auto current_version = self._version();
     if (diff_view_meta->attr_version != current_version) {
+      AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = self.sizes().vec();
