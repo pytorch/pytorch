@@ -94,12 +94,12 @@ public:
         }
       }
     }
-    return dispatchKeySetToDispatchKey_(nonFallthroughMask, ts);
+    return dispatchKeySetToDispatchKey_(nonFallthroughMask, ts.add(DispatchKey::BackendSelect).add(DispatchKey::VariableTensorId));
   }
 
   template<class... Args>
   c10::optional<DispatchKey> getDispatchKeyUnboxed(DispatchKeySet nonFallthroughMask, const Args&... args) const {
-    auto key_set = detail::multi_dispatch_key_set(args...);
+    auto key_set = detail::multi_dispatch_key_set(args...).add(DispatchKey::BackendSelect).add(DispatchKey::VariableTensorId);
     return dispatchKeySetToDispatchKey_(nonFallthroughMask, key_set);
   }
 

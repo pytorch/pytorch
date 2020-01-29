@@ -8,10 +8,10 @@ namespace native {
 
 namespace {
 
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_cudnn_init_dropout_state", "");
-  return op.callUnboxedWithDispatchKey<Tensor, double, bool, int64_t, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, dropout, train, dropout_seed, dtype, layout, device, pin_memory);
+  return op.callUnboxedWithDispatchKey<Tensor, double, bool, int64_t, c10::ScalarType, c10::Layout, c10::Device, bool>(key, dropout, train, dropout_seed, dtype, layout, device, pin_memory);
 }
 
 Tensor arange(Scalar end, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -62,10 +62,6 @@ Tensor empty(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::option
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, size, dtype, layout, device, pin_memory, memory_format);
 }
 
-Tensor empty_names(IntArrayRef size, c10::optional<DimnameList> names, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
-  return at::native::empty(size, names, dtype, layout, device, pin_memory, memory_format);
-}
-
 Tensor empty_strided(IntArrayRef size, IntArrayRef stride, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::empty_strided", "");
@@ -82,10 +78,6 @@ Tensor _empty_per_channel_affine_quantized(IntArrayRef size, const Tensor & scal
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_empty_per_channel_affine_quantized", "");
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, const Tensor &, const Tensor &, int64_t, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, size, scales, zero_points, axis, dtype, layout, device, pin_memory, memory_format);
-}
-
-Tensor empty_like(const Tensor & self, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
-  return at::native::empty_like(self, dtype.value(), layout.value(), device.value(), pin_memory.value(), memory_format);
 }
 
 Tensor eye(int64_t n, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -112,10 +104,10 @@ Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<c10::ScalarType> 
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, Scalar, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, size, fill_value, dtype, layout, device, pin_memory);
 }
 
-Tensor full_like(const Tensor & self, Scalar fill_value, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor full_like(const Tensor & self, Scalar fill_value, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::full_like", "dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, Scalar, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, fill_value, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, Scalar, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, fill_value, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -184,10 +176,10 @@ Tensor ones(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::optiona
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, size, dtype, layout, device, pin_memory);
 }
 
-Tensor ones_like(const Tensor & self, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor ones_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::ones_like", "dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor scalar_tensor(Scalar s, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -220,10 +212,10 @@ Tensor rand_generator(IntArrayRef size, Generator * generator, c10::optional<c10
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, Generator *, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, size, generator, dtype, layout, device, pin_memory);
 }
 
-Tensor rand_like(const Tensor & self, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor rand_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::rand_like", "dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor normal(double mean, double std, IntArrayRef size, Generator * generator, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -244,10 +236,10 @@ Tensor tril_indices(int64_t row, int64_t col, int64_t offset, c10::optional<c10:
   return op.callUnboxedWithDispatchKey<Tensor, int64_t, int64_t, int64_t, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, row, col, offset, dtype, layout, device, pin_memory);
 }
 
-Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
+Tensor _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, const Tensor & indices, const Tensor & values, ScalarType dtype, Layout layout, Device device, bool pin_memory) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_sparse_coo_tensor_with_dims_and_tensors", "");
-  return op.callUnboxedWithDispatchKey<Tensor, int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory);
+  return op.callUnboxedWithDispatchKey<Tensor, int64_t, int64_t, IntArrayRef, const Tensor &, const Tensor &, c10::ScalarType, c10::Layout, c10::Device, bool>(key, sparse_dim, dense_dim, size, indices, values, dtype, layout, device, pin_memory);
 }
 
 Tensor _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -280,10 +272,10 @@ Tensor sparse_coo_tensor_size(IntArrayRef size, c10::optional<c10::ScalarType> d
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, size, dtype, layout, device, pin_memory);
 }
 
-Tensor zeros_like(const Tensor & self, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor zeros_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::zeros_like", "dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor zeros(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -316,10 +308,10 @@ Tensor randperm(int64_t n, c10::optional<c10::ScalarType> dtype, c10::optional<c
   return op.callUnboxedWithDispatchKey<Tensor, int64_t, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, n, dtype, layout, device, pin_memory);
 }
 
-Tensor randn_like(const Tensor & self, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor randn_like(const Tensor & self, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::randn_like", "dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor randn_generator_with_names(IntArrayRef size, Generator * generator, c10::optional<DimnameList> names, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -346,10 +338,10 @@ Tensor randn(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::option
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>>(key, size, dtype, layout, device, pin_memory);
 }
 
-Tensor randint_like(const Tensor & self, int64_t low, int64_t high, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> memory_format) {
+Tensor randint_like(const Tensor & self, int64_t low, int64_t high, ScalarType dtype, Layout layout, Device device, bool pin_memory, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory).computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::randint_like", "low_dtype");
-  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, int64_t, int64_t, c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>, c10::optional<MemoryFormat>>(key, self, low, high, dtype, layout, device, pin_memory, memory_format);
+  return op.callUnboxedWithDispatchKey<Tensor, const Tensor &, int64_t, int64_t, c10::ScalarType, c10::Layout, c10::Device, bool, c10::optional<MemoryFormat>>(key, self, low, high, dtype, layout, device, pin_memory, memory_format);
 }
 
 Tensor randint_low(int64_t low, int64_t high, IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::optional<c10::Layout> layout, c10::optional<c10::Device> device, c10::optional<bool> pin_memory) {
@@ -413,14 +405,6 @@ static auto registry = torch::RegisterOperators()
     .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
     .impl_unboxedOnlyKernel<decltype(empty), &empty>(DispatchKey::BackendSelect)
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(empty_like), &empty_like>(DispatchKey::BackendSelect)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(empty_names), &empty_names>(DispatchKey::BackendSelect)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor")
     .impl_unboxedOnlyKernel<decltype(_empty_per_channel_affine_quantized), &_empty_per_channel_affine_quantized>(DispatchKey::BackendSelect)
