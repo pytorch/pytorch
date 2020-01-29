@@ -1632,12 +1632,6 @@ Node* Graph::createNumToTensor(Value* value) {
   return result;
 }
 
-Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::ImplicitTensorToNum, {value});
-  result->output()->setType(type);
-  return result;
-}
-
 Node* Graph::createObject(const ClassTypePtr& type) {
   auto result = create(prim::CreateObject);
   result->output()->setType(type);
