@@ -619,7 +619,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
                     self.cell = cell
 
                 def forward(self, x, hiddens):
-                    # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                    # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                    # -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
                     return self.cell(x, hiddens)
 
             # TODO: TorchScript overloads don't work without this wrapper

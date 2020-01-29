@@ -282,16 +282,19 @@ static std::vector<QuantizedCellParamsDynamic> _quantized_params_dynamic(
     std::vector<QuantizedCellParamsDynamic> result;
     for (size_t i = 0; i < params.size(); i += 2) {
       at::Tensor bias_ih, bias_hh;
-      if (qengine == "fbgemm") {
-      auto& packed_struct_ih =
-          cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
-      auto& packed_struct_hh =
-          cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
 
-      bias_ih = packed_struct_ih.bias.value_or(undefined);
-      bias_hh = packed_struct_hh.bias.value_or(undefined);
-      }
-      else if (qengine == "qnnpack") {
+      if (qengine == "fbgemm") {
+#ifdef USE_FBGEMM
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias.value_or(undefined);
+        bias_hh = packed_struct_hh.bias.value_or(undefined);
+#endif
+      } else if (qengine == "qnnpack") {
+#ifdef USE_PYTORCH_QNNPACK
         auto& packed_struct_ih =
             cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
         auto& packed_struct_hh =
@@ -299,6 +302,7 @@ static std::vector<QuantizedCellParamsDynamic> _quantized_params_dynamic(
 
         bias_ih = packed_struct_ih.bias;
         bias_hh = packed_struct_hh.bias;
+#endif
       }
       result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
     }
