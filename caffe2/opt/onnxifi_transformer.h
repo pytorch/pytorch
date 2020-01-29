@@ -22,7 +22,7 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
   bool use_onnx{false};
 
-  // Whether to adjust batch at the ouptuts or not
+  // Whether to adjust batch at the outputs or not
   bool adjust_batch{true};
 
   // Whether to lower model blob by blob

@@ -21,11 +21,14 @@ using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
 using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
 using leaky_relu_fn = void (*)(TensorIterator&, Scalar);
 using leaky_relu_backward_fn = void (*)(TensorIterator&, Scalar);
+using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_fn, elu_backward_stub);
 DECLARE_DISPATCH(softplus_fn, softplus_stub);
 DECLARE_DISPATCH(softplus_backward_fn, softplus_backward_stub);
+DECLARE_DISPATCH(log_sigmoid_cpu_fn, log_sigmoid_cpu_stub);
+DECLARE_DISPATCH(activation_backward_fn, log_sigmoid_backward_cpu_stub);
 DECLARE_DISPATCH(threshold_fn, threshold_stub);
 DECLARE_DISPATCH(activation_fn, GeluKernel);
 DECLARE_DISPATCH(activation_backward_fn, GeluBackwardKernel);

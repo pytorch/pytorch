@@ -83,7 +83,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
-        # if addiional test inputs are provided run the onnx
+        # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
             for test_input in test_with_inputs:
@@ -1026,6 +1026,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
+        return  # TEMPORARILY DISABLED Until ONNX Export of List[Float] constants fixe
+
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -2038,30 +2040,26 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_sort(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=True)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=True))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=False)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=False))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
@@ -2429,6 +2427,34 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LogDet(), x)
+
+    def test_dim(self):
+        class DimModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input * 2
+                out *= out.dim()
+                return out
+        empty_input = torch.randn(0, requires_grad=True)
+        multi_dim_input = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(DimModel(), empty_input)
+        self.run_test(DimModel(), multi_dim_input)
+
+    def test_empty_branch(self):
+        class EmptyBranchModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                out = input + 1
+                if out.dim() > 2:
+                    if out.dim() > 3:
+                        out += 3
+                    else:
+                        pass
+                else:
+                    pass
+                return out
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(EmptyBranchModel(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

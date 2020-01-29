@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-using namespace torch::distributed::rpc;
 
 TEST(WireSerialize, Base) {
   auto run = [](const std::string& payload,

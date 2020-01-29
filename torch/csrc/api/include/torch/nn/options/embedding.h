@@ -95,6 +95,10 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(torch::Tensor, _weight) = Tensor();
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 // ============================================================================
@@ -117,6 +121,10 @@ struct TORCH_API EmbeddingBagFromPretrainedOptions {
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   /// Note: this option is not supported when ``mode="kMax"``.
   TORCH_ARG(bool, sparse) = false;
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 // ============================================================================
@@ -144,6 +152,10 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// If specified, `per_sample_weights` must have exactly the same shape as input and is treated as
   /// having the same `offsets`, if those are not None.
   TORCH_ARG(torch::Tensor, per_sample_weights) = Tensor();
+  /// If ``True``, `offsets` has one additional element, where the last element
+  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
+  /// this option is currently only supported when ``mode="sum"``.
+  TORCH_ARG(bool, include_last_offset) = false;
 };
 
 } // namespace functional

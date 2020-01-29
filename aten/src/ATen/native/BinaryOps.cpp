@@ -18,6 +18,8 @@ DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_or_stub);
 DEFINE_DISPATCH(bitwise_xor_stub);
+DEFINE_DISPATCH(lshift_stub);
+DEFINE_DISPATCH(rshift_stub);
 DEFINE_DISPATCH(logical_and_stub);
 DEFINE_DISPATCH(logical_or_stub);
 DEFINE_DISPATCH(logical_xor_stub);
@@ -29,6 +31,8 @@ DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
+DEFINE_DISPATCH(max_elementwise_stub);
+DEFINE_DISPATCH(min_elementwise_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -377,6 +381,62 @@ Tensor& __ixor__(Tensor& self, Scalar other) {
   return self.bitwise_xor_(other);
 }
 
+Tensor __lshift__(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor __lshift__(const Tensor& self, Scalar other) { 
+  Tensor result;
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& __ilshift__(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  lshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor& __ilshift__(Tensor& self, Scalar other) {
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(self, self, wrapper);
+  lshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor __rshift__(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  rshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor __rshift__(const Tensor& self, Scalar other) { 
+  Tensor result;
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, wrapper);
+  rshift_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& __irshift__(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  rshift_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor& __irshift__(Tensor& self, Scalar other) {
+  auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
+  auto iter = TensorIterator::binary_op(self, self, wrapper);
+  rshift_stub(iter.device_type(), iter);
+  return self;
+}
+
 template <typename Stub>
 Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
@@ -491,5 +551,40 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
+
+Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  max_elementwise_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor max(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::max_out(result, self, other);
+}
+
+Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
+
+Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+                                        /*check_mem_overlap=*/true);
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
+              other.dtype(), " for argument 'other'");
+  min_elementwise_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor min(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty(0, self.options());
+  return at::min_out(result, self, other);
+}
+
+Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+
 }
 }  // namespace at

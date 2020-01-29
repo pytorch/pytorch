@@ -17,6 +17,8 @@ DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);
 DEFINE_DISPATCH(softplus_stub);
 DEFINE_DISPATCH(softplus_backward_stub);
+DEFINE_DISPATCH(log_sigmoid_cpu_stub);
+DEFINE_DISPATCH(log_sigmoid_backward_cpu_stub);
 DEFINE_DISPATCH(threshold_stub);
 DEFINE_DISPATCH(hardtanh_backward_stub);
 DEFINE_DISPATCH(hardshrink_stub);
@@ -672,6 +674,47 @@ Tensor leaky_relu_backward(
   auto iter = TensorIterator::binary_op(result, input, grad_output);
   leaky_relu_backward_stub(iter.device_type(), iter, negval);
   return iter.output();
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
+  auto result = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto buffer = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
+  return std::make_tuple(result, buffer);
+}
+
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cpu(Tensor& result, Tensor& buffer, const Tensor& input) {
+  log_sigmoid_cpu_stub(kCPU, result, buffer, input);
+  return std::forward_as_tuple(result, buffer);
+}
+
+Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
+  Tensor grad_input;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(buffer);
+  iter.add_input(grad_output);
+  iter.build();
+  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  return iter.output();
+}
+
+Tensor& log_sigmoid_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& buffer) {
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(buffer);
+  iter.add_input(grad_output);
+  iter.build();
+  log_sigmoid_backward_cpu_stub(kCPU, iter);
+  return grad_input;
 }
 
 DEFINE_DISPATCH(GeluKernel);
