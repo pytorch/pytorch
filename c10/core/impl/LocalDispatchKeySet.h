@@ -95,9 +95,9 @@ private:
 // The non-RAII API is less efficient than the RAII guards because both the
 // getter and setter will do a tls_getaddr lookup (the RAII struct only needs one!)
 
-bool tls_is_dispatch_key_excluded(DispatchKey x);
-void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
-bool tls_is_dispatch_key_included(DispatchKey x);
-void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_excluded(DispatchKey x);
+C10_API void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
+C10_API bool tls_is_dispatch_key_included(DispatchKey x);
+C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
 
 }} // namespace c10::impl
