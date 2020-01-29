@@ -1650,10 +1650,7 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if (
-            dist_utils.TEST_CONFIG.rpc_backend_name
-            == "PROCESS_GROUP"
-        ):
+        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
@@ -1679,3 +1676,20 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+
+@unittest.skipUnless(
+    torch._six.PY3, "Pytorch distributed autograd package does not support python2"
+)
+class RpcJitTest(RpcAgentTestFixture):
+    @dist_utils.dist_init
+    def test_rpc_async(self):
+        @torch.jit.script
+        def send_rpc_async():
+            return rpc._rpc_async_torchscript(dst_worker_name, no_args, args=())
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        FileCheck().check("send_rpc_async").run(str(dist_get_gradients.graph))
+
+        send_rpc_async()
