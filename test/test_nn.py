@@ -8215,10 +8215,11 @@ class TestNNInit(TestCase):
 
             # Test 2D
             input_var = torch.randn(batch, in_c, size, size)
-            filter_var = torch.zeros(out_c, in_c, kernel_size, kernel_size)
+            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size)
             filter_var = torch.cat([filter_var] * groups)
             init.dirac_(filter_var, groups)
             output_var = F.conv2d(input_var, filter_var)
+            input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
                 self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], 
@@ -8228,7 +8229,7 @@ class TestNNInit(TestCase):
 
             # Test 3D
             input_var = torch.randn(batch, in_c, size, size, size)
-            filter_var = torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size)
+            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size, kernel_size)
             filter_var = torch.cat([filter_var] * groups)
             init.dirac_(filter_var, groups)
             output_var = F.conv3d(input_var, filter_var)
