@@ -334,8 +334,7 @@ static void gatherParametersAndBuffers(
     } else if (auto class_type = s.value.type()->cast<ClassType>()) {
       if (class_type->name() &&
           getCustomClass(class_type->name()->qualifiedName())) {
-        auto capsule = s.value.toObject()->getAttr("capsule");
-        tracer::setValueTrace(capsule, trace_get_attr);
+        tracer::setValueTrace(s.value, trace_get_attr);
       }
     } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
@@ -436,7 +435,12 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < elements.size(); ++i) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
-  } else if (v.isFuture() || v.isObject() || v.isCapsule()) {
+  } else if (
+      v.isObject() && v.toObject()->type()->name() &&
+      getCustomClass(v.toObject()->type()->name()->qualifiedName())) {
+    auto capsule = v.toObject()->getAttr("capsule");
+    env_stack.back()[capsule] = value;
+  } else if (v.isFuture() || v.isObject()) {
     env_stack.back()[v] = value;
   } else {
     std::ostringstream os;
