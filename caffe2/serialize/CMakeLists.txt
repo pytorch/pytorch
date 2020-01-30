@@ -9,13 +9,13 @@ if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
       ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/CrcHw.cpp)
   set_property(
     SOURCE ${SSE42_FILES}
-    PROPERTY COMPILE_FLAGS
+    APPEND PROPERTY COMPILE_FLAGS
     "-mpclmul -msse4.2 "
   )
   set_property(
     SOURCE ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
-    APPEND PROPERTY COMPILE_DEFINITIONS
-    "USE_EXTERNAL_MZCRC")
+    APPEND PROPERTY COMPILE_FLAGS
+    "-DUSE_EXTERNAL_MZCRC")
 endif()
 
 list(APPEND Caffe2_CPU_SRCS
