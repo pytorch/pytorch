@@ -8983,17 +8983,16 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
-    def _test_module_empty_input(self, module, inp, check_size=True, check_parameter_grads=True):
+    def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
         out.backward(gO)
         if check_size:
             self.assertEqual(out.size(), inp.size())
-        if check_parameter_grads:
-            for p in module.parameters():
-                if p.requires_grad:
-                    self.assertEqual(p.grad, torch.zeros_like(p.grad))
+        for p in module.parameters():
+            if p.requires_grad:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
         self.assertEqual(inp.grad, torch.zeros_like(inp))
 
     def test_Dropout(self, device):

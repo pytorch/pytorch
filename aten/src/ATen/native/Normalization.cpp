@@ -534,7 +534,7 @@ Tensor batch_norm(
   if (input.numel()==0){
     //don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
-    if (weight.defined()) out = out*weight[0];
+    if (weight.defined()) out = out * weight[0];
     if (bias.defined()) out = out + bias[0];
     return out; 
   }
