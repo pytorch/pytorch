@@ -1459,12 +1459,12 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   r.bn_b = bn.attr("bias").toTensor();
 
   r.conv_w = conv.attr("weight").toTensor();
-  r.conv_b = at::zeros_like(r.bn_rm);
-  if (hastensor(conv, "bias")) {
-    auto t = conv.attr("bias").toTensor();
-    if (t.numel() > 0) {
-      r.conv_b = conv.attr("bias").toTensor();
-    }
+  TORCH_INTERNAL_ASSERT(conv.hasattr("bias"), "Expecting Conv module to have parameter/attribute bias");
+  auto bias_opt = conv.attr("bias").toOptional<at::Tensor>();
+  if (bias_opt) {
+    r.conv_b = *bias_opt;
+  } else {
+    r.conv_b = at::zeros_like(r.bn_rm);
   }
 
   return true;
@@ -1562,12 +1562,15 @@ graph(%self, %x):
         nodes_to_delete_.insert(matched_bn);
         GRAPH_UPDATE("Deleting ", *matched_bn);
 
-        // TODO: we have a workaround right now
-        // that changes self.bias to torch.Tensor and
-        // use numel() == 0 to indicate self.bias is None
-        // since https://github.com/pytorch/pytorch/blob/master/torch/jit/_recursive.py#L91-L95
-        // we have to fix this when we change self.bias
-        // back to Optional[torch.Tensor]
+        auto slot = conv_submodule.type()->getAttributeSlot("bias");
+        // We need to remove the attribute field before adding parameter field
+        if (!conv_submodule.type()->is_parameter(slot)) {
+          GRAPH_UPDATE(
+              "Removing existing bias attribute from conv module");
+          conv_submodule._ivalue()->unsafeRemoveAttr("bias");
+          conv_submodule.type()->unsafeRemoveAttribute("bias");
+        }
+
       } // matches
     } // methods
   } // while
@@ -1578,7 +1581,8 @@ void FoldConvBatchNorm2dHelper::transform() {
     script::Module conv(item.first);
     auto w_b = item.second;
     conv.setattr("weight", std::get<0>(w_b));
-    conv.setattr("bias", std::get<1>(w_b));
+    // registering a parameter field (not attribute field)
+    conv.register_parameter("bias", std::get<1>(w_b), false);
   }
 }
 
