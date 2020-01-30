@@ -331,12 +331,14 @@ static void gatherParametersAndBuffers(
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value, s.value.type(), trace_get_attr);
-    } else if (auto class_type = s.value.type()->cast<ClassType>()) {
+    }
+    if (auto class_type = s.value.type()->cast<ClassType>()) {
       if (class_type->name() &&
           getCustomClass(class_type->name()->qualifiedName())) {
         tracer::setValueTrace(s.value, trace_get_attr);
       }
-    } else if (self_ty->getAttribute(s.name)->is_module()) {
+    }
+    if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
           state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
