@@ -293,7 +293,12 @@ void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes() {
     } else {
       // We need to use generic Slice
       SliceImpl<int32_t, CPUContext>(
-          &tmp, *output_tensor, output_reshape_info_.begins[i], end, &context);
+          &tmp,
+          *output_tensor,
+          output_reshape_info_.begins[i],
+          end,
+          {},
+          &context);
       output_tensor->CopyFrom(tmp);
     }
   }

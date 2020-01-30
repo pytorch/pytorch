@@ -27,21 +27,26 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
   template <typename SIndex>
   bool DoRunWithType() {
     if (InputSize() > 1) {
-      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
-      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
+      ReinitializeAndCopyFrom(
+          &starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(
+          &ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
-
-        if (HasArgument("dim") && HasArgument("start_idx") && HasArgument("end_idx")) {
+        if (HasArgument("dim") && HasArgument("start_idx") &&
+            HasArgument("end_idx")) {
           auto dim = this->template GetSingleArgument<int>("dim", 0);
-          auto start = this->template GetSingleArgument<int64_t>("start_idx", 0);
+          auto start =
+              this->template GetSingleArgument<int64_t>("start_idx", 0);
           auto end = this->template GetSingleArgument<int64_t>("end_idx", -1);
           auto& input_tensor = Inputs()[0]->Get<Int8TensorCPU>();
-          auto rank = input_tensor.t.sizes().size();
-          starts_.resize(rank, 0);
-          ends_.resize(rank, -1);
-          starts_[dim] = start;
-          ends_[dim] = end;
+          auto axis = input_tensor.t.canonical_axis_index(dim);
+          starts_.resize(1, 0);
+          ends_.resize(1, -1);
+          axes_.resize(1, 0);
+          starts_[0] = start;
+          ends_[0] = end;
+          axes_[0] = axis;
         } else {
           CAFFE_ENFORCE(HasArgument("starts"));
           CAFFE_ENFORCE(HasArgument("ends"));
@@ -49,9 +54,13 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
         ReinitializeTensor(
-            &starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+            &starts_host_,
+            {static_cast<int64_t>(starts_.size())},
+            at::dtype<SIndex>().device(CPU));
         ReinitializeTensor(
-            &ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
+            &ends_host_,
+            {static_cast<int64_t>(ends_.size())},
+            at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.template mutable_data<SIndex>(),
@@ -75,7 +84,7 @@ class Int8SliceOp final : public SliceOp<CPUContext> {
     Y->zero_point = Y_offset;
 
     return SliceImpl<SIndex, CPUContext>(
-        &Y->t, X.t, starts_host_, ends_host_, &context_);
+        &Y->t, X.t, starts_host_, ends_host_, axes_, &context_);
   }
 };
 
