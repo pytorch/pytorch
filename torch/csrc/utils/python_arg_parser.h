@@ -710,6 +710,6 @@ static auto check_has_torch_function(PyObject* obj) -> bool
  *
  */
 
-PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name);
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
 } // namespace torch
