@@ -1653,9 +1653,9 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
-        def _save_for_mobile(self, *args, **kwargs):
+        def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
-            _save_for_mobile(f)
+            _save_for_lite_interpreter(f)
 
             Add (or update) the bytecode session to the script model. The updated model is used
             in lite interpreter for mobile applications.
