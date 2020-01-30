@@ -10,13 +10,13 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/jit_log.h>
 
 #include <exception>
 #include <iostream>
@@ -244,15 +244,15 @@ struct CanEmitInline {
   }
   bool canInline(Value* v) {
     return v->node()->kind() != prim::Param &&
-           // without this a BailOut may float downstream past some later
-           // BailOut
-           // and receive a higher jf_index. Then a GUARD instruction
-           // we generated for the floated BailOut will get popped up from the
-           // instruction stack
-           // by the later BailOut in createBailoutBlock and its jf_index
-           // will become invalid.
-           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
-           v->node()->outputs().size() == 1;
+        // without this a BailOut may float downstream past some later
+        // BailOut
+        // and receive a higher jf_index. Then a GUARD instruction
+        // we generated for the floated BailOut will get popped up from the
+        // instruction stack
+        // by the later BailOut in createBailoutBlock and its jf_index
+        // will become invalid.
+        v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+        v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {
@@ -394,6 +394,7 @@ struct CodeImpl {
           fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
     }
     n_inputs = graph_->inputs().size();
+    GRAPH_DUMP("CodeImpl: ", graph_);
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
@@ -433,7 +434,7 @@ struct CodeImpl {
   }
 
   void truncateInstructions(size_t size) {
-    while(instructions_.size() > size) {
+    while (instructions_.size() > size) {
       instructions_.pop_back();
       instructions_source_.pop_back();
     }
@@ -463,20 +464,9 @@ struct CodeImpl {
     return value_to_reg_.at(v);
   }
 
-  void emitUse(Value* input, bool drop) {
-    // drop - if true, we are not actually going to use this thing
-    // and we can short circuit doing many instructions here
-    // by either clearing the register (DROPR) or just popping the stack
-    // (DROP)
-    if (preprocess_.can_emit_inline[input->node()]) {
-      emitNode(input->node());
-      if (drop) {
-        insertInstruction(DROP);
-      }
-    } else {
+  void emitRegisterLoadMove(Value* input, bool drop) {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
-
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
@@ -488,6 +478,21 @@ struct CodeImpl {
         op = LOAD;
       }
       insertInstruction(op, reg);
+
+  }
+
+  void emitUse(Value* input, bool drop) {
+    // drop - if true, we are not actually going to use this thing
+    // and we can short circuit doing many instructions here
+    // by either clearing the register (DROPR) or just popping the stack
+    // (DROP)
+    if (preprocess_.can_emit_inline[input->node()]) {
+      emitNodeIter(input->node());
+      if (drop) {
+        insertInstruction(DROP);
+      }
+    } else {
+      emitRegisterLoadMove(input, drop);
     }
   }
 
@@ -497,8 +502,7 @@ struct CodeImpl {
     }
   }
 
-
-  //emitLoadInputs-> emitUse -> emitNode -> emitOperator -> emitLoadInputs
+  // emitLoadInputs-> emitUse -> emitNode -> emitOperator -> emitLoadInputs
 
   static bool isIterEmitNodeSupported(Node* node) {
     switch (node->kind()) {
@@ -529,8 +533,106 @@ struct CodeImpl {
     }
   }
 
-  void emitOperatorIter(Node* start) {
+  void pushArguments(
+      Value* val,
+      at::ArrayRef<Value*> inputs,
+      std::vector<Value*>& stack,
+      std::unordered_set<Node*>& seen) {
+    seen.insert(val->node());
+    stack.push_back(val);
+    GRAPH_DEBUG("pushing second time ", val->debugName());
+    // arguments in reverse order
+    for (int i = inputs.size() - 1; i >= 0; i--) {
+      GRAPH_DEBUG("pushing ", inputs.at(i)->debugName());
+      stack.push_back(inputs.at(i));
+    }
+  }
 
+  void emitNodeIter(Node* start) {
+    std::vector<Value*> stack;
+    std::unordered_set<Node*> seen;
+    // start is always a single-output node
+    stack.push_back(start->output());
+    while (!stack.empty()) {
+      auto val = stack.back();
+      GRAPH_DEBUG("emitting value ", val->debugName());
+      stack.pop_back();
+      auto node = val->node();
+      if (!preprocess_.can_emit_inline[node]) {
+        // this means that node has already been emitted
+        // and we only emit register loads
+        emitRegisterLoadMove(val, false);
+        GRAPH_DEBUG("can't emit inline value ", val->debugName());
+      } else {
+        if (seen.count(node) != 0) {
+          // we already emitted arguments
+          // so we will use an empty inputs list
+          // for emitCall, emitInterfaceCall, emitGetAttr
+          at::ArrayRef<Value*> empty{};
+          switch (node->kind()) {
+            default:
+              insertInstruction(OP, operator_table_.size());
+              GRAPH_DEBUG("inserting ", operator_table_.size());
+              operator_table_.emplace_back(getOperation(node));
+              break;
+            case prim::CallFunction:
+              emitCall(
+                  node->inputs()
+                      .at(0)
+                      ->type()
+                      ->expect<FunctionType>()
+                      ->function(),
+                  empty);
+              break;
+            case prim::GetAttr:
+              emitGetAttr(node, empty);
+              break;
+            case prim::CallMethod:
+              if (auto class_type =
+                      node->inputs().at(0)->type()->cast<ClassType>()) {
+                emitCall(class_type->getMethod(node->s(attr::name)), empty);
+              } else {
+                emitInterfaceCall(node->s(attr::name), empty);
+              }
+              break;
+          }
+        } else {
+          WithCurrentNode guard(&current_node_, node);
+          switch (node->kind()) {
+            default:
+              pushArguments(val, node->inputs(), stack, seen);
+              break;
+            case prim::Drop:
+            case prim::BailOut:
+            case prim::SetAttr:
+            case prim::If:
+            case prim::Loop:
+              TORCH_INTERNAL_ASSERT(false, "emitNodeIter should never see these nodes");
+              break;
+            case prim::Constant:
+              emitConstant(node);
+              break;
+            case aten::wait:
+              emitWait(node);
+              break;
+            case prim::Param:
+              break;
+            case prim::CallFunction:
+              pushArguments(val, node->inputs().slice(1), stack, seen);
+              break;
+            case prim::CallMethod:
+              pushArguments(val, node->inputs(), stack, seen);
+              break;
+            case prim::GetAttr:
+              pushArguments(node);
+              break;
+          }
+        }
+      }
+    }
+  }
+
+  void emitOperatorIter(Node* start) {
     GRAPH_DEBUG("emitOperatorIter for ", getHeader(start));
     if (!preprocess_.can_emit_inline[start]) {
       // fallback on the original implementation
@@ -567,13 +669,12 @@ struct CodeImpl {
             seen.insert(node);
             stack.push_back(val);
             GRAPH_DEBUG("pushing second time ", val->debugName());
-            //arguments in reverse order
+            // arguments in reverse order
             for (int i = node->inputs().size() - 1; i >= 0; i--) {
-                GRAPH_DEBUG("pushing ", node->input(i)->debugName());
-                stack.push_back(node->input(i));
+              GRAPH_DEBUG("pushing ", node->input(i)->debugName());
+              stack.push_back(node->input(i));
             }
-          }
-          else {
+          } else {
             GRAPH_DEBUG("iterative not supported for ", val->debugName());
             emitUse(val, false);
           }
@@ -581,7 +682,6 @@ struct CodeImpl {
       }
     }
   }
-
 
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
@@ -649,9 +749,7 @@ struct CodeImpl {
     instructions_[start].X = instructions_.size() - start;
   }
 
-  void emitCall(
-      Function* func,
-      at::ArrayRef<Value*> inputs) {
+  void emitCall(Function* func, at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
     function_table_.emplace_back(std::move(func));
@@ -699,8 +797,7 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function &func) {
-
+                                unoptimized_graph](Function& func) {
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -729,7 +826,7 @@ struct CodeImpl {
   }
 
   void insertBailoutBlocks() {
-    for(const BailoutBlock& block : bailout_blocks_) {
+    for (const BailoutBlock& block : bailout_blocks_) {
       TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
       instructions_[block.jf_instruction_index].X =
           instructions_.size() - block.jf_instruction_index;
@@ -745,7 +842,7 @@ struct CodeImpl {
   }
   void emitInterfaceCall(
       std::string method_name_str,
-      c10::ArrayRef<Value*> inputs) {
+      at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     auto method_name = insertConstant(std::move(method_name_str));
     insertInstruction(INTERFACE_CALL, method_name, inputs.size());
@@ -755,7 +852,8 @@ struct CodeImpl {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
-        emitOperatorIter(node);
+        // emitOperatorIter(node);
+        emitOperator(node);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -1116,7 +1214,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
+            const Code& code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
