@@ -1130,6 +1130,8 @@ graph(%x : Tensor,
             m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
             assert len(attrs_with_prefix(m, '_observer_')) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
+            assert len(attrs_with_prefix(m.conv, '_observer')) == 2, \
+                'Expected to have 2 observers in Conv module'
             c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
                            .check_next('prim::CallMethod[name="forward"]') \
                            .check_not('Observer = prim::GetAttr[name="_observer_') \
@@ -1137,9 +1139,9 @@ graph(%x : Tensor,
             if is_call_function:
                 c = c.check('Observer = prim::GetAttr[name="_observer_') \
                      .check_next('prim::CallMethod[name="forward"](%_observer_')
+            else:
+                assert len(attrs_with_prefix(m.relu, '_observer')) == 1
             c.run(str(get_forward_graph(m._c)))
-            # TODO: add checks for conv and relu later, graph looks correct but this pr
-            # has too many changes already
         test_module(M, 'prim::CallFunction(', 1, True)
         test_module(M2, 'prim::CallMethod[name="forward"]', 0, False)
 
