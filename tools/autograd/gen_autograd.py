@@ -77,7 +77,7 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
 #   backward as the multiple Nodes we create will force the gradient buffer to be created
 #   for each Node, instead of once in the original multi-output Node.
 # If you update this list, please update "test_multi_view_methods" in test_autograd.py
-PURE_VIEW_FUNCTIONS = ['split', 'split_with_sizes', 'unbind']
+PURE_VIEW_FUNCTIONS = ['split', 'unbind']
 
 def format_return_type(returns):
     if len(returns) == 0:

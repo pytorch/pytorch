@@ -562,8 +562,9 @@ def emit_body(declaration):
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
-    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
-        view_info = "self"
+    # TODO: Add back when https://github.com/pytorch/pytorch/pull/32044 lands again
+    # if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
+    #     view_info = "self"
 
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
