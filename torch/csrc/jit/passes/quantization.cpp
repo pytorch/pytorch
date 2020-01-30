@@ -677,12 +677,6 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
-  for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
-    auto& invoked_module = std::get<0>(invoked_methods);
-    const auto& invoked_method_name = std::get<1>(invoked_methods);
-    insertObservers(invoked_module, invoked_method_name);
-  }
-
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
@@ -692,6 +686,11 @@ void InsertObserversHelper::insertObservers(
       const auto& name = std::get<0>(observer_attrs);
       const auto& observer = std::get<1>(observer_attrs);
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+    }
+    for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+      auto& invoked_module = std::get<0>(invoked_method);
+      const auto& invoked_method_name = std::get<1>(invoked_method);
+      insertObservers(invoked_module, invoked_method_name);
     }
     return;
   }
@@ -704,6 +703,15 @@ void InsertObserversHelper::insertObservers(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   addIntermediateValuesToSkipObserver(module, method_name);
+
+  // This needs to happen after addIntermediateValuesToSkipObserver
+  // because we'll skip values in the graph of invoked methods as well
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    insertObservers(invoked_module, invoked_method_name);
+  }
+
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
