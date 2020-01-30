@@ -24,7 +24,8 @@ namespace {
       TensorInfo<scalar_t, int> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      bool pixel_coords) {
 
     int C = input.sizes[1];
     int inp_H = input.sizes[2];
@@ -54,8 +55,8 @@ namespace {
       scalar_t ix = grid.data[grid_offset];
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
 
-      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
+      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners, pixel_coords);
+      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners, pixel_coords);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -119,7 +120,8 @@ namespace {
       TensorInfo<scalar_t, int> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      bool pixel_coords) {
 
     int C = input.sizes[1];
     int inp_D = input.sizes[2];
@@ -156,9 +158,9 @@ namespace {
       scalar_t iy = grid.data[grid_offset + grid_sCoor];
       scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
 
-      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
-      iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners);
+      ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners, pixel_coords);
+      iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners, pixel_coords);
+      iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners, pixel_coords);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get corner pixel values from (x, y, z)
@@ -269,7 +271,8 @@ namespace {
       TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      bool pixel_coords) {
 
     int C = input.sizes[1];
     int inp_H = input.sizes[2];
@@ -306,8 +309,8 @@ namespace {
 
       // multipliers for gradients on ix and iy
       scalar_t gix_mult, giy_mult;
-      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
+      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, pixel_coords, &gix_mult);
+      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, pixel_coords, &giy_mult);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -403,7 +406,8 @@ namespace {
       TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
-      bool align_corners) {
+      bool align_corners,
+      bool pixel_coords) {
 
     int C = input.sizes[1];
     int inp_D = input.sizes[2];
@@ -448,9 +452,9 @@ namespace {
 
       // multipliers for gradients on ix, iy, and iz
       scalar_t gix_mult, giy_mult, giz_mult;
-      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
-      iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, &giz_mult);
+      ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, pixel_coords, &gix_mult);
+      iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, pixel_coords, &giy_mult);
+      iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, pixel_coords, &giz_mult);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get corner pixel values from (x, y, z)
@@ -605,7 +609,7 @@ namespace {
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+                            bool align_corners, bool pixel_coords) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -621,7 +625,8 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
           getTensorInfo<scalar_t, int>(output),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+          align_corners,
+          pixel_coords);
     });
   }
   return output;
@@ -630,7 +635,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+                            bool align_corners, bool pixel_coords) {
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
@@ -647,7 +652,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
           getTensorInfo<scalar_t, int>(output),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+          align_corners,
+          pixel_coords);
     });
   }
   return output;
@@ -657,7 +663,8 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode,
-                              int64_t padding_mode, bool align_corners) {
+                              int64_t padding_mode, bool align_corners,
+                              bool pixel_coords) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -676,7 +683,8 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
           getTensorInfo<scalar_t, int>(grad_grid),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+          align_corners,
+          pixel_coords);
     });
   }
   return std::make_tuple(grad_input, grad_grid);
@@ -686,7 +694,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
 std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
-                              bool align_corners) {
+                              bool align_corners, bool pixel_coords) {
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
@@ -706,7 +714,8 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
           getTensorInfo<scalar_t, int>(grad_grid),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+          align_corners,
+          pixel_coords);
     });
   }
   return std::make_tuple(grad_input, grad_grid);

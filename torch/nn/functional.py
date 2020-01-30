@@ -3247,7 +3247,7 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
-def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
+def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None, pixel_coords=False):
     # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
@@ -3335,7 +3335,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 grid_sample, tens_ops, input, grid, mode=mode, padding_mode=padding_mode,
-                align_corners=align_corners)
+                align_corners=align_corners, pixel_coords=pixel_coords)
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
                          "'bilinear' or 'nearest', but got: '{}'".format(mode))
@@ -3363,7 +3363,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
                       "See the documentation of grid_sample for details.")
         align_corners = False
 
-    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
+    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners, pixel_coords)
 
 
 def affine_grid(theta, size, align_corners=None):

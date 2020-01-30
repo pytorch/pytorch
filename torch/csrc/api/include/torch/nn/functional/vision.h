@@ -56,7 +56,8 @@ inline Tensor grid_sample(
     const Tensor& grid,
     GridSampleFuncOptions::mode_t mode,
     GridSampleFuncOptions::padding_mode_t padding_mode,
-    c10::optional<bool> align_corners) {
+    c10::optional<bool> align_corners,
+    bool pixel_coords = false) {
   int64_t mode_enum, padding_mode_enum;
 
   if (c10::get_if<enumtype::kBilinear>(&mode)) {
@@ -81,7 +82,8 @@ inline Tensor grid_sample(
     align_corners = false;
   }
 
-  return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners.value());
+  return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum,
+                             align_corners.value(), pixel_coords);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -106,7 +108,8 @@ inline Tensor grid_sample(
     grid,
     options.mode(),
     options.padding_mode(),
-    options.align_corners());
+    options.align_corners(),
+    options.pixel_coords());
 }
 
 } // namespace functional

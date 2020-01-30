@@ -26,6 +26,8 @@ struct TORCH_API GridSampleFuncOptions {
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
   /// Specifies perspective to pixel as point. Default: false
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
+  /// whether the grid is already in pixel coordinates. Default: false
+  TORCH_ARG(bool, pixel_coords) = false;
 };
 
 } // namespace functional

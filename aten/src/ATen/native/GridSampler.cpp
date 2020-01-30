@@ -19,7 +19,7 @@ namespace {
   Tensor grid_sampler_3d_cpu_impl(const Tensor& input, const Tensor& grid,
                                   GridSamplerInterpolation interpolation_mode,
                                   GridSamplerPadding padding_mode,
-                                  bool align_corners) {
+                                  bool align_corners, bool pixel_coords) {
     int64_t N = input.size(0);
     int64_t C = input.size(1);
     int64_t inp_D = input.size(2);
@@ -61,9 +61,9 @@ namespace {
               scalar_t iy = grid_ptr_NDHW[grid_sCoor];
               scalar_t iz = grid_ptr_NDHW[2 * grid_sCoor];
 
-              ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-              iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
-              iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners);
+              ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners, pixel_coords);
+              iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners, pixel_coords);
+              iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners, pixel_coords);
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
                 // get corner pixel values from (x, y, z)
@@ -175,7 +175,7 @@ namespace {
                                     const Tensor& input, const Tensor& grid,
                                     GridSamplerInterpolation interpolation_mode,
                                     GridSamplerPadding padding_mode,
-                                    bool align_corners) {
+                                    bool align_corners, bool pixel_coords) {
     auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     // If interpolation mode is Nearest, then grad_grid is not filled in the
@@ -235,9 +235,9 @@ namespace {
 
               // multipliers for gradients on ix, iy, and iz
               scalar_t gix_mult, giy_mult, giz_mult;
-              ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-              iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
-              iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, &giz_mult);
+              ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, pixel_coords, &gix_mult);
+              iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, pixel_coords, &giy_mult);
+              iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, pixel_coords, &giz_mult);
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
                 // get corner pixel values from (x, y, z)
@@ -385,9 +385,9 @@ namespace {
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
-                           bool align_corners) {
+                           bool align_corners, bool pixel_coords) {
   return grid_sampler_2d_cpu_kernel(
-    kCPU, input, grid, interpolation_mode, padding_mode, align_corners);
+    kCPU, input, grid, interpolation_mode, padding_mode, align_corners, pixel_coords);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
@@ -396,20 +396,21 @@ DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
-                           bool align_corners) {
+                           bool align_corners, bool pixel_coords) {
   return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode), align_corners);
+      static_cast<GridSamplerPadding>(padding_mode), align_corners, pixel_coords);
   });
 }
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
+                             bool pixel_coords) {
   return grid_sampler_2d_backward_cpu_kernel(
-    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
+    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners, pixel_coords);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
@@ -417,18 +418,19 @@ DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
+                             bool pixel_coords) {
   return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),
-      static_cast<GridSamplerPadding>(padding_mode), align_corners);
+      static_cast<GridSamplerPadding>(padding_mode), align_corners, pixel_coords);
   });
 }
 
 Tensor grid_sampler(const Tensor& input, const Tensor& grid,
                     int64_t interpolation_mode, int64_t padding_mode,
-                    bool align_corners) {
+                    bool align_corners, bool pixel_coords) {
   TORCH_CHECK(
     input.defined() && grid.defined(),
     "grid_sampler(): expected input and grid to not be undefined, but input "
@@ -472,14 +474,15 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bilinear &&
       static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Zeros &&
       align_corners &&
+      !pixel_coords &&
       input.dim() == 4 &&
       input.size(1) <= 1024) {
     return cudnn_grid_sampler(input, grid);
   }
   if (input.dim() == 4) {
-    return at::grid_sampler_2d(input, grid, interpolation_mode, padding_mode, align_corners);
+    return at::grid_sampler_2d(input, grid, interpolation_mode, padding_mode, align_corners, pixel_coords);
   } else {
-    return at::grid_sampler_3d(input, grid, interpolation_mode, padding_mode, align_corners);
+    return at::grid_sampler_3d(input, grid, interpolation_mode, padding_mode, align_corners, pixel_coords);
   }
 }
 

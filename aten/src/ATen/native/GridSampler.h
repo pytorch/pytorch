@@ -145,8 +145,12 @@ static inline scalar_t grid_sampler_compute_source_index(
     scalar_t coord,
     int64_t size,
     GridSamplerPadding padding_mode,
-    bool align_corners) {
-  coord = grid_sampler_unnormalize(coord, size, align_corners);
+    bool align_corners,
+    bool pixel_coords) {
+  if (!pixel_coords) {
+    // unnormalize from [-1, 1] to the absolute pixel coordinates
+    coord = grid_sampler_unnormalize(coord, size, align_corners);
+  }
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates(coord, size);
@@ -173,9 +177,15 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
     int64_t size,
     GridSamplerPadding padding_mode,
     bool align_corners,
+    bool pixel_coords,
     scalar_t *grad_in) {
   scalar_t grad_clip, grad_refl;
-  coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
+  if (!pixel_coords) {
+    // unnormalize from [-1, 1] to the absolute pixel coordinates
+    coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
+  } else {
+    *grad_in = static_cast<scalar_t>(1);
+  }
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
     coord = clip_coordinates_set_grad(coord, size, &grad_clip);
