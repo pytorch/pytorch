@@ -222,6 +222,62 @@ void argmin_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+template<typename scalar_t, typename BinaryFunction>
+void scanThrustWithIndices(Tensor& values, Tensor& indices, const Tensor& self, BinaryFunction binary_op) {
+
+}
+
+template <typename scalar_t, typename BinaryFunction>
+void scanDimWithIndices(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim, BinaryFunction binary_op) {
+  int ndim = self.dim();
+  TORCH_CHECK(dim >= 0 && dim < ndim, "dimension ", dim, " out of range");
+   Tensor self_ = self.contiguous();
+   Tensor values_ = values.contiguous();
+   Tensor indices_ = indices.contiguous();
+   auto values__data = values.data_ptr<scalar_t>();
+   auto self__data = self.data_ptr<scalar_t>();
+   auto indices__data = indices.data_ptr<int64_t>();
+   if (!self.is_empty()) {
+     if(scalar_t == at::Half) {
+       if (ndim == 1) {
+         // thrust does not take an "init"
+         // scanThrustWithIndices(values, indices, self, binary_op);
+       }
+     }
+     if (dim == ndim - 1) {
+       // THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
+     } else {
+       // THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+     }
+   }
+   // // cuda blocks & threads:
+   // int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
+   // dim3 blocks(sizeB * sizeD, blocksH);
+   // dim3 threads(32, 8);
+   //
+   // // run averagepool kernel
+   // adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+   //   input_data, output_data,
+   //   isizeH, isizeW, osizeH, osizeW,
+   //   istrideD, istrideH, istrideW);
+}
+
+std::tuple<Tensor&, Tensor&> cummax_helper_out_cuda(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+  checkAllSameGPU("cummax", {self, values, indices});
+  AT_DISPATCH_ALL_TYPES(self.dtype(), "cummax_cuda", [&]() {
+    scanDimWithIndices<scalar_t, MaxOp<scalar_t>>(values, indices, self, dim, MaxOp<scalar_t>());
+  });
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> cummin_helper_out_cpu(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+  checkAllSameGPU("cummin", {self, values, indices});
+  AT_DISPATCH_ALL_TYPES(self.dtype(), "cummin_cuda", [&]() {
+    scanDimWithIndices<scalar_t, MinOp<scalar_t>>(values, indices, self, dim, MinOp<scalar_t>());
+  });
+  return std::forward_as_tuple(values, indices);
+}
+
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
@@ -233,5 +289,4 @@ REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
-
 }} // namespace at::native
