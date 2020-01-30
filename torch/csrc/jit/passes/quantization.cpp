@@ -383,7 +383,35 @@ class InsertObserversHelper {
       script::Module& module,
       const c10::optional<QConfig>& qconfig);
 
-  void findIntermediateValuesInPattern(
+  void skipValuesInFirstModule(
+      const script::Module& module,
+      Graph& graph,
+      Value* first_module,
+      Value* first_output);
+
+  void skipValuesInSecondModule(
+      const script::Module& module,
+      Graph& graph,
+      Value* first_output,
+      Value* second_module,
+      Value* second_output);
+
+  void skipValuesInModuleFunctionPattern(
+      const script::Module& module,
+      Graph& graph,
+      const PatternInfo& pattern);
+
+  void skipValuesInFunctionModulePattern(
+      const script::Module& module,
+      Graph& graph,
+      const PatternInfo& pattern);
+
+  void skipValuesInModulePattern(
+      const script::Module& module,
+      Graph& graph,
+      const PatternInfo& pattern);
+
+  void skipValuesInFunctionPattern(
       Graph& graph,
       const PatternInfo& pattern);
 
@@ -413,30 +441,40 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
-  const PatternInfo conv_functional_relu = PatternInfo::parse_from_str(R"(
+  // 1. Module - Function
+  const PatternInfo mf_conv_functional_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
-    %conv = match::module[name="Conv2d"](%self)
-    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
-    %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
-    return (%r) )");
-  const PatternInfo conv_relu_module = PatternInfo::parse_from_str(R"(
+    %first_module = match::module[name="Conv2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  // 3. Module - Module
+  const PatternInfo mm_conv_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
-    %conv = match::module[name="Conv2d"](%self)
-    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
-    %relu = match::module[name="ReLU"](%self)
-    %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
-    return (%r) )");
-  const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
+    %first_module = match::module[name="Conv2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
+  // 4. Function - Function
+  const PatternInfo ff_matmul_add = PatternInfo::parse_from_str(R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
-     %intermediate_val = aten::matmul(%input, %weight_t)
-     %res = aten::add_(%intermediate_val, %bias, %4)
-     return (%res) )");
-  const std::vector<std::reference_wrapper<const PatternInfo>> patterns = {
-      conv_functional_relu,
-      conv_relu_module,
-      matmul_add};
+     %first_output = aten::matmul(%input, %weight_t)
+     %second_output = aten::add_(%first_output, %bias, %4)
+     return (%second_output) )");
+
+  const std::vector<std::reference_wrapper<const PatternInfo>> module_function_patterns = {
+    mf_conv_functional_relu
+  };
+  const std::vector<std::reference_wrapper<const PatternInfo>> function_module_patterns = {};
+  const std::vector<std::reference_wrapper<const PatternInfo>> module_patterns = {
+    mm_conv_relu
+  };
+  const std::vector<std::reference_wrapper<const PatternInfo>> function_patterns = {
+    ff_matmul_add
+  };
 };
 
 // Check if `use` is an aten function of name `func_name` and if value
@@ -649,7 +687,60 @@ void InsertObserversHelper::insertObserverFor(
   }
 }
 
-void InsertObserversHelper::findIntermediateValuesInPattern(
+void InsertObserversHelper::skipValuesInFirstModule(
+      const script::Module& module,
+      Graph& graph,
+      Value* first_module,
+      Value* first_output) {
+  Value* self = graph.inputs()[0];
+  std::vector<std::string> first_module_path = getModuleAccessPath(first_module, self);
+  TORCH_CHECK(first_module_path.size() != 0, "Don't support skipping "
+              " values in recursive calls");
+  auto first = findChildModule(module, first_module_path);
+  Node* first_call = first_output->node();
+  auto first_graph = first.get_method(first_call->s(attr::name)).graph();
+  TORCH_CHECK(first_graph->outputs().size() == 1, "Only support skipping values for the "
+              "graphs with 1 output");
+  Value* return_val = first_graph->outputs()[0];
+  while (!nodeQuantizable(return_val->node()) && return_val->node()->kind() == prim::CallMethod) {
+    GRAPH_DEBUG("Skip values: tracing back CallMethod:", return_val->node()->s(attr::name));
+    auto sub_graph = first.get_method(return_val->node()->s(attr::name)).graph();
+    return_val = sub_graph->outputs()[0];
+  }
+  TORCH_CHECK(nodeQuantizable(return_val->node()),
+              "Expecting the node that's producing return value to be quantizable");
+  GRAPH_DEBUG("Skipping value in module-module pattern:",
+              return_val->debugName());
+  values_to_skip_.emplace(return_val);
+}
+
+void InsertObserversHelper::skipValuesInSecondModule(
+      const script::Module& module,
+      Graph& graph,
+      Value* first_output,
+      Value* second_module,
+      Value* second_output) {
+  Value* self = graph.inputs()[0];
+  std::vector<std::string> second_module_path = getModuleAccessPath(second_module, self);
+  TORCH_CHECK(second_module_path.size() != 0, "We don't support skipping "
+              "values for recursive calls");
+  auto second = findChildModule(module, second_module_path);
+  // Find the argument index for %intermediate_val
+  size_t arg_index = 1;
+  Node* second_call = second_output->node();
+  while (arg_index < second_call->inputs().size() &&
+         second_call->inputs()[arg_index] != first_output) {
+    arg_index++;
+  }
+  TORCH_INTERNAL_ASSERT(arg_index < second_call->inputs().size(),
+                        "%first_output must be the input of the second call");
+  auto second_graph = second.get_method(second_call->s(attr::name)).graph();
+  GRAPH_DEBUG("Skipping value in module-module pattern:",
+              second_graph->inputs()[arg_index]->debugName());
+  values_to_skip_.emplace(second_graph->inputs()[arg_index]);
+}
+
+void InsertObserversHelper::skipValuesInFunctionPattern(
     Graph& graph,
     const PatternInfo& pattern) {
   const Graph& pattern_graph = *pattern.pattern_graph;
@@ -657,11 +748,67 @@ void InsertObserversHelper::findIntermediateValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
-    auto output_value = vmap.at("intermediate_val");
-    TORCH_INTERNAL_ASSERT(
-        match.values_map.find(output_value) != match.values_map.end(),
-        "Didn't find Value output in match result.");
+    auto output_value = vmap.at("first_output");
+    GRAPH_DEBUG("Skipping value in function pattern:",
+                match.values_map.at(output_value)->debugName());
     values_to_skip_.emplace(match.values_map.at(output_value));
+  }
+}
+
+void InsertObserversHelper::skipValuesInModuleFunctionPattern(
+    const script::Module& module,
+    Graph& graph,
+    const PatternInfo& pattern) {
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const std::unordered_map<std::string, Value*>& vmap = pattern.vmap;
+
+  const auto& matches = findPatternMatches(pattern_graph, graph);
+  for (const auto& match : matches) {
+    auto first_module = match.values_map.at(vmap.at("first_module"));
+    auto first_output = match.values_map.at(vmap.at("first_output"));
+    // skip the output of first module
+    skipValuesInFirstModule(module, graph, first_module, first_output);
+    // skip the input of the second function call
+    values_to_skip_.emplace(match.values_map.at(vmap.at("first_output")));
+  }
+}
+
+void InsertObserversHelper::skipValuesInFunctionModulePattern(
+    const script::Module& module,
+    Graph& graph,
+    const PatternInfo& pattern) {
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const std::unordered_map<std::string, Value*>& vmap = pattern.vmap;
+
+  const auto& matches = findPatternMatches(pattern_graph, graph);
+  for (const auto& match : matches) {
+    auto first_output = match.values_map.at(vmap.at("first_output"));
+    // skip the output of the first function call
+    values_to_skip_.emplace(match.values_map.at(vmap.at("first_output")));
+    // skip the input of the second module
+    auto second_module = match.values_map.at(vmap.at("second_module"));
+    auto second_output = match.values_map.at(vmap.at("second_output"));
+    skipValuesInSecondModule(module, graph, first_output, second_module, second_output);
+  }
+}
+
+void InsertObserversHelper::skipValuesInModulePattern(
+    const script::Module& module,
+    Graph& graph,
+    const PatternInfo& pattern) {
+  const Graph& pattern_graph = *pattern.pattern_graph;
+  const std::unordered_map<std::string, Value*>& vmap = pattern.vmap;
+
+  const auto& matches = findPatternMatches(pattern_graph, graph);
+  for (const auto& match : matches) {
+    auto first_module = match.values_map.at(vmap.at("first_module"));
+    auto first_output = match.values_map.at(vmap.at("first_output"));
+    // skip the output of the first module
+    skipValuesInFirstModule(module, graph, first_module, first_output);
+    // skip the input of the second module
+    auto second_module = match.values_map.at(vmap.at("second_module"));
+    auto second_output = match.values_map.at(vmap.at("second_output"));
+    skipValuesInSecondModule(module, graph, first_output, second_module, second_output);
   }
 }
 
@@ -671,8 +818,20 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
-  for (const auto& pattern : patterns) {
-    findIntermediateValuesInPattern(*graph, pattern);
+  for (const auto& pattern : module_function_patterns) {
+    skipValuesInModuleFunctionPattern(module, *graph, pattern);
+  }
+
+  for (const auto& pattern : function_module_patterns) {
+    skipValuesInFunctionModulePattern(module, *graph, pattern);
+  }
+
+  for (const auto& pattern : module_patterns) {
+    skipValuesInModulePattern(module, *graph, pattern);
+  }
+
+  for (const auto& pattern : function_patterns) {
+    skipValuesInFunctionPattern(*graph, pattern);
   }
 }
 
@@ -743,7 +902,11 @@ void InsertObserversHelper::insertObservers(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
+    if (values_to_skip_.count(v)) {
+      GRAPH_DEBUG("Skipping input:", v->debugName());
+    }
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+      GRAPH_DEBUG("inserting observer for input ", v->debugName());
       insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
     }
   }
