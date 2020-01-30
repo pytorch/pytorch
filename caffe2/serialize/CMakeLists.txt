@@ -7,15 +7,12 @@ CHECK_CXX_COMPILER_FLAG(-msse4.2 COMPILER_HAS_M_SSE42)
 if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
   set(SSE42_FILES
       ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/CrcHw.cpp)
-  set_property(
-    SOURCE ${SSE42_FILES}
-    APPEND PROPERTY COMPILE_FLAGS
-    "-mpclmul -msse4.2 "
-  )
-  set_property(
-    SOURCE ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
-    APPEND PROPERTY COMPILE_FLAGS
-    "-DUSE_EXTERNAL_MZCRC")
+  set_source_files_properties(
+    ${SSE42_FILES}
+    PROPERTIES COMPILE_FLAGS "-mpclmul -msse4.2 ")
+  set_source_files_properties(
+    ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
+    PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC ")
 endif()
 
 list(APPEND Caffe2_CPU_SRCS
