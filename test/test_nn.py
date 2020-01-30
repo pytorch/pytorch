@@ -10647,23 +10647,23 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
-    def test_convert_conv2d_weight_memory_layout(self, device):
+    def test_convert_conv2d_weight_memory_format(self, device):
         input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
         model = nn.Sequential(
             nn.Conv2d(8, 4, 3),
             nn.BatchNorm2d(4)).to(device).float()
-        for layout in [torch.channels_last, torch.contiguous_format]:
-            model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
             out = model(input)
-            self.assertTrue(out.is_contiguous(memory_format=layout))
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
         model = nn.Sequential(
             nn.ConvTranspose2d(8, 4, 3),
             nn.BatchNorm2d(4)).to(device).float()
-        for layout in [torch.channels_last, torch.contiguous_format]:
-            model = nn.utils.convert_conv2d_weight_memory_layout(model, layout)
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
             out = model(input)
-            self.assertTrue(out.is_contiguous(memory_format=layout))
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)
