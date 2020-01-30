@@ -68,6 +68,10 @@ if is_available():
             )
 
         # Rendezvous.
+        # This rendezvous state sometimes is destroyed before all processes
+        # finishing handshaking. To avoid that issue, we make it global to
+        # keep it alive.
+        global rendezvous_iterator
         rendezvous_iterator = torch.distributed.rendezvous(
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
