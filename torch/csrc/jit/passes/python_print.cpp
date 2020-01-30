@@ -1218,7 +1218,10 @@ struct PythonPrintImpl {
         }
         body_ << "]\n";
       }
-
+      indent();
+      if (auto original_qual_name = moduleType->getOriginalQualName()) {
+        body_ << "__original_qual_name__ = '" << *original_qual_name << "'\n";
+      }
       for (size_t i = 0; i < numAttrs; i++) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);

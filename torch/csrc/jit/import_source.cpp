@@ -259,13 +259,11 @@ struct SourceImporterImpl : public Resolver,
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
       bool is_module) {
-    auto class_type = ClassType::create(
-        c10::QualifiedName(qualified_classname), cu_, is_module);
-
     std::vector<Def> methods;
     std::vector<ResolverPtr> resolvers;
     std::vector<Assign> attributes;
     std::vector<Assign> constants;
+    c10::optional<std::string> original_qual_name = c10::nullopt;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
@@ -292,6 +290,9 @@ struct SourceImporterImpl : public Resolver,
                 for (const auto& param : param_list) {
                   parameter_names.insert(StringLiteral(param).text());
                 }
+              } else if (name == "__original_qual_name__") {
+                auto rhs = assign.rhs().get();
+                original_qual_name = StringLiteral(assign.rhs().get()).text();
               } else if (name == "__annotations__") {
                 // This is to initialize the annotations dict, just ignore.
                 continue;
@@ -337,6 +338,11 @@ struct SourceImporterImpl : public Resolver,
         }
       }
     }
+    auto class_type = ClassType::create(
+        c10::QualifiedName(qualified_classname),
+        cu_,
+        is_module,
+        original_qual_name);
 
     // Populate class attributes
     ScriptTypeParser type_parser(shared_from_this());
