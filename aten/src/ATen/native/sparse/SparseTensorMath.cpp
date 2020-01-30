@@ -9,8 +9,6 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <TH/THBlasUtils.h>
 
 #include <algorithm>
@@ -1420,8 +1418,7 @@ Tensor any_sparse(const Tensor& self) {
 }
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
-  Tensor result;
-  result = at::empty({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
+  Tensor result = at::empty({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
   return bmm_out_sparse_cpu(result, self, mat2);
 }
 
