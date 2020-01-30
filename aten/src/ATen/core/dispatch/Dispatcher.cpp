@@ -165,7 +165,7 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
 }
 
 [[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {
-  if (dispatchKey == DispatchKey::UndefinedTensorId) {
+  if (dispatchKey == DispatchKey::Undefined) {
     TORCH_CHECK(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
