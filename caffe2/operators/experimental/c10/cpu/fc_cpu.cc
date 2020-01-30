@@ -131,7 +131,7 @@ class fc_op_cpu final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::FullyConnected",
     c10::RegisterOperators::options()
-      .kernel<fc_op_cpu<float, CPUContext>>(TensorTypeId::CPUTensorId));
+      .kernel<fc_op_cpu<float, CPUContext>>(DispatchKey::CPUTensorId));
 
 } // namespace
 

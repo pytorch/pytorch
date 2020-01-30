@@ -99,7 +99,7 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntListRef()',
+    'IntArrayRef': '{}.toIntVector()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -112,7 +112,7 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorListRef()',
+    'TensorList': '{}.toTensorVector()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',

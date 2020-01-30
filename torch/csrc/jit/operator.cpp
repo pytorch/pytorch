@@ -21,7 +21,7 @@ struct OperatorRegistry {
   std::mutex lock;
   OperatorMap operators;
   // list of operators whose schema have not yet been parsed, and must
-  // be registered before any call to lookup an opeator
+  // be registered before any call to lookup an operator
   std::vector<std::shared_ptr<Operator>> to_register;
   // Those two maps are used to implement lookupByLiteral, which is needed for
   // the n->match(...) calls. Basically, every function schema is assigned a

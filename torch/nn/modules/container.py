@@ -446,7 +446,7 @@ class ParameterList(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p.data), size_str, device_str)
+                torch.typename(p), size_str, device_str)
             child_lines.append('  (' + str(k) + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
@@ -586,7 +586,7 @@ class ParameterDict(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p.data), size_str, device_str)
+                torch.typename(p), size_str, device_str)
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr

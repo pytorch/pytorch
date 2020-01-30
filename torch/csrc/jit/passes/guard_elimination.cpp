@@ -158,7 +158,7 @@ struct GuardElimination {
   }
 
   // `checkInputs` check the invariants specified in `removableGuard`
-  // on inputs to `n`. The invarints must hold, or an input must
+  // on inputs to `n`. The invariants must hold, or an input must
   // be a `prim::Constant` or be of `NumberType` or be included
   // as an exception in `except`
   bool checkInputs(Node *n, const std::unordered_set<size_t> &except) {

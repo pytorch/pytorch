@@ -1,4 +1,4 @@
-#include <ATen/native/Indexing.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
@@ -108,7 +108,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
+  // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
   stride[tensor.dim() - 1] = 1;

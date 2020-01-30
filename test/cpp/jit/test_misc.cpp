@@ -8,6 +8,7 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/type_hashing.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -39,8 +40,6 @@
 #include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/utils/memory.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
@@ -76,7 +75,6 @@ inline c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
-using namespace torch::autograd;
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
@@ -178,9 +176,9 @@ void testTHNNConv() {
 
   // make JIT graph
   auto graph = std::make_shared<Graph>();
-  auto ksz_val = graph->insertConstant(c10::impl::toList(kernel_size));
-  auto kst_val = graph->insertConstant(c10::impl::toList(stride));
-  auto pad_val = graph->insertConstant(c10::impl::toList(padding));
+  auto ksz_val = graph->insertConstant(kernel_size);
+  auto kst_val = graph->insertConstant(stride);
+  auto pad_val = graph->insertConstant(padding);
 
   auto inputg = graph->addInput("self");
   auto weightg = graph->addInput("weight");

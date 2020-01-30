@@ -27,6 +27,8 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 fi
 
+TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
+
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
@@ -51,6 +53,13 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.5)
     TRAVIS_PYTHON_VERSION=3.5
+    GCC_VERSION=7
+    # Do not install PROTOBUF, DB, and VISION as a test
+    ;;
+  pytorch-linux-xenial-py3.8)
+    # TODO: This is a hack, get rid of this as soon as you get rid of the travis downloads
+    TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/16.04/x86_64"
+    TRAVIS_PYTHON_VERSION=3.8
     GCC_VERSION=7
     # Do not install PROTOBUF, DB, and VISION as a test
     ;;
@@ -88,22 +97,6 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-xenial-cuda8-cudnn7-py2)
-    CUDA_VERSION=8.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=2.7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-cuda8-cudnn7-py3)
-    CUDA_VERSION=8.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
   pytorch-linux-xenial-cuda9-cudnn7-py2)
     CUDA_VERSION=9.0
     CUDNN_VERSION=7
@@ -119,7 +112,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
     ;;
   pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7)
     CUDA_VERSION=9.2
@@ -147,6 +139,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    KATEX=yes
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
@@ -186,6 +179,7 @@ tmp_tag="tmp-$(cat /dev/urandom | tr -dc 'a-z' | fold -w 32 | head -n 1)"
 # Build image
 docker build \
        --no-cache \
+       --build-arg "TRAVIS_DL_URL_PREFIX=${TRAVIS_DL_URL_PREFIX}" \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "THRIFT=${THRIFT:-}" \
