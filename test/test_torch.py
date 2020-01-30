@@ -13759,7 +13759,7 @@ class TestTorchDeviceType(TestCase):
     def test_lobpcg_utils(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_matrix
         from torch._linalg_utils import get_matmul
-        from torch.lobpcg import svqb, _ortho, _get_rayleigh_ritz_transform
+        from torch.lobpcg import svqb
         from torch.lobpcg import _ortho as ortho
         from torch.lobpcg import _get_rayleigh_ritz_transform as get_rayleigh_ritz_transform
         mm = torch.matmul

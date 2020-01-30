@@ -8,22 +8,22 @@ from . import _linalg_utils as _utils
 
 
 def get_approximate_basis(A, q, niter=2, M=None):
-    """Return tensor :math:`Q` with q orthonormal columns such that
-    :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is specified,
-    then `Q` is such that :math:`Q Q^H (A - M)` approximates :math:`A
-    - M`.
+    """Return tensor :math:`Q` with :math:`q` orthonormal columns such
+    that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
+    specified, then :math:`Q` is such that :math:`Q Q^H (A - M)`
+    approximates :math:`A - M`.
 
     .. note:: The implementation is based on the Algorithm 4.4 from
               Halko et al, 2009.
 
-    .. note:: For an adequate approximation of a k-rank matrix A,
-              where k is not known in advance but could be estimated,
-              the number of Q columns q can be choosen according to
-              the following criteria: in general, :math:`k <= q <=
-              min(2*k, m, n)`. For large low-rank matrices, take
-              :math:`q = k + 5..10`.  If k is relatively small
-              compared to :math:`min(m, n)`, choosing :math:`q = k +
-              0..2` may be sufficient.
+    .. note:: For an adequate approximation of a k-rank matrix
+              :math:`A`, where k is not known in advance but could be
+              estimated, the number of :math:`Q` columns, q, can be
+              choosen according to the following criteria: in general,
+              :math:`k <= q <= min(2*k, m, n)`. For large low-rank
+              matrices, take :math:`q = k + 5..10`.  If k is
+              relatively small compared to :math:`min(m, n)`, choosing
+              :math:`q = k + 0..2` may be sufficient.
 
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
@@ -31,12 +31,13 @@ def get_approximate_basis(A, q, niter=2, M=None):
     Arguments::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
-        q (int): the dimension of subspace spanned by Q columns.
+        q (int): the dimension of subspace spanned by :math:`Q`
+                 columns.
 
         niter (int, optional): the number of subspace iterations to
-                               conduct; niter must be a nonnegative
-                               integer. In most cases, the default
-                               value 2 is more than enough.
+                               conduct; ``niter`` must be a
+                               nonnegative integer. In most cases, the
+                               default value 2 is more than enough.
 
         M (Tensor, optional): the input tensor's mean of size
                               :math:`(*, 1, n)`.
@@ -53,8 +54,7 @@ def get_approximate_basis(A, q, niter=2, M=None):
     dtype = _utils.get_floating_dtype(A)
     matmul = _utils.get_matmul(A)
 
-    R = _utils.uniform(low=-1.0, high=1.0, size=(n, q),
-                       dtype=dtype, device=A.device)
+    R = torch.randn(n, q, dtype=dtype, device=A.device)
 
     A_H = _utils.transjugate(A)
     if M is None:
@@ -149,8 +149,8 @@ def svd(A, q=6, niter=2, M=None):
 
 
 def pca(A, q=None, center=True, niter=2):
-    r"""Performs Principal Component Analysis (PCA) on a low-rank matrix,
-    batches of such matrices, or sparse matrix.
+    r"""Performs linear Principal Component Analysis (PCA) on a low-rank
+    matrix, batches of such matrices, or sparse matrix.
 
     This function returns a namedtuple ``(U, S, V)`` which is the
     nearly optimal approximation of a singular value decomposition of
