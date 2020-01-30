@@ -1,3 +1,7 @@
+// This is used for factory methods dispatching. We register ops with a high priority dispatch key,
+// which makes the dispatcher to dispatch here. We compute the dispatch key 'manually' and navigate to the
+// correct backend.
+
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/op_registration/op_registration.h>
@@ -68,7 +72,7 @@ Tensor empty_strided(IntArrayRef size, IntArrayRef stride, const TensorOptions &
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, IntArrayRef, const TensorOptions &>(key, size, stride, options);
 }
 
-Tensor empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
+Tensor _empty_affine_quantized(IntArrayRef size, const TensorOptions & options, double scale, int64_t zero_point, c10::optional<MemoryFormat> memory_format) {
   DispatchKey key = options.computeDispatchKey();
   static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_empty_affine_quantized", "");
   return op.callUnboxedWithDispatchKey<Tensor, IntArrayRef, const TensorOptions &, double, int64_t, c10::optional<MemoryFormat>>(key, size, options, scale, zero_point, memory_format);
@@ -415,7 +419,7 @@ static auto registry = torch::RegisterOperators()
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::_empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(empty_affine_quantized), &empty_affine_quantized>(DispatchKey::BackendSelect)
+    .impl_unboxedOnlyKernel<decltype(_empty_affine_quantized), &_empty_affine_quantized>(DispatchKey::BackendSelect)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   .op(torch::RegisterOperators::options()
     .schema("aten::eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor")
