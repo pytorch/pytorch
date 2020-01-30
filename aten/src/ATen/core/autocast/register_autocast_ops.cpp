@@ -253,7 +253,7 @@ struct WrapFunction final {
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     return (*F)(cached_cast(at::kHalf, args)...);
   }
 };
@@ -262,7 +262,7 @@ struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16_with_tensorlist, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)()
     std::vector<Tensor> vec = get_casted_vector(at::kHalf, args...);
     return (*F)(cached_cast_with_vector(at::kHalf, vec, args)...);
@@ -273,7 +273,7 @@ struct WrapFunction_<CastPolicy::fp16_with_tensorlist, Redispatch, F, Ret, guts:
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
@@ -282,7 +282,7 @@ struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typel
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     return (*F)(set_opt_dtype(at::kFloat, args)...);
   }
 };
@@ -291,7 +291,7 @@ struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::t
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     return (*F)(args..., at::kFloat);
   }
 };
@@ -300,7 +300,7 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
@@ -310,7 +310,7 @@ struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::ty
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::promote_with_tensorlist, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
-    c10::impl::ExcludeTensorTypeIdGuard no_autocasting(TensorTypeId::AutocastTensorId);
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     auto to_type = promote_type(at::kHalf, args...);
     // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)()
     std::vector<Tensor> vec = get_casted_vector(to_type, args...);
@@ -358,7 +358,7 @@ void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
 // void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   std::cout << "autocast_fallback" << std::endl;
 
-  c10::impl::ExcludeTensorTypeIdGuard no_autocast(TensorTypeId::AutocastTensorId);
+  c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::AutocastTensorId);
   // Temporary workaround.
   // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
   // callBoxedWorkaround(op, stack);
@@ -391,7 +391,7 @@ I think Option 2 is the right answer for all ops, not just convolutions.  Option
 *****************************************************************************************************************/
 
 auto register_fallback = c10::Dispatcher::singleton()
-  .registerBackendFallbackKernel(TensorTypeId::AutocastTensorId,
+  .registerBackendFallbackKernel(DispatchKey::AutocastTensorId,
                                  KernelFunction::makeFromBoxedFunction<&autocast_fallback>());
 
 // TODO:  Codegen the stuff below?  Ed said
@@ -404,7 +404,7 @@ auto register_fallback = c10::Dispatcher::singleton()
 #define KERNEL(FUNC, REGISTER_SCHEMA, SIGNATURE, POLICY) \
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
-    .kernel<SIGNATURE>(TensorTypeId::AutocastTensorId, \
+    .kernel<SIGNATURE>(DispatchKey::AutocastTensorId, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call) \
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 
@@ -413,7 +413,7 @@ auto register_fallback = c10::Dispatcher::singleton()
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<SIGNATURE, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call \
-    >(TensorTypeId::AutocastTensorId) \
+    >(DispatchKey::AutocastTensorId) \
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
@@ -422,7 +422,7 @@ auto register_fallback = c10::Dispatcher::singleton()
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<REGISTER_SIGNATURE, \
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, REDISPATCH_FUNC>::type::call \
-    >(TensorTypeId::AutocastTensorId) \
+    >(DispatchKey::AutocastTensorId) \
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 
 /*****************************************
@@ -486,7 +486,7 @@ auto register_out_of_place = torch::RegisterOperators()
     .schema("aten::native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)")
     .impl_unboxedOnlyKernel<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double),
     &WrapFunction<CastPolicy::fp32, std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, int64_t, int64_t, double), at::native_layer_norm>::type::call
-    >(TensorTypeId::AutocastTensorId)
+    >(DispatchKey::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
   KERNEL_UNBOXED_ONLY(at::group_norm, "aten::group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &, double, bool), fp32)
   KERNEL_UNBOXED_ONLY(at::frobenius_norm, "aten::frobenius_norm(Tensor self) -> Tensor", Tensor (const Tensor &), fp32)
@@ -557,7 +557,7 @@ auto register_out_of_place = torch::RegisterOperators()
 auto register_banned = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor")
-    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), &at::autocast::binary_cross_entropy_banned>(TensorTypeId::AutocastTensorId)
+    .impl_unboxedOnlyKernel<Tensor (const Tensor &, const Tensor &, const Tensor &, int64_t), &at::autocast::binary_cross_entropy_banned>(DispatchKey::AutocastTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 #endif

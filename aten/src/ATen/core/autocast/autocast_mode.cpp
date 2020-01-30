@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/autocast/autocast_mode.h>
-#include <c10/core/impl/LocalTensorTypeSet.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 
 #include <stdexcept>
 #include <memory>
@@ -14,7 +14,7 @@ namespace autocast {
 /// is on.
 #if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 namespace {
-  thread_local std::unique_ptr<c10::impl::IncludeTensorTypeIdGuard> guard_holder;
+  thread_local std::unique_ptr<c10::impl::IncludeDispatchKeyGuard> guard_holder;
 }
 
 bool AutocastMode::is_enabled() {
@@ -24,15 +24,13 @@ bool AutocastMode::is_enabled() {
 void AutocastMode::set_enabled(bool enabled) {
   if (enabled) {
     if (!is_enabled()) {
-      guard_holder.reset(new c10::impl::IncludeTensorTypeIdGuard(TensorTypeId::AutocastTensorId));
+      guard_holder.reset(new c10::impl::IncludeDispatchKeyGuard(DispatchKey::AutocastTensorId));
     }
   } else {
     guard_holder.reset(nullptr);
   }
 }
 
-// I'd like the cache to reside in the same .cpp file that actually does the casting, for quicker access.
-// Clearing the cache is something that happens relatively rarely.
 void clear_cache();
 
 void AutocastMode::clear_cache() {
