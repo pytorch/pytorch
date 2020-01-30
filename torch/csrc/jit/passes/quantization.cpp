@@ -379,7 +379,7 @@ class InsertObserversHelper {
       Value* v,
       Graph* g,
       script::Module& module,
-      const QConfig& qconfig);
+      const c10::optional<QConfig>& qconfig);
 
   void findIntermediateValuesInPattern(
       Graph& graph,
@@ -590,7 +590,10 @@ void InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
-    const QConfig& qconfig) {
+    const c10::optional<QConfig>& qconfig_opt) {
+  if (!qconfig_opt) {
+    return;
+  }
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
     TORCH_CHECK(
@@ -598,6 +601,7 @@ void InsertObserversHelper::insertObserverFor(
     return;
   }
 
+  const auto& qconfig = *qconfig_opt;
   script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
     TORCH_CHECK(
@@ -679,16 +683,6 @@ void InsertObserversHelper::insertObservers(
     insertObservers(invoked_module, invoked_method_name);
   }
 
-  // We need to do this check after we call insertObservers on invoked modules
-  // since qconfig can be None for parent module and valid for invoked modules
-  auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
-  if (!qconfig_opt) {
-    // qconfig is None because the module is added by us, e.g.: observer module
-    // or no qconfig is specified for the module
-    return;
-  }
-  auto qconfig = *qconfig_opt;
-
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
@@ -715,6 +709,7 @@ void InsertObserversHelper::insertObservers(
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
+  auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -726,7 +721,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      insertObserverFor(v, v->owningGraph(), module, qconfig);
+      insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
     }
   }
 
@@ -755,7 +750,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    insertObserverFor(v, v->owningGraph(), module, qconfig);
+    insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
   }
 }
 
