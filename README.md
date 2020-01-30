@@ -278,11 +278,16 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake
 ccmake build  # or cmake-gui build
 ```
 
-### Docker Image
+### Using Docker
 
-#### Using pre-built images
+#### Using official images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+All major releases for PyTorch will also have pre-built docker images that include the latest
+CUDA version at the time as well as the latest `torchvision` package. These images are currently
+based on the latest Ubuntu LTS release.
+
+You can pull the official docker image from [Docker Hub](https://hub.docker.com/r/pytorch/pytorch)
+and run with docker v19.03+
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
@@ -290,19 +295,49 @@ docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
-should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `docker run`.
 
-#### Building the image yourself
+Official style images can be built directly using the following commands:
 
-**NOTE:** Must be built with a docker version > 18.06
-
-The `Dockerfile` is supplied to build images with cuda support and cudnn v7.
-You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
 ```bash
-make -f docker.Makefile
-# images are tagged as docker.io/${your_docker_username}/pytorch
+make -f docker.Makefile BUILD_TYPE=official runtime-image
 ```
+
+This will build an image with the latest available package from the `pytorch` channel on `anaconda`.
+
+#### For Development
+
+**Requires**: Docker > 18.06
+
+Building the new images is pretty simple, just requires `docker` > 18.06 since the new build process relies on `buildkit` caching and multi-stage build resolving.
+The base `Dockerfile` includes caching for both `apt` and `ccache` so no setup is actually necessary for these as they are enabled by default. Building from the
+`docker.Makefile` will copy the current tree into docker build and compile it into a usable docker image, that is similar in usage to the official images.
+
+For `runtime` images:
+```
+make -f docker.Makefile runtime-image
+```
+
+For `devel` images:
+```
+make -f docker.Makefile devel-image
+```
+
+Builds are tagged as follows:
+```bash
+docker.io/${docker_user:-$(whoami)}/pytorch:$(git describe --tags)-${image_type}
+```
+
+Example:
+```
+docker.io/pytorch/pytorch:v1.5.0a0-2225-g9eba97b61d-runtime
+```
+
+##### Adjustable make options for docker builds
+
+* `DOCKER_ORG`: Org to build images as (defaults to current docker user)
+* `BUILD_TYPE`: Whether to build dev or official images (defaults to dev)
+* `INSTALL_CHANNEL`: The conda channel to use to install pytorch / torchvision (defaults to pytorch)
 
 ### Building the Documentation
 
