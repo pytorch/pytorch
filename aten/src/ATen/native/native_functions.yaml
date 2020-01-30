@@ -305,7 +305,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: add.Scalar(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
+- func: add.Scalar2(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
   supports_named_tensor: True
@@ -1026,7 +1026,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: div.Scalar(Scalar other, Tensor self) -> Tensor
+- func: div.Scalar2(Scalar other, Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function
   supports_named_tensor: True
@@ -1980,7 +1980,7 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: mul.Scalar(Scalar other, Tensor self) -> Tensor
+- func: mul.Scalar2(Scalar other, Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function
 
@@ -3167,7 +3167,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: sub.Scalar(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
+- func: sub.Scalar2(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
   supports_named_tensor: True
@@ -3186,7 +3186,7 @@
   variants: function
   supports_named_tensor: True
 
-- func: rsub.Scalar(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
+- func: rsub.Scalar2(Scalar other, Tensor self, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
   supports_named_tensor: True

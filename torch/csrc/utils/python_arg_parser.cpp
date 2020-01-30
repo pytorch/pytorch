@@ -192,7 +192,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         }
         return true;
       }
-      return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
+      return THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
