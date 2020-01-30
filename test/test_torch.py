@@ -13563,6 +13563,19 @@ class TestTorchDeviceType(TestCase):
     def test_cpow(self, device, dtype):
         self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y), dtype, device)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.float32)
+    def test_prod_gpu(self, device, dtype):
+        x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
+        result_expected = torch.tensor([2592], dtype=dtype, device=device)
+        output = torch.prod(x, dtype=dtype)
+        result = torch.tensor([output.item()], dtype=dtype, device=device)
+        self.assertEqual(result, result_expected)
+
+        output = x.prod(dtype=dtype)
+        result = torch.tensor([output.item()], dtype=dtype, device=device)
+        self.assertEqual(result, result_expected)
+
     @onlyCPU
     @dtypes(torch.float)
     def test_prod(self, device, dtype):
