@@ -13552,14 +13552,18 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float16, torch.float32)
     def test_prod_gpu(self, device, dtype):
         x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
-        result_expected = torch.tensor([2592], dtype=dtype, device=device)
-        output = torch.prod(x, dtype=dtype)
-        result = torch.tensor([output.item()], dtype=dtype, device=device)
-        self.assertEqual(result, result_expected)
 
-        output = x.prod(dtype=dtype)
-        result = torch.tensor([output.item()], dtype=dtype, device=device)
-        self.assertEqual(result, result_expected)
+        # Check for all combinations: fp16 input - fp16 output, fp16 input -
+        # fp32 output, fp32 input - fp16 output, fp32 input - fp32 output
+        for dtype_output in [torch.float16, torch.float32]:
+            result_expected = torch.tensor([2592], dtype=dtype_output, device=device)
+            output = torch.prod(x, dtype=dtype_output)
+            result = torch.tensor([output.item()], dtype=output.type(), device=output.device)
+            self.assertEqual(result, result_expected)
+
+            output = x.prod(dtype=dtype_output)
+            result = torch.tensor([output.item()], dtype=output.type(), device=output.device)
+            self.assertEqual(result, result_expected)
 
     @onlyCPU
     @dtypes(torch.float)
