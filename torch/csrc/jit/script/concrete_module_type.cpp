@@ -14,10 +14,15 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
   if (className.prefix().empty()) {
     className = c10::QualifiedName("__torch__", className.name());
   }
+  auto orig_class_name = className;
   if (cu->get_class(className) != nullptr) {
     className = cu->mangle(className);
   }
-  auto cls = ClassType::create(std::move(className), cu, /*is_module=*/true);
+  auto cls = ClassType::create(
+      std::move(className),
+      cu,
+      /*is_module=*/true,
+      orig_class_name.qualifiedName());
   cu->register_type(cls);
 
   // populate type with info from the concrete type information

@@ -7,19 +7,22 @@ namespace c10 {
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+    bool is_module,
+    c10::optional<std::string> original_qual_name) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName), std::move(cu), is_module, original_qual_name));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
+    bool is_module,
+    c10::optional<std::string> original_qual_name = c10::nullopt)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)) {
   if (is_module) {
     parameterSlots_ = std::make_shared<std::vector<bool>>();
+    original_qual_name_ = std::move(original_qual_name);
   }
 }
 

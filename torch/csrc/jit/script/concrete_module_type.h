@@ -197,6 +197,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
 
+  c10::optional<std::string> getOriginalQualName() const {
+    return jitType_->expect<ClassType>()->getOriginalQualName();
+  };
+
   // These getters are only here to return things as types that can be
   // automatically converted by pybind.
   std::unordered_map<std::string, py::object> getConstantsPy() const;

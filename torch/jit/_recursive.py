@@ -72,7 +72,6 @@ def infer_concrete_type_builder(nn_module):
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
 
-    setattr(nn_module, "_original_qual_name", torch.jit._qualified_name(type(nn_module)))
     class_annotations = getattr(nn_module, '__annotations__', {})
 
     # try to infer the type from type annotation or from the object itself
@@ -569,8 +568,9 @@ def wrap_cpp_module(cpp_module_inner):
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
-        if cpp_module_inner.hasattr("_original_qual_name"):
-            nn_module = torch._jit_internal._try_get_module_class_from_qual_name(cpp_module_inner._original_qual_name)
+        original_qual_name = script_module._concrete_type.get_original_qual_name()
+        if original_qual_name:
+            nn_module = torch._jit_internal._try_get_module_class_from_qual_name(original_qual_name)
             if nn_module:
                 _add_copy_to_script_methods(nn_module, script_module)
 

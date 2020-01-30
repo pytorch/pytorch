@@ -1448,7 +1448,8 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false);
+      bool is_module = false,
+      c10::optional<std::string> original_qual_name = c10::nullopt);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -1684,6 +1685,11 @@ struct CAFFE2_API ClassType : public NamedType {
   bool is_module() const override {
     return bool(parameterSlots_);
   }
+
+  c10::optional<std::string> getOriginalQualName() {
+    return original_qual_name_;
+  }
+
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
         is_module(), "asking for parameterSlots of non-Module");
@@ -1712,7 +1718,8 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module);
+      bool is_module,
+      c10::optional<std::string> original_qual_name);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1731,6 +1738,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
+  c10::optional<std::string> original_qual_name_ = c10::nullopt;
 
   // List of methods associated with this class.
   std::vector<Function*> methods_;

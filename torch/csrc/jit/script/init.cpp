@@ -1251,6 +1251,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
       .def("dump", &ConcreteModuleType::dump)
+      .def("get_original_qual_name", &ConcreteModuleType::getOriginalQualName)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
