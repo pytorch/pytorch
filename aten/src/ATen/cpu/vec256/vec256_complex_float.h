@@ -240,7 +240,14 @@ public:
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> exp() const {
-    return map(std::exp);
+    //exp(a + bi)
+    // = exp(a)*(cos(b) + sin(b)i)
+    auto exp = Sleef_expf8_u10(values);                               //exp(a)           exp(b)
+    exp = _mm256_blend_ps(exp, _mm256_permute_ps(exp, 0xB1), 0xAA);   //exp(a)           exp(a)
+
+    auto sin_cos = Sleef_sincosf8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_ps(sin_cos.y, sin_cos.x, 0xAA);       //cos(b)           sin(b)
+    return _mm256_mul_ps(exp, cos_sin);
   }
   Vec256<std::complex<float>> expm1() const {
     AT_ERROR("not supported for complex numbers");
