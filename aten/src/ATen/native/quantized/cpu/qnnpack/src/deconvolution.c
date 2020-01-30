@@ -60,6 +60,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     pytorch_qnnp_operator_t* deconvolution_out) {
   pytorch_qnnp_operator_t deconvolution = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
@@ -103,12 +105,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
 
   status = pytorch_qnnp_status_unsupported_parameter;
 
-  if (requantization_scale[0] >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create deconvolution with "
-        "deconvolution scale %.7g is greater or equal to 1.0",
-        requantization_scale[0]);
-    goto error;
+  for (size_t i = 0; i < groups * group_output_channels; ++i) {
+    if (requantization_scale[i] >= 1.0f) {
+      pytorch_qnnp_log_error(
+          "failed to create deconvolution with "
+          "deconvolution scale %.7g is greater or equal to 1.0",
+          requantization_scale[i]);
+      goto error;
+    }
   }
 
   status = pytorch_qnnp_status_out_of_memory;
@@ -198,7 +202,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
           kernel_zero_points,
-          requantization_scale,
+          multipliers,
+          shifts,
           output_zero_point,
           output_min,
           output_max);

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <pytorch_qnnpack.h>
+#include <qnnpack/utils.h>
 
 class DeconvolutionOperatorTester {
  public:
@@ -499,7 +500,16 @@ class DeconvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      std::vector<float> requantization_scale(1, 1.0 * 1.0 / outputScale);
+      std::vector<float> requantization_scale
+        (num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       pytorch_qnnp_operator_t deconvolution = nullptr;
 
       ASSERT_EQ(
@@ -529,6 +539,8 @@ class DeconvolutionOperatorTester {
               qmax(),
               0,
               requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               &deconvolution));
 
       ASSERT_EQ(
@@ -564,8 +576,8 @@ class DeconvolutionOperatorTester {
                               groups() +
                           g) *
                              groupOutputChannels() +
-                         c] /
-                    outputScale;
+                         c] *
+                         requantization_scale[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,

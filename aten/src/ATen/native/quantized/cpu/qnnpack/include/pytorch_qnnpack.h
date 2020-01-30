@@ -60,6 +60,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     pytorch_qnnp_operator_t* convolution);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_convolution2d_nhwc_q8(
@@ -98,6 +100,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     pytorch_qnnp_operator_t* deconvolution);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_deconvolution2d_nhwc_q8(
@@ -123,6 +127,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     pytorch_qnnp_operator_t* fully_connected);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(

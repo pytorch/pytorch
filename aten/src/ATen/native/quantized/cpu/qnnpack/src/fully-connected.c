@@ -33,6 +33,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     pytorch_qnnp_operator_t* fully_connected_out) {
   pytorch_qnnp_operator_t fully_connected = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
@@ -49,12 +51,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
 
   // Need to adjust this to check for per channel. Although internally we dont use this path at all.
   // Better remove it at some point.
-  if (requantization_scale[0] >= 1.0f) {
-    pytorch_qnnp_log_error(
-        "failed to create fully connected operator with "
-        "requantization scale %.7g is greater or equal to 1.0",
-        requantization_scale);
-    goto error;
+  for (size_t i = 0; i < output_channels; ++i) {
+    if (requantization_scale[i] >= 1.0f) {
+      pytorch_qnnp_log_error(
+          "failed to create fully connected operator with "
+          "requantization scale %.7g is greater or equal to 1.0",
+          requantization_scale[i]);
+      goto error;
+    }
   }
 
   status = pytorch_qnnp_status_out_of_memory;
@@ -110,7 +114,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_nc_q8(
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
           kernel_zero_points,
-          requantization_scale,
+          multipliers,
+          shifts,
           output_zero_point,
           output_min,
           output_max);

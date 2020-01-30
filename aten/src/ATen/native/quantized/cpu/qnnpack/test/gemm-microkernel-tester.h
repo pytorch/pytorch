@@ -23,6 +23,7 @@
 #include <qnnpack/pack.h>
 #include <qnnpack/params.h>
 #include <qnnpack/requantization.h>
+#include <qnnpack/utils.h>
 
 class GemmMicrokernelTester {
  public:
@@ -267,14 +268,25 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      std::vector<float> requantization_scale(1, 1.0f / float(cScale));
       size_t num_zero_points_padded = ((nr() + 7) / 8) * 8;
-      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, bZeroPoint());
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::vector<float> requantization_scale
+        (num_zero_points_padded, 1.0f / float(cScale));
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
               kernel_zero_points.data(),
-              requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               cZeroPoint,
               qmin(),
               qmax());
@@ -533,13 +545,25 @@ class GemmMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      std::vector<float> requantization_scale(1, 1.0f / float(cScale));
-      std::vector<uint8_t> kernel_zero_points(nr(), bZeroPoint());
+      size_t num_zero_points_padded = ((nr() + 7) / 8) * 8;
+      std::vector<uint8_t> kernel_zero_points
+        (num_zero_points_padded, bZeroPoint());
+      std::vector<float> requantization_scale
+        (num_zero_points_padded, 1.0f / float(cScale));
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
               kernel_zero_points.data(),
-              requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               cZeroPoint,
               qmin(),
               qmax());

@@ -21,6 +21,7 @@
 #include <qnnpack/params.h>
 #include <qnnpack/q8gemm.h>
 #include <qnnpack/requantization.h>
+#include <qnnpack/utils.h>
 
 #include <benchmark/benchmark.h>
 
@@ -116,10 +117,13 @@ class Q8GEMM : public benchmark::Fixture {
 
     size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
     std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
-    std::vector<float> requantization_scale(1, 0.75f);
+    float requantization_scale = 0.75f;
+    auto multiplier_shift_pair = calc_multiplier_and_shift(requantization_scale);
+    std::vector<int32_t> multipliers(1, multiplier_shift_pair.first);
+    std::vector<int32_t> shifts(1, multiplier_shift_pair.second);
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
-        127, kernel_zero_points.data(),
-        requantization_scale.data(), 127, 1, 254);
+        127, kernel_zero_points.data(), multipliers.data(),
+        shifts.data(), 127, 1, 254);
   }
 
   virtual void TearDown(benchmark::State& state) override {

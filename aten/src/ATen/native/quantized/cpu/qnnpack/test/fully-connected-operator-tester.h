@@ -19,6 +19,7 @@
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
+#include <qnnpack/utils.h>
 
 class FullyConnectedOperatorTester {
  public:
@@ -176,7 +177,16 @@ class FullyConnectedOperatorTester {
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
       // 1 bcz input_scale and kernel_scale are both 1.
-      std::vector<float> requantization_scale(outputChannels(), 1 / outputScale);
+      std::vector<float> requantization_scale
+        (num_zero_points_padded, 1 / outputScale);
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       if (runtime_quant) {
           auto packW = std::unique_ptr<qnnpack::PackBMatrix>(
               new qnnpack::PackBMatrix(
@@ -194,6 +204,8 @@ class FullyConnectedOperatorTester {
               inputZeroPoint,
               kernelZeroPoints.data(),
               requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               outputZeroPoint,
               qmin(),
               qmax(),
@@ -223,6 +235,8 @@ class FullyConnectedOperatorTester {
                 qmax(),
                 0,
                 requantization_scale.data(),
+                multipliers.data(),
+                shifts.data(),
                 &convolution));
 
         ASSERT_EQ(
@@ -247,7 +261,7 @@ class FullyConnectedOperatorTester {
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t c = 0; c < outputChannels(); c++) {
           const double scaledAccumulator =
-              accumulators[i * outputChannels() + c] / outputScale;
+              accumulators[i * outputChannels() + c] * requantization_scale[c];
           const double clampedAccumulator = std::max(
               std::min(
                   scaledAccumulator, double(qmax()) - double(outputZeroPoint)),

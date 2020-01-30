@@ -128,15 +128,14 @@ static inline union pytorch_qnnp_conv_quantization_params
 pytorch_qnnp_compute_conv_quantization_params(
     uint8_t input_zero_point,
     const uint8_t* kernel_zero_point,
-    const float* requantization_scale_ptr,
+    const int32_t* multiplier_ptr,
+    const int32_t* shift_ptr,
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max) {
   /* Compute requantization parameters */
 
   union pytorch_qnnp_conv_quantization_params params;
-  //requantization_scale_ptr[0] = input_scale * kernel_scale[0] / output_scale;
-  const float requantization_scale = requantization_scale_ptr[0];
   /*
   if (requantization_scale >= 1.0f) {
     pytorch_qnnp_log_error(
@@ -151,18 +150,8 @@ pytorch_qnnp_compute_conv_quantization_params(
   }
   */
 
-  const uint32_t scale_bits = fp32_to_bits(requantization_scale);
-
-  /* Multiplier is in [0x40000000, 0x7FFFFF80] range */
-  const int32_t multiplier = (int32_t)(
-      ((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
-  assert(multiplier >= INT32_C(0x40000000));
-  assert(multiplier <= INT32_C(0x7FFFFF80));
-
-  /* Shift is in [0, 31] range */
-  const int32_t shift = 127 + 31 - 32 - (fp32_to_bits(requantization_scale) >> 23);
-  assert(shift >= 0);
-  assert(shift < 32);
+  const int32_t multiplier = multiplier_ptr[0];
+  const int32_t shift = shift_ptr[0];
 
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);

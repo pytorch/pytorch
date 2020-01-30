@@ -21,6 +21,7 @@
 #include <qnnpack/pack.h>
 #include <qnnpack/params.h>
 #include <qnnpack/requantization.h>
+#include <qnnpack/utils.h>
 
 class DWConvMicrokernelTester {
  public:
@@ -265,11 +266,20 @@ class DWConvMicrokernelTester {
       std::vector<float> requantization_scale(1, 1.0f / float(outputScale));
       // Per channel quantization is not supported for depth wise.
       std::vector<uint8_t> kernel_zero_points(1, this->kernelZeroPoint_);
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
               kernel_zero_points.data(),
-              requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               outputZeroPoint,
               qmin(),
               qmax());
@@ -441,11 +451,20 @@ class DWConvMicrokernelTester {
       std::vector<float> requantization_scale(1, 1.0f / float(outputScale));
       // Per channel quantization is not supported for depth wise.
       std::vector<uint8_t> kernel_zero_points(1, this->kernelZeroPoint_);
+      std::vector<int32_t> multipliers(requantization_scale.size(), 0);
+      std::vector<int32_t> shifts(requantization_scale.size(), 0);
+      for (uint32_t i = 0; i < requantization_scale.size(); ++i) {
+        const auto multiplier_shift =
+          calc_multiplier_and_shift(requantization_scale[i]);
+        multipliers[i] = multiplier_shift.first;
+        shifts[i] = multiplier_shift.second;
+      }
       const union pytorch_qnnp_conv_quantization_params quantizationParams =
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
               kernel_zero_points.data(),
-              requantization_scale.data(),
+              multipliers.data(),
+              shifts.data(),
               outputZeroPoint,
               qmin(),
               qmax());

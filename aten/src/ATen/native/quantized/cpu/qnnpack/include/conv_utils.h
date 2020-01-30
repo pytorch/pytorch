@@ -19,6 +19,8 @@ struct conv_param_t {
   const size_t output_channels;
   const uint8_t* kernel_zero_points;
   const float* requantization_scale;
+  const int32_t* multipliers;
+  const int32_t* shifts;
   const uint8_t output_min;
   const uint8_t output_max;
 
@@ -40,6 +42,8 @@ struct conv_param_t {
       const size_t out_ch,
       const uint8_t* kernel_zp,
       const float* scale,
+      const int32_t* multipliers_ptr,
+      const int32_t* shifts_ptr,
       const uint8_t out_min,
       const uint8_t out_max)
       : kernel_dims(kernel),
@@ -51,6 +55,8 @@ struct conv_param_t {
         output_channels(out_ch),
         kernel_zero_points(kernel_zp),
         requantization_scale(scale),
+        multipliers(multipliers_ptr),
+        shifts(shifts_ptr),
         output_min(out_min),
         output_max(out_max) {
     const uint32_t kernel_width = kernel_dims[0];

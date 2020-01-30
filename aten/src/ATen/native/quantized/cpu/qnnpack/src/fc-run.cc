@@ -58,7 +58,9 @@ enum pytorch_qnnp_status qnnpackLinear(
     const size_t output_channels,
     const uint8_t input_zero_point,
     const uint8_t* kernel_zero_point,
-    const float* requantization_scale_ptr,
+    const float* requantization_scale,
+    const int32_t* multipliers,
+    const int32_t* shifts,
     const uint8_t output_zero_point,
     const uint8_t output_min,
     const uint8_t output_max,
@@ -82,7 +84,7 @@ enum pytorch_qnnp_status qnnpackLinear(
   union pytorch_qnnp_conv_quantization_params conv_quantization_params =
     pytorch_qnnp_compute_conv_quantization_params(
       input_zero_point, kernel_zero_point,
-      requantization_scale_ptr, output_zero_point, output_min, output_max);
+      multipliers, shifts, output_zero_point, output_min, output_max);
 
   struct q8gemm_context q8gemm_context = {
       .k = group_input_channels,

@@ -332,7 +332,8 @@ enum pytorch_qnnp_status qnnpackConv(
     conv_quantization_params = pytorch_qnnp_compute_conv_quantization_params(
         input_zero_point,
         conv_p.kernel_zero_points,
-        conv_p.requantization_scale,
+        conv_p.multipliers,
+        conv_p.shifts,
         output_zero_point,
         conv_p.output_min,
         conv_p.output_max);
