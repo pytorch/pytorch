@@ -62,10 +62,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         for output in outputs:
             np.testing.assert_array_equal(outputs[0], output)
             self.assertEqual(outputs[0].tobytes(), output.tobytes())
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
@@ -85,10 +81,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             broadcast, input_device_options)
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000),
@@ -111,10 +103,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             reduce, input_device_options)
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000))
@@ -135,10 +123,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         for output in outputs:
             np.testing.assert_array_equal(outputs[0], output)
             self.assertEqual(outputs[0].tobytes(), output.tobytes())
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=1, max_value=1000))
@@ -159,10 +143,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             hu.gpu_do, op, [xs[i] for i, _ in enumerate(inputs)],
             reduce_scatter, input_device_options)
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @given(n=st.integers(min_value=2, max_value=workspace.NumGpuDevices()),
            m=st.integers(min_value=100000, max_value=100000),
@@ -187,10 +167,6 @@ class NCCLOpsTest(hu.HypothesisTestCase):
         np.testing.assert_array_equal(
             self.ws.blobs[inputs[0]].fetch(),
             np.full(shape=(m,), fill_value=iters * n, dtype=np.float32))
-        # TODO(T60310021): This grace period is temporarily added to allow AMD RCCL
-        # to clean up its resources before launching another test. Otherwise it may
-        # hang the following tests. Looking at longer term solution.
-        time.sleep(2)
 
     @unittest.skipIf(not os.environ.get("CAFFE2_BENCHMARK"), "Benchmark")
     def test_timings(self):
