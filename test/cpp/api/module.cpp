@@ -262,6 +262,7 @@ TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
 }
 
 TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
+  at::DeviceGuard guard(at::Device(at::kCUDA, 0));
   test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
 }
 
