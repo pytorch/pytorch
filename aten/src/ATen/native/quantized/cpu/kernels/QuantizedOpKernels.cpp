@@ -196,7 +196,6 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
 void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
   float scale = qx.q_scale();
-  float inv_scale = 1.0f / scale;
   auto scale_vec = Vec256<float>(scale);
   auto zero_point_vec = Vec256<float>((float)zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
