@@ -2,11 +2,9 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -79,7 +77,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() {
+std::vector<IValue> UserRRef::toHere() {
   auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -108,16 +106,8 @@ IValue UserRRef::toHere() {
       "Message type should either be SCRIPT_RREF_FETCH_RET "
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;
-  if (isPyObj()) {
-    auto& pythonRRefFetchRet = static_cast<PythonRRefFetchRet&>(rpc);
-    return jit::toIValue(
-        PythonRpcHandler::getInstance().deserialize(
-            SerializedPyObj::fromIValues(pythonRRefFetchRet.values())),
-        PyObjectType::get());
-  } else {
-    auto& pythonRRefFetchRet = static_cast<ScriptRRefFetchRet&>(rpc);
-    return pythonRRefFetchRet.values().front();
-  }
+  auto& rrefFetchRet = static_cast<RRefFetchRet&>(rpc);
+  return rrefFetchRet.values();
 }
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////

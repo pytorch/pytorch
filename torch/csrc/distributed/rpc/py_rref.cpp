@@ -90,7 +90,17 @@ py::object PyRRef::toHere() {
   } else {
     // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
     // a python object
-    IValue value = std::static_pointer_cast<UserRRef>(rref_)->toHere();
+    std::vector<IValue> rawValues =
+        std::static_pointer_cast<UserRRef>(rref_)->toHere();
+    IValue value;
+    if (rref_->isPyObj()) {
+      value = jit::toIValue(
+          PythonRpcHandler::getInstance().deserialize(
+              SerializedPyObj::fromIValues(std::move(rawValues))),
+          PyObjectType::get());
+    } else {
+      value = std::move(rawValues).front();
+    }
     {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
