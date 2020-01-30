@@ -33,20 +33,20 @@ class SGD(Optimizer):
 
         .. math::
             \begin{aligned}
-                v_{t+1} & = \mu * v_{t} + g_{t+1} \\
-                p_{t+1} & = p_{t} - lr * v_{t+1}
+                v_{t+1} & = \mu * v_{t} + g_{t+1}, \\
+                p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
             \end{aligned}
 
-        where p, g, v and :math:`\mu` denote the parameters, gradient,
-        velocity, and momentum respectively.
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
         other frameworks which employ an update of the form
 
         .. math::
             \begin{aligned}
-                v_{t+1} & = \mu * v_{t} + lr * g_{t+1} \\
-                p_{t+1} & = p_{t} - v_{t+1}
+                v_{t+1} & = \mu * v_{t} + \text{lr} * g_{t+1}, \\
+                p_{t+1} & = p_{t} - v_{t+1}.
             \end{aligned}
 
         The Nesterov version is analogously modified.
