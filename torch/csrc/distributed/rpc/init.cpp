@@ -181,15 +181,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   If the current node is the owner, returns a reference to the
                   local value. Otherwise, throws an exception.
               )")
-          .def(py::pickle(
-              [](const PyRRef& self) {
-                // __getstate__
-                return self.pickle();
-              },
-              [](py::tuple t) { // NOLINT
-                // __setstate__
-                return PyRRef::unpickle(t);
-              }))
+          .def(
+              py::pickle(
+                  [](const PyRRef& self) {
+                    // __getstate__
+                    return self.pickle();
+                  },
+                  [](py::tuple t) { // NOLINT
+                    // __setstate__
+                    return PyRRef::unpickle(t);
+                  }),
+              py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -253,9 +255,19 @@ If the future completes with an error, an exception is thrown.
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
-    RpcAgent::setDefaultRpcAgent(agent);
-    agent->start();
+  module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
+
+  module.def("_get_current_rpc_agent", &RpcAgent::getCurrentRpcAgent);
+
+  module.def(
+      "_set_and_start_rpc_agent",
+      [](const std::shared_ptr<RpcAgent>& rpcAgent) {
+        RpcAgent::setCurrentRpcAgent(rpcAgent);
+        rpcAgent->start();
+      });
+
+  module.def("_reset_current_rpc_agent", []() {
+    RpcAgent::setCurrentRpcAgent(nullptr);
   });
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
@@ -272,25 +284,22 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_rpc_builtin",
-      [](RpcAgent& agent,
-         const WorkerInfo& dst,
+      [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRpcBuiltin(agent, dst, opName, rf, args, kwargs);
+        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
       });
 
   module.def(
       "_invoke_rpc_python_udf",
-      [](RpcAgent& agent,
-         const WorkerInfo& dst,
+      [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        return pyRpcPythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
-      py::arg("agent"),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -350,13 +359,12 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_remote_builtin",
-      [](RpcAgent& agent,
-         const WorkerInfo& dst,
+      [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRemoteBuiltin(agent, dst, opName, rf, args, kwargs);
+        return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
       });
 
   module.def(
@@ -379,14 +387,12 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_remote_python_udf",
-      [](RpcAgent& agent,
-         const WorkerInfo& dst,
+      [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        return pyRemotePythonUdf(agent, dst, pickledPythonUDF, tensors, rf);
+        return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
-      py::arg("agent"),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -394,7 +400,7 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "get_rpc_timeout",
-      []() { return RpcAgent::getDefaultRpcAgent()->getRpcTimeout(); },
+      []() { return RpcAgent::getCurrentRpcAgent()->getRpcTimeout(); },
       R"(
           Retrieve the timeout for all RPCs that was set during RPC initialization.
 
@@ -405,7 +411,7 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_set_rpc_timeout",
       [](const std::chrono::milliseconds& rpcTimeout) {
-        RpcAgent::getDefaultRpcAgent()->setRpcTimeout(rpcTimeout);
+        RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
       },
       R"(
           Set the timeout for all RPCs. If an RPC is not completed within this
