@@ -487,7 +487,7 @@ struct CodeImpl {
     // by either clearing the register (DROPR) or just popping the stack
     // (DROP)
     if (preprocess_.can_emit_inline[input->node()]) {
-      emitNodeIter(input->node());
+      emitNodeInline(input->node());
       if (drop) {
         insertInstruction(DROP);
       }
@@ -499,37 +499,6 @@ struct CodeImpl {
   void emitLoadInputs(at::ArrayRef<Value*> inputs) {
     for (Value* input : inputs) {
       emitUse(input, false);
-    }
-  }
-
-  // emitLoadInputs-> emitUse -> emitNode -> emitOperator -> emitLoadInputs
-
-  static bool isIterEmitNodeSupported(Node* node) {
-    switch (node->kind()) {
-      default:
-        return true;
-      case prim::Drop:
-        return false;
-      case prim::Constant:
-        return false;
-      case prim::If:
-        return false;
-      case prim::Loop:
-        return false;
-      case aten::wait:
-        return false;
-      case prim::Param:
-        return false;
-      case prim::CallFunction:
-        return false;
-      case prim::CallMethod:
-        return false;
-      case prim::BailOut:
-        return false;
-      case prim::GetAttr:
-        return false;
-      case prim::SetAttr:
-        return false;
     }
   }
 
@@ -548,21 +517,21 @@ struct CodeImpl {
     }
   }
 
-  void emitNodeIter(Node* start) {
+  void emitNodeInline(Node* start) {
     std::vector<Value*> stack;
     std::unordered_set<Node*> seen;
     // start is always a single-output node
     stack.push_back(start->output());
     while (!stack.empty()) {
       auto val = stack.back();
-      GRAPH_DEBUG("emitting value ", val->debugName());
+      GRAPH_DEBUG("emitNodeInline stack's value ", val->debugName());
       stack.pop_back();
       auto node = val->node();
       if (!preprocess_.can_emit_inline[node]) {
         // this means that node has already been emitted
         // and we only emit register loads
         emitRegisterLoadMove(val, false);
-        GRAPH_DEBUG("can't emit inline value ", val->debugName());
+        GRAPH_DEBUG("emitRegisterLoadMove ", val->debugName());
       } else {
         if (seen.count(node) != 0) {
           // we already emitted arguments
@@ -572,7 +541,7 @@ struct CodeImpl {
           switch (node->kind()) {
             default:
               insertInstruction(OP, operator_table_.size());
-              GRAPH_DEBUG("inserting ", operator_table_.size());
+              GRAPH_DEBUG("Inserting operator ", operator_table_.size());
               operator_table_.emplace_back(getOperation(node));
               break;
             case prim::CallFunction:
@@ -607,7 +576,8 @@ struct CodeImpl {
             case prim::SetAttr:
             case prim::If:
             case prim::Loop:
-              TORCH_INTERNAL_ASSERT(false, "emitNodeIter should never see these nodes");
+              TORCH_INTERNAL_ASSERT(
+                  false, "emitNodeInline should never see these nodes");
               break;
             case prim::Constant:
               emitConstant(node);
@@ -624,59 +594,8 @@ struct CodeImpl {
               pushArguments(val, node->inputs(), stack, seen);
               break;
             case prim::GetAttr:
-              pushArguments(node);
+              pushArguments(val, node->inputs(), stack, seen);
               break;
-          }
-        }
-      }
-    }
-  }
-
-  void emitOperatorIter(Node* start) {
-    GRAPH_DEBUG("emitOperatorIter for ", getHeader(start));
-    if (!preprocess_.can_emit_inline[start]) {
-      // fallback on the original implementation
-
-      GRAPH_DEBUG("can't emit inline node ", getHeader(start));
-      emitOperator(start);
-      return;
-    }
-
-    std::vector<Value*> stack;
-    std::unordered_set<Node*> seen;
-    // can_emit_inline are single-output/single use nodes only
-    stack.push_back(start->output());
-    while (!stack.empty()) {
-      auto val = stack.back();
-      GRAPH_DEBUG("emitting value ", val->debugName());
-      stack.pop_back();
-      auto node = val->node();
-      if (!preprocess_.can_emit_inline[node]) {
-        // this means that node has already been emitted
-        // and we only emit register loads
-        emitUse(val, false);
-        GRAPH_DEBUG("can't emit inline value ", val->debugName());
-      } else {
-        if (seen.count(node) != 0) {
-          insertInstruction(OP, operator_table_.size());
-          GRAPH_DEBUG("inserting ", operator_table_.size());
-          operator_table_.emplace_back(getOperation(node));
-        } else {
-          // for simplicity we only support iterative emitOperator
-          // we can add emitCall and emitMethodCall and GetAttr later
-          // as needed by adding emitNodeIter
-          if (isIterEmitNodeSupported(node)) {
-            seen.insert(node);
-            stack.push_back(val);
-            GRAPH_DEBUG("pushing second time ", val->debugName());
-            // arguments in reverse order
-            for (int i = node->inputs().size() - 1; i >= 0; i--) {
-              GRAPH_DEBUG("pushing ", node->input(i)->debugName());
-              stack.push_back(node->input(i));
-            }
-          } else {
-            GRAPH_DEBUG("iterative not supported for ", val->debugName());
-            emitUse(val, false);
           }
         }
       }
@@ -852,7 +771,6 @@ struct CodeImpl {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
-        // emitOperatorIter(node);
         emitOperator(node);
         break;
       case prim::Drop:
