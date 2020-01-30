@@ -796,20 +796,6 @@ struct PythonPrintImpl {
     stmt << ss.str();
   }
 
-  static bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
-    if (elem_type->kind() == OptionalType::Kind) {
-      // it is possible that we are constructing an optional list, but all
-      // elements are present
-      return false;
-    }
-    if (elem_type->kind() == InterfaceType::Kind) {
-      // since classes can be members of multiple interfaces, we cannot
-      // construct which interface the list holds from the members alone
-      return false;
-    }
-    return true;
-  }
-
   void printOpName(TaggedStringStream& stmt, Symbol kind) {
     // Special overriding ops set that requires serializing differently to
     // preserve the original code semantics.
