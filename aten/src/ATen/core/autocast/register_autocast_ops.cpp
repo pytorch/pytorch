@@ -330,45 +330,6 @@ Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const Tensor 
            "safe to autocast.");
 }
 
-/*******************************
-Boxed fallback for all other ops
-*******************************/
-
-// Temporary workaround used by autocast_fallback.  I copy pasted this from somewhere, it should die soon.
-// void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-//   auto s = Symbol::fromQualString(op.schema().name());
-//   auto operators = torch::jit::getAllOperatorsFor(s);
-//   // Find the exact match
-//   std::shared_ptr<torch::jit::Operator> jit_op;
-//   for (const auto& candidate_op : operators) {
-//     auto candidate_schema = candidate_op->schema();
-//     // NB: this is a VERY slow equality test
-//     if (candidate_schema == op.schema()) {
-//       jit_op = candidate_op;
-//       break;
-//     }
-//   }
-//   TORCH_INTERNAL_ASSERT(jit_op);
-//
-//   auto offset = jit_op->getOperation()(*stack);
-//   TORCH_INTERNAL_ASSERT(offset == 0);
-// }
-
-void autocast_fallback(const c10::OperatorHandle& op, c10::Stack* stack) {
-// void autocast_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cout << "autocast_fallback" << std::endl;
-
-  c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::AutocastTensorId);
-  // Temporary workaround.
-  // TODO:  Replace callBoxedWorkaround with op.callBoxed(stack) once callBoxed is possible for all ops.
-  // callBoxedWorkaround(op, stack);
-  // Alternative:  Have the fallback go straight for the forward-compatible call, and if anything breaks,
-  // manually register something for it.
-  op.callBoxed(stack);
-}
-// TODO:  Once fallthrough is implemented (https://github.com/pytorch/pytorch/issues/29548),
-// autocast_fallback can be deleted entirely.
-
 #ifndef USE_STATIC_DISPATCH
 namespace {
 /*****************************************************************************************************************
@@ -390,9 +351,9 @@ recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
 I think Option 2 is the right answer for all ops, not just convolutions.  Option 2 is what I implement here.
 *****************************************************************************************************************/
 
-auto register_fallback = c10::Dispatcher::singleton()
+auto register_fallthrough = c10::Dispatcher::singleton()
   .registerBackendFallbackKernel(DispatchKey::AutocastTensorId,
-                                 KernelFunction::makeFromBoxedFunction<&autocast_fallback>());
+                                 KernelFunction::makeFallthrough());
 
 // TODO:  Codegen the stuff below?  Ed said
 // > you are going to have to write the function definition at some point, I wouldn't try to get clever about it
