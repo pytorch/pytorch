@@ -5037,6 +5037,7 @@ def foo(x):
                 return torch.ops._TorchScriptTesting.take_an_instance(self.f)
 
         traced = torch.jit.trace(TryTracing(), ())
+        self.assertEqual(torch.zeros(4, 4), traced())
 
     def test_jitter_bug(self):
         @torch.jit.script
