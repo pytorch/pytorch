@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
-#include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
@@ -252,7 +252,7 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.scalar_type());
+    return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
   void for_each(loop_t loop);
@@ -301,6 +301,16 @@ struct CAFFE2_API TensorIterator {
 
   bool needs_dynamic_casting() const {
     return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
+  }
+
+  bool has_contiguous_first_dim() const {
+    int num_tensors = ntensors();
+    for (int i = 0; i < num_tensors; i++) {
+      if (strides(i)[0] != element_size(i)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {

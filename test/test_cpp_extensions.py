@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 import glob
 
-import common_utils as common
+import torch.testing._internal.common_utils as common
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -21,7 +21,7 @@ try:
 except ImportError:
     warnings.warn(
         "test_cpp_extensions.py cannot be invoked directly. Run "
-        "`python run_test.py -i cpp_extensions` instead."
+        "`python run_test.py -i test_cpp_extensions` instead."
     )
 
 
@@ -841,6 +841,41 @@ class TestCppExtension(common.TestCase):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 0)
 
+    def test_autograd_from_cpp(self):
+        source = '''
+        void run_back(at::Tensor x) {
+            x.backward({});
+        }
+
+        void run_back_no_gil(at::Tensor x) {
+            pybind11::gil_scoped_release no_gil;
+            x.backward({});
+        }
+        '''
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        test_backward_deadlock = torch.utils.cpp_extension.load_inline(name='test_backward_deadlock',
+                                                                       cpp_sources=[source],
+                                                                       functions=['run_back', 'run_back_no_gil'],)
+
+        # This used to deadlock
+        inp = torch.rand(20, requires_grad=True)
+        loss = MyFn.apply(inp).sum()
+        with self.assertRaisesRegex(RuntimeError, "The autograd engine was called while holding the GIL."):
+            test_backward_deadlock.run_back(loss)
+
+        inp = torch.rand(20, requires_grad=True)
+        loss = MyFn.apply(inp).sum()
+        test_backward_deadlock.run_back_no_gil(loss)
+
 
 class TestMSNPUTensor(common.TestCase):
     @classmethod
@@ -882,13 +917,13 @@ class TestMSNPUTensor(common.TestCase):
         weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
         bias = torch.empty(6, device='msnpu')
 
-        # Make sure forward is overriden
+        # Make sure forward is overridden
         out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(msnpu_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])
 
-        # Make sure backward is overriden
+        # Make sure backward is overridden
         # Double backward is dispatched to _convolution_double_backward.
         # It is not tested here as it involves more computation/overrides.
         grad = torch.autograd.grad(out, input, out, create_graph=True)

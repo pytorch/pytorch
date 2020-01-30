@@ -110,7 +110,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
+  // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
   stride[tensor.dim() - 1] = 1;
@@ -289,13 +289,9 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
              dstSliceSize, srcSliceSize);
 
   if (mismatch) {
-    static bool warningShown = false;
-    if (!warningShown) {
-      warningShown = true;
-      fprintf(stderr,
-              "Warning: source/destination slices have same size but different "
-              "shape for an index operation.  This behavior is deprecated.\n");
-    }
+    TORCH_WARN_ONCE(
+        "Warning: source/destination slices have same size but different "
+        "shape for an index operation.  This behavior is deprecated.\n");
   }
 
   return dstSliceSize;
@@ -464,7 +460,7 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
     return self;
   }
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  int indContig = index.is_contiguous();
+  bool indContig = index.is_contiguous();
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 

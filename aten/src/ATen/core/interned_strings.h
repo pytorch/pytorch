@@ -206,6 +206,7 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, Sqrt)                      \
   _(onnx, SplitToSequence)           \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \

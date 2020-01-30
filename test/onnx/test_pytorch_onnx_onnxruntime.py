@@ -20,6 +20,7 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
 import torchvision
+import onnx
 
 
 def ort_test_with_input(ort_sess, input, output, rtol, atol):
@@ -83,7 +84,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
-        # if addiional test inputs are provided run the onnx
+        # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
             for test_input in test_with_inputs:
@@ -705,6 +706,11 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=['output_1', 'output_2', 'output_3'],
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
+        self.run_test(torch.jit.script(ArangeModel()), x,
+                      test_with_inputs=[y], input_names=['input_1'],
+                      output_names=['output_1', 'output_2', 'output_3'],
+                      dynamic_axes={'input_1': [0],
+                                    'output_1': [0]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange(self):
@@ -1026,6 +1032,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
+        return  # TEMPORARILY DISABLED Until ONNX Export of List[Float] constants fixe
+
 
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
@@ -2038,30 +2046,26 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_sort(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=True)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=True))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
-            def __init__(self, dim):
-                super(SortModel, self).__init__()
-                self.dim = dim
-
             def forward(self, x):
-                return torch.sort(x, dim=self.dim, descending=False)
+                out = []
+                for i in range(-2, 2):
+                    out.append(torch.sort(x, dim=i, descending=False))
+                return out
 
-        dim = 1
         x = torch.randn(3, 4)
-        self.run_test(SortModel(dim), x)
+        self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
@@ -2457,6 +2461,25 @@ class TestONNXRuntime(unittest.TestCase):
                 return out
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
+
+    def test_onnx_proto_checker(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                return 2 * x
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(Model(), x, f)
+        model = onnx.load(f)
+        model.ir_version = 0
+
+        def check_proto():
+            torch._C._check_onnx_proto(model.SerializeToString())
+        self.assertRaises(RuntimeError, check_proto)
+
+
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

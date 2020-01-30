@@ -59,7 +59,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDATensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -211,7 +211,7 @@ inline int64_t resolve_root_int(
 //                       (row + 2f - 1)row <= 2x
 //                  row^2 + (2f-1)row - 2x <= 0.                            [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = 2f - 1
@@ -254,7 +254,7 @@ inline void get_coordinate_in_tril_trapezoid(
 //                       (-row + 2f + 1)row <= 2x
 //                   row^2 - (2f+1)row + 2x >= 0.                           [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = -1 - 2f
