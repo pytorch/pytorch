@@ -21,7 +21,6 @@
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
-#include "caffe2/opt/custom/fakefp16_transform.h"
 #include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
 #include "caffe2/opt/onnxifi_transformer.h"
@@ -1706,9 +1705,6 @@ void addGlobalMethods(py::module& m) {
     std::string out;
     new_proto.SerializeToString(&out);
     return py::bytes(out);
-  });
-  m.def("get_fakefp16_mapping", [](bool use_fp16_acc, bool use_nnpi) {
-    return caffe2::opt::getFakeFp16OpMapping(use_fp16_acc, use_nnpi);
   });
   m.def(
       "onnxifi",
