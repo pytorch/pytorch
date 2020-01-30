@@ -2431,9 +2431,6 @@ struct to_ir {
 
         if (expr->type()->kind() == TypeKind::NoneType &&
             type->kind() == TypeKind::TensorType) {
-          // This check is only here to preserve backwards compatibility. We
-          // previously allowed torch.jit.annotate(Tensor, None) and need to be
-          // able to load it back in.
           type = OptionalType::create(type);
         }
 
