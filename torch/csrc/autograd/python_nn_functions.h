@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include <Python.h>
 #include <pybind11/pybind11.h>
 
