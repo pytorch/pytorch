@@ -119,6 +119,10 @@ void PythonRpcHandler::handleException(const py::object& obj) {
   pyHandleException_(obj);
 }
 
+void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
+  pyHandleException_(obj);
+}
+
 TypePtr PythonRpcHandler::parseTypeFromStr(const std::string& type_str) {
   return typeParser_->parseType(type_str);
 }
