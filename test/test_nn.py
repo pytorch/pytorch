@@ -8211,7 +8211,7 @@ class TestNNInit(TestCase):
                 self.assertEqual(input_tensor[:, :, 1:-1], 
                                  output_tensor[:, eff_out_c*g:eff_out_c*g+in_c, :])  
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c*g+in_c:eff_out_c*(g+1), :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0  
 
             # Test 2D
             input_var = torch.randn(batch, in_c, size, size)
@@ -8223,9 +8223,9 @@ class TestNNInit(TestCase):
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
                 self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], 
-                                 output_tensor[:, eff_out_c*g:eff_out_c*g+in_c, :, :])  
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :])  
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c*g+in_c:eff_out_c*(g+1), :, :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :]).numel() == 0  
 
             # Test 3D
             input_var = torch.randn(batch, in_c, size, size, size)
@@ -8237,9 +8237,9 @@ class TestNNInit(TestCase):
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
                 self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], 
-                                 output_tensor[:, eff_out_c*g:eff_out_c*g+in_c, :, :, :])  
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :, :])  
                 # Assert extra outputs are 0
-                assert torch.nonzero(output_tensor[:, eff_out_c*g+in_c:eff_out_c*(g+1), :, :, :]).numel() == 0  
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :, :]).numel() == 0  
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for dims in [1, 2, 6]:

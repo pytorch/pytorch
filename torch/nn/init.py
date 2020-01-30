@@ -190,24 +190,24 @@ def dirac_(tensor, groups=1):
     sizes = tensor.size()
 
     if sizes[0] % groups != 0:
-        raise ValueError('out_channels must be divisible by groups')
+        raise ValueError('dim 0 must be divisible by groups')
 
-    if sizes[1] % groups != 0:
-        raise ValueError('in_channels must be divisible by groups')
-
-    min_dim = min(sizes[0], sizes[1])
+    out_chans_per_grp = sizes[0] // groups
+    min_dim = min(out_chans_per_grp, sizes[1])
 
     with torch.no_grad():
         tensor.zero_()
 
         for g in range(groups):
-            for d in range(min_dim // groups):
+            for d in range(min_dim):
                 if dimensions == 3:  # Temporal convolution
-                    tensor[g + d, d, tensor.size(2) // 2] = 1
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2] = 1
                 elif dimensions == 4:  # Spatial convolution
-                    tensor[g + d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2,
+                           tensor.size(3) // 2] = 1
                 else:  # Volumetric convolution
-                    tensor[g + d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+                    tensor[g * out_chans_per_grp + d, d, tensor.size(2) // 2,
+                           tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
