@@ -213,6 +213,8 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
     auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
     auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
@@ -292,6 +294,8 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
+    // Note that it is important for the gradient calculation that borders
+    // are considered out of bounds.
     auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) != cast<int_t>(Vec(0)));
     auto res = minimum(bounded_lo, Vec(max_val));
     auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) != cast<int_t>(Vec(max_val)));
