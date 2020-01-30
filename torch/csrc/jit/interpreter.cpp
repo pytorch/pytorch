@@ -761,7 +761,7 @@ struct CodeImpl {
   }
   void emitInterfaceCall(
       std::string method_name_str,
-      at::ArrayRef<Value*> inputs) {
+      c10::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     auto method_name = insertConstant(std::move(method_name_str));
     insertInstruction(INTERFACE_CALL, method_name, inputs.size());
@@ -960,8 +960,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        std::cout << "RUNNING ";
-        frames.back().function->dump(std::cout, af.pc);
+        // std::cout << "RUNNING ";
+        // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
