@@ -148,7 +148,6 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   TypePtr rrefType =
       PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
   rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
-
   ctx.notifyOwnerAndParentOfFork(
       rrefForkData.forkId_, rrefForkData.parent_, rref);
   return PyRRef(std::move(rref));

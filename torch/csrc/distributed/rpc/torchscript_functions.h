@@ -22,11 +22,13 @@ namespace rpc {
 c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack);
 
 std::shared_ptr<UserRRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack);
 
 } // namespace rpc

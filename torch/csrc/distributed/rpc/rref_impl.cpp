@@ -109,14 +109,14 @@ IValue UserRRef::toHere() {
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;
   if (isPyObj()) {
-    auto& rfr = static_cast<PythonRRefFetchRet&>(rpc);
+    auto& pythonRRefFetchRet = static_cast<PythonRRefFetchRet&>(rpc);
     return jit::toIValue(
         PythonRpcHandler::getInstance().deserialize(
-            SerializedPyObj::fromIValues(rfr.values())),
+            SerializedPyObj::fromIValues(pythonRRefFetchRet.values())),
         PyObjectType::get());
   } else {
-    auto& rfr = static_cast<ScriptRRefFetchRet&>(rpc);
-    return rfr.values().front();
+    auto& pythonRRefFetchRet = static_cast<ScriptRRefFetchRet&>(rpc);
+    return pythonRRefFetchRet.values().front();
   }
 }
 
