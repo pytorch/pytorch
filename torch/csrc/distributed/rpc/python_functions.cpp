@@ -68,7 +68,11 @@ void finishCreatingOwnerRRef(
       rr->rrefId() == rr->forkId(),
       "Expecting an OwnerRRef as RemoteRet but got a fork.");
   auto& ctx = RRefContext::getInstance();
-  ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+  auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+  if (deletedRRef && deletedRRef->isPyObj()) {
+    pybind11::gil_scoped_acquire ag;
+    deletedRRef.reset();
+  }
 }
 
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
