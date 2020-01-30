@@ -2429,6 +2429,14 @@ struct to_ir {
             emitExpr(apply.inputs()[1], type),
             /*allow_conversions=*/true);
 
+        if (expr->type()->kind() == TypeKind::NoneType &&
+            type->kind() == TypeKind::TensorType) {
+          // This check is only here to preserve backwards compatibility. We
+          // previously allowed torch.jit.annotate(Tensor, None) and need to be
+          // able to load it back in.
+          type = OptionalType::create(type);
+        }
+
         std::stringstream why_not;
         if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
           throw ErrorReport(apply.inputs())
