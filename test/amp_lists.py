@@ -124,6 +124,9 @@ class AmpLists(object):
             ("cdist", mat0_fp16 + mat1_fp16),
             ("prod", pointwise0_fp16),
             ("prod", pointwise0_fp16 + (0,)),
+            ("renorm", mat0_fp16 + (2, 0, 1.0)),
+            ("sum", pointwise0_fp16),
+            ("sum", mat0_fp16 + (1,)),
         ]
         # self.torch_fp32_inplace = []
         # self.torch_fp32_user_supplied_out = []
