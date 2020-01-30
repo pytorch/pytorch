@@ -269,7 +269,12 @@ If the future completes with an error, an exception is thrown.
   });
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
-    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
+    auto deletedRRefs =
+        RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
+    if (!deletedRRefs.empty()) {
+      pybind11::gil_scoped_acquire ag;
+      deletedRRefs.clear();
+    }
   });
 
   module.def("_rref_context_get_debug_info", []() {

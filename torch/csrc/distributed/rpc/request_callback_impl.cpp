@@ -212,7 +212,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
       return wrap(std::move(RRefAck()).toMessage());
     }
     case MessageType::RREF_CHILD_ACCEPT: {

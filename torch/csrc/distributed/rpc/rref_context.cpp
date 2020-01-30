@@ -28,13 +28,23 @@ RRefContext& RRefContext::getInstance() {
   return *context;
 }
 
-void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+std::vector<std::shared_ptr<RRef>> RRefContext::destroyInstance(
+    bool ignoreRRefLeak) {
   auto& ctx = RRefContext::getInstance();
   {
     std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
     ctx.destroyed_ = true;
   }
   ctx.checkRRefLeaks(ignoreRRefLeak);
+  std::vector<std::shared_ptr<RRef>> deletedRRefs;
+  for (auto& entry: ctx.owners_) {
+    auto rref = entry.second;
+    if (rref->isPyObj()) {
+      deletedRRefs.emplace_back(std::move(rref));
+    }
+  }
+  ctx.owners_.clear();
+  return deletedRRefs;
 }
 
 void RRefContext::handleException(
@@ -51,8 +61,10 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    pybind11::gil_scoped_acquire ag;
-    owners_.clear();
+    VLOG(1)
+        << "Destructing RRefContext with non-empty OwnerRRef set. "
+        << "This would likely cause Python deref error. "
+        << "Make sure destroyInstance() is invoked before destruction.";
   }
 }
 
@@ -250,7 +262,15 @@ void RRefContext::notifyOwnerAndParentOfFork(
     if (parent == agent_->getWorkerInfo().id_) {
       // Owner sending RRef to self, remove the forkId as it was added during
       // pickling
-      delForkOfOwner(rref->rrefId(), forkId);
+      auto deletedRRef = delForkOfOwner(rref->rrefId(), forkId);
+      if (deletedRRef) {
+        TORCH_INTERNAL_ASSERT(
+            deletedRRef->rrefId() == rref->rrefId(),
+            "Deleting a fork of ", rref->rrefId(), " triggered deleting the "
+            "OwnerRRef of ", deletedRRef->rrefId());
+        // NB: not necessary to reset deletedRRef as rref is another shared_ptr
+        // instance pointing to the same OwnerRRef.
+      }
     } else {
       // If the parent is the owner, this fork has already been added into the
       // forks_ map when the owner sends the message to the callee user. Hence,
@@ -363,7 +383,8 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
+std::shared_ptr<RRef> RRefContext::delForkOfOwner(
+    const RRefId& rrefId, const ForkId& forkId) {
   std::shared_ptr<RRef> deletedRRef = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -389,10 +410,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
       forks_.erase(rrefIter);
     }
   }
-  if (deletedRRef && deletedRRef->isPyObj()) {
-    pybind11::gil_scoped_acquire ag;
-    deletedRRef.reset();
-  }
+  return deletedRRef;
 }
 
 } // namespace rpc
