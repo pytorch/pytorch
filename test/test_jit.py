@@ -5970,7 +5970,7 @@ a")
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
+        with self.assertRaisesRegex(RuntimeError, r'Arguments for call are not valid\.'):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
