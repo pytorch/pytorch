@@ -3469,8 +3469,9 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
+        inp_change_err = "The {}th output of UnbindBackward is being modified inplace but this is not allowed"
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, None))
+                 should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
         leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
@@ -3800,11 +3801,10 @@ for shape in [(1,), ()]:
 
     def test_multi_view_methods(self):
         # This list should match the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
-        # It maps a function its arguments for an input of size [3,]
+        # It maps a function to its arguments for an input of size [3,]
         fn_to_test = {
             'split': (2,),
             'split_with_sizes': ((2, 1),),
-            'unbind': (0,)
         }
 
         for fn, arg in fn_to_test.items():
