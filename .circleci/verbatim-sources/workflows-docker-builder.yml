@@ -42,6 +42,9 @@
           name: "pytorch-linux-xenial-py3.5"
           image_name: "pytorch-linux-xenial-py3.5"
       - docker_build_job:
+          name: "pytorch-linux-xenial-py3.8"
+          image_name: "pytorch-linux-xenial-py3.8"
+      - docker_build_job:
           name: "pytorch-linux-xenial-py3.6-clang7"
           image_name: "pytorch-linux-xenial-py3.6-clang7"
       - docker_build_job:

@@ -153,6 +153,28 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   }
 
+  py::bool_ isClass =
+      py::module::import("inspect").attr("isclass")(input.get_type());
+  if (py::cast<bool>(isClass)) {
+    py::str qualifiedName = py::module::import("torch.jit")
+                                .attr("_qualified_name")(input.get_type());
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(qualifiedName);
+    if (!pyClass.is_none()) {
+      auto cu = get_python_cu();
+      const auto classname =
+          c10::QualifiedName(py::cast<std::string>(qualifiedName));
+      auto class_type = cu->get_class(classname);
+      TORCH_INTERNAL_ASSERT(class_type);
+      return InferredType(class_type);
+    }
+  }
+
+  if (py::isinstance<script::Object>(input)) {
+    auto object = py::cast<script::Object>(input);
+    return InferredType(object.type());
+  }
+
   // Try container types
   return tryToInferContainerType(input);
 }
@@ -693,6 +715,13 @@ inline py::object toPyObject(IValue ivalue) {
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    if (pyClass.is_none()) {
+      std::stringstream err;
+      err << "Unknown reference to ScriptClass ";
+      err << obj->name();
+      err << ". Did you forget to import it?)";
+      throw std::runtime_error(err.str());
+    }
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
