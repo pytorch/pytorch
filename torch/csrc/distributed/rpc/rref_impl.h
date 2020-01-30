@@ -18,7 +18,7 @@ class RRefContext;
 class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
-struct RRefForkData {
+struct TORCH_API RRefForkData {
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
@@ -175,7 +175,7 @@ struct RRefForkData {
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef : public RRefInterface {
+class TORCH_API RRef : public RRefInterface {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
@@ -221,7 +221,7 @@ class RRef : public RRefInterface {
 // also has a globally unique ``ForkId`` to identify this user. ``UserRRef``
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
-class UserRRef final : public RRef {
+class TORCH_API UserRRef final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
@@ -256,7 +256,7 @@ class UserRRef final : public RRef {
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
-class OwnerRRef final : public RRef {
+class TORCH_API OwnerRRef final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;

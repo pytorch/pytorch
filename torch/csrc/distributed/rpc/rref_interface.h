@@ -8,7 +8,7 @@ namespace rpc {
 
 // This abstract class contains only user-facing APIs, and will be shared
 // between jit and distributed to implement TorchScript support.
-class RRefInterface {
+class TORCH_API RRefInterface {
  public:
   RRefInterface() = default;
   // RRef is made NOT copyable NOT movable to prevent messing up reference

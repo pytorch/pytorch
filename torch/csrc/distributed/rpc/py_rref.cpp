@@ -12,8 +12,6 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
-
-namespace {
 constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
 constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
 constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
@@ -24,7 +22,6 @@ constexpr int TYPE_IDX = 6; // index of parent in the tuple
 
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-} // namespace
 
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
