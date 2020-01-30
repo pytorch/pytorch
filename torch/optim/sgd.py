@@ -33,8 +33,8 @@ class SGD(Optimizer):
 
         .. math::
             \begin{aligned}
-            v_{t+1} & = \mu * v_{t} + g_{t+1} \\
-            p_{t+1} & = p_{t} - lr * v_{t+1}
+                v_{t+1} & = \mu * v_{t} + g_{t+1} \\
+                p_{t+1} & = p_{t} - lr * v_{t+1}
             \end{aligned}
 
         where p, g, v and :math:`\mu` denote the parameters, gradient,
@@ -45,8 +45,8 @@ class SGD(Optimizer):
 
         .. math::
             \begin{aligned}
-            v_{t+1} & = \mu * v_{t} + lr * g_{t+1} \\
-            p_{t+1} & = p_{t} - v_{t+1}
+                v_{t+1} & = \mu * v_{t} + lr * g_{t+1} \\
+                p_{t+1} & = p_{t} - v_{t+1}
             \end{aligned}
 
         The Nesterov version is analogously modified.
