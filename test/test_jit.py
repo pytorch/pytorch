@@ -1118,6 +1118,16 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.relu(self.conv(x))
 
+        class FM(torch.nn.Module):
+            def __init__(self):
+                super(FM, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                out = x
+                out += x
+                return self.relu(out)
+
         def attrs_with_prefix(module, prefix):
             return [x for x, _ in module._modules._c.items()
                     if x.startswith(prefix)]
@@ -1142,8 +1152,21 @@ graph(%x : Tensor,
             else:
                 assert len(attrs_with_prefix(m.relu, '_observer')) == 1
             c.run(str(get_forward_graph(m._c)))
-        test_module(M, 'prim::CallFunction(', 1, True)
+
+        def test_function_module(module):
+            m = torch.jit.script(module())
+            qconfig_dict = {'': script_qconfig(default_qconfig)}
+            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            assert len(attrs_with_prefix(m.relu, '_observer')) == 1, \
+                'ReLU module is Expected to have 1 observer'
+            FileCheck().check('aten::add_') \
+                       .check_not('Observer = prim::GetAttr[name="_observer_') \
+                       .check('ReLU = prim::GetAttr') \
+                       .run(str(get_forward_graph(m._c)))
+
+        test_module(M, 'prim::CallFunction', 1, True)
         test_module(M2, 'prim::CallMethod[name="forward"]', 0, False)
+        test_function_module(FM)
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_weight_dtype(self):

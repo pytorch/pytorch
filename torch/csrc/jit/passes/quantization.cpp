@@ -449,6 +449,13 @@ graph(%self, %input, %inplace):
     %first_output = prim::CallMethod[name="forward"](%first_module, %input)
     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
     return (%second_output) )");
+  // 2. Function - Module
+  const PatternInfo fm_add_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %ignore):
+     %first_output = aten::add_(%a, %b, %ignore)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
   // 3. Module - Module
   const PatternInfo mm_conv_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
@@ -468,7 +475,9 @@ graph(%input, %weight, %bias, %4):
   const std::vector<std::reference_wrapper<const PatternInfo>> module_function_patterns = {
     mf_conv_functional_relu
   };
-  const std::vector<std::reference_wrapper<const PatternInfo>> function_module_patterns = {};
+  const std::vector<std::reference_wrapper<const PatternInfo>> function_module_patterns = {
+    fm_add_relu
+  };
   const std::vector<std::reference_wrapper<const PatternInfo>> module_patterns = {
     mm_conv_relu
   };
