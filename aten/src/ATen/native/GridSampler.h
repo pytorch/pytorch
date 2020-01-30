@@ -67,12 +67,12 @@ static inline scalar_t clip_coordinates(scalar_t in, int64_t clip_limit) {
 template<typename scalar_t>
 static inline scalar_t clip_coordinates_set_grad(scalar_t in, int64_t clip_limit,
                                                  scalar_t *grad_in) {
-  if (in < static_cast<scalar_t>(0)) {
+  if (in <= static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
   } else {
     scalar_t max = static_cast<scalar_t>(clip_limit - 1);
-    if (in > max) {
+    if (in >= max) {
       *grad_in = static_cast<scalar_t>(0);
       return max;
     } else {
@@ -183,6 +183,9 @@ static inline scalar_t grid_sampler_compute_source_index_set_grad(
     if (align_corners) {
       coord = reflect_coordinates_set_grad(coord, 0, 2*(size - 1), &grad_refl);
       *grad_in = (*grad_in) * grad_refl;
+      if (coord == size - 1 || coord == 0) {
+        *grad_in = static_cast<scalar_t>(0);
+      }
     } else {
       coord = reflect_coordinates_set_grad(coord, -1, 2*size - 1, &grad_refl);
       // when align_corners=False, reflection does not auto clip coords
