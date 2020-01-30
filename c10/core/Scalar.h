@@ -9,6 +9,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
+#include <c10/util/TypeCast.h>
 
 namespace c10 {
 
