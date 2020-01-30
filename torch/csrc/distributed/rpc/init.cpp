@@ -181,15 +181,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   If the current node is the owner, returns a reference to the
                   local value. Otherwise, throws an exception.
               )")
-          .def(py::pickle(
-              [](const PyRRef& self) {
-                // __getstate__
-                return self.pickle();
-              },
-              [](py::tuple t) { // NOLINT
-                // __setstate__
-                return PyRRef::unpickle(t);
-              }))
+          .def(
+              py::pickle(
+                  [](const PyRRef& self) {
+                    // __getstate__
+                    return self.pickle();
+                  },
+                  [](py::tuple t) { // NOLINT
+                    // __setstate__
+                    return PyRRef::unpickle(t);
+                  }),
+              py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
