@@ -77,6 +77,11 @@ struct Vec256<int64_t> : public Vec256i {
   }
   static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
     __at_align32__ int64_t tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value
+    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
   }
