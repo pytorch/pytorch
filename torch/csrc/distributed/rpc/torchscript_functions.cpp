@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/script_functions.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>

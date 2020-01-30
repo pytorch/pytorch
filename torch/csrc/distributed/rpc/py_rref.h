@@ -28,11 +28,6 @@ class PyRRef {
   std::shared_ptr<RRef> rref_;
 };
 
-namespace rrefforkdata {
-py::tuple toPyTuple(const RRefForkData& forkData);
-RRefForkData fromPyTuple(const py::tuple& pyTuple);
-} // namespace rrefforkdata
-
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

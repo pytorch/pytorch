@@ -8,6 +8,58 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+/////////////////////  Pickle/Unpickle Helplers ////////////////////////////
+
+namespace {
+
+namespace {
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int PARENT_IDX = 5; // index of parent in the tuple
+constexpr int TYPE_IDX = 6; // index of parent in the tuple
+
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
+} // namespace
+
+py::tuple toPyTuple(const RRefForkData& rrefForkData) {
+  // add GIL as it is contructing a py::object
+  pybind11::gil_scoped_acquire ag;
+  return py::make_tuple(
+      rrefForkData.ownerId_,
+      rrefForkData.rrefId_.createdOn_,
+      rrefForkData.rrefId_.localId_,
+      rrefForkData.forkId_.createdOn_,
+      rrefForkData.forkId_.localId_,
+      rrefForkData.parent_,
+      rrefForkData.typeStr_);
+}
+RRefForkData fromPyTuple(const py::tuple& pyTuple) {
+  // add GIL as it is accessing a py::object
+  pybind11::gil_scoped_acquire ag;
+  TORCH_INTERNAL_ASSERT(
+      pyTuple.size() == RFD_TUPLE_SIZE,
+      "Pickled RRefForkData must contain 6 numbers.");
+  worker_id_t ownerId = pyTuple[OWNER_IDX].cast<worker_id_t>();
+  // const reference will extend the lifetime of the temporary variable
+  const RRefId& rrefId = RRefId(
+      pyTuple[RREFID_ON_IDX].cast<worker_id_t>(),
+      pyTuple[RREFID_ID_IDX].cast<local_id_t>());
+  const RRefId& forkId = RRefId(
+      pyTuple[FORKID_ON_IDX].cast<worker_id_t>(),
+      pyTuple[FORKID_ID_IDX].cast<local_id_t>());
+
+  worker_id_t parent = pyTuple[PARENT_IDX].cast<worker_id_t>();
+  const std::string& typeStr = pyTuple[TYPE_IDX].cast<std::string>();
+
+  return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
+}
+} // namespace
+
 ///////////////////////////  PyRRef  //////////////////////////////////
 
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
@@ -56,18 +108,19 @@ py::object PyRRef::localValue() {
 
   py::object res;
   auto value = std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
+  auto& rpcHandler = PythonRpcHandler::getInstance();
   {
     // acquiring GIL as torch::jit::toPyObject creates new py::object without
     // grabbing the GIL.
     pybind11::gil_scoped_acquire ag;
     res = torch::jit::toPyObject(std::move(value));
+    rpcHandler.handleExceptionGILHeld(res);
   }
-  PythonRpcHandler::getInstance().handleException(res);
   return res;
 }
 
 std::string PyRRef::str() const {
-  std::stringstream ss;
+  std::ostringstream ss;
   if (rref_->isOwner()) {
     ss << "OwnerRRef(" << rref_->rrefId() << ")";
   } else {
@@ -85,12 +138,12 @@ py::tuple PyRRef::pickle() const {
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
   auto rrefForkData = ctx.prepareChildFork(rref_);
-  return rrefforkdata::toPyTuple(rrefForkData);
+  return toPyTuple(rrefForkData);
 }
 
 PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   auto& ctx = RRefContext::getInstance();
-  auto rrefForkData = rrefforkdata::fromPyTuple(pyTuple);
+  auto rrefForkData = fromPyTuple(pyTuple);
   std::shared_ptr<RRef> rref = nullptr;
   TypePtr rrefType =
       PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
@@ -100,55 +153,6 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
       rrefForkData.forkId_, rrefForkData.parent_, rref);
   return PyRRef(std::move(rref));
 }
-
-namespace rrefforkdata {
-
-namespace {
-constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
-constexpr int PARENT_IDX = 5; // index of parent in the tuple
-constexpr int TYPE_IDX = 6; // index of parent in the tuple
-
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-} // namespace
-
-py::tuple toPyTuple(const RRefForkData& forkData) {
-  // add GIL as it is contructing a py::object
-  pybind11::gil_scoped_acquire ag;
-  return py::make_tuple(
-      forkData.ownerId_,
-      forkData.rrefId_.createdOn_,
-      forkData.rrefId_.localId_,
-      forkData.forkId_.createdOn_,
-      forkData.forkId_.localId_,
-      forkData.parent_,
-      forkData.typeStr_);
-}
-RRefForkData fromPyTuple(const py::tuple& pyTuple) {
-  // add GIL as it is accessing a py::object
-  pybind11::gil_scoped_acquire ag;
-  TORCH_INTERNAL_ASSERT(
-      pyTuple.size() == RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain 6 numbers.");
-  worker_id_t ownerId = pyTuple[OWNER_IDX].cast<worker_id_t>();
-  // const reference will extend the lifetime of the temporary variable
-  const RRefId& rrefId = RRefId(
-      pyTuple[RREFID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[RREFID_ID_IDX].cast<local_id_t>());
-  const RRefId& forkId = RRefId(
-      pyTuple[FORKID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[FORKID_ID_IDX].cast<local_id_t>());
-
-  worker_id_t parent = pyTuple[PARENT_IDX].cast<worker_id_t>();
-  const std::string& typeStr = pyTuple[TYPE_IDX].cast<std::string>();
-
-  return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
-}
-} // namespace rrefforkdata
 
 } // namespace rpc
 } // namespace distributed
