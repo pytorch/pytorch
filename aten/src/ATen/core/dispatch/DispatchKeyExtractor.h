@@ -52,6 +52,11 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
+    void operator()(at::Generator* gen) {
+      if (gen != nullptr) {
+        ts = ts | gen->key_set();
+      }
+    }
     template <typename T>
     void operator()(const T& x) {
       // do nothing

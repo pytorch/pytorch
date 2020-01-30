@@ -11,7 +11,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-import torch.testing._internal.dist_utils as dist_utils
+import torch.testing._internal.dist_utils
 from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
@@ -31,7 +31,9 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
+            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+            == "PROCESS_GROUP",
+            message,
         )(old_func)
 
     return decorator
@@ -243,11 +245,6 @@ def set_global_rref(rref):
 def clear_global_rref():
     global global_rref
     global_rref = None
-
-
-@torch.jit.script
-def one_arg(value):
-    return value + 1
 
 
 @torch.jit.script
@@ -575,7 +572,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
-        self._run_uneven_workload(num_repeat=100)
+        self._run_uneven_workload()
 
     @dist_init(setup_rpc=False)
     def test_shutdown_followed_by_rpc(self):
@@ -830,24 +827,19 @@ class RpcTest(RpcAgentTestFixture):
             fut.wait()
 
     @dist_init
-    def test_script_function(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-        rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-    @dist_init
     def test_script_function_exception(self):
-        dst_rank = (self.rank + 1) % self.world_size
-
-        with self.assertRaisesRegex(Exception, "one_arg"):
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), one_arg, args=(10, 20))
+        @torch.jit.script
+        def no_args():
+            a = 1
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(Exception, "no_args"):
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
 
         with self.assertRaisesRegex(
-            Exception, r"one_arg\(\) expected at most 1 argument\(s\)"
+            Exception, r"no_args\(\) expected at most 0 argument"
         ):
-            rref = rpc.remote("worker{}".format(dst_rank), one_arg, args=(10, 20))
+            rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
 
     @dist_init
     def test_script_functions_not_supported(self):
@@ -1538,7 +1530,9 @@ class RpcTest(RpcAgentTestFixture):
         # exception instead of just crashing.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=self.rpc_backend,
+            backend=rpc.backend_registry.BackendType[
+                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1650,7 +1644,10 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
+        if (
+            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+            == "PROCESS_GROUP"
+        ):
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
