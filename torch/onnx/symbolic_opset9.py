@@ -2202,3 +2202,6 @@ def dim(g, self):
     # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
     shape = g.op('Shape', self)
     return g.op('Size', shape)
+
+def __getitem_(g, self, i):
+    return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
