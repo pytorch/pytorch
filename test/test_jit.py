@@ -1098,7 +1098,6 @@ graph(%x : Tensor,
         # check forward of sub.linear is observed
         check_observed(get_forward(m._c.getattr('sub').getattr('linear')).graph)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_skip_values(self):
         import torch.nn.functional as F
 
@@ -1119,35 +1118,30 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        def test_module(module, relu_call, num_observers):
+        def attrs_with_prefix(module, prefix):
+            return [x for x, _ in module._modules._c.items()
+                    if x.startswith(prefix)]
+
+        def test_module(module, relu_call, num_observers, is_call_function):
             m = torch.jit.script(module())
-            # TODO: this is because right-now the InsertObservers is in-place.
-            # When we change the implementation to clone the module before
-            # inserting observers, we can remove this copy
-            m = m.copy()
-            observer = torch.jit.script(default_observer())
             qconfig_dict = {
-                '':
-                QConfig(
-                    activation=observer._c,
-                    weight=observer._c)
+                '': script_qconfig(default_qconfig)
             }
-            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-            assert len([x for x, _ in m._modules._c.items()
-                        if x.startswith('_observer_')]) == num_observers, \
+            m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+            assert len(attrs_with_prefix(m, '_observer_')) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
             c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
                            .check_next('prim::CallMethod[name="forward"]') \
                            .check_not('Observer = prim::GetAttr[name="_observer_') \
                            .check(relu_call)
-            if num_observers == 1:
+            if is_call_function:
                 c = c.check('Observer = prim::GetAttr[name="_observer_') \
                      .check_next('prim::CallMethod[name="forward"](%_observer_')
             c.run(str(get_forward_graph(m._c)))
             # TODO: add checks for conv and relu later, graph looks correct but this pr
             # has too many changes already
-        test_module(M, 'prim::CallFunction(', 1)
-        test_module(M2, 'prim::CallMethod[name="forward"]', 0)
+        test_module(M, 'prim::CallFunction(', 1, True)
+        test_module(M2, 'prim::CallMethod[name="forward"]', 0, False)
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_observers_weight_dtype(self):
