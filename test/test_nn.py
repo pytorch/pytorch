@@ -48,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionT
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, expectedFailureXLA
+    skipCUDAIfRocm, skipCUDAIf
 
 from torch.nn import MultiheadAttention
 
@@ -918,7 +918,7 @@ class TestNN(NNTestCase):
         w = torch.randn(6, 1, 5, 5)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r'Expected 4-dimensional input for 4-dimensional weight 6 1 5 5,' +
+                                    r'Expected 4-dimensional input for 4-dimensional weight \[6, 1, 5, 5\],' +
                                     r' but got 5-dimensional input of size \[1, 10, 1, 28, 28\] instead'):
 
             F.conv2d(x, w)
@@ -5713,12 +5713,20 @@ class TestNN(NNTestCase):
         num_layers = 2
         seq_length = 7
         batch = 6
-        m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
-        input = torch.randn(seq_length, batch, input_size).cuda()
+
+        # runs on CPU to acquire expected output
+        m = nn.LSTM(input_size, hidden_size, num_layers)
+        input = torch.randn(seq_length, batch, input_size)
         expected_output = m(input)
-        # add weight normalization
+
+        # adds weight normalization
         name = 'weight_hh_l0'
         m = torch.nn.utils.weight_norm(m, name=name)
+
+        # moves to CUDA
+        m = m.cuda()
+        input = input.cuda()
+
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
         self.assertEqual(m(input), expected_output)
@@ -5726,6 +5734,20 @@ class TestNN(NNTestCase):
         # remove weight norm
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_partial_flat_weights(self):
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+
+        # creates an RNN (LSTM) and deletes an attribute
+        m = nn.LSTM(input_size, hidden_size, num_layers)
+        del m.weight_hh_l0
+
+        # verifies that moving to CUDA with only some attributes defined
+        # does not throw an error
+        m.cuda()
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
@@ -6008,6 +6030,52 @@ class TestNN(NNTestCase):
         weight = torch.rand(1, dtype=torch.float)
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
+    def test_bce_loss_input_range(self):
+        bceloss = nn.BCELoss()
+
+        target = torch.rand(25, 25)
+        output_valid = torch.rand(25, 25)
+        output_too_negative = output_valid - 1.0
+        output_too_positive = output_valid + 1.0
+
+        loss_valid = bceloss(output_valid, target)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            loss_too_negative = bceloss(output_too_negative, target)
+        with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+            loss_too_positive = bceloss(output_too_positive, target)
+
+    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
+        x_size = 1024
+        y_size = 256
+        target = torch.rand(x_size, y_size)
+
+        for reduction in ['none', 'mean', 'sum']:
+            output_sig = torch.rand(x_size, y_size) - 0.5
+            output_logits = output_sig.clone().detach()
+
+            output_sig.requires_grad = True
+            output_logits.requires_grad = True
+            weight = torch.rand(y_size)
+
+            loss_sig = nn.BCELoss(weight, reduction=reduction)(
+                torch.sigmoid(output_sig), target
+            )
+            loss_logits = nn.BCEWithLogitsLoss(weight, reduction=reduction)(
+                output_logits, target
+            )
+
+            self.assertEqual(loss_logits, loss_sig)
+
+            if reduction == 'none':
+                grad = torch.rand(x_size, y_size)
+                loss_sig.backward(grad)
+                loss_logits.backward(grad)
+            else:
+                loss_sig.backward()
+                loss_logits.backward()
+
+            self.assertEqual(output_sig.grad, output_logits.grad)
+
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = torch.zeros(3, 1, requires_grad=True)
         target = torch.zeros(3, 1)
@@ -6197,6 +6265,11 @@ class TestNN(NNTestCase):
         bn = nn.BatchNorm1d(1).to('cuda', dtype)
         data = torch.rand(131072, 1, device="cuda", dtype=dtype)
         out = bn(data).sum().backward()
+
+    def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.BatchNorm1d(10)(x)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = torch.rand(2, 10)
@@ -8932,12 +9005,13 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
-    def _test_module_empty_input(self, module, inp):
+    def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
         out = module(inp)
         gO = torch.rand_like(out)
         out.backward(gO)
-        self.assertEqual(out.size(), inp.size())
+        if check_size:
+            self.assertEqual(out.size(), inp.size())
         for p in module.parameters():
             # TODO: p.grad should not be None, but this is not yet supported
             # (https://github.com/pytorch/pytorch/issues/12013)
@@ -9002,6 +9076,11 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.InstanceNorm1d(10)(x).to(device)
+
     def test_LayerNorm_general(self, device):
         self._test_LayerNorm_general(device)
 
@@ -9013,6 +9092,11 @@ class TestNNDeviceType(NNTestCase):
 
         if self.device_type == 'cuda':
             self._test_GroupNorm_cuda_half()
+
+    def test_groupnorm_raises_error_if_less_than_one_value_per_channel(self, device):
+        x = torch.rand(10)[None, :, None]
+        with self.assertRaises(ValueError):
+            torch.nn.GroupNorm(10, 10)(x).to(device)
 
     def test_GroupNorm_empty(self, device):
         mod = torch.nn.GroupNorm(2, 4).to(device)
@@ -9029,6 +9113,22 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    def test_group_conv_empty(self, device):
+        mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
+        inp = torch.randn(0, 4, 4, 4, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp, check_size=False)
+
+    def test_ConvTranspose_empty(self, device):
+        mod = torch.nn.ConvTranspose2d(4, 4, stride=2, kernel_size=3, padding=1).to(device)
+        inp = torch.randn(0, 4, 4, 4, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_module_empty_input(mod, inp, check_size=False)
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
@@ -10632,7 +10732,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
-    @expectedFailureXLA  # https://github.com/pytorch/xla/issues/1539
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([0, 3], "mean", nan, device)

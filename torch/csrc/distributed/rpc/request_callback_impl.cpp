@@ -183,8 +183,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
       std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-            jit::toPyObject(rref->getValue()));
+        auto value = rref->getValue();
+        py::object pyValue;
+        {
+          pybind11::gil_scoped_acquire ag;
+          pyValue = torch::jit::toPyObject(std::move(value));
+        }
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(pyValue);
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
       }
 
@@ -197,9 +203,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
             if (!error) {
+              auto value = rref->getValue();
+              py::object pyValue;
+              {
+                pybind11::gil_scoped_acquire ag;
+                pyValue = torch::jit::toPyObject(std::move(value));
+              }
               SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(
-                      jit::toPyObject(rref->getValue()));
+                  PythonRpcHandler::getInstance().serialize(pyValue);
               Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
@@ -212,7 +223,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
       return wrap(std::move(RRefAck()).toMessage());
     }
     case MessageType::RREF_CHILD_ACCEPT: {
@@ -248,14 +263,33 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-      auto wrappedRpcResponse = processRpc(
+      // Kick off processing for the nested future and get a Future<T> to the
+      // result.
+      auto wrappedRpcResponseFuture = processRpc(
           rpcWithAutograd.wrappedRpc(), wrappedMessageType, messageId);
-      wrappedRpcResponse->waitNoThrow(); // TODO: make async
 
-      return wrap(getMessageWithAutograd(
-          rpcWithAutograd.fromWorkerId(),
-          std::move(*wrappedRpcResponse).moveValue(),
-          MessageType::FORWARD_AUTOGRAD_RESP));
+      // Make an overall future for the wrapped response.
+      auto responseFuture = std::make_shared<rpc::FutureMessage>();
+      auto fromWorkerId = rpcWithAutograd.fromWorkerId();
+      // The original future needs to be marked as completed when the wrapped
+      // one completes, with the autograd context information wrapped.
+      wrappedRpcResponseFuture->addCallback(
+          [responseFuture, messageId, fromWorkerId, wrappedRpcResponseFuture](
+              const Message& /* unused */,
+              const c10::optional<utils::FutureError>& error) {
+            if (error) {
+              // Propagate error to responseFuture if we had one.
+              responseFuture->setError(error->what());
+            } else {
+              auto msg = getMessageWithAutograd(
+                  fromWorkerId,
+                  std::move(*wrappedRpcResponseFuture).moveValue(),
+                  MessageType::FORWARD_AUTOGRAD_RESP);
+              msg.setId(messageId);
+              responseFuture->markCompleted(std::move(msg));
+            }
+          });
+      return responseFuture;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
