@@ -6,7 +6,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/script_functions.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -181,15 +181,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
                   If the current node is the owner, returns a reference to the
                   local value. Otherwise, throws an exception.
               )")
-          .def(py::pickle(
-              [](const PyRRef& self) {
-                // __getstate__
-                return self.pickle();
-              },
-              [](py::tuple t) { // NOLINT
-                // __setstate__
-                return PyRRef::unpickle(t);
-              }))
+          .def(
+              py::pickle(
+                  [](const PyRRef& self) {
+                    // __getstate__
+                    return self.pickle();
+                  },
+                  [](py::tuple t) { // NOLINT
+                    // __setstate__
+                    return PyRRef::unpickle(t);
+                  }),
+              py::call_guard<py::gil_scoped_release>())
           // not releasing GIL to avoid context switch
           .def("__str__", &PyRRef::str);
 
@@ -269,7 +271,11 @@ If the future completes with an error, an exception is thrown.
   });
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
-    RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
+    // NB: do not release GIL in the function. The destroyInstance() method
+    // returns a list of deleted OwnerRRefs that hold py::object instances.
+    // Clearing those OwnerRRefs are likely to trigger Python deref, which
+    // requires GIL.
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak).clear();
   });
 
   module.def("_rref_context_get_debug_info", []() {
@@ -334,8 +340,8 @@ If the future completes with an error, an exception is thrown.
           py::call_guard<py::gil_scoped_release>());
 
   module.def(
-      "_invoke_rpc_script",
-      [](const std::string& dst,
+      "_invoke_rpc_torchscript",
+      [](const std::string& dstWorkerName,
          const std::string& qualifiedName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -350,7 +356,7 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto fut = rpcTorchscript(dst, name, stack);
+        auto fut = rpcTorchscript(dstWorkerName, name, stack);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -367,7 +373,7 @@ If the future completes with an error, an exception is thrown.
 
   module.def(
       "_invoke_remote_torchscript",
-      [](const WorkerInfo& dst,
+      [](const std::string& dstWorkerName,
          const std::string& qualifiedName,
          const py::args& args,
          const py::kwargs& kwargs) {
@@ -378,7 +384,7 @@ If the future completes with an error, an exception is thrown.
                             .getSchema();
         auto stack = torch::jit::createStackForSchema(
             fnSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(dst, name, stack);
+        auto userRRefPtr = remoteTorchscript(dstWorkerName, name, stack);
         return PyRRef(userRRefPtr);
       },
       py::call_guard<py::gil_scoped_release>());

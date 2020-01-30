@@ -12,6 +12,7 @@ import re
 import gc
 import types
 import inspect
+import io
 import argparse
 import unittest
 import warnings
@@ -1446,6 +1447,13 @@ def load_tests(loader, tests, pattern):
             test_suite.addTest(test)
     return test_suite
 
+
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
