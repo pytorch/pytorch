@@ -107,7 +107,8 @@ class RRefContext {
   // a GIL and reset the shared_ptr. The GIL-guarded deletion is intentionally
   // left out of this function to avoid creating dependency on pybind.
   std::shared_ptr<RRef> delForkOfOwner(
-      const RRefId& rrefId, const ForkId& forkId);
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);

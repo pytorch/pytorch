@@ -269,12 +269,11 @@ If the future completes with an error, an exception is thrown.
   });
 
   module.def("_destroy_rref_context", [](bool ignoreRRefLeak) {
-    auto deletedRRefs =
-        RRefContext::getInstance().destroyInstance(ignoreRRefLeak);
-    if (!deletedRRefs.empty()) {
-      pybind11::gil_scoped_acquire ag;
-      deletedRRefs.clear();
-    }
+    // NB: do not release GIL in the function. The destroyInstance() method
+    // returns a list of deleted OwnerRRefs that hold py::object instances.
+    // Clearing those OwnerRRefs are likely to trigger Python deref, which
+    // requires GIL.
+    RRefContext::getInstance().destroyInstance(ignoreRRefLeak).clear();
   });
 
   module.def("_rref_context_get_debug_info", []() {

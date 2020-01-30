@@ -37,7 +37,7 @@ std::vector<std::shared_ptr<RRef>> RRefContext::destroyInstance(
   }
   ctx.checkRRefLeaks(ignoreRRefLeak);
   std::vector<std::shared_ptr<RRef>> deletedRRefs;
-  for (auto& entry: ctx.owners_) {
+  for (auto& entry : ctx.owners_) {
     auto rref = entry.second;
     if (rref->isPyObj()) {
       deletedRRefs.emplace_back(std::move(rref));
@@ -61,10 +61,9 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    VLOG(1)
-        << "Destructing RRefContext with non-empty OwnerRRef set. "
-        << "This would likely cause Python deref error. "
-        << "Make sure destroyInstance() is invoked before destruction.";
+    VLOG(1) << "Destructing RRefContext with non-empty OwnerRRef set. "
+            << "This would likely cause Python deref error. "
+            << "Make sure destroyInstance() is invoked before destruction.";
   }
 }
 
@@ -266,8 +265,10 @@ void RRefContext::notifyOwnerAndParentOfFork(
       if (deletedRRef) {
         TORCH_INTERNAL_ASSERT(
             deletedRRef->rrefId() == rref->rrefId(),
-            "Deleting a fork of ", rref->rrefId(), " triggered deleting the "
-            "OwnerRRef of ", deletedRRef->rrefId());
+            "Deleting a fork of ",
+            rref->rrefId(),
+            " triggered deleting the OwnerRRef of ",
+            deletedRRef->rrefId());
         // NB: not necessary to reset deletedRRef as rref is another shared_ptr
         // instance pointing to the same OwnerRRef.
       }
@@ -384,7 +385,8 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
 }
 
 std::shared_ptr<RRef> RRefContext::delForkOfOwner(
-    const RRefId& rrefId, const ForkId& forkId) {
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   std::shared_ptr<RRef> deletedRRef = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
