@@ -42,18 +42,26 @@ namespace torch { namespace autograd {
 inline void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && GradMode::is_enabled()) {
-    if (var.is_leaf()) {
-      AT_ERROR(
-        "a leaf Variable that requires grad is being used in an in-place operation.");
-    } else if (var.is_view()) {
+    if (var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      // Unsafe because we don't want to trigger the creation of the view's custom grad_fn
       auto grad_fn = impl::grad_fn_unsafe(var);
-      // NB: !var.is_leaf() ==> grad_fn != nullptr
-      TORCH_INTERNAL_ASSERT(grad_fn);
-      TORCH_CHECK(diff_view_meta->allow_rebase_history,
-          "The ", diff_view_meta->output_nr_, "th output of ", grad_fn->name(),
-          " is being modified inplace but this is not allowed as it would prevent correct gradient computation.");
+      if (grad_fn) {
+        TORCH_CHECK(diff_view_meta->allow_rebase_history,
+            "The ", diff_view_meta->output_nr_, "th output of ", grad_fn->name(),
+            " is being modified inplace but this is not allowed as it would prevent correct gradient computation.");
+      } else {
+        TORCH_CHECK(diff_view_meta->allow_rebase_history,
+            "A view created in no_grad mode is being modified inplace but this is not allowed as the expected"
+            " behavior is unclear. You should have both the view and inplace inside the no_grad block if you"
+            " do NOT want the change to be tracked by the autograd. Or both outside the no_grad block if you"
+            " want the change to tracked.");
+
+      }
+    } else if (var.is_leaf()) {
+      AT_ERROR(
+        "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }
 }

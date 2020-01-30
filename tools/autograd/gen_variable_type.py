@@ -782,8 +782,10 @@ def emit_body(declaration):
                 if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
                 # Only allow rebasing of the history if we return a single Tensor
-                # Or if the function is marked as a pure view
-                allow_rebase_history = 'true'
+                # Or if the function is marked as a pure view.
+                # Views created in NoGrad mode a **never** allowed to be modified inplace as there is no
+                # clear interpretation of what it should be doing so we explicitly forbid it.
+                allow_rebase_history = 'GradMode::is_enabled()'
                 if return_info['dynamic_type'] == 'TensorList' and base_name not in PURE_VIEW_FUNCTIONS:
                     allow_rebase_history = 'false'
                 wrapped_call = ("as_differentiable_view(/* base */{}, /* output */ {}, "

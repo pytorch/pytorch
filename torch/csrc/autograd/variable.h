@@ -65,10 +65,7 @@ struct Node;
 /// construction, the interface of a view is identical to that of a regular
 /// `Variable`. You can determine whether `Variable` is in fact a view by
 /// probing its `is_view()` method. Note that the *view* semantics are only
-/// meaningful for `Variable` relations that are relevant to autograd. For
-/// example, if you hide your code from autograd using `.no_grad()`, the
-/// `Variable`s will not be registered as having view relations, even if they
-/// share storage.
+/// meaningful for `Variable` relations that are relevant to autograd.
 /// See NOTE [ Autograd View Variables ] for more details.
 ///
 ///
@@ -303,6 +300,20 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     created with allow_rebase_history=false to prevent the engine from
 ///     ignoring the provided grad_fn.
 ///
+/// Interaction with GradMode:
+/// The particular case that we consider here is:
+///
+///     # Have:
+///     #   base.requires_grad = True or False
+///     with torch.no_grad():
+///         view = base[1]
+///     base.requires_grad_()
+///     view.copy_(var)
+///     torch.autograd.grad(base.sum(), var)  <- what should it return?
+///
+/// Given that there is no consensus on what this particular code should return,
+/// we explicitely forbid it by setting allow_rebase_history=false for all
+/// differentiable views created in no_grad mode.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
