@@ -36,20 +36,14 @@ py::object PyRRef::toHere() {
   if (rref_->isOwner()) {
     return localValue();
   } else {
-    if (rref_->isPyObj()) {
-      // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
-      // GIL.
-      return jit::toPyObject(
-          std::static_pointer_cast<UserRRef>(rref_)->toHere());
-    } else {
-      IValue value = std::static_pointer_cast<UserRRef>(rref_)->toHere();
-
-      {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object
-        // without grabbing the GIL.
-        pybind11::gil_scoped_acquire ag;
-        return torch::jit::toPyObject(std::move(value));
-      }
+    // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
+    // a python object
+    IValue value = std::static_pointer_cast<UserRRef>(rref_)->toHere();
+    {
+      // acquiring GIL as torch::jit::toPyObject creates new py::object
+      // without grabbing the GIL.
+      pybind11::gil_scoped_acquire ag;
+      return torch::jit::toPyObject(std::move(value));
     }
   }
 }
@@ -60,25 +54,16 @@ py::object PyRRef::localValue() {
       "Cannot call localValue() on a non-local reference. Call it on ",
       owner().name_);
 
-  if (rref_->isPyObj()) {
-    const py::object& value = jit::toPyObject(
-        std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue());
-    PythonRpcHandler::getInstance().handleException(value);
-    {
-      // acquiring GIL as the return statement construct a new py::object from
-      // a const reference.
-      pybind11::gil_scoped_acquire ag;
-      return value;
-    }
-  } else {
-    auto value = std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
-    {
-      // acquiring GIL as torch::jit::toPyObject creates new py::object without
-      // grabbing the GIL.
-      pybind11::gil_scoped_acquire ag;
-      return torch::jit::toPyObject(std::move(value));
-    }
+  py::object res;
+  auto value = std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
+  {
+    // acquiring GIL as torch::jit::toPyObject creates new py::object without
+    // grabbing the GIL.
+    pybind11::gil_scoped_acquire ag;
+    res = torch::jit::toPyObject(std::move(value));
   }
+  PythonRpcHandler::getInstance().handleException(res);
+  return res;
 }
 
 std::string PyRRef::str() const {
