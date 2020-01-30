@@ -934,7 +934,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   }
 
   caffe2::Argument starts_vals;
-  starts_vals.set_name("values");
+  starts_vals.set_name("starts");
   auto pos = args.find("starts");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
@@ -944,7 +944,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   }
 
   caffe2::Argument ends_vals;
-  ends_vals.set_name("values");
+  ends_vals.set_name("ends");
   pos = args.find("ends");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
@@ -958,7 +958,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   }
 
   caffe2::Argument axes_vals;
-  axes_vals.set_name("values");
+  axes_vals.set_name("axes");
   pos = args.find("axes");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
@@ -978,94 +978,12 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   Caffe2Ops ret;
 
   auto* c2_op = ret.ops.Add();
-  BuildOperator(c2_op, "Shape", {data}, {shape_tensor});
-
-  auto axes_tensor = dummy_->NewDummyName();
-  c2_op = ret.ops.Add();
-  {
-    caffe2::Argument shape;
-    shape.set_name("shape");
-    shape.add_ints(axes_vals.ints_size());
-    BuildOperator(
-        c2_op, "GivenTensorIntFill", {}, {axes_tensor}, {shape, axes_vals});
-  }
-
-  auto starts_vals_tensor = dummy_->NewDummyName();
-  auto starts_tensor = dummy_->NewDummyName();
-  c2_op = ret.ops.Add();
-  {
-    caffe2::Argument shape_starts;
-    shape_starts.set_name("shape");
-    shape_starts.add_ints(starts_vals.ints_size());
-    BuildOperator(
-        c2_op,
-        "GivenTensorInt64Fill",
-        {},
-        {starts_vals_tensor},
-        {shape_starts, starts_vals});
-  }
-
-  caffe2::Argument dtype;
-  dtype.set_name("dtype");
-  dtype.set_i(static_cast<int64_t>(caffe2::TensorProto::INT64));
-  caffe2::Argument constant;
-  constant.set_name("value");
-  constant.set_i(0);
-  c2_op = ret.ops.Add();
   BuildOperator(
       c2_op,
-      "ConstantFill",
-      {shape_tensor},
-      {starts_tensor},
-      {dtype, constant});
-  c2_op = ret.ops.Add();
-  BuildOperator(
-      c2_op,
-      "ScatterAssign",
-      {starts_tensor, axes_tensor, starts_vals_tensor},
-      {starts_tensor});
-  // Slice only accepts starts as int
-  caffe2::Argument to;
-  to.set_name("to");
-  to.set_i(static_cast<int64_t>(caffe2::TensorProto::INT32));
-
-  auto ends_vals_tensor = dummy_->NewDummyName();
-  auto ends_tensor = dummy_->NewDummyName();
-  c2_op = ret.ops.Add();
-  {
-    caffe2::Argument shape_ends;
-    shape_ends.set_name("shape");
-    shape_ends.add_ints(ends_vals.ints_size());
-    BuildOperator(
-        c2_op,
-        "GivenTensorInt64Fill",
-        {},
-        {ends_vals_tensor},
-        {shape_ends, ends_vals});
-  }
-
-  constant.set_i(-1);
-  c2_op = ret.ops.Add();
-  BuildOperator(
-      c2_op, "ConstantFill", {shape_tensor}, {ends_tensor}, {dtype, constant});
-  c2_op = ret.ops.Add();
-  BuildOperator(
-      c2_op,
-      "ScatterAssign",
-      {ends_tensor, axes_tensor, ends_vals_tensor},
-      {ends_tensor});
-
-  // attach the original op at the end
-  c2_op = ret.ops.Add();
-  c2_op->CopyFrom(*op);
-  c2_op->mutable_input()->Clear();
-  c2_op->add_input(data);
-  c2_op->add_input(starts_tensor);
-  c2_op->add_input(ends_tensor);
-  c2_op->mutable_arg()->Clear();
-  for (const auto& kv : args) {
-    c2_op->add_arg()->CopyFrom(*kv.second);
-  }
+      "Slice",
+      {data},
+      {onnx_node->node.output(0)},
+      {starts_vals, ends_vals, axes_vals});
 
   return ret;
 }
