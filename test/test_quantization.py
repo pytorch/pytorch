@@ -38,7 +38,7 @@ from torch.testing._internal.common_quantization import QuantizationTestCase, \
 
 from torch.testing._internal.common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
-
+from torch.testing._internal.common_quantized import override_quantized_engine
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -535,200 +535,204 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
     @unittest.skip("temporarily disable the test")
-    def test_quantized_rnn(self):
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_quantized_rnn(self, qengine):
         d_in, d_hid = 2, 2
-        model = LSTMDynamicModel().eval()
-        cell = model.lstm
 
-        # Replace parameter values s.t. the range of values is exactly
-        # 255, thus we will have 0 quantization error in the quantized
-        # GEMM call. This i s for testing purposes.
-        #
-        # Note that the current implementation does not support
-        # accumulation values outside of the range representable by a
-        # 16 bit integer, instead resulting in a saturated value. We
-        # must take care that in our test we do not end up with a dot
-        # product that overflows the int16 range, e.g.
-        # (255*127+255*127) = 64770. So, we hardcode the test values
-        # here and ensure a mix of signedness.
-        vals = [[100, -155],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155],
-                [-155, 100],
-                [-155, 100],
-                [100, -155]]
-        if isinstance(cell, torch.nn.LSTM):
-            num_chunks = 4
-        vals = vals[:d_hid * num_chunks]
-        cell.weight_ih_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
-        cell.weight_hh_l0 = torch.nn.Parameter(
-            torch.tensor(vals, dtype=torch.float),
-            requires_grad=False)
+        with override_quantized_engine(qengine):
+            model = LSTMDynamicModel().eval()
+            cell = model.lstm
 
-        ref = copy.deepcopy(cell)
+            # Replace parameter values s.t. the range of values is exactly
+            # 255, thus we will have 0 quantization error in the quantized
+            # GEMM call. This i s for testing purposes.
+            #
+            # Note that the current implementation does not support
+            # accumulation values outside of the range representable by a
+            # 16 bit integer, instead resulting in a saturated value. We
+            # must take care that in our test we do not end up with a dot
+            # product that overflows the int16 range, e.g.
+            # (255*127+255*127) = 64770. So, we hardcode the test values
+            # here and ensure a mix of signedness.
+            vals = [[100, -155],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155],
+                    [-155, 100],
+                    [-155, 100],
+                    [100, -155]]
+            if isinstance(cell, torch.nn.LSTM):
+                num_chunks = 4
+            vals = vals[:d_hid * num_chunks]
+            cell.weight_ih_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
+            cell.weight_hh_l0 = torch.nn.Parameter(
+                torch.tensor(vals, dtype=torch.float),
+                requires_grad=False)
 
-        model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
-        model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
+            ref = copy.deepcopy(cell)
 
-        # Smoke test extra reprs
-        self.assertTrue('DynamicQuantizedLSTM' in str(model_int8))
-        self.assertTrue('DynamicQuantizedLSTM' in str(model_fp16))
-        cell_int8 = model_int8.lstm
-        cell_fp16 = model_fp16.lstm
+            model_int8 = quantize_dynamic(model=model, dtype=torch.qint8)
+            model_fp16 = quantize_dynamic(model=model, dtype=torch.float16)
 
-        assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
-            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
-        assert type(cell_fp16) == torch.nn.quantized.dynamic.LSTM, \
-            'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+            # Smoke test extra reprs
+            self.assertTrue('DynamicQuantizedLSTM' in str(model_int8))
+            self.assertTrue('DynamicQuantizedLSTM' in str(model_fp16))
+            cell_int8 = model_int8.lstm
+            cell_fp16 = model_fp16.lstm
 
-        niter = 10
-        x = torch.tensor([[100, -155],
-                          [-155, 100],
-                          [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
+            assert type(cell_int8) == torch.nn.quantized.dynamic.LSTM, \
+                'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
+            assert type(cell_fp16) == torch.nn.quantized.dynamic.LSTM, \
+                'torch.nn.LSTM should be converted to torch.nn.quantized.dynamic.LSTM after quantize_dynamic'
 
-        h0_vals = [[-155, 100],
-                   [-155, 155],
-                   [100, -155]]
+            niter = 10
+            x = torch.tensor([[100, -155],
+                              [-155, 100],
+                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
 
-        hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
-        cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+            h0_vals = [[-155, 100],
+                       [-155, 155],
+                       [100, -155]]
 
-        if isinstance(ref, torch.nn.LSTM):
-            hiddens = (hx, cx)
+            hx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
+            cx = torch.tensor(h0_vals, dtype=torch.float).unsqueeze(0)
 
-        ref_out, ref_hid = ref(x, hiddens)
+            if isinstance(ref, torch.nn.LSTM):
+                hiddens = (hx, cx)
 
-        # Compare int8 quantized to unquantized
-        output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
+            ref_out, ref_hid = ref(x, hiddens)
 
-        torch.testing.assert_allclose(output_int8, ref_out)
-        self.assertEqual(output_int8, ref_out)
-        for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
-            torch.testing.assert_allclose(out_val, ref_val)
+            # Compare int8 quantized to unquantized
+            output_int8, final_hiddens_int8 = cell_int8(x, hiddens)
 
-        class ScriptWrapper(torch.nn.Module):
-            def __init__(self, cell):
-                super(ScriptWrapper, self).__init__()
-                self.cell = cell
+            torch.testing.assert_allclose(output_int8, ref_out)
+            self.assertEqual(output_int8, ref_out)
+            for out_val, ref_val in zip(final_hiddens_int8, ref_hid):
+                torch.testing.assert_allclose(out_val, ref_val)
 
-            def forward(self, x, hiddens):
-                # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-                return self.cell(x, hiddens)
+            class ScriptWrapper(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapper, self).__init__()
+                    self.cell = cell
 
-        # TODO: TorchScript overloads don't work without this wrapper
-        cell_script = torch.jit.script(ScriptWrapper(cell_int8))
-        out_script, hid_script = cell_script(x, hiddens)
-        self.assertEqual(len(out_script), len(ref_out))
-        for out_val, ref_val in zip(out_script, ref_out):
-            torch.testing.assert_allclose(out_val, ref_val)
+                def forward(self, x, hiddens):
+                    # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
+                    # -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+                    return self.cell(x, hiddens)
 
-        # Test save/load
-        b = io.BytesIO()
-        torch.jit.save(cell_script, b)
-        b.seek(0)
-        loaded = torch.jit.load(b)
-        out_loaded, hid_loaded = loaded(x, hiddens)
-        for loaded_val, ref_val in zip(out_loaded, ref_out):
-            torch.testing.assert_allclose(loaded_val, ref_val)
+            # TODO: TorchScript overloads don't work without this wrapper
+            cell_script = torch.jit.script(ScriptWrapper(cell_int8))
+            out_script, hid_script = cell_script(x, hiddens)
+            self.assertEqual(len(out_script), len(ref_out))
+            for out_val, ref_val in zip(out_script, ref_out):
+                torch.testing.assert_allclose(out_val, ref_val)
 
-        # Compare fp16 quantized to unquantized
-        output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+            # Test save/load
+            b = io.BytesIO()
+            torch.jit.save(cell_script, b)
+            b.seek(0)
+            loaded = torch.jit.load(b)
+            out_loaded, hid_loaded = loaded(x, hiddens)
+            for loaded_val, ref_val in zip(out_loaded, ref_out):
+                torch.testing.assert_allclose(loaded_val, ref_val)
 
-        torch.testing.assert_allclose(output_fp16, ref_out)
-        self.assertEqual(output_fp16, ref_out)
-        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
-            torch.testing.assert_allclose(out, ref_val)
+            # Compare fp16 quantized to unquantized
+            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-        # Test tracing
-        # TODO: TorchScript overloads don't work without this wrapper
-        cell_trace = torch.jit.trace(ScriptWrapper(cell_int8), (x, (hx, cx)))
-        out_script, hid_script = cell_trace(x, hiddens)
-        for out_val, ref_val in zip(out_script, ref_out):
-            torch.testing.assert_allclose(out_val, ref_val)
+            torch.testing.assert_allclose(output_fp16, ref_out)
+            self.assertEqual(output_fp16, ref_out)
+            for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+                torch.testing.assert_allclose(out, ref_val)
 
-        # print(cell_trace.code)
+            # Test tracing
+            # TODO: TorchScript overloads don't work without this wrapper
+            cell_trace = torch.jit.trace(ScriptWrapper(cell_int8), (x, (hx, cx)))
+            out_script, hid_script = cell_trace(x, hiddens)
+            for out_val, ref_val in zip(out_script, ref_out):
+                torch.testing.assert_allclose(out_val, ref_val)
 
-        # Test save/load
-        b = io.BytesIO()
-        torch.jit.save(cell_trace, b)
-        b.seek(0)
-        loaded = torch.jit.load(b)
-        out_loaded, hid_loaded = loaded(x, hiddens)
-        for loaded_val, ref_val in zip(out_loaded, ref_out):
-            torch.testing.assert_allclose(loaded_val, ref_val)
+            # print(cell_trace.code)
 
-        # Compare fp16 quantized to unquantized
-        output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
+            # Test save/load
+            b = io.BytesIO()
+            torch.jit.save(cell_trace, b)
+            b.seek(0)
+            loaded = torch.jit.load(b)
+            out_loaded, hid_loaded = loaded(x, hiddens)
+            for loaded_val, ref_val in zip(out_loaded, ref_out):
+                torch.testing.assert_allclose(loaded_val, ref_val)
 
-        torch.testing.assert_allclose(output_fp16, ref_out)
-        self.assertEqual(output_fp16, ref_out)
-        for out, ref_val in zip(final_hiddens_fp16, ref_hid):
-            torch.testing.assert_allclose(out, ref_val)
+            # Compare fp16 quantized to unquantized
+            output_fp16, final_hiddens_fp16 = cell_fp16(x, hiddens)
 
-        class ScriptWrapperPacked(torch.nn.Module):
-            def __init__(self, cell):
-                super(ScriptWrapperPacked, self).__init__()
-                self.cell = cell
+            torch.testing.assert_allclose(output_fp16, ref_out)
+            self.assertEqual(output_fp16, ref_out)
+            for out, ref_val in zip(final_hiddens_fp16, ref_hid):
+                torch.testing.assert_allclose(out, ref_val)
 
-            def forward(self,
-                        x,  # type: PackedSequence
-                        hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
-                        ):
-                # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
-                return self.cell(x, hiddens)
+            class ScriptWrapperPacked(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapperPacked, self).__init__()
+                    self.cell = cell
 
-        cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
-        packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
-        ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
-        output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
+                def forward(self,
+                            x,  # type: PackedSequence
+                            hiddens  # type: Tuple[torch.Tensor, torch.Tensor]
+                            ):
+                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                    return self.cell(x, hiddens)
 
-        for packed_val, ref_val in zip(output_packed, ref_out_packed):
-            if isinstance(packed_val, torch.Tensor):
-                torch.testing.assert_allclose(packed_val, ref_val)
-            else:
-                self.assertEqual(packed_val, ref_val)
+            cell_packed = torch.jit.script(ScriptWrapperPacked(cell_int8))
+            packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+            ref_out_packed, ref_hid_packed = ref(packed_input, hiddens)
+            output_packed, hiddens_packed = cell_packed(packed_input, hiddens)
 
-        # Test save/load
-        b = io.BytesIO()
-        torch.jit.save(cell_packed, b)
-        b.seek(0)
-        loaded_packed = torch.jit.load(b)
-        out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
-        for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
-            if isinstance(packed_val, torch.Tensor):
-                torch.testing.assert_allclose(packed_val, ref_val)
-            else:
-                self.assertEqual(packed_val, ref_val)
+            for packed_val, ref_val in zip(output_packed, ref_out_packed):
+                if isinstance(packed_val, torch.Tensor):
+                    torch.testing.assert_allclose(packed_val, ref_val)
+                else:
+                    self.assertEqual(packed_val, ref_val)
 
-        # Test default instantiation
-        seq_len = 128
-        batch = 16
-        input_size = 3
-        hidden_size = 7
-        num_layers = 2
-        bias = True
-        bidirectional = False
+            # Test save/load
+            b = io.BytesIO()
+            torch.jit.save(cell_packed, b)
+            b.seek(0)
+            loaded_packed = torch.jit.load(b)
+            out_loaded_packed, hid_loaded_packed = loaded_packed(packed_input, hiddens)
+            for packed_val, ref_val in zip(out_loaded_packed, ref_out_packed):
+                if isinstance(packed_val, torch.Tensor):
+                    torch.testing.assert_allclose(packed_val, ref_val)
+                else:
+                    self.assertEqual(packed_val, ref_val)
 
-        x = torch.rand(seq_len, batch, input_size)
-        h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
-        c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+            # Test default instantiation
+            seq_len = 128
+            batch = 16
+            input_size = 3
+            hidden_size = 7
+            num_layers = 2
+            bias = True
+            bidirectional = False
 
-        dtype = torch.qint8
+            x = torch.rand(seq_len, batch, input_size)
+            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+            c = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
 
-        cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                  hidden_size=hidden_size,
-                                                  num_layers=num_layers,
-                                                  bias=bias,
-                                                  batch_first=False,
-                                                  dropout=0.0,
-                                                  bidirectional=bidirectional,
-                                                  dtype=dtype)
+            dtype = torch.qint8
 
-        y, (h, c) = cell_dq(x, (h, c))
+            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                      hidden_size=hidden_size,
+                                                      num_layers=num_layers,
+                                                      bias=bias,
+                                                      batch_first=False,
+                                                      dropout=0.0,
+                                                      bidirectional=bidirectional,
+                                                      dtype=dtype)
+
+            y, (h, c) = cell_dq(x, (h, c))
 
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
