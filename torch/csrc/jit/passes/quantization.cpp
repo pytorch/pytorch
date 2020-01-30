@@ -170,7 +170,8 @@ bool hitGraphInput(Value* value) {
 // names along the way.
 // For example, the module access path will be ['conv1', 'basic_block', 'sub']
 // for `self.sub.basic_block.conv1`
-Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
+std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
+  std::vector<std::string> path;
   // Iterator to traverse back the GetAttr calls
   Value* iter = instance;
   // trace back the instance to recover the path of the submodule
@@ -181,7 +182,13 @@ Value* getModuleAccessPath(Value* instance, std::vector<std::string>& path) {
     // trace back the chain of GetAttr
     iter = get_attr->inputs()[0];
   }
-  return iter;
+  TORCH_CHECK(iter == self,
+              "Can't handle the access pattern of GetAttr "
+              " in getModuleAccessPath, traced back to:",
+              iter->debugName(),
+              " which is not self:",
+              self->debugName());
+  return path;
 }
 
 class ModuleCloneHelper {
@@ -278,21 +285,11 @@ class ModuleCloneHelper {
     for (Node* node : block->nodes()) {
       // remapping type for module instance
       if (node->kind() == prim::CallMethod) {
-        std::vector<std::string> path;
         Value* instance = node->inputs()[0];
-        Value* boundary_val = getModuleAccessPath(instance, path);
-        if (boundary_val == self) {
-          auto child = findChildModule(source, path);
-          auto qconfig = module_qconfig_map.at(child._ivalue());
-          instance->setType(type_remap_fn(instance->type(), qconfig));
-        } else {
-          GRAPH_DEBUG(
-              "Can't handle the access pattern of GetAttr ",
-              "in make submodule uses unique, traced back to ",
-              boundary_val->debugName(),
-              " which is not self: ",
-              self->debugName());
-        }
+        auto path = getModuleAccessPath(instance, self);
+        auto child = findChildModule(source, path);
+        auto qconfig = module_qconfig_map.at(child._ivalue());
+        instance->setType(type_remap_fn(instance->type(), qconfig));
       }
       // We don't remap output and the remapping of module type
       // will be done in CallMethod, we don't support type remapping
@@ -1304,35 +1301,25 @@ class ModuleUseDeduper {
         if (n->kind() != prim::CallMethod) {
           continue;
         }
-        std::vector<std::string> path;
         Value* instance = n->inputs()[0];
         // boundary_val is the value we get when we trace back
         // the GetAttr access chain until we hit the input of graph
         // or a node that is not prim::GetAttr
-        Value* boundary_val = getModuleAccessPath(instance, path);
+        auto path = getModuleAccessPath(instance, self);
 
-        if (boundary_val == self) {
-          // path.size() == 0 means we're calling a method
-          // on self, we don't need to dedup uses of self
-          if (path.size() == 0) {
-            continue;
-          }
-          value_to_path_map_[instance] = path;
-          auto m = findChildModule(module_, path);
-          // If we fail to insert the module to the unique_modules_ set,
-          // which means there are uses of this module before this point,
-          // we'll have to rewrite the use
-          if (!unique_modules_.insert(m._ivalue()).second) {
-            uses_to_rewrite_.push_back(instance);
-            GRAPH_DEBUG("Found use to rewrite: ", instance->debugName());
-          }
-        } else {
-          GRAPH_DEBUG(
-              "Can't handle the access pattern of GetAttr ",
-              "in make submodule uses unique, traced back to ",
-              boundary_val->debugName(),
-              " which is not self: ",
-              self->debugName());
+        // path.size() == 0 means we're calling a method
+        // on self, we don't need to dedup uses of self
+        if (path.size() == 0) {
+          continue;
+        }
+        value_to_path_map_[instance] = path;
+        auto m = findChildModule(module_, path);
+        // If we fail to insert the module to the unique_modules_ set,
+        // which means there are uses of this module before this point,
+        // we'll have to rewrite the use
+        if (!unique_modules_.insert(m._ivalue()).second) {
+          uses_to_rewrite_.push_back(instance);
+          GRAPH_DEBUG("Found use to rewrite: ", instance->debugName());
         }
       }
     }
