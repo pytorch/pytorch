@@ -8179,11 +8179,11 @@ class TestNNInit(TestCase):
         for dims in [3, 4, 5]:
             for groups in [1, 2, 3]:
                 # prepare random tensor with random sizes, but fits groups
-                a, c, d, e = (random.randint(1,5) for _ in range(4))
-                b = random.randint(1,5 * groups)  # same range as a*groups but all range allowed
+                a, c, d, e = (random.randint(1, 5) for _ in range(4))
+                b = random.randint(1, 5 * groups)  # same range as a*groups but all range allowed
                 # make sure first dim divides by groups
                 input_tensor = torch.randn((a * groups, b, c, d, e)[:dims])
-                
+
                 init.dirac_(input_tensor, groups)
 
                 c_out, c_in = input_tensor.size(0) // groups, input_tensor.size(1)
@@ -8195,7 +8195,7 @@ class TestNNInit(TestCase):
 
 
     def test_dirac_identity(self):
-        for groups in [1,3]:
+        for groups in [1, 3]:
             batch, in_c, out_c, size, kernel_size = 8, 3, 9, 5, 3  # in_c, out_c must divide by groups
             eff_out_c = out_c // groups
 
@@ -8209,7 +8209,7 @@ class TestNNInit(TestCase):
             for g in range(groups):
                 # Assert in_c outputs are preserved (per each group)
                 self.assertEqual(input_tensor[:, :, 1:-1], 
-                                 output_tensor[:, eff_out_c*g:eff_out_c*g+in_c, :])  
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :])  
                 # Assert extra outputs are 0
                 assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0  
 
