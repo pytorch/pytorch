@@ -577,7 +577,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
-        self._run_uneven_workload(num_repeat=100)
+        self._run_uneven_workload()
 
     @dist_init(setup_rpc=False)
     def test_shutdown_followed_by_rpc(self):
