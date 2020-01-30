@@ -3540,6 +3540,8 @@ for shape in [(1,), ()]:
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
             for inplace in [True, False]:
                 for make_view in [True, False]:
+                    # Used for special casing the tests below
+                    output_is_a_view = (make_view or fn_id == "view_of_temp")
                     def fn(a, b):
                         # never modify a, b inplace for gracheck
                         a = a.clone()
@@ -3569,29 +3571,40 @@ for shape in [(1,), ()]:
                     b = torch.ones(2, requires_grad=True)
 
                     # Are the computed gradients correct ?
-                    if fn_id == "view_of_temp" and inplace:
-                        # TODO: This should compute the right gradients
-                        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                    if inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
                             gradcheck(fn, (a, b))
                     else:
-                        gradcheck(fn, (a, b))
+                        if fn_id == "view_of_temp" and inplace:
+                            # TODO: This should compute the right gradients
+                            with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                gradcheck(fn, (a, b))
+                        else:
+                            gradcheck(fn, (a, b))
 
-                    # Was the custom backward called properly
-                    bw_called[0] = 0
-                    ga_nz[0] = True  # For the case where the backward is not called
-                    fn(a, b).backward()
+                    if inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
+                            gradcheck(fn, (a, b))
+                    else:
+                        # Was the custom backward called properly
+                        bw_called[0] = 0
+                        ga_nz[0] = True  # For the case where the backward is not called
+                        fn(a, b).backward()
 
-                    expected_called = 1
-                    expected_ga_nz = True
-                    if fn_id in ["one_output", "view_of_temp"] and inplace:
-                        # TODO: The custom backward is not called in this case
-                        expected_called = 0
-                    if fn_id == "two_output" and inplace:
-                        # TODO: The backward only sees part of the gradient as the other part
-                        # is computed with a AsStridedBackward
-                        expected_ga_nz = False
-                    self.assertTrue(bw_called[0] == expected_called)
-                    self.assertTrue(ga_nz[0] == expected_ga_nz)
+                        expected_called = 1
+                        expected_ga_nz = True
+                        if fn_id in ["one_output"] and inplace:
+                            # TODO: When we return an input, view_as is done in grad mode enabled
+                            expected_called = 0
+
+                        if fn_id == "two_output" and inplace:
+                            # TODO: The backward only sees part of the gradient as the other part
+                            # is computed with a AsStridedBackward
+                            expected_ga_nz = False
+
+                        self.assertTrue(bw_called[0] == expected_called)
+                        self.assertTrue(ga_nz[0] == expected_ga_nz)
+
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -3630,17 +3643,9 @@ for shape in [(1,), ()]:
         out.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
-        bw_called[0] = 0
         out = ComplexView.apply(a.clone(), idx)
-        out += 1
-        out.sum().backward()
-        # TODO: The custom backward is not called in this case
-        self.assertTrue(bw_called[0] == 0)
-
-        out = ComplexView.apply(a, idx)
-        out += 1
-        with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
-            out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
+            out += 1
 
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
