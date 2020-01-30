@@ -706,6 +706,11 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=['output_1', 'output_2', 'output_3'],
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
+        self.run_test(torch.jit.script(ArangeModel()), x,
+                      test_with_inputs=[y], input_names=['input_1'],
+                      output_names=['output_1', 'output_2', 'output_3'],
+                      dynamic_axes={'input_1': [0],
+                                    'output_1': [0]})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange(self):
