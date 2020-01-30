@@ -1678,7 +1678,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(torch.distributed.rpc.api._default_pickler is test_pickler)
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
-            )
+        )
 
     @dist_init
     def test_function_not_on_callee(self):
