@@ -9,11 +9,15 @@ from .module import Module
 from .utils import _single, _pair, _triple, _repeat_tuple
 from ..._jit_internal import List, Optional
 
+
 class _ConvNd(Module):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups',
                      'padding_mode', 'output_padding', 'in_channels',
                      'out_channels', 'kernel_size']
+    __annotations__ = {
+        'bias': Optional[torch.Tensor]
+    }
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -47,12 +51,12 @@ class _ConvNd(Module):
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
-            self.bias = torch.tensor([])
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias.numel() > 0:
+        if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
@@ -68,7 +72,7 @@ class _ConvNd(Module):
             s += ', output_padding={output_padding}'
         if self.groups != 1:
             s += ', groups={groups}'
-        if self.bias.numel() == 0:
+        if self.bias is None:
             s += ', bias=False'
         if self.padding_mode != 'zeros':
             s += ', padding_mode={padding_mode}'
@@ -198,12 +202,11 @@ class Conv1d(_ConvNd):
             False, _single(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
         if self.padding_mode != 'zeros':
             return F.conv1d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, bias, self.stride,
+                            self.weight, self.bias, self.stride,
                             _single(0), self.dilation, self.groups)
-        return F.conv1d(input, self.weight, bias, self.stride,
+        return F.conv1d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
@@ -337,12 +340,11 @@ class Conv2d(_ConvNd):
             False, _pair(0), groups, bias, padding_mode)
 
     def _conv_forward(self, input, weight):
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
         if self.padding_mode != 'zeros':
             return F.conv2d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
-                            weight, bias, self.stride,
+                            weight, self.bias, self.stride,
                             _pair(0), self.dilation, self.groups)
-        return F.conv2d(input, weight, bias, self.stride,
+        return F.conv2d(input, weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
     def forward(self, input):
@@ -473,12 +475,11 @@ class Conv3d(_ConvNd):
             False, _triple(0), groups, bias, padding_mode)
 
     def forward(self, input):
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
         if self.padding_mode != 'zeros':
             return F.conv3d(F.pad(input, self._padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, bias, self.stride, _triple(0),
+                            self.weight, self.bias, self.stride, _triple(0),
                             self.dilation, self.groups)
-        return F.conv3d(input, self.weight, bias, self.stride,
+        return F.conv3d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
@@ -639,9 +640,8 @@ class ConvTranspose1d(_ConvTransposeNd):
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
         return F.conv_transpose1d(
-            input, self.weight, bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
 
 
@@ -786,9 +786,9 @@ class ConvTranspose2d(_ConvTransposeNd):
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
+
         return F.conv_transpose2d(
-            input, self.weight, bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
 
 
@@ -929,9 +929,9 @@ class ConvTranspose3d(_ConvTransposeNd):
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
         output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
-        bias : Optional[torch.Tensor] = None if self.bias.numel() == 0 else self.bias
+
         return F.conv_transpose3d(
-            input, self.weight, bias, self.stride, self.padding,
+            input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
 
 
