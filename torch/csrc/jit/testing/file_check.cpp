@@ -90,10 +90,8 @@ size_t assertFind(
     std::stringstream ss;
     ss << "Expected to find ";
     c10::printQuotedString(ss, sub);
-    ss << " in" << std::endl;
-    ss << search_range.source()->text().substr(search_range.start(), search_range.end() - search_range.start());
-    ss << std::endl;
-    ss << "but did not find it\n";
+    ss << "but did not find it" << std::endl;
+    ss << "Searched string:" << std::endl;
     found_range.highlight(ss);
     if (extra_msg) {
       extra_msg(ss);
