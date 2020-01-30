@@ -3542,6 +3542,7 @@ for shape in [(1,), ()]:
                 for make_view in [True, False]:
                     # Used for special casing the tests below
                     output_is_a_view = (make_view or fn_id == "view_of_temp")
+
                     def fn(a, b):
                         # never modify a, b inplace for gracheck
                         a = a.clone()
