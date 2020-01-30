@@ -487,7 +487,7 @@ struct CodeImpl {
     // by either clearing the register (DROPR) or just popping the stack
     // (DROP)
     if (preprocess_.can_emit_inline[input->node()]) {
-      emitNodeInline(input->node());
+      emitUseInline(input);
       if (drop) {
         insertInstruction(DROP);
       }
@@ -517,21 +517,20 @@ struct CodeImpl {
     }
   }
 
-  void emitNodeInline(Node* start) {
+  void emitUseInline(Value* start) {
     std::vector<Value*> stack;
     std::unordered_set<Node*> seen;
-    // start is always a single-output node
-    stack.push_back(start->output());
+    stack.push_back(start);
     while (!stack.empty()) {
       auto val = stack.back();
-      GRAPH_DEBUG("emitNodeInline stack's value ", val->debugName());
+      GRAPH_DEBUG("emitUseInline stack's value ", val->debugName());
       stack.pop_back();
       auto node = val->node();
       if (!preprocess_.can_emit_inline[node]) {
-        // this means that node has already been emitted
-        // and we only emit register loads
-        emitRegisterLoadMove(val, false);
+        // the node has already been emitted
+        // emitRegisterLoadMove simply emits LOADs
         GRAPH_DEBUG("emitRegisterLoadMove ", val->debugName());
+        emitRegisterLoadMove(val, false);
       } else {
         if (seen.count(node) != 0) {
           // we already emitted arguments
@@ -577,7 +576,7 @@ struct CodeImpl {
             case prim::If:
             case prim::Loop:
               TORCH_INTERNAL_ASSERT(
-                  false, "emitNodeInline should never see these nodes");
+                  false, "emitUseInline should never see these nodes");
               break;
             case prim::Constant:
               emitConstant(node);
