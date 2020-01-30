@@ -229,7 +229,9 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
           "max", [](dnnlowp::TensorQuantizationParams& qparam) {
             return qparam.Max();
           });
-
+  m.def("get_fakefp16_mapping", [](bool use_fp16_acc, bool use_nnpi) {
+    return caffe2::opt::getFakeFp16OpMapping(use_fp16_acc, use_nnpi);
+  });
   m.def(
       "ChooseStaticQuantizationParams",
       [](float min,
