@@ -12,7 +12,6 @@ namespace rpc {
 py::object toPyObj(const Message& message);
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
@@ -20,14 +19,12 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs);
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 PyRRef pyRemoteBuiltin(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     const std::string& opName,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
@@ -35,7 +32,6 @@ PyRRef pyRemoteBuiltin(
     const py::kwargs& kwargs);
 
 PyRRef pyRemotePythonUdf(
-    RpcAgent& agent,
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
