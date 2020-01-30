@@ -7,13 +7,37 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace callback {
+void confirmPendingUser(
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
+  auto rr = RemoteRet::fromMessage(message);
+  auto& ctx = RRefContext::getInstance();
+  ctx.delPendingUser(rr->forkId());
+}
+
+void finishCreatingOwnerRRef(
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
+  auto rr = RemoteRet::fromMessage(message);
+  TORCH_INTERNAL_ASSERT(
+      rr->rrefId() == rr->forkId(),
+      "Expecting an OwnerRRef as RemoteRet but got a fork.");
+  auto& ctx = RRefContext::getInstance();
+  ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+}
+
+} // namespace callback
+
 // Keys for RRef-related debug information.
 const std::string kNumOwnerRRefs = "num_owner_rrefs";
 const std::string kNumPendingUsers = "num_pending_users";
 
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
-  static RRefContext* context = new RRefContext(RpcAgent::getDefaultRpcAgent());
+  static RRefContext* context = new RRefContext(RpcAgent::getCurrentRpcAgent());
   return *context;
 }
 

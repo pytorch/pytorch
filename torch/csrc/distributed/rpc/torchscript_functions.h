@@ -1,6 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/script_remote_call.h>
 
 namespace torch {
 namespace distributed {
@@ -16,8 +21,18 @@ namespace rpc {
 //                  "dist_autograd_test::my_py_add"
 //   stack: a bag of IValue args passed to torchscriptFunctionName
 // It returns c10::intrusive_ptr<ivalue::Future>
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscriptCall(
-    const std::string& dst,
+c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
+    const std::string& dstWorkerName,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack);
+
+c10::intrusive_ptr<UserRRef> remoteTorchscript(
+    const std::string& dstWorkerName,
+    const c10::QualifiedName& qualifiedName,
+    std::vector<c10::IValue>& stack);
+
+c10::intrusive_ptr<OwnerRRef> remoteTorchscriptToOwner(
+    const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     std::vector<c10::IValue>& stack);
 
