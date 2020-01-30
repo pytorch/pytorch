@@ -48,6 +48,69 @@ namespace {
 // NB: Deleted spaddcmul (aka addcmul_, but not actually wired up), spaddcdiv (not
 // wired at all)
 
+template <typename scalar_t>
+void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int64_t k, Tensor& r_, Scalar beta, const Tensor& t, Scalar alpha, LongTensor& indices, Tensor& values, const Tensor& dense) {
+  scalar_t cast_beta = beta.to<scalar_t>();
+  scalar_t cast_alpha = alpha.to<scalar_t>();
+  LongTensor rowIndices = indices.select(0, 0);
+  LongTensor colIndices = indices.select(0, 1);
+  IntTensor csr = _to_csr_int(rowIndices, m, nnz);
+  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
+  colIndicesInt.copy_(colIndices);
+
+  Tensor r__;
+  if (cast_beta == 0) {
+    r_.zero_();
+  } else if (cast_beta == 1) {
+    if (!is_same_tensor(t, r_)) {
+      r_.copy_(t);
+    }
+  } else {
+    at::mul_out(r_, t, scalar_to_tensor(beta));
+  }
+
+  if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
+    r__ = r_;
+  } else {
+    // TODO: how... strange
+    r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
+    r__.transpose_(0, 1);
+  }
+
+  if (nnz > 0) {
+    Tensor dense_;
+    char transpose_dense;
+    if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
+      transpose_dense = 'n';
+      dense_ = dense;
+    } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
+      transpose_dense = 't';
+      dense_ = dense;
+    } else {
+      transpose_dense = 't';
+      dense_ = dense.contiguous();
+    }
+
+    sparse::cuda::csrmm2(
+      'n',
+      transpose_dense,
+      m,
+      n,
+      k,
+      nnz,
+      cast_alpha,
+      values.data_ptr<scalar_t>(),
+      csr.data_ptr<int32_t>(),
+      colIndicesInt.data_ptr<int32_t>(),
+      dense_.data_ptr<scalar_t>(),
+      (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
+      cast_beta,
+      r__.data_ptr<scalar_t>(),
+      r__.stride(1));
+  }
+  r_.copy_(r__);
+}
+
 // --------------------------------------------------------------------
 // addmm(Tensor, SparseTensor, Tensor, Scalar, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
@@ -84,72 +147,14 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   LongTensor indices = sparse._indices();
   Tensor values = sparse._values();
 
-  LongTensor rowIndices = indices.select(0, 0);
-  LongTensor colIndices = indices.select(0, 1);
-  IntTensor csr = _to_csr_int(rowIndices, m, nnz);
-  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
-  colIndicesInt.copy_(colIndices);
 
   // No half support, so we don't have to use CUDATypeConversion
-  Tensor r__;
   AT_DISPATCH_FLOATING_TYPES(
-      values.scalar_type(), "addmm_sparse_cuda", [&] {
-        scalar_t cast_beta = beta.to<scalar_t>();
-        scalar_t cast_alpha = alpha.to<scalar_t>();
-        if (cast_beta == 0) {
-          r_.zero_();
-        } else if (cast_beta == 1) {
-          if (!is_same_tensor(t, r_)) {
-            r_.copy_(t);
-          }
-        } else {
-          at::mul_out(r_, t, scalar_to_tensor(beta));
-        }
+    values.scalar_type(), "addmm_sparse_cuda", [&] {
+      s_addmm_out_sparse_dense_cuda_worker<scalar_t>(nnz, m, n, k, r_, beta, t, alpha, indices, values, dense);
+    }
+  );
 
-        /* r_ */
-        if(r_.stride(0) == 1 && r_.stride(1) == r_.size(0)) {
-          r__ = r_;
-        } else {
-          // TODO: how... strange
-          r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
-          r__.transpose_(0, 1);
-        }
-
-        if (nnz > 0) {
-          /* dense */
-          Tensor dense_;
-          char transpose_dense;
-          if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
-            transpose_dense = 'n';
-            dense_ = dense;
-          } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
-            transpose_dense = 't';
-            dense_ = dense;
-          } else {
-            transpose_dense = 't';
-            dense_ = dense.contiguous();
-          }
-
-          sparse::cuda::csrmm2(
-            'n',
-            transpose_dense,
-            m,
-            n,
-            k,
-            nnz,
-            cast_alpha,
-            values.data_ptr<scalar_t>(),
-            csr.data_ptr<int32_t>(),
-            colIndicesInt.data_ptr<int32_t>(),
-            dense_.data_ptr<scalar_t>(),
-            (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
-            cast_beta,
-            r__.data_ptr<scalar_t>(),
-            r__.stride(1));
-        }
-      });
-
-  r_.copy_(r__);
   return r_;
 }
 
