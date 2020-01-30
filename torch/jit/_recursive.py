@@ -87,27 +87,22 @@ def infer_concrete_type_builder(nn_module):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
-        concrete_type_builder.add_attribute(name, attr_type, True)
+        # We currently have the invariant in various places in our code
+        # that parameters must be Tensors. However, the nn.Module API also
+        # allows NoneType parameters. These parameters are not returned as
+        # part of `parameters()` and its variants, but are available
+        # through direct attribute access.
+        #
+        # So to achieve the nn.Module behavior, add the NoneType parameters
+        # as an attribute.
+        should_register_as_parameter = item is not None
+        concrete_type_builder.add_attribute(name, attr_type, should_register_as_parameter)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False)
         added_names.add(name)
@@ -140,13 +135,23 @@ def infer_concrete_type_builder(nn_module):
 
     for name in constants_set:
         if name in added_names:
-            # XXX: It is possible for something to be in the constants set but
-            # also in the parameters/buffers. This happens in BatchNorm as a
-            # hack to support optional parameters.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
+            if name in nn_module._modules:
+                hint = "submodule"
+            elif name in nn_module._buffers:
+                hint = "buffer"
+            elif name in nn_module._parameters:
+                hint = "parameter"
+            else:
+                raise AssertionError("added_names must be submodule, parameter, or buffer")
+
+            warnings.warn("'{}' was found in ScriptModule constants, "
+                          " but it is a non-constant {}. Consider removing it.".format(name, hint))
             continue
         if not hasattr(nn_module, name):
-            # TODO: We should really error in this case, but there are a couple
-            # extant examples of this so leave it for a future PR.
+            # TODO: We should really error in this case, but its bc-breaking so
+            # we need to warn for at least one release
             warnings.warn("'{}' was found in ScriptModule constants, "
                           "but was not actually set in __init__. "
                           "Consider removing it.".format(name))
