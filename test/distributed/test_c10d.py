@@ -3334,6 +3334,7 @@ class CommTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
