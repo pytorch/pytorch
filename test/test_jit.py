@@ -3927,6 +3927,10 @@ graph(%Ra, %Rb):
                 # type: (Tensor) -> Tensor
                 return 2 * x
 
+            def three(self, x):
+                # type: (Tensor) -> Tensor
+                return x * 3
+
             @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
@@ -3943,7 +3947,7 @@ graph(%Ra, %Rb):
 
         bar = Bar()
         ops = torch.jit.export_opnames(bar)
-        expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant']
+        expected = ['aten::add.Tensor', 'aten::mul.Scalar', 'aten::mul.Scalar2', 'prim::Constant']
         self.assertEqual(ops, expected)
 
     def test_pytorch_jit_env_off(self):
