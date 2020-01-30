@@ -635,7 +635,8 @@ void GraphEncoder::EncodeTensor(
   } else {
     printf("I am in EncodeTensor checkpoint 1b.\n");
     // printf("The parameter name that is considered is %s.\n", external_ref.value().c_str());
-    int64_t tensorSize = std::accumulate(std::begin(tensor.sizes()), std::end(tensor.sizes()), 1, std::multiplies<size_t>());
+    int64_t tensorSize = std::accumulate(std::begin(tensor.sizes()), std::end(tensor.sizes()), 
+                                         static_cast<int64_t>(1), std::multiplies<int64_t>());
     if (use_large_model_format && 
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
@@ -662,6 +663,9 @@ void GraphEncoder::EncodeTensor(
       }
       std::string fullFilePath = folder + "/" + tensorName;
       FILE* fp = fopen(fullFilePath.c_str(), "wb");
+      if (fp == NULL) {
+        throw std::runtime_error(std::string("ONNX export failed. No such file or directory: ") + fullFilePath);
+      }
       fwrite(t.data_ptr(), t.element_size(), t.numel(), fp);
       if (fp) { fclose(fp); }
       onnx::StringStringEntryProto* location = tensor_proto->mutable_external_data()->Add();
