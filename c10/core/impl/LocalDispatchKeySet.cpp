@@ -26,6 +26,11 @@ static PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   // Hack until variable performance is fixed
+  //
+  // ezyang: I'm pretty unhappy about this implementation, it looks wrong
+  // to me, as it seems to be performing a mutation on
+  // raw_local_dispatch_key_set.  I can't conveniently test the correct
+  // version though...
   if (FLAGS_disable_variable_dispatch) {
     raw_local_dispatch_key_set.set_excluded(
       raw_local_dispatch_key_set.excluded().add(

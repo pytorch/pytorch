@@ -11,6 +11,11 @@ namespace c10 {
 
 namespace impl {
 
+// Some keys are ALWAYS considered for inclusion by default, so they are
+// included in the set here.  (const appears to be sufficient for
+// always_included to get inlined, constexpr not necessary)
+const DispatchKeySet always_included{DispatchKey::VariableTensorId};
+
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
 // fall through.
@@ -32,7 +37,12 @@ static inline DispatchKey dispatchTypeId(
     DispatchKeySet key_mask
 ) {
   c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
-  return (((ks | local.included_) - local.excluded_) & key_mask).highestPriorityTypeId();
+  // TODO: It's a bit irritating that we have to do logical ORs here, it would
+  // be nice to only do one.  Can always_included be folded into the TLS?  Well,
+  // it's a bit troublesome, because fastpath TLS access requires the type of
+  // the TLS in question to be zero-initialized, so you don't actually win
+  // anyting in that case.
+  return (((ks | local.included_ | always_included) - local.excluded_) & key_mask).highestPriorityTypeId();
 }
 
 }
