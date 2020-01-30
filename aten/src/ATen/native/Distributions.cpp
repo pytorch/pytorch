@@ -114,6 +114,7 @@ namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
+DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
@@ -195,6 +196,13 @@ Tensor& log_normal_(Tensor& self, double mean, double std, Generator* gen) {
 Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& exponential_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_stub(iter.device_type(), iter, lambda, gen);
   return self;
 }
 

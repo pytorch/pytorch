@@ -43,6 +43,8 @@ RRefForkData::RRefForkData(
       type_str_(std::move(type_str)) {}
 
 py::tuple RRefForkData::toPyTuple() const {
+  // add GIL as it is contructing a py::object
+  pybind11::gil_scoped_acquire ag;
   return py::make_tuple(
       ownerId_,
       rrefId_.createdOn_,
@@ -54,6 +56,8 @@ py::tuple RRefForkData::toPyTuple() const {
 }
 
 RRefForkData RRefForkData::fromPyTuple(const py::tuple& t) {
+  // add GIL as it is accessing a py::object
+  pybind11::gil_scoped_acquire ag;
   TORCH_INTERNAL_ASSERT(
       t.size() == RFD_TUPLE_SIZE,
       "Pickled RRefForkData must contain 6 numbers.");
