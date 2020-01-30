@@ -13558,11 +13558,11 @@ class TestTorchDeviceType(TestCase):
         for dtype_output in [torch.float16, torch.float32]:
             result_expected = torch.tensor([2592], dtype=dtype_output, device=device)
             output = torch.prod(x, dtype=dtype_output)
-            result = torch.tensor([output.item()], dtype=output.type(), device=output.device)
+            result = torch.tensor([output.item()], dtype=output.dtype, device=output.device)
             self.assertEqual(result, result_expected)
 
             output = x.prod(dtype=dtype_output)
-            result = torch.tensor([output.item()], dtype=output.type(), device=output.device)
+            result = torch.tensor([output.item()], dtype=output.dtype, device=output.device)
             self.assertEqual(result, result_expected)
 
     @onlyCPU
