@@ -168,34 +168,46 @@ def eye_(tensor):
     return tensor
 
 
-def dirac_(tensor):
+def dirac_(tensor, groups=1):
     r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
     delta function. Preserves the identity of the inputs in `Convolutional`
-    layers, where as many input channels are preserved as possible.
+    layers, where as many input channels are preserved as possible. In case
+    of groups>1, each group of channels preserves identity
 
     Args:
         tensor: a {3, 4, 5}-dimensional `torch.Tensor`
-
+        groups: number of groups in the conv layer
     Examples:
         >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)
+        >>> w = torch.empty(3, 24, 5, 5)
+        >>> nn.init.dirac_(w, 3)
     """
     dimensions = tensor.ndimension()
     if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
     sizes = tensor.size()
+
+    if sizes[0] % groups != 0:
+        raise ValueError('out_channels must be divisible by groups')
+
+    if sizes[1] % groups != 0:
+        raise ValueError('in_channels must be divisible by groups')
+
     min_dim = min(sizes[0], sizes[1])
+
     with torch.no_grad():
         tensor.zero_()
 
-        for d in range(min_dim):
-            if dimensions == 3:  # Temporal convolution
-                tensor[d, d, tensor.size(2) // 2] = 1
-            elif dimensions == 4:  # Spatial convolution
-                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
-            else:  # Volumetric convolution
-                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+        for g in range(groups):
+            for d in range(min_dim // groups):
+                if dimensions == 3:  # Temporal convolution
+                    tensor[g + d, d, tensor.size(2) // 2] = 1
+                elif dimensions == 4:  # Spatial convolution
+                    tensor[g + d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
+                else:  # Volumetric convolution
+                    tensor[g + d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
