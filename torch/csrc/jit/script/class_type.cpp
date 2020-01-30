@@ -81,6 +81,9 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
   attributeNames_.erase(attributeNames_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
+  if (is_module()) {
+    parameterSlots_->erase(parameterSlots_->begin() + slot);
+  }
 }
 
 void ClassType::addMethod(Function* method) {
