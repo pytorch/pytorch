@@ -121,7 +121,7 @@ public:
   void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
 
 private:
-  // NB: If there is no valid dispatch key, this will return UndefinedTensorId
+  // NB: If there is no valid dispatch key, this will return Undefined
   DispatchKey dispatchKeySetToDispatchKey_(DispatchKeySet backendsWithoutFallthrough, const DispatchKeySet& ks) const {
     // We must NOT respect the passed in backendsWithoutFallthrough if an operator has
     // specifically overridden the backend, since that means we've opted to

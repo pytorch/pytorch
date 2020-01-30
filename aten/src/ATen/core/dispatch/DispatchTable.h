@@ -33,7 +33,7 @@ public:
 
   enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
   C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
-    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::UndefinedTensorId);
+    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     SetKernelResult result;;
     if (slot.isValid()) {

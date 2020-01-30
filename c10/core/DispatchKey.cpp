@@ -4,8 +4,8 @@ namespace c10 {
 
 const char* toString(DispatchKey t) {
   switch (t) {
-    case DispatchKey::UndefinedTensorId:
-      return "UndefinedTensorId";
+    case DispatchKey::Undefined:
+      return "Undefined";
     case DispatchKey::CPUTensorId:
       return "CPUTensorId";
     case DispatchKey::CUDATensorId:

@@ -47,12 +47,12 @@ public:
   DispatchKeySet(Raw, uint64_t x)
     : repr_(x) {}
   explicit DispatchKeySet(DispatchKey t)
-    : repr_(t == DispatchKey::UndefinedTensorId
+    : repr_(t == DispatchKey::Undefined
               ? 0
               : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
   // Test if a DispatchKey is in the set
   bool has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT(t != DispatchKey::UndefinedTensorId);
+    TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Perform set union
@@ -92,7 +92,7 @@ public:
   // type id is the one that should handle dispatch (assuming there
   // aren't any further exclusions or inclusions).
   DispatchKey highestPriorityTypeId() const {
-    // TODO: If I put UndefinedTensorId as entry 64 and then adjust the
+    // TODO: If I put Undefined as entry 64 and then adjust the
     // singleton constructor to shift from the right, we can get rid of the
     // subtraction here.  It's modestly more complicated to get right so I
     // didn't do it for now.
