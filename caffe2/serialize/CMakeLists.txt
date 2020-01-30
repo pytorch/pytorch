@@ -10,9 +10,8 @@ if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
   ADD_DEFINITIONS(-DUSE_EXTERNAL_MZCRC)
   set_source_files_properties(
     ${SSE42_FILES}
-    PROPERTIES
     COMPILE_FLAGS
-    -mpclmul -msse4.2
+    "-mpclmul -msse4.2 "
   )
 endif()
 
