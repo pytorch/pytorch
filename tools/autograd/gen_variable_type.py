@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, PURE_VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS, PURE_VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
