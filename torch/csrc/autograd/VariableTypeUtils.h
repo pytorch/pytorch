@@ -59,7 +59,8 @@ inline void check_inplace(const Tensor& tensor) {
             " want the change to tracked.");
 
       }
-    } else if (var.is_leaf()) {
+    }
+    if (var.is_leaf()) {
       AT_ERROR(
         "a leaf Variable that requires grad is being used in an in-place operation.");
     }
