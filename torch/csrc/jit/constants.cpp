@@ -2,8 +2,8 @@
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
 
 namespace torch {
 namespace jit {
@@ -15,6 +15,32 @@ c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
   return options;
 }
 } // namespace
+
+bool insertableTensor(const at::Tensor& ten) {
+  return !ten.requires_grad();
+}
+
+bool insertableIValue(const IValue& ivalue) {
+  if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
+      ivalue.isDouble() || ivalue.isString() || ivalue.isDevice()) {
+    return true;
+  }
+  if (ivalue.isTensor()) {
+    return insertableTensor(ivalue.toTensor());
+  }
+  if (ivalue.isList() || ivalue.isTuple()) {
+    c10::ArrayRef<IValue> elems;
+    if (ivalue.isTuple()) {
+      elems = ivalue.toTuple()->elements();
+    } else {
+      elems = ivalue.toListRef();
+    }
+    return std::all_of(elems.begin(), elems.end(), [](const IValue& tup_elem) {
+      return insertableIValue(tup_elem);
+    });
+  }
+  return false;
+}
 
 Value* insertConstant(
     Graph& g,
@@ -71,9 +97,23 @@ c10::optional<Value*> tryInsertConstant(
           return t;
         }));
     n->output()->setType(ListType::ofTensors());
+  } else if (val.isDoubleList()) {
+    auto double_list = val.toDoubleList();
+    n->fs_(
+        attr::value,
+        std::vector<double>(double_list.begin(), double_list.end()));
+    n->output()->setType(ListType::ofFloats());
   } else if (val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if (val.type()->isSubtypeOf(ListType::ofStrings())) {
+    std::vector<std::string> ss;
+    auto generic_list = val.toListRef();
+    for (const IValue& ival : generic_list) {
+      ss.push_back(ival.toStringRef());
+    }
+    n->ss_(attr::value, ss);
+    n->output()->setType(ListType::create(StringType::get()));
   } else if (val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
@@ -81,6 +121,14 @@ c10::optional<Value*> tryInsertConstant(
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
+  } else if (val.isTuple()) {
+    if (insertableIValue(val)) {
+      n->ival_(attr::value, val);
+      n->output()->setType(val.type());
+    } else {
+      n->destroy();
+      return c10::nullopt;
+    };
   } else {
     n->destroy();
     return c10::nullopt;
@@ -131,10 +179,25 @@ RegisterOperators reg({
               push(stack, f);
               return 0;
             };
+          } else if (
+              type->cast<TupleType>() &&
+              node->kindOf(attr::value) == AttributeKind::ival) {
+            const auto& tup = node->ival(attr::value);
+            TORCH_INTERNAL_ASSERT(tup.isTuple());
+            return [tup](Stack& stack) {
+              push(stack, tup);
+              return 0;
+            };
           } else if (type->isSubtypeOf(ListType::ofInts())) {
             const auto& is = node->is(attr::value);
             return [is](Stack& stack) {
               push(stack, is);
+              return 0;
+            };
+          } else if (type->isSubtypeOf(ListType::ofFloats())) {
+            const auto& fs = node->fs(attr::value);
+            return [fs](Stack& stack) {
+              push(stack, fs);
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
@@ -147,6 +210,16 @@ RegisterOperators reg({
             const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
               push(stack, ts);
+              return 0;
+            };
+          } else if (type->isSubtypeOf(ListType::ofStrings())) {
+            const auto& ss = node->ss(attr::value);
+            auto vals = c10::impl::GenericList(StringType::get());
+            for (const auto& str : ss) {
+              vals.push_back(str);
+            }
+            return [vals](Stack& stack) {
+              push(stack, vals);
               return 0;
             };
           } else if (type == StringType::get()) {

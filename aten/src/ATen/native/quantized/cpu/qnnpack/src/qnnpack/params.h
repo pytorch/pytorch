@@ -162,6 +162,12 @@ union pytorch_qnnp_conv_quantization_params {
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
 };
 
+struct pytorch_qnnp_conv_dynamic_quantization_params {
+  int16_t input_zero_point;
+  int16_t kernel_zero_point;
+  float multiplier;
+};
+
 union pytorch_qnnp_requantization_params {
   union pytorch_qnnp_precise_requantization_params precise;
   union pytorch_qnnp_fp32_requantization_params fp32;
@@ -273,6 +279,37 @@ typedef void (*pytorch_q8gemm_ukernel_function)(
     uint8_t* c,
     size_t c_stride,
     const union pytorch_qnnp_conv_quantization_params* quantization_params);
+
+/*
+  Q8 GEMM kernel with support for dynamic quantization.
+
+  The w parameter designates weights, and is to be passed on to this kernel
+  exactly as returned by the pack function.  The initial bias portion of
+  this buffer will be ignored.
+
+  The bias parameter, expects max(nr, 8) floating-point biases.  Technically
+  the kernels only need nr biases from the buffer pointed to by this parameter,
+  but end up reading at most 8 to keep the logic simple and fast.  Consequently,
+  make sure this parameter has enough storage for 8 floating point numbers to
+  avoid triggering out of bound errors.  The remaining 8 - nr biases, if any,
+  will be unused.
+
+  quantization_params contains the quantization parameters, namely input, and
+  kernel zero points, and the multiplier.  The multiplier is expected to be
+  equal to input_scale * kernel_scale.
+*/
+
+typedef void (*pytorch_q8gemm_dq_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    size_t k,
+    const uint8_t* a,
+    size_t a_stride,
+    const void* w,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 typedef void (*pytorch_q8conv_ukernel_function)(
     size_t mr,
@@ -446,6 +483,7 @@ typedef void (*pytorch_q8vadd_ukernel_function)(
 struct pytorch_q8conv_parameters {
   pytorch_q8gemm_ukernel_function gemm;
   pytorch_q8conv_ukernel_function conv;
+  pytorch_q8gemm_dq_ukernel_function gemm_dq;
   uint8_t mr;
   uint8_t nr;
   uint8_t kr;
