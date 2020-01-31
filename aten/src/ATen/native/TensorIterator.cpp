@@ -235,10 +235,6 @@ void TensorIterator::compute_types() {
       }
     }
 
-    if (is_different && !skip_output) {
-      have_differing_types_ = true;
-    }
-
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
@@ -675,7 +671,6 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.allow_cpu_scalars_ = true;
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
-  iter.dynamic_cast_if(iter.dtype() != kBool);
   return iter;
 }
 
