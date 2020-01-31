@@ -9001,8 +9001,8 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(mod.running_mean, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.running_var, torch.tensor([1., 1, 1], device=device))
-        self.assertEqual(mod.weight.grad, None)
-        self.assertEqual(mod.bias.grad, None)
+        self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
+        self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
