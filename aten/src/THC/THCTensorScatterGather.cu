@@ -3,6 +3,7 @@
 #include <THC/THCAtomics.cuh>
 #include <THC/THCApply.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/WrapDimUtils.h>
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
