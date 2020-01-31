@@ -425,7 +425,7 @@ struct MethodValue : public SugaredValue {
           method->ensure_defined();
         } catch (const RecursiveMethodCallError&) {
           throw script::ErrorReport(loc)
-              << " function '" << method->name() << "' is called recursively. "
+              << " method '" << method->name() << "' is called recursively. "
               << "Recursive calls are not supported";
         }
         schemas.push_back(&method->getSchema());
