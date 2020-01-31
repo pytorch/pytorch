@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -14,6 +13,7 @@ namespace rpc {
 c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
@@ -24,11 +24,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       std::move(*scriptCall).toMessage());
 
   // Get function return type to construct c10::ivalue::Future.
-  auto returns = PythonRpcHandler::getInstance()
-                     .jitCompilationUnit()
-                     ->get_function(qualifiedName)
-                     .getSchema()
-                     .returns();
+  auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -56,6 +52,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 std::shared_ptr<UserRRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
@@ -66,11 +63,7 @@ std::shared_ptr<UserRRef> remoteTorchscript(
       "Does not support creating RRef on self yet.");
 
   // Get function return type to construct UserRRef.
-  auto returns = PythonRpcHandler::getInstance()
-                     .jitCompilationUnit()
-                     ->get_function(qualifiedName)
-                     .getSchema()
-                     .returns();
+  auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,

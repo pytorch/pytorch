@@ -342,21 +342,22 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const std::string& qualifiedName,
+         const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        auto name = c10::QualifiedName(qualifiedName);
-        auto fnSchema = PythonRpcHandler::getInstance()
-                            .jitCompilationUnit()
-                            ->get_function(name)
-                            .getSchema();
+        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
+        auto functionSchema = PythonRpcHandler::getInstance()
+                                  .jitCompilationUnit()
+                                  ->get_function(qualifiedName)
+                                  .getSchema();
         auto stack = torch::jit::createStackForSchema(
-            fnSchema, args, kwargs, c10::nullopt);
-        auto fut = rpcTorchscript(dstWorkerName, name, stack);
+            functionSchema, args, kwargs, c10::nullopt);
+        auto fut =
+            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -374,17 +375,18 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_remote_torchscript",
       [](const std::string& dstWorkerName,
-         const std::string& qualifiedName,
+         const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
-        auto name = c10::QualifiedName(qualifiedName);
-        auto fnSchema = PythonRpcHandler::getInstance()
-                            .jitCompilationUnit()
-                            ->get_function(name)
-                            .getSchema();
+        auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
+        auto functionSchema = PythonRpcHandler::getInstance()
+                                  .jitCompilationUnit()
+                                  ->get_function(qualifiedName)
+                                  .getSchema();
         auto stack = torch::jit::createStackForSchema(
-            fnSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(dstWorkerName, name, stack);
+            functionSchema, args, kwargs, c10::nullopt);
+        auto userRRefPtr = remoteTorchscript(
+            dstWorkerName, qualifiedName, functionSchema, stack);
         return PyRRef(userRRefPtr);
       },
       py::call_guard<py::gil_scoped_release>());

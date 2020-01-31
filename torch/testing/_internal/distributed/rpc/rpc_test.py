@@ -248,8 +248,8 @@ def clear_global_rref():
 
 
 @torch.jit.script
-def no_args():
-    a = 1
+def one_arg(value):
+    return value + 1
 
 
 @torch.jit.script
@@ -832,19 +832,27 @@ class RpcTest(RpcAgentTestFixture):
             fut.wait()
 
     @dist_init
-    def test_script_function_exception(self):
-        dst_rank = (self.rank + 1) % self.world_size
+    def test_torchscript_function(self):
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
 
-        with self.assertRaisesRegex(Exception, "no_args"):
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), no_args, args=(10,))
+        ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
 
-        with self.assertRaisesRegex(
-            Exception, r"no_args\(\) expected at most 0 argument"
-        ):
-            rref = rpc.remote("worker{}".format(dst_rank), no_args, args=(10,))
+        rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
 
     @dist_init
-    def test_script_functions_not_supported(self):
+    def test_torchscript_function_exception(self):
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
+            ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
+
+        with self.assertRaisesRegex(
+            Exception, r"one_arg\(\) expected at most"
+        ):
+            rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
+
+    @dist_init
+    def test_torchscript_functions_not_supported(self):
         # Right now _rpc_sync_torchscript does not accept annotated torchscript
         # class name or script module class name or their class method names.
         # But rpc_sync still accepts script class name and run it in
