@@ -635,7 +635,7 @@ void GraphExecutor::run(Stack& inputs) {
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? 1 : 0;
+  return getProfilingMode() ? getBailoutDepth().load() : 0;
 }
 
 ExecutionPlan GraphExecutor::getPlanFor(

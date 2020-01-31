@@ -75,6 +75,8 @@ TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
 TORCH_API std::atomic<bool> &getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
+TORCH_API std::atomic<size_t>& getNumProfiledRuns();
+TORCH_API std::atomic<size_t>& getBailoutDepth();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

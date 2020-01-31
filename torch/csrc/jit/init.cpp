@@ -297,16 +297,10 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
-      .def("_jit_has_cpp_tests", []() {
-        return true;
-      })
+      .def("_jit_has_cpp_tests", []() { return true; })
 #else
-      .def("_jit_run_cpp_tests", []() {
-        throw std::exception();
-      })
-      .def("_jit_has_cpp_tests", []() {
-        return false;
-      })
+      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def("_jit_has_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
@@ -357,6 +351,20 @@ void initJITBindings(PyObject* module) {
             bool oldState = getExecutorMode();
             getExecutorMode() = profiling_flag;
             return oldState;
+          })
+      .def(
+          "_jit_set_num_profiled_runs",
+          [](size_t num) {
+            size_t old_num = getNumProfiledRuns();
+            getNumProfiledRuns() = num;
+            return old_num;
+          })
+      .def(
+          "_jit_set_bailout_depth",
+          [](size_t depth) {
+            size_t old_depth = getBailoutDepth();
+            getBailoutDepth() = depth;
+            return old_depth;
           })
       .def(
           "_jit_set_inline_everything_mode",
