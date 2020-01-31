@@ -9112,12 +9112,11 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
 
-<<<<<<< HEAD
         self.assertEqual(mod.running_mean, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.running_var, torch.tensor([1., 1, 1], device=device))
         self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
         self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
-=======
+
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -9141,7 +9140,6 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp, check_size=False)
->>>>>>> master
 
     def test_one_hot(self, device):
         with self.assertRaises(RuntimeError):
