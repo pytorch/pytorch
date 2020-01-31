@@ -41,10 +41,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <ATen/native/cuda/ROCmWorkaround.cuh>
-#endif
-
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
 // the host, even if the function is typically only executed on the device.
@@ -255,13 +251,8 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
     args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
   }
 
-#ifdef __HIP_PLATFORM_HCC__
-  rocm::workaround::enable_default_constructor<return_t> results[policy_t::thread_work_size];
-  rocm::workaround::enable_default_constructor<arg_t> args[policy_t::thread_work_size][nargs];
-#else
   return_t results[policy_t::thread_work_size];
   arg_t args[policy_t::thread_work_size][nargs];
-#endif
 
   // load
   #pragma unroll
