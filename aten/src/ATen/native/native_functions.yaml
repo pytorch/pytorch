@@ -918,17 +918,11 @@
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
 
-- func: _cummax_helper(Tensor self, int dim) -> (Tensor values, Tensor indices)
+- func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
-    CPU: cummax_helper
-    CUDA: cummax_helper
-
-- func: _cummax_helper.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  variants: function
-  dispatch:
-    CPU: cummax_helper_out_cpu
-    CUDA: cummax_helper_out_cuda
+    CPU: cummax_helper_cpu
+    CUDA: cummax_helper_cuda
 
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
@@ -944,17 +938,11 @@
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
 
-- func: _cummin_helper(Tensor self, int dim) -> (Tensor values, Tensor indices)
+- func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
   variants: function
   dispatch:
-    CPU: cummin_helper
-    CUDA: cummin_helper
-
-- func: _cummin_helper.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  variants: function
-  dispatch:
-    CPU: cummin_helper_out_cpu
-    CUDA: cummin_helper_out_cuda
+    CPU: cummin_helper_cpu
+    CUDA: cummin_helper_cuda
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   supports_named_tensor: True
