@@ -328,9 +328,10 @@ class BuildExtension(build_ext, object):
                                     extra_postargs=None,
                                     depends=None):
             """Compiles sources by outputting a ninja file and running it."""
-            # NB: We're using private functions on self.compiler (which is
-            # an instance of distutils.UnixCCompiler). This can be fragile,
-            # but a lot of other repos also do this
+            # NB: I copied some lines from self.compiler (which is an instance
+            # of distutils.UnixCCompiler). See the following link.
+            # https://github.com/python/cpython/blob/f03a8f8d5001963ad5b5b28dbd95497e9cc15596/Lib/distutils/ccompiler.py#L564-L567
+            # This can be fragile, but a lot of other repos also do this
             # (see https://github.com/search?q=_setup_compile&type=Code)
             # so it is probably OK; we'll also get CI signal if/when
             # we update our python version (which is when distutils can be
@@ -1206,9 +1207,13 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
         sys.stdout.flush()
         sys.stderr.flush()
         if sys.version_info >= (3, 5):
+            # Don't pass an argument for `stdout` to subprocess.run.
+            # Sometimes (I don't know why) sys.__stdout__ can get
+            # detached before entering this function. Furthemore, passing
+            # `stdout` to subprocess.run calls it to try to grab
+            # `sys.__stdout__`. Avoid passing it if possible.
             subprocess.run(
                 ['ninja', '-v'],
-                stdout=None if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 check=True)
