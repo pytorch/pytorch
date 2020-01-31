@@ -213,6 +213,12 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               "max only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "max only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device().type() == max.device().type(),
+              "expected device type ", self.device().type(), " but got ",
+              max.device().type(), " for max values output");
+  TORCH_CHECK(self.device().type() == max_indices.device().type(),
+              "expected device type ", self.device().type(), " but got ",
+              max_indices.device().type(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     AT_ASSERT(max.dim() == 0);
@@ -271,6 +277,12 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
               "min only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "min only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device().type() == min.device().type(),
+              "expected device type ", self.device().type(), " but got ",
+              min.device().type(), " for min values output");
+  TORCH_CHECK(self.device().type() == min_indices.device().type(),
+              "expected device type ", self.device().type(), " but got ",
+              min_indices.device().type(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     AT_ASSERT(min.dim() == 0);
