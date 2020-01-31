@@ -30,7 +30,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       "function_taking_optional",
       &function_taking_optional,
       "function_taking_optional");
-  py::class_<MatrixMultiplier>(m, "MatrixMultiplier", py::module_local())
+  py::class_<MatrixMultiplier>(m, "MatrixMultiplier")
       .def(py::init<int, int>())
       .def("forward", &MatrixMultiplier::forward)
       .def("get", &MatrixMultiplier::get);

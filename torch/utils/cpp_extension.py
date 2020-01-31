@@ -29,9 +29,10 @@ def _find_cuda_home():
         # Guess #2
         try:
             which = 'where' if IS_WINDOWS else 'which'
-            nvcc = subprocess.check_output(
-                [which, 'nvcc']).decode().rstrip('\r\n')
-            cuda_home = os.path.dirname(os.path.dirname(nvcc))
+            with open(os.devnull, 'w') as devnull:
+                nvcc = subprocess.check_output([which, 'nvcc'],
+                                               stderr=devnull).decode().rstrip('\r\n')
+                cuda_home = os.path.dirname(os.path.dirname(nvcc))
         except Exception:
             # Guess #3
             if IS_WINDOWS:
@@ -236,8 +237,8 @@ class BuildExtension(build_ext, object):
 
     ``use_ninja`` (bool): If ``use_ninja`` is ``True`` (default), then we
     attempt to build using the Ninja backend. Ninja greatly speeds up
-    compilation compared to the standard ``setuptools.build_ext``. Errors
-    out if we cannot find Ninja.
+    compilation compared to the standard ``setuptools.build_ext``.
+    Fallbacks to the standard distutils backend if Ninja is not available.
     '''
 
     @classmethod
@@ -256,13 +257,17 @@ class BuildExtension(build_ext, object):
         super(BuildExtension, self).__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
-        self.use_ninja = kwargs.get('use_ninja', False)
-        if self.use_ninja and IS_WINDOWS:
+        self.use_ninja = kwargs.get('use_ninja', True)
+        if self.use_ninja:
+            # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
-                   'we don\'t support this on windows yet. Falling back to '
-                   'using the slow distutils backend.')
-            warnings.warn(msg.format('we don\'t support this on windows yet'))
-            self.use_ninja = False
+                   '{}. Falling back to using the slow distutils backend.')
+            if IS_WINDOWS:
+                warnings.warn(msg.format('we don\'t support this on windows yet'))
+                self.use_ninja = False
+            elif not _is_ninja_available():
+                warnings.warn(msg.format('we could not find ninja.'))
+                self.use_ninja = False
 
     def build_extensions(self):
         self._check_abi()
@@ -967,10 +972,8 @@ def _write_ninja_file_and_compile_objects(
         verbose,
         with_cuda):
     verify_ninja_availability()
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    assert not IS_WINDOWS
+    compiler = os.environ.get('CXX', 'c++')
     check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1045,18 +1048,23 @@ def _write_ninja_file_and_build_library(
         error_prefix="Error building extension '{}'".format(name))
 
 
+def _is_ninja_available():
+    with open(os.devnull, 'wb') as devnull:
+        try:
+            subprocess.check_call('ninja --version'.split(), stdout=devnull)
+        except OSError:
+            return False
+        else:
+            return True
+
+
 def verify_ninja_availability():
     '''
     Returns ``True`` if the `ninja <https://ninja-build.org/>`_ build system is
     available on the system.
     '''
-    with open(os.devnull, 'wb') as devnull:
-        try:
-            subprocess.check_call('ninja --version'.split(), stdout=devnull)
-        except OSError:
-            raise RuntimeError("Ninja is required to load C++ extensions")
-        else:
-            return True
+    if not _is_ninja_available():
+        raise RuntimeError("Ninja is required to load C++ extensions")
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
