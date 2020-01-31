@@ -29,7 +29,7 @@ class IRParser {
         type_parser(L, /*parse_complete_tensor_types*/ true) {}
 
   std::string parseVar();
-  VarWithType parseVarWithType();
+  VarWithType parseVarWithType(bool allow_optional = false);
   ParsedLiteral parseScalarLiteral(Node* n);
 
   void parse();
@@ -95,10 +95,14 @@ void parseIR(const std::string& str, torch::jit::Graph* graph) {
   parseIR(str, graph, vmap);
 }
 
-VarWithType IRParser::parseVarWithType() {
+VarWithType IRParser::parseVarWithType(bool allow_optional) {
   VarWithType r;
   r.name = parseVar();
-  r.type = TensorType::get();
+  if (allow_optional) {
+    r.type = nullptr;
+  } else {
+    r.type = TensorType::get();
+  }
   if (L.nextIf(':')) {
     auto type_alias = type_parser.parseType();
     AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
@@ -127,7 +131,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
     return;
   }
   parseList(TK_NOTHING, ',', TK_NOTHING, [&] {
-    outs->push_back(parseVarWithType());
+    outs->push_back(parseVarWithType(true));
   });
   L.expect('=');
 }
@@ -347,11 +351,30 @@ void IRParser::parseOperator(Block* b) {
   // Parse attributes and inputs.
   parseOperatorInputs(n);
 
+  const FunctionSchema* schema = n->maybeSchema();
+
   // Register outputs.
   int idx = 0;
   for (const VarWithType& v : outs) {
-    vmap[v.name] = n->outputs()[idx++];
-    vmap[v.name]->setType(v.type);
+    vmap[v.name] = n->outputs()[idx];
+    if (schema && !schema->is_varret()) {
+      auto schema_return_type = schema->returns().at(idx).type();
+      if (!v.type) {
+        vmap[v.name]->setType(schema_return_type);
+      } else {
+        if (*v.type != *schema_return_type) {
+          throw ErrorReport(L.cur().range)
+              << "Annotated type " << v.type->python_str()
+              << " does not match schema type "
+              << schema_return_type->python_str() << " for operator "
+              << *schema;
+        }
+        vmap[v.name]->setType(v.type);
+      }
+    } else {
+      vmap[v.name]->setType(v.type ? v.type : TensorType::get());
+    }
+    idx++;
   }
 
   // Insert the new node into block B.
