@@ -721,4 +721,122 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 }
 
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
+  return bmm_out_sparse_cuda(result, self, mat2);
+}
+
+// Search a sorted array for the rightmost instance of a value.
+// Array must be sorted from lowest to highest
+template<typename scalar_t>
+scalar_t binary_search_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t length, bool* found) {
+  // Since upper_bound finds the first value greater than our
+  // target value, we need to subtract its result by 1 to get
+  // the value we actually want
+  scalar_t* val_ptr = std::upper_bound(sorted_arr, sorted_arr+length, search_val) - 1;
+
+  // If our pointer is now less than the array pointer, then
+  // the first value encountered was too large, and the array
+  // does not contain the target. Or if upper_bound reached the
+  // end without finding the value, our pointer will not be
+  // pointing to the target value.
+  if ((val_ptr < sorted_arr) || (*val_ptr != search_val)) {
+    *found = false;
+    return -1;
+  } else {
+    *found = true;
+    return (val_ptr - sorted_arr);
+  }
+}
+
+Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+  TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
+
+  TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
+  TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
+  TORCH_CHECK(mat2.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2.dim());
+
+  TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
+  TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+
+  // First need to coalesce to get all of the first dimension indices
+  // in order since we'll be sending each matrix into the MM operation
+  SparseTensor self_coalesced;
+
+  if (!self.is_coalesced()){
+    self_coalesced = self.coalesce();
+  } else {
+    self_coalesced = self;
+  }
+
+  int64_t nnz =        self_coalesced._nnz();
+  LongTensor indices = self_coalesced._indices();
+  Tensor values =      self_coalesced._values();
+
+  LongTensor indices_dim0_cpu = indices[0].cpu();
+
+  int64_t* indices_dim0 = &(indices_dim0_cpu.accessor<int64_t, 1>()[0]);
+  LongTensor indices_dim1_dim2 = indices.slice(0, 1, 3);
+
+  int64_t dim_i = self_coalesced.size(1);
+  int64_t dim_j = self_coalesced.size(2);
+  int64_t dim_k = mat2.size(2);
+
+  Scalar beta = 0;
+  Tensor t = at::ones({self_coalesced.size(1)});
+  Scalar alpha = 1;
+
+  int64_t mat_el_begin_idx = 0;
+
+  int64_t num_matrices = self_coalesced.size(0);
+
+  int64_t cur_mat_num = indices_dim0[0];
+  // Iterate through each set of 2D matrices within the 3D
+  // tensor inputs, performing a matrix multiply with each
+  for (;
+    (cur_mat_num < num_matrices) && (mat_el_begin_idx < nnz);
+    cur_mat_num++
+  ) {
+    bool mat_end_found;
+
+    // Search for the range of sparse tensor elements that
+    // correspond to the current matrix number. We already know
+    // where the current matrix begins, so we just need to find
+    // the end. The search excludes everything to the left of
+    // the starting point, for best performance
+    int64_t mat_el_end_idx = binary_search_rightmost(
+      cur_mat_num,
+      indices_dim0+mat_el_begin_idx,
+      nnz-mat_el_begin_idx,
+      &mat_end_found
+    ) + mat_el_begin_idx;
+
+    if (mat_end_found) {
+      mat_el_end_idx++;
+
+      // Create tensors to view just the current set of matrices
+      const Tensor dense_matrix = mat2[cur_mat_num];
+      Tensor result_matrix = result[cur_mat_num];
+      LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
+      Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
+      int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
+
+      AT_DISPATCH_FLOATING_TYPES(
+          sparse_values.scalar_type(), "addmm_sparse_cuda", [&] {
+            s_addmm_out_sparse_dense_cuda_worker<scalar_t>(
+              sparse_nnz,
+              dim_i, dim_j, dim_k,
+              result_matrix,
+              beta, t, alpha,
+              sparse_indices, sparse_values,
+              dense_matrix
+            );
+          }
+      );
+      mat_el_begin_idx = mat_el_end_idx;
+    }
+  }
+  return result;
+}
+
 }} // namespace at::native
