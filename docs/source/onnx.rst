@@ -231,6 +231,13 @@ The dynamic control flow is captured correctly. We can verify in backends with d
     #       [37, 37, 37]], dtype=int64)]
 
 
+TorchVision support
+-------------------
+
+All TorchVision models, except for quantized versions, are exportable to ONNX.
+More details can be found in `TorchVision <../torchvision/models.html>`_.
+
+
 Limitations
 -----------
 
@@ -427,6 +434,7 @@ Adding support for operators
 ----------------------------
 
 Adding export support for operators is an *advance usage*.
+
 To achieve this, developers need to touch the source code of PyTorch.
 Please follow the `instructions <https://github.com/pytorch/pytorch#from-source>`_
 for installing PyTorch from source.
@@ -685,7 +693,9 @@ Q: Is tensor in-place indexed assignment like `data[index] = new_data` supported
 
 Q: Is tensor list exportable to ONNX?
 
-  Yes, this is supported now for ONNX opset version >= 11. E.g.: ::
+  Yes, this is supported now for ONNX opset version >= 11. ONNX introduced the concept of Sequence in opset 11.
+  Similar to list, Sequence is a data type that contains arbitrary number of Tensors.
+  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc. E.g.: ::
 
     class ListLoopModel(torch.nn.Module):
         def forward(self, x):
