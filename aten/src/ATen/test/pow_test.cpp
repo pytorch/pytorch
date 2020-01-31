@@ -201,19 +201,15 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
       const auto exp = static_cast<T>(std::pow(val, pow));
 
       const auto act_pow = actual_pow[i].template item<T>();
-      std::cout << "val: " << val << " pow: " << pow << " act_pow: " << act_pow << " exp: " << exp << std::endl;
       assert_eq(val, act_pow, exp);
 
       const auto act_pow_ = actual_pow_[i].template item<T>();
-      std::cout << "val: " << val << " pow: " << pow << " act_pow_: " << act_pow_ << " exp: " << exp << std::endl;
       assert_eq(val, act_pow_, exp);
 
       const auto act_pow_out = actual_pow_out[i].template item<T>();
-      std::cout << "val: " << val << " pow: " << pow << " act_pow_out: " << act_pow_out << " exp: " << exp << std::endl;
       assert_eq(val, act_pow_out, exp);
 
       const auto act_torch_pow = actual_torch_pow[i].template item<T>();
-      std::cout << "val: " << val << " pow: " << pow << " act_torch_pow: " << act_torch_pow << " exp: " << exp << std::endl;
       assert_eq(val, act_torch_pow, exp);
 
       i++;
