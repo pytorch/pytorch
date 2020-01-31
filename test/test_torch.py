@@ -13676,13 +13676,20 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     @onlyCPU
-    def test_max_min_mixed_devices(self, device):
+    def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
         if torch.cuda.is_available():
             values = torch.randn(10).cuda()
             indices = torch.cuda.LongTensor()
             self.assertRaises(RuntimeError,
                               lambda: torch.max(a, 0, out=(values, indices)))
+
+    @onlyCPU
+    def test_min_mixed_devices(self, device):
+        a = torch.randn(10, device=device)
+        if torch.cuda.is_available():
+            values = torch.randn(10).cuda()
+            indices = torch.cuda.LongTensor()
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
 
