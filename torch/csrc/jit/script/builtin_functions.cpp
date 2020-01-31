@@ -9,10 +9,6 @@ namespace script {
 
 auto scalar_operators_source = CodeTemplate(
     R"SCRIPT(
-def mul(a : ${Scalar}, b : Tensor) -> Tensor:
-  return b * a
-def add(a : ${Scalar}, b : Tensor) -> Tensor:
-  return b + a
 def ne(a : ${Scalar}, b : Tensor) -> Tensor:
   return b != a
 def eq(a : ${Scalar}, b : Tensor) -> Tensor:
@@ -25,10 +21,6 @@ def gt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b < a
 def ge(a : ${Scalar}, b : Tensor) -> Tensor:
   return b <= a
-def sub(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.neg(b) + a
-def div(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.reciprocal(b) * a
 )SCRIPT");
 
 auto _ntuple_ops = CodeTemplate(
