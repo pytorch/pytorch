@@ -15,8 +15,6 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       the_message(e.the_message),
       error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
-ErrorReport::ErrorReport()
-    : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
 ErrorReport::ErrorReport(SourceRange r)
     : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
 
