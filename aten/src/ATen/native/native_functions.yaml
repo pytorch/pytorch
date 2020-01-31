@@ -507,6 +507,34 @@
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
 
+- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
+  python_module: nn
+  variants: function
+  dispatch:
+    CPU: binary_cross_entropy_cpu
+    CUDA: binary_cross_entropy_cuda
+
+- func: binary_cross_entropy.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  variants: function
+  dispatch:
+    CPU: binary_cross_entropy_out_cpu
+    CUDA: binary_cross_entropy_out_cuda
+
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
+  python_module: nn
+  variants: function
+  dispatch:
+    CPU: binary_cross_entropy_backward_cpu
+    CUDA: binary_cross_entropy_backward_cuda
+
+- func: binary_cross_entropy_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  variants: function
+  dispatch:
+    CPU: binary_cross_entropy_backward_out_cpu
+    CUDA: binary_cross_entropy_backward_out_cuda
+
 - func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   variants: function
 
@@ -1041,9 +1069,9 @@
 # applying indices = indices.contiguous().
 # The backward functions apply a check that these input tensors are contiguous.
 
-- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
 
-- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
@@ -4292,9 +4320,6 @@
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_exponential_
-    CUDA: exponential_cuda_
   supports_named_tensor: True
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
@@ -5254,11 +5279,13 @@
   dispatch:
     CPU: legacy::cpu::_th_cat
     CUDA: legacy::cuda::_th_cat
+    QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_cat_out
     CUDA: legacy::cuda::_th_cat_out
+    QuantizedCPU: quantized_cat_out
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
@@ -5291,30 +5318,6 @@
     CUDA: legacy::cuda::_th_min_out
 
 ## NN wrappers
-
-- func: binary_cross_entropy.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_binary_cross_entropy_forward_out
-    CUDA: legacy::cuda::_thnn_binary_cross_entropy_forward_out
-
-- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_binary_cross_entropy_forward
-    CUDA: legacy::cuda::_thnn_binary_cross_entropy_forward
-
-- func: binary_cross_entropy_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_binary_cross_entropy_backward_out
-    CUDA: legacy::cuda::_thnn_binary_cross_entropy_backward_out
-
-- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_binary_cross_entropy_backward
-    CUDA: legacy::cuda::_thnn_binary_cross_entropy_backward
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

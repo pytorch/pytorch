@@ -388,22 +388,10 @@ auto ConvParams::use_cudnn_depthwise(
 }
 
 static void check_shape_forward(const at::Tensor& input,
-                                const at::Tensor& weight, const at::Tensor& bias,
+                                const c10::IntArrayRef& weight_sizes, const at::Tensor& bias,
                                 const ConvParams& params, bool input_is_mkldnn) {
   int64_t k = input.ndimension();
-  int64_t weight_dim = weight.ndimension();
-  std::vector<int64_t> weight_sizes(weight_dim);
-  // mkldnn conv2d weights could have been re-ordered to 5d by
-  // mkldnn_reorder_conv2d_weight
-  if ((weight_dim == k + 1) && input_is_mkldnn) {
-    weight_sizes[0] = weight.size(0) * weight.size(1);
-    std::copy_n(
-        weight.sizes().cbegin() + 2, k - 1, weight_sizes.begin() + 1);
-    weight_dim = k;
-  } else {
-    std::copy_n(
-        weight.sizes().cbegin(), weight_dim, weight_sizes.begin());
-  }
+  int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
   auto padding = params.padding;
   auto output_padding = params.output_padding;
@@ -424,8 +412,8 @@ static void check_shape_forward(const at::Tensor& input,
            " at dimension 0, but got weight of size ", weight_sizes, " instead");
   TORCH_CHECK(weight_sizes[0] % groups == 0,
            "Given groups=", groups, ", expected weight to be divisible by ",
-           groups, " at dimension 0, but got weight of size ", weight_sizes,
-           " instead");
+           groups, " at dimension 0, but got weight of size [", weight_sizes,
+           "] instead");
 
   if (!transposed) {
     std::vector<int64_t> input_shape;
@@ -577,10 +565,18 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
+  std::vector<int64_t> weight_sizes_mkl;
+  c10::IntArrayRef weight_sizes = weight.sizes();
   if (input_is_mkldnn && (k == input.ndimension() + 1)) {
     k = input.ndimension();
+    weight_sizes_mkl.resize(k);
+    weight_sizes_mkl[0] = weight.size(0) * weight.size(1);
+    std::copy_n(
+        weight.sizes().cbegin() + 2, k - 1, weight_sizes_mkl.begin() + 1);
+    weight_sizes = c10::IntArrayRef(weight_sizes_mkl);
   }
   int64_t dim = k - 2;
+  
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
@@ -595,7 +591,26 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  check_shape_forward(input, weight, bias, params, input_is_mkldnn);
+  check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
+
+  if (input.size(0) == 0) {    
+    // don't send empty inputs through backends
+    // but need to compute correct output size first and set up history for params
+    std::vector<int64_t> o;
+    if (!params.transposed) {
+      o = conv_output_size(input.sizes(), weight_sizes, params.padding,
+                           params.stride, params.dilation);
+    } else {
+      o = conv_input_size(input.sizes(), weight_sizes, params.padding,
+                          params.output_padding, params.stride, params.dilation,
+                          params.groups);
+    }
+    auto weight_view = at::_unsafe_view(weight, -1);
+    auto out = input*weight_view[0];
+    if (bias.defined())
+      out = out + bias[0];
+    return out.view(o);
+  }
 
   if (k == 3) {
     // avoid accidentally going through NHWC for permuted 3d input.
