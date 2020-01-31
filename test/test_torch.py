@@ -13571,14 +13571,12 @@ class TestTorchDeviceType(TestCase):
         # Check all combinations: fp16 input - fp16 output, fp16 input - fp32
         # output, fp32 input - fp16 output, fp32 input - fp32 output
         for dtype_output in [torch.float16, torch.float32]:
-            result_expected = torch.tensor([2592], dtype=dtype_output, device=device)
+            result_expected = torch.tensor(2592, dtype=dtype_output, device=device)
             output = torch.prod(x, dtype=dtype_output)
-            result = torch.tensor([output.item()], dtype=output.dtype, device=output.device)
-            self.assertEqual(result, result_expected)
+            self.assertEqual(output, result_expected)
 
             output = x.prod(dtype=dtype_output)
-            result = torch.tensor([output.item()], dtype=output.dtype, device=output.device)
-            self.assertEqual(result, result_expected)
+            self.assertEqual(output, result_expected)
 
     @onlyCPU
     @dtypes(torch.float)
