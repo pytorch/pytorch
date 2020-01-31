@@ -1587,13 +1587,13 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         class TestModule(torch.nn.Module):
             def __init__(self):
                 super(TestModule, self).__init__()
-                self.conv1 = torch.nn.Conv2d(5, 5, 3)
+                self.conv1 = torch.nn.Conv2d(5, 5, 3, bias=False)
                 self.bn1 = torch.nn.BatchNorm2d(num_features=5)
                 self.bn1.running_mean.fill_(-0.2)
                 self.bn1.bias = torch.nn.Parameter(torch.rand([5]))
                 # to make sure new bias is not zero
                 self.bn1.eps = 0.0023
-                self.conv2 = torch.nn.Conv2d(5, 5, 3)
+                self.conv2 = torch.nn.Conv2d(5, 5, 3, bias=False)
                 self.bn2 = torch.nn.BatchNorm2d(num_features=5)
                 self.bn2.eps = 0.0029
                 self.relu = torch.nn.ReLU()
@@ -1611,7 +1611,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         torch._C._jit_pass_dedup_module_uses(scripted._c)
 
         folded = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
-        folded._c.dump()
         x = torch.rand(1, 5, 6, 6)
         self.assertEqual(eager(x), scripted(x))
 
