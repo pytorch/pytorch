@@ -1412,6 +1412,16 @@ class FoldConvBatchNorm2dHelper {
    */
   void transform();
 
+  /**
+   * Since multiple conv module instances could share the same type
+   * and folding means changing the ClassType (by removing "bias" attribute and adding
+   * "bias" parameter for the conv modules with bias of None,
+   * there can be a case when two conv instances share the same ClassType
+   * but we're only going to fold one of them, therefore we have to
+   * set the bias for the ones that are not folded.
+   */
+  void restoreNoneBias(script::Module& module);
+
  private:
   bool tryExtractingConvBNParameters(
       script::Module& conv,
@@ -1428,8 +1438,9 @@ class FoldConvBatchNorm2dHelper {
   std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
       const ConvBNParameters& p);
 
-  std::unordered_map<ClassTypePtr, int> removed_bias_slot_;
+  std::unordered_map<Graph*, std::unordered_map<ClassTypePtr, int>> removed_bias_slot_;
   std::unordered_map<script::ModulePtr, std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
+  std::unordered_set<ClassTypePtr> modified_conv_types_;
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
@@ -1512,6 +1523,7 @@ graph(%self, %x):
 
       GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
       Graph* g = method.graph().get();
+      bool is_folded_graph = removed_bias_slot_.count(g);
       for (const Match& match : matches) {
         GRAPH_DEBUG("Checking next match...");
         Node* matched_conv = match.nodes_map.at(pattern_conv);
@@ -1541,11 +1553,13 @@ graph(%self, %x):
         auto new_w_b = computeUpdatedConvWeightAndBias(params);
         conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
 
-        if (removed_bias_slot_.count(conv_submodule.type())) {
+        if (is_folded_graph && removed_bias_slot_.at(g).count(conv_submodule.type())) {
           GRAPH_UPDATE("Replaying the slot removal in conv_submodule and skipping the"
                        " rest of the modifications");
+          TORCH_INTERNAL_ASSERT(!conv_submodule.hasattr("bias"),
+                                "bias attribute of Conv is expected to be removed.");
           conv_submodule._ivalue()->unsafeRemoveSlot(
-              removed_bias_slot_.at(conv_submodule.type()));
+              removed_bias_slot_.at(g).at(conv_submodule.type()));
           continue;
         }
         // We are using a separate vector for saving Values we want to rewrite to
@@ -1562,8 +1576,16 @@ graph(%self, %x):
             matched_conv->output()->debugName());
 
         nodes_to_delete_.insert(matched_bn);
+        nodes_to_delete_.insert(matched_bn_submodule);
         GRAPH_UPDATE("Deleting ", *matched_bn);
+        GRAPH_UPDATE("Deleting ", *matched_bn_submodule);
 
+        // The bias attribute can be deleted when we traverse
+        // previous Graphs which refers to the conv instance
+        // of the same type
+        if (!conv_submodule.hasattr("bias")) {
+          continue;
+        }
         auto slot = conv_submodule.type()->getAttributeSlot("bias");
         // We need to remove the attribute field before adding parameter field
         if (!conv_submodule.type()->is_parameter(slot)) {
@@ -1575,9 +1597,9 @@ graph(%self, %x):
               "Removing existing bias attribute from conv module");
           conv_submodule._ivalue()->unsafeRemoveAttr("bias");
           conv_submodule.type()->unsafeRemoveAttribute("bias");
-          removed_bias_slot_[conv_submodule.type()] = slot;
+          removed_bias_slot_[g][conv_submodule.type()] = slot;
+          modified_conv_types_.insert(conv_submodule.type());
         }
-
       } // matches
     } // methods
   } // while
@@ -1588,8 +1610,8 @@ void FoldConvBatchNorm2dHelper::transform() {
     script::Module conv(item.first);
     auto w_b = item.second;
     conv.setattr("weight", std::get<0>(w_b));
-    // registering a parameter field (not attribute field)
-    conv.register_parameter("bias", std::get<1>(w_b), false);
+    // registering bias as an attribute field
+    conv.register_parameter("bias", std::get<1>(w_b), true);
   }
 
   // Perform planned rewritings
@@ -1604,6 +1626,21 @@ void FoldConvBatchNorm2dHelper::transform() {
   for (auto n : nodes_to_delete_) {
     n->destroy();
   }
+}
+
+void FoldConvBatchNorm2dHelper::restoreNoneBias(script::Module& module) {
+
+  for (script::Module m : module.children()) {
+    restoreNoneBias(m);
+    if (modified_conv_types_.count(m.type()) &&
+        m.num_slots() < m.type()->numAttributes()) {
+      TORCH_INTERNAL_ASSERT(m.num_slots() + 1 == m.type()->numAttributes(),
+                            "Unexpected number of slots when restoring None bias for "
+                            "conv module instances");
+      m.register_attribute("bias", NoneType::get(), IValue());
+    }
+  }
+
 }
 
 } // namespace
@@ -1655,6 +1692,7 @@ script::Module FoldConvBatchNorm2d(const script::Module& module) {
   script::Module m = module.clone();
   h.analyze(m);
   h.transform();
+  h.restoreNoneBias(m);
   return m;
 }
 
