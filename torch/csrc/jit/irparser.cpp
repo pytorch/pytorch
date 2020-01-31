@@ -345,8 +345,10 @@ void IRParser::parseOperator(Block* b) {
   parseOperatorOutputs(&outs);
 
   // Parse the name and create the corresponding node in the graph.
+  auto source_range = L.cur().range;
   std::string name = parseOperatorName();
-  Node* n = g->create(Symbol::fromQualString(name), {}, outs.size());
+  Node* n = g->create(Symbol::fromQualString(name), {}, outs.size())
+                ->setSourceRange(source_range);
 
   // Parse attributes and inputs.
   parseOperatorInputs(n);
@@ -362,8 +364,11 @@ void IRParser::parseOperator(Block* b) {
       if (!v.type) {
         vmap[v.name]->setType(schema_return_type);
       } else {
-        if (!v.type->isSubtypeOf(schema_return_type)) {
-          throw ErrorReport(L.cur().range)
+        // Don't currently support checking against type variables
+        // TODO: support?
+        if (!schema_return_type->hasFreeVariables() &&
+            !v.type->isSubtypeOf(schema_return_type)) {
+          throw ErrorReport(source_range)
               << "Annotated type " << v.type->python_str()
               << " does not match schema type "
               << schema_return_type->python_str() << " for operator "
