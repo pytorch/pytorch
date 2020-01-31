@@ -1510,9 +1510,7 @@ private:
   // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
   // equivalent to having an autograd_meta_ pointing to a default constructed
   // AutogradMeta; intuitively, tensors which don't require grad will have this
-  // field set to null.  If !key_set_.has(VariableTensorId), then
-  // autograd_meta == nullptr (but not vice versa, due to the nullptr
-  // optimization)
+  // field set to null.
   //
   // This means accessors on autograd_meta_ have to be careful to test if they
   // got a nullptr, and handle default behavior appropriately in that case.
@@ -1581,23 +1579,9 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of DispatchKeys which describe this tensor
-  //
-  // INVARIANT: key_set_.has(DispatchKey::VariableTensorId) (every tensor
-  // is a variable).  Historically this was not the case (there was a
-  // distinction between plain tensors and variables), but because
-  // we merged Variable and Tensor, this invariant now always holds.
-  // This invariant is currently enforced in the constructor of TensorImpl.
-  //
-  // You might be wondering why we don't just not include VariableTensorId
-  // from the type set, if it is always set.  The answer is, we still need
-  // to dispatch differently from variables, and then mask out the variable
-  // id once we are done handling autograd.  If the boolean here was
-  // inverted, we wouldn't be able to get autograd codepath (since there's
-  // be no DispatchKey to dispatch to!)  We cannot set VariableTensorId
-  // as the default value contained in the *included* tensor type id set
-  // as TLS requires our state to be zero-initialized (i.e., it is not
-  // included).
+  // The set of DispatchKeys which describe this tensor.  NB: this
+  // does NOT include VariableTensorId (historically, it did, but
+  // not anymore!)
   DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you
