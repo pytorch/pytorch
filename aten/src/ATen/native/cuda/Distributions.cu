@@ -453,7 +453,7 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
    });
 }
 
-void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cuda", [&] {
     if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
@@ -483,6 +483,14 @@ void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator
         random_func);
     }
    });
+}
+
+void random_full_64_range_kernel(TensorIterator& iter, Generator* gen_) {
+  // TODO
+}
+
+void random_kernel(TensorIterator& iter, Generator* gen_) {
+  // TODO
 }
 
 void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
@@ -539,7 +547,7 @@ void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, Generato
    });
 }
 
-void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
+void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
@@ -550,6 +558,9 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for exponential transformation
       auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
+        if (lambda == static_cast<accscalar_t>(0.0)) {
+          return static_cast<scalar_t>(0.0);
+        }
         accscalar_t sample;
         // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
         // Hence, squash the 1 to just below 1.
@@ -567,6 +578,9 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     } else {
       // use __logf fast approximation for peak bandwidth
       auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
+        if (lambda == static_cast<accscalar_t>(0.0)) {
+          return static_cast<scalar_t>(0.0);
+        }
         accscalar_t sample;
         if(rand == static_cast<accscalar_t>(1.0)) {
           sample = __logf(nextafter_1_0_float);
@@ -723,12 +737,6 @@ Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
   return ret;
 }
 
-Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  exponential_kernel_cuda(iter, lambda, gen);
-  return self;
-}
-
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
@@ -737,8 +745,11 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
 }
 
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel_cuda);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
+REGISTER_DISPATCH(random_full_64_range_stub, &random_full_64_range_kernel);
 
 }} // namespace at::native

@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/Optional.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -114,10 +115,13 @@ namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
+DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(random_stub);
+DEFINE_DISPATCH(random_from_to_stub);
+DEFINE_DISPATCH(random_full_64_range_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -199,6 +203,13 @@ Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
   return self;
 }
 
+Tensor& exponential_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_stub(iter.device_type(), iter, lambda, gen);
+  return self;
+}
+
 Tensor& geometric_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::nullary_op(self);
@@ -208,28 +219,27 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
 
 Tensor& random_(Tensor& self, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
-  uint64_t range;
-  auto iter_scalar_type = iter.dtype();
-  if (isFloatingType(iter_scalar_type)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter_scalar_type, "random_range_calc", [&] {
-      range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
-    });
-  } else if (iter.dtype() == ScalarType::Bool) {
-    range = 2;
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_range_calc", [&] {
-      range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
-    });
-  }
-  random_stub(iter.device_type(), iter, range, 0, gen);
+  random_stub(iter.device_type(), iter, gen);
   return self;
 }
 
-Tensor& random_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
-  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
+Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen) {
+  uint64_t range;
   auto iter = TensorIterator::nullary_op(self);
-  uint64_t range = to - from;
-  random_stub(iter.device_type(), iter, range, from, gen);
+  if (to) {
+    // [from, to)
+    TORCH_CHECK(from < *to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", *to);
+    range = *to - from;
+    random_from_to_stub(iter.device_type(), iter, range, from, gen);
+  } else if (from != std::numeric_limits<int64_t>::lowest()) {
+    // [from, std::numeric_limits<int64_t>::max()]
+    range = std::numeric_limits<int64_t>::max() - from + 1;
+    random_from_to_stub(iter.device_type(), iter, range, from, gen);
+  } else {
+    // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
+    // range = 2^64
+    random_full_64_range_stub(iter.device_type(), iter, gen);
+  }
   return self;
 }
 

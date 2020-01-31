@@ -19,6 +19,7 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/Math.h>
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/cpu/DistributionTemplates.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -253,14 +254,8 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
 }
 
 static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator* gen) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cauchy_cpu", [&]() {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [median, sigma, generator]() -> scalar_t {
-      at::cauchy_distribution<double> cauchy(median, sigma);
-      return (scalar_t)cauchy(generator);
-    });
-  });
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  templates::cauchy_kernel(iter, median, sigma, generator);
 }
 
 #if !AT_MKL_ENABLED()
@@ -322,6 +317,17 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
+static void exponential_kernel(TensorIterator& iter, double lambda, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    at::exponential_distribution<double> exponential(lambda);
+    cpu_serial_kernel(iter, [&exponential, generator]() -> scalar_t {
+      return static_cast<scalar_t>(exponential(generator));
+    });
+  });
+}
+
 static void geometric_kernel(TensorIterator& iter, double p, Generator* gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "geometric_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -344,8 +350,8 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
-static void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_cpu", [&] {
+static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_from_to_cpu", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if ((
@@ -357,8 +363,54 @@ static void random_kernel(TensorIterator& iter, uint64_t range, int64_t base, Ge
         return static_cast<scalar_t>(static_cast<int64_t>((generator->random64() % range) + base));
       });
     } else {
-       cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
+      cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
         return static_cast<scalar_t>(static_cast<int64_t>((generator->random() % range) + base));
+      });
+    }
+  });
+}
+
+static void random_kernel(TensorIterator& iter, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_cpu", [&] {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    if (std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, float>::value) {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+      });
+    } else if (std::is_same<scalar_t, bool>::value) {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random() & 1;
+      });
+    } else {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
+      });
+    }
+  });
+}
+
+// This is the special kernel to handle single specific case:
+// from(inclusive) = std::numeric_limits<int64_t>::lowest()
+// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
+static void random_full_64_range_kernel(TensorIterator& iter, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random64_cpu", [&] {
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    if (std::is_same<scalar_t, int64_t>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, float>::value) {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random64(); // use all 64 bits
+      });
+    } else if (std::is_same<scalar_t, bool>::value) {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random() & 1; // use the lowest bit
+      });
+    } else {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random(); // use 32/16/8 bits
       });
     }
   });
@@ -445,8 +497,11 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
+REGISTER_DISPATCH(random_full_64_range_stub, &random_full_64_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
