@@ -3934,7 +3934,7 @@ graph(%Ra, %Rb):
             @torch.jit.script_method
             def forward(self, x):
                 # type: (Tensor) -> Tensor
-                return self.one(self.two(x), x)
+                return self.one(self.two(self.three(x)), x)
 
         class Bar(torch.jit.ScriptModule):
             def __init__(self):
