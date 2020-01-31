@@ -151,8 +151,7 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     py_nn_functions = get_py_nn_functions(declarations)
 
-    env = create_python_bindings(py_nn_functions, is_python_method=False,
-                                 module="torch.nn", native_namespace="THPNNVariableFunctions")
+    env = create_python_bindings(py_nn_functions, is_python_method=False, module="torch.nn")
 
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
@@ -178,8 +177,7 @@ def gen_py_torch_functions(out, declarations, template_path):
 
     py_torch_functions = get_py_torch_functions(declarations)
 
-    env = create_python_bindings(py_torch_functions, is_python_method=False,
-                                 module="torch", native_namespace="(PyObject*)&THPVariableFunctions")
+    env = create_python_bindings(py_torch_functions, is_python_method=False, module="torch")
 
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 

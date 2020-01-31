@@ -449,12 +449,17 @@ static PyTypeObject THPVariableFunctions = {
   0                                      /* tp_new */
 };
 
+static PyObject* THPVariableFunctionsModule = NULL;
+
 void initTorchFunctions(PyObject* module) {
   if (PyType_Ready(&THPVariableFunctions) < 0) {
     throw python_error();
   }
   Py_INCREF(&THPVariableFunctions);
-  if (PyModule_AddObject(module, "_VariableFunctions", (PyObject*)&THPVariableFunctions) < 0) {
+  // PyType_GenericNew returns a new reference
+  THPVariableFunctionsModule = PyType_GenericNew(&THPVariableFunctions, Py_None, Py_None);
+  // PyModule_AddObject steals a reference
+  if (PyModule_AddObject(module, "_VariableFunctions", THPVariableFunctionsModule) < 0) {
     throw python_error();
   }
 }
@@ -474,7 +479,7 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, args, kwargs, (PyObject*)&THPVariableFunctions, "torch");
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
   }
 
   if (r.idx == 0) {
@@ -504,7 +509,7 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, args, kwargs, (PyObject*)&THPVariableFunctions, "torch");
+    return handle_torch_function(r, args, kwargs, THPVariableFunctionsModule, "torch");
   }
 
   if (r.idx == 0) {

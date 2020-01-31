@@ -63,7 +63,7 @@ static PyMethodDef nn_functions[] = {
   {NULL}
 };
 
-static PyObject* THPNNVariableFunctions = NULL;
+static PyObject* THPNNVariableFunctionsModule = NULL;
 
 void initNNFunctions(PyObject* module) {
 #if PY_MAJOR_VERSION == 2
@@ -79,7 +79,7 @@ void initNNFunctions(PyObject* module) {
   };
   PyObject* nn = PyModule_Create(&def);
 #endif
-  THPNNVariableFunctions = nn;
+  THPNNVariableFunctionsModule = nn;
   if (!nn) {
     throw python_error();
   }
