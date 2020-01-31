@@ -41,11 +41,6 @@ def argument_to_declaration(param, func=None):
         arg['default'] = default
     arg['name'] = name
 
-    if func is not None:
-        wrap_dims = func.get('wrap_dim', {})
-        if name in wrap_dims:
-            arg['wrap_dim'] = wrap_dims[name]
-
     return arg
 
 

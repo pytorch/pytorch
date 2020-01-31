@@ -2,12 +2,15 @@
 #define TH_GENERIC_FILE "THNN/generic/GatedLinearUnit.c"
 #else
 
+#include <ATen/WrapDimUtils.h>
+
 void THNN_(GatedLinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
           int dim)
 {
+  dim = at::maybe_wrap_dim(dim, input);
   // size output to half of input
   const int64_t nIn = THTensor_sizeLegacyNoScalars(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
@@ -39,6 +42,7 @@ void THNN_(GatedLinear_updateGradInput)(
           THTensor *gradInput,
           int dim)
 {
+  dim = at::maybe_wrap_dim(dim, input);
   // set up tensors
   const int64_t nIn = THTensor_(size)(input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",

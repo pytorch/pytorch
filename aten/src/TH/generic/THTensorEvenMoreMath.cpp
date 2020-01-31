@@ -4,6 +4,7 @@
 
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -121,6 +122,7 @@ void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *
 void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
   int64_t elems_per_row, i, idx;
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THLongTensor_nDimensionLegacyAll(index);
 
   THArgCheck(dim < THTensor_(nDimensionLegacyAll)(tensor), 2, "Index dimension is out of bounds");
@@ -351,8 +353,8 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   THTensor *tSlice, *sSlice;
   int64_t *index_data;
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   // Error checking for this function has moved to ATen!!
-
   numel = THLongTensor_nElement(index);
 
   index = THLongTensor_newContiguous(index);
@@ -483,6 +485,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   THTensor *tSlice;
   int64_t *index_data;
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   numel = THLongTensor_nElement(index);
   THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
@@ -510,6 +513,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
 void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
 
   THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
