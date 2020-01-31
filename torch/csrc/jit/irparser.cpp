@@ -362,7 +362,7 @@ void IRParser::parseOperator(Block* b) {
       if (!v.type) {
         vmap[v.name]->setType(schema_return_type);
       } else {
-        if (v.type->isSubtypeOf(schema_return_type)) {
+        if (!v.type->isSubtypeOf(schema_return_type)) {
           throw ErrorReport(L.cur().range)
               << "Annotated type " << v.type->python_str()
               << " does not match schema type "
