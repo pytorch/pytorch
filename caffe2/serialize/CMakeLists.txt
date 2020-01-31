@@ -10,10 +10,7 @@ if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
   set_source_files_properties(
     ${SSE42_FILES}
     PROPERTIES COMPILE_FLAGS "-mpclmul -msse4.2 ")
-  target_compile_options(torch_cpu PUBLIC "-DUSE_EXTERNAL_MZCRC=1")
-  #set_source_files_properties(
-  #  ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
-  #  PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC=1 ")
+  #target_compile_options(torch_cpu PUBLIC "-DUSE_EXTERNAL_MZCRC=1")
 endif()
 
 list(APPEND Caffe2_CPU_SRCS
@@ -24,6 +21,13 @@ list(APPEND Caffe2_CPU_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/file_adapter.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/read_adapter_interface.cc)
 list(APPEND Caffe2_CPU_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8)
+
+if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
+  set_source_files_properties(
+    ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
+    PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC=1 ")
+endif()
+
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} PARENT_SCOPE)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
