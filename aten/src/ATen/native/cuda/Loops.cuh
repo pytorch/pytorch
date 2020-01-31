@@ -38,6 +38,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -323,6 +324,25 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
 
 } // namespace modern
 
+template<typename func_t, int nargs=function_traits<func_t>::arity>
+struct needs_dynamic_casting {
+  static bool check(TensorIterator& iter) {
+    using traits = function_traits<func_t>;
+    if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
+      return true;
+    }
+    return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
+  }
+};
+
+template<typename func_t>
+struct needs_dynamic_casting<func_t, 0> {
+  static bool check(TensorIterator& iter) {
+    using traits = function_traits<func_t>;
+    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
+  }
+};
+
 template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
@@ -350,7 +370,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
@@ -366,7 +386,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
@@ -462,7 +482,7 @@ void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
       strides[i] = inner_strides[i];
     }
 
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t, traits::arity - 1>::check(iter)) {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = legacy::invoke_with_index(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx, idx);
@@ -476,7 +496,7 @@ void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
     }
   } else {
     auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
-    if (iter.needs_dynamic_casting()) {
+    if (needs_dynamic_casting<func_t, traits::arity - 1>::check(iter)) {
       legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
