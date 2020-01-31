@@ -56,18 +56,19 @@ py::object PyRRef::localValue() {
 
   py::object res;
   auto value = std::dynamic_pointer_cast<OwnerRRef>(rref_)->getValue();
+  auto& rpcHandler = PythonRpcHandler::getInstance();
   {
     // acquiring GIL as torch::jit::toPyObject creates new py::object without
     // grabbing the GIL.
     pybind11::gil_scoped_acquire ag;
     res = torch::jit::toPyObject(std::move(value));
+    rpcHandler.handleExceptionGILHeld(res);
   }
-  PythonRpcHandler::getInstance().handleException(res);
   return res;
 }
 
 std::string PyRRef::str() const {
-  std::stringstream ss;
+  std::ostringstream ss;
   if (rref_->isOwner()) {
     ss << "OwnerRRef(" << rref_->rrefId() << ")";
   } else {
@@ -95,7 +96,6 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   TypePtr rref_type =
       PythonRpcHandler::getInstance().parseTypeFromStr(rfd.type_str_);
   rref = ctx.getOrCreateRRef(rfd, rref_type);
-
   ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));
 }
