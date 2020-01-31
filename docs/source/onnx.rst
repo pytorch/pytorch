@@ -137,7 +137,7 @@ The ONNX exporter can be both *trace-based* and *script-based* exporter.
   exporting a static graph that is exactly the same as this run.  If you want
   to export your model with dynamic control flows, you will need to use the *script-based* exporter.
 
-* *script-based* means that the model you are trying to export is a `ScriptModule <../jit.html>`_.
+* *script-based* means that the model you are trying to export is a `ScriptModule <jit.html>`_.
   `ScriptModule` is the core data structure in `TorchScript`, and `TorchScript` is a subset of Python language,
   that creates serializable and optimizable models from PyTorch code.
 
@@ -235,7 +235,7 @@ TorchVision support
 -------------------
 
 All TorchVision models, except for quantized versions, are exportable to ONNX.
-More details can be found in `TorchVision <../torchvision/models.html>`_.
+More details can be found in `TorchVision <torchvision/models.html>`_.
 
 
 Limitations
