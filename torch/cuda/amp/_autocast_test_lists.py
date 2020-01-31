@@ -1,39 +1,30 @@
 import torch
 
+
 class _AutocastTestLists(object):
     # Supplies autocast tests in test_cuda.py with ops and arguments.
     def __init__(self):
-        super(AmpLists, self).__init__()
+        super(_AutocastTestLists, self).__init__()
+        n = 8
         # Utility arguments, created as one-element tuples
-        conv_args_fp16 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float16, device="cuda"),
-                     torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float16, device="cuda"))
-                     for dims in (1, 2, 3)]
-        bias_fp16 = (torch.randn((8,), dtype=torch.float16, device="cuda"),)
-        pointwise0_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
-        pointwise1_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
-        pointwise2_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
-        pointwise3_fp16 = (torch.randn(8, dtype=torch.float16, device="cuda"),)
-        element0_fp16 = (torch.randn(1, dtype=torch.float16, device="cuda"),)
-        mat0_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
-        mat1_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
-        mat2_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
-        mat3_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
-        mat4_fp16 = (torch.randn((8, 8), dtype=torch.float16, device="cuda"),)
+        pointwise0_fp16 = (torch.randn(n, dtype=torch.float16, device="cuda"),)
+        pointwise1_fp16 = (torch.randn(n, dtype=torch.float16, device="cuda"),)
+        pointwise2_fp16 = (torch.randn(n, dtype=torch.float16, device="cuda"),)
+        mat0_fp16 = (torch.randn((n, n), dtype=torch.float16, device="cuda"),)
+        mat1_fp16 = (torch.randn((n, n), dtype=torch.float16, device="cuda"),)
+        mat2_fp16 = (torch.randn((n, n), dtype=torch.float16, device="cuda"),)
 
-        conv_args_fp32 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float32, device="cuda"),
-                     torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float32, device="cuda"))
-                     for dims in (1, 2, 3)]
-        bias_fp32 = (torch.randn((8,), dtype=torch.float32, device="cuda"),)
-        pointwise0_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
-        pointwise1_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
-        pointwise2_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
-        pointwise3_fp32 = (torch.randn(8, dtype=torch.float32, device="cuda"),)
+        conv_args_fp32 = [(torch.randn((n, n, *(n,) * dims), dtype=torch.float32, device="cuda"),
+                           torch.randn((n, *(n,) * (dims + 1)), dtype=torch.float32, device="cuda"))
+                          for dims in (1, 2, 3)]
+        bias_fp32 = (torch.randn((n,), dtype=torch.float32, device="cuda"),)
         element0_fp32 = (torch.randn(1, dtype=torch.float32, device="cuda"),)
-        mat0_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
-        mat1_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
-        mat2_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
-        mat3_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
-        mat4_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
+        pointwise0_fp32 = (torch.randn(n, dtype=torch.float32, device="cuda"),)
+        pointwise1_fp32 = (torch.randn(n, dtype=torch.float32, device="cuda"),)
+        mat0_fp32 = (torch.randn((n, n), dtype=torch.float32, device="cuda"),)
+        mat1_fp32 = (torch.randn((n, n), dtype=torch.float32, device="cuda"),)
+        mat2_fp32 = (torch.randn((n, n), dtype=torch.float32, device="cuda"),)
+        mat3_fp32 = (torch.randn((n, n), dtype=torch.float32, device="cuda"),)
 
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cuda.py.
@@ -57,7 +48,8 @@ class _AutocastTestLists(object):
 
         # The remaining lists organize ops that autocast treats explicitly.
         self.torch_fp16 = [
-            ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1, False, False, True)),
+            ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
+                                                              (0, 0), 1, False, False, True)),
             ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
@@ -68,7 +60,8 @@ class _AutocastTestLists(object):
             ("conv_transpose3d", conv_args_fp32[2]),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
             ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, False)),
-            ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1),
+                                                                             (1, 1), 1, False, False)),
             # versions with no bias
             ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, False)),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, False)),
@@ -80,13 +73,13 @@ class _AutocastTestLists(object):
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
             ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
-            ("addbmm", mat0_fp32 + (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
-                                    torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
-            ("baddbmm", (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
-                         torch.randn((8,8,8), device="cuda", dtype=torch.float32),
-                         torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
-            ("bmm", (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
-                     torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
+            ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device="cuda", dtype=torch.float32),
+                                    torch.randn((n, n, n), device="cuda", dtype=torch.float32))),
+            ("baddbmm", (torch.randn((n, n, n), device="cuda", dtype=torch.float32),
+                         torch.randn((n, n, n), device="cuda", dtype=torch.float32),
+                         torch.randn((n, n, n), device="cuda", dtype=torch.float32))),
+            ("bmm", (torch.randn((n, n, n), device="cuda", dtype=torch.float32),
+                     torch.randn((n, n, n), device="cuda", dtype=torch.float32))),
         ]
         self.torch_fp32 = [
             ("acos", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
@@ -102,7 +95,7 @@ class _AutocastTestLists(object):
             ("reciprocal", pointwise0_fp16),
             ("rsqrt", (pointwise0_fp16[0].clamp(0.0, 100.0),)),
             ("sinh", pointwise0_fp16),
-            ("tan", (pointwise0_fp16[0].clamp(-3.1/2, 3.1/2),)),
+            ("tan", (pointwise0_fp16[0].clamp(-3.1 / 2, 3.1 / 2),)),
             ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + pointwise1_fp16),
             ("pow", ((pointwise0_fp16[0] + 1.).clamp(0.0, 100.0),) + (1.7,)),
             # ("pow", (1.7,) + pointwise0_fp16), # This variant has a backend, but is not documented in the API.
@@ -120,14 +113,14 @@ class _AutocastTestLists(object):
             ("cosine_similarity", mat0_fp16 + mat1_fp16),
             ("poisson_nll_loss", mat0_fp16 + mat1_fp16 + (True, False, 1.e-8,
                                                           torch.nn.functional._Reduction.get_enum('mean'))),
-            ("cosine_embedding_loss", (torch.tensor([[1,2,3]], device="cuda", dtype=torch.float16),
-                                       torch.tensor([[1,3,4]], device="cuda", dtype=torch.float16),
+            ("cosine_embedding_loss", (torch.tensor([[1, 2, 3]], device="cuda", dtype=torch.float16),
+                                       torch.tensor([[1, 3, 4]], device="cuda", dtype=torch.float16),
                                        torch.tensor([1], device="cuda", dtype=torch.int))),
-            ("hinge_embedding_loss", mat0_fp16 +(torch.ones((8,), device="cuda", dtype=torch.int),)),
-            ("kl_div", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
-            ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((8,), device="cuda", dtype=torch.float16),)),
+            ("hinge_embedding_loss", mat0_fp16 + (torch.ones(n, device="cuda", dtype=torch.int),)),
+            ("kl_div", mat0_fp16 + (torch.rand((n, n), device="cuda", dtype=torch.float16),)),
+            ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((n,), device="cuda", dtype=torch.float16),)),
             ("triplet_margin_loss", mat0_fp16 + mat1_fp16 + mat2_fp16),
-            ("binary_cross_entropy_with_logits", mat0_fp16 + (torch.rand((8,8), device="cuda", dtype=torch.float16),)),
+            ("binary_cross_entropy_with_logits", mat0_fp16 + (torch.rand((n, n), device="cuda", dtype=torch.float16),)),
             ("cumprod", pointwise0_fp16 + (0,)),
             ("cumsum", pointwise0_fp16 + (0,)),
             ("dist", pointwise0_fp16 + pointwise1_fp16),
@@ -145,13 +138,13 @@ class _AutocastTestLists(object):
             ("atan2", pointwise0_fp32 + (pointwise1_fp16[0].clamp(0.1, 100),)),
             ("cross", (torch.randn(3, dtype=torch.float32, device="cuda"),
                        torch.randn(3, dtype=torch.float16, device="cuda"))),
-            ("bilinear", (torch.randn((1,2), dtype=torch.float16, device="cuda"),
-                          torch.randn((1,2), dtype=torch.float32, device="cuda"),
-                          torch.randn((1,2,2), dtype=torch.float16, device="cuda"),
+            ("bilinear", (torch.randn((1, 2), dtype=torch.float16, device="cuda"),
+                          torch.randn((1, 2), dtype=torch.float32, device="cuda"),
+                          torch.randn((1, 2, 2), dtype=torch.float16, device="cuda"),
                           torch.randn((1,), dtype=torch.float32, device="cuda"))),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
-            ("tensordot", (torch.randn((2,2,2), dtype=torch.float32, device="cuda"),
-                           torch.randn((2,2,2), dtype=torch.float16, device="cuda"))),
+            ("tensordot", (torch.randn((2, 2, 2), dtype=torch.float32, device="cuda"),
+                           torch.randn((2, 2, 2), dtype=torch.float16, device="cuda"))),
             ("equal", pointwise0_fp32 + pointwise1_fp16),
             ("cat", (pointwise0_fp16 + pointwise1_fp32,)),
             ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
@@ -162,16 +155,16 @@ class _AutocastTestLists(object):
         self.nn_fp32 = [
             ("softplus", pointwise0_fp16),
             ("gelu", pointwise0_fp16),
-            ("nll_loss", (torch.rand((8,8), device="cuda", dtype=torch.float),
-                          torch.zeros((8,), device="cuda", dtype=torch.long))),
-            ("nll_loss2d", (torch.rand((8,8,8,8), device="cuda", dtype=torch.half),
-                            torch.zeros((8,8,8), device="cuda", dtype=torch.long))),
+            ("nll_loss", (torch.rand((n, n), device="cuda", dtype=torch.float),
+                          torch.zeros((n,), device="cuda", dtype=torch.long))),
+            ("nll_loss2d", (torch.rand((n, n, n, n), device="cuda", dtype=torch.half),
+                            torch.zeros((n, n, n), device="cuda", dtype=torch.long))),
             ("l1_loss", mat0_fp16 + mat1_fp16),
             ("smooth_l1_loss", mat0_fp16 + mat1_fp16),
             ("mse_loss", mat0_fp16 + mat1_fp16),
-            ("multilabel_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
-            ("soft_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
-            ("multi_margin_loss", mat0_fp16 + (torch.ones((8,), device="cuda", dtype=torch.long),)),
+            ("multilabel_margin_loss", mat0_fp16 + (torch.ones((n, n), device="cuda", dtype=torch.long),)),
+            ("soft_margin_loss", mat0_fp16 + (torch.ones((n, n), device="cuda", dtype=torch.long),)),
+            ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device="cuda", dtype=torch.long),)),
         ]
         self.operators_fp16 = [
             ("__matmul__", mat0_fp32 + mat1_fp32)
@@ -181,6 +174,6 @@ class _AutocastTestLists(object):
         self.operators_need_autocast_promote = [
         ]
         self.banned = [
-          ("binary_cross_entropy", (torch.rand((8,8), device="cuda", dtype=torch.float32),
-                                    torch.rand((8,8), device="cuda", dtype=torch.float32)), torch._C._nn),
+            ("binary_cross_entropy", (torch.rand((n, n), device="cuda", dtype=torch.float32),
+                                      torch.rand((n, n), device="cuda", dtype=torch.float32)), torch._C._nn),
         ]
