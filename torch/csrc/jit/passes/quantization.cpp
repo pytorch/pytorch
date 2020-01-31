@@ -1642,7 +1642,6 @@ void FoldConvBatchNorm2dHelper::transform() {
 }
 
 void FoldConvBatchNorm2dHelper::restoreNoneBias(script::Module& module) {
-
   for (script::Module m : module.children()) {
     restoreNoneBias(m);
     if (modified_conv_types_.count(m.type()) &&
@@ -1653,7 +1652,6 @@ void FoldConvBatchNorm2dHelper::restoreNoneBias(script::Module& module) {
       m.register_attribute("bias", NoneType::get(), IValue());
     }
   }
-
 }
 
 } // namespace
