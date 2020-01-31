@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/utils/pybind.h>
 
 #include <atomic>
 
@@ -19,27 +18,19 @@ class RRefContext;
 class UserRRef;
 
 // Represents fork of an RRef to be sent over the wire.
-struct RRefForkData {
-  py::tuple toPyTuple() const;
-  static RRefForkData fromPyTuple(const py::tuple& obj);
-
+struct TORCH_API RRefForkData {
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
   const worker_id_t parent_;
-  const std::string type_str_;
-
- private:
-  friend class RRef;
-  friend class RRefContext;
-  friend class UserRRef;
+  const std::string typeStr_;
 
   RRefForkData(
       worker_id_t ownerId,
       const RRefId& rrefId_,
       const ForkId& forkId_,
       worker_id_t parent,
-      std::string type_str);
+      std::string typeStr);
 };
 
 // Note [RRef Protocol]
@@ -184,7 +175,7 @@ struct RRefForkData {
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef : public RRefInterface {
+class TORCH_API RRef : public RRefInterface {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
@@ -230,7 +221,7 @@ class RRef : public RRefInterface {
 // also has a globally unique ``ForkId`` to identify this user. ``UserRRef``
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
-class UserRRef final : public RRef {
+class TORCH_API UserRRef final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
@@ -246,7 +237,7 @@ class UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  IValue toHere();
+  std::vector<IValue> toHere();
 
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;
@@ -265,7 +256,7 @@ class UserRRef final : public RRef {
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
-class OwnerRRef final : public RRef {
+class TORCH_API OwnerRRef final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
