@@ -678,15 +678,22 @@ static auto check_has_torch_function(PyObject* obj) -> bool
 
 /*
  *
- * Calls __torch_function__ on the overloaded arguments to a torch API
- * function in order of precedence, returning the first result that is
- * not NotImplemented. If all arguments return NotImplemented, raises a
- * TypeError.
+ * Handle __torch_function__ overrides if we know that there are overloaded
+ * arguments.  All objects stored in r.overloaded_args must have a
+ * __torch_function__ implementation and the arguments must be ordered in order
+ * of precedence. Precedence goes from left to right in the order of the
+ * signature of the function the overloaded arguments were passed to, except
+ * subclasses are always considered before superclasses.
+ *
+ * If the result of calling __torch_function__ is NotImplemented, the
+ * next implementation in the precedence order is called. If all
+ * arguments return NotImplemented from their __torch_function__
+ * implementation, a TypeError is raised in Python.
  *
  * Assumes overloaded_args has at least one entry. All entries must have
  * a __torch_function__ attribute that resolves to a callable that
- * accepts a torch API function, arguments, and keyword arguments for
- * the torch API function.
+ * accepts a torch API function, a tuple of arguments, and a dict of
+ * keyword arguments for the torch API function.
  *
  * It is sufficient to call PythonArgs::has_torch_function before
  * calling this function to verify that there are valid arguments
