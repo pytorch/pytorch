@@ -5,7 +5,7 @@
 // memory access introduce regression on ROCm.
 
 #ifndef __HIP_PLATFORM_HCC__
-#include <CUDALoops.cuh>
+#include <ATen/native/cuda/CUDALoops.cuh>
 #else
-#include <ROCmLoops.cuh>
+#include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
