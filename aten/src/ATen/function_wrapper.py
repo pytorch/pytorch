@@ -217,11 +217,6 @@ if (${check_name}.dim() == 0) {
     return ${api_name}(${zero_dim_actuals});
 }""")
 
-SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.is_sparse()) {
-    return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
-}""")
-
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
 if (${name}.defined()) {
     ${initializer}
@@ -423,6 +418,8 @@ TopEnvironment = TypedDict('TopEnvironment', {
 
 # A Declarations.cwrap formal argument
 # type can contain THTensor* types
+# NOTE: this must contain all 'AtFormal' attributes, because FunctionOption
+# doesn't differentiate between whether we have AtFormals or THFormals
 THFormal = TypedDict('THFormal', {
     'name': str,
     'type': str,
@@ -432,9 +429,9 @@ THFormal = TypedDict('THFormal', {
     'default': str,
     'output': bool,
     'size': int,
+    'annotation': str,
     'allocate': bool,
     'mask': bool,
-    'wrap_dim': str,
     # Broadcast is originally a str but gets unwrapped to a List or Dict in-place
     'broadcast': Any,
     'resize': str,
@@ -453,6 +450,7 @@ AtFormal = TypedDict('AtFormal', {
     'default': str,
     'output': bool,
     'size': int,
+    'annotation': str,
 }, total=False)
 
 # Note [field_name versus name]
@@ -559,8 +557,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_method_definition_dispatch': str,
     'type_method_formals': List[str],
     'variants': str,
-    'when_spares_dispatch': str,
-    'when_sparse_dispatch': str,
     'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
 })
@@ -715,8 +711,6 @@ def create_generic(top_env, declarations):
             'type': type_str,
             'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
         }  # type: AtFormal
-        if 'kwarg_only' in argument:
-            translated['kwarg_only'] = argument['kwarg_only']
         if 'default' in argument:
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
@@ -738,10 +732,8 @@ def create_generic(top_env, declarations):
             # type: (THFormal) -> None
             if argument['name'] not in seen:
                 seen.add(argument['name'])
-                if argument.get('kwarg_only', False):
-                    kwd_args.append(argument)
-                else:
-                    pos_args.append(argument)
+                # there are no kwarg_only THFormals
+                pos_args.append(argument)
 
         def has_output_mask(argument):
             # type: (THFormal) -> bool
@@ -998,7 +990,18 @@ def create_generic(top_env, declarations):
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
 
-            if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
+            # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
+            # I.e., the signature of the cpp implementation currently fits the code
+            # generated from a misread schema, but the alias annotation is the truth.
+            # TODO fix the signature of set_data's cpp impl to match correct codegen from
+            # the current schema.
+            # then remove this
+            if argument['name'] == 'self':
+                is_mutable = option['inplace']
+            else:
+                is_mutable = '!' in (argument['annotation'] or '')
+
+            if is_mutable:
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
                 argument['type'] = translate_map(True).get(argument['type'], argument['type'])
@@ -1348,17 +1351,10 @@ def create_derived(backend_type_env, declarations):
         else:
             return argument['name']
 
-    def drop_argument(argument, option):
-        # type: (THFormal, FunctionOption) -> bool
-        # Devices are handled in the body of the function.
-        if argument['name'] == 'device':
-            return True
-        return False
-
     def get_arguments(env, arguments, option):
         # type: (Environment, List[THFormal], FunctionOption) -> List[str]
         return [get_argument(env, argument, option)
-                for argument in arguments if not drop_argument(argument, option)]
+                for argument in arguments]
 
     def is_actual_return_long(env, ret):
         # type: (Environment, ReturnDecl) -> bool
@@ -1444,7 +1440,7 @@ def create_derived(backend_type_env, declarations):
         cases = []
         for scalar_name, c_type, accreal, _ in scalar_types:
             if scalar_name in scalar_type_cases:
-                case_body = []
+                case_body = []  # type: List[str]
                 # arguments are potentially duplicated because of one argument
                 # referencing another
                 seen_names = set()  # type: Set[str]
@@ -1473,16 +1469,6 @@ def create_derived(backend_type_env, declarations):
                     if arg['type'] == 'TensorList':
                         seen_tensorlists.add(arg['name'])
 
-                    wrap_dim_target = arg.get('wrap_dim', None)
-                    if wrap_dim_target is not None:
-                        # for Tensors, "name_" is the TensorImpl, but for TensorLists, it is an
-                        # std::vector of TH*s.  Since TH*s have different dimension rules, we used
-                        # "name" instead, but keep "name_" for tensor to avoid an extra function call.
-                        if wrap_dim_target not in seen_tensorlists:
-                            wrap_dim_target = wrap_dim_target + "_"
-                        case_body.append("{} = maybe_wrap_dim({}, {});".format(
-                            arg['name'], arg['name'], wrap_dim_target))
-
                     # only generated checked casts the first time we see it
                     if arg['name'] not in seen_names and requires_checked_cast(arg):
                         seen_names.add(arg['name'])
@@ -1504,9 +1490,6 @@ def create_derived(backend_type_env, declarations):
                                 size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
-                        if drop_argument(arg, option):
-                            case_body.append(
-                                "(void) {}_; //silence unused warning".format(arg['name']))
 
                         initializers = []
 

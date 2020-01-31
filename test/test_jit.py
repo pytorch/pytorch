@@ -1,4 +1,4 @@
-# -*- coding: UTF-8 -*-
+# -*- coding: utf-8 -*-
 from __future__ import division
 import torch
 
@@ -4934,22 +4934,6 @@ def foo(x):
 
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
-    def test_torchbind_getstate_setstate(self):
-        def f():
-            val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
-            s = val.__getstate__()
-            # TODO: sort out whether unpickler should call __new__ or __init__
-            val2 = torch.classes._TorchScriptTesting_StackString(["0", "0"])
-            val2.__setstate__(s)
-            return val.pop(), val2.pop()
-        ret = f()
-        self.assertEqual(ret[0], ret[1])
-
-        ret = torch.jit.script(f)()
-        self.assertEqual(ret[0], ret[1])
-
-    @skipIfRocm
-    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_return_tuple(self):
         def f():
             val = torch.classes._TorchScriptTesting_StackString(["3", "5"])
@@ -4970,6 +4954,76 @@ def foo(x):
 
         scripted = torch.jit.script(foo)
         self.getExportImportCopy(scripted)
+
+    def test_class_as_attribute(self):
+        @torch.jit.script
+        class Foo321(object):
+            def __init__(self):
+                self.x = 3
+
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = Foo321()
+
+            def forward(self, x):
+                return x + self.f.x
+
+        scripted = torch.jit.script(FooBar1234())
+        eic = self.getExportImportCopy(scripted)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted(x), eic(x))
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_lambda_method(self):
+        def foo():
+            ss = torch.classes._TorchScriptTesting_StackString(["mom"])
+            return ss.top()
+
+        scripted = torch.jit.script(foo)
+        self.assertEqual(scripted(), "mom")
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_class_attribute(self):
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = torch.classes._TorchScriptTesting_StackString(["3", "4"])
+
+            def forward(self):
+                return self.f.top()
+
+        inst = FooBar1234()
+        scripted = torch.jit.script(inst)
+        eic = self.getExportImportCopy(scripted)
+        assert eic() == "deserialized"
+        for expected in ["deserialized", "was", "i"]:
+            assert eic.f.pop() == expected
+
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_getstate(self):
+        class FooBar4321(torch.nn.Module):
+            def __init__(self):
+                super(FooBar4321, self).__init__()
+                self.f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+
+            def forward(self):
+                return self.f.top()
+
+        inst = FooBar4321()
+        scripted = torch.jit.script(inst)
+        eic = self.getExportImportCopy(scripted)
+        # NB: we expect the values {7, 3, 3, 1} as __getstate__ is defined to
+        # return {1, 3, 3, 7}. I tried to make this actually depend on the
+        # values at instantiation in the test with some transformation, but
+        # because it seems we serialize/deserialize multiple times, that
+        # transformation isn't as you would it expect it to be.
+        assert eic() == 7
+        for expected in [7, 3, 3, 1]:
+            assert eic.f.pop() == expected
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -9626,8 +9680,6 @@ a")
                 return (x - 4) * 3
 
         class M(torch.nn.Module):
-            __constants__ = ['moduledict']
-
             def __init__(self):
                 super(M, self).__init__()
                 modules = OrderedDict([
@@ -9785,8 +9837,6 @@ a")
                 return self.weight + thing
 
         class M(torch.jit.ScriptModule):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub() for i in range(10)])
@@ -9893,6 +9943,23 @@ a")
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    def test_missing_getstate(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.x = 1
+
+            def forward(self, x):
+                return x * self.x
+
+            @torch.jit.export
+            def __setstate__(self, state):
+                self.x = state[0]
+                self.training = state[1]
+
+        with self.assertRaisesRegex(RuntimeError, "getstate"):
+            scripted = torch.jit.script(Foo())
 
     def test_trace_export_fns(self):
         class Foo(torch.nn.Module):
@@ -10082,8 +10149,6 @@ a")
                 return self.weight + thing
 
         class M(torch.jit.ScriptModule):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.Sequential(Sub(), Sub(), Sub())
@@ -10112,8 +10177,6 @@ a")
 
     def test_script_sequential_orderdict(self):
         class M(torch.jit.ScriptModule):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.Sequential(OrderedDict([
@@ -10147,8 +10210,6 @@ a")
                 return x, x, x
 
         class HaveSequential(torch.jit.ScriptModule):
-            __constants__ = ['someseq']
-
             def __init__(self):
                 super(HaveSequential, self).__init__()
                 self.someseq = nn.Sequential(
@@ -10190,8 +10251,6 @@ a")
                 return self.weight + thing
 
         class M(torch.jit.ScriptModule):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([Sub(), nn.Sequential(Sub(), nn.Sequential(Sub(), Sub()), Sub())])
@@ -10219,8 +10278,6 @@ a")
                 return self.weight + thing
 
         class M(torch.jit.ScriptModule):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(M, self).__init__()
                 self.mods = nn.ModuleList([nn.ModuleList([Sub()]), nn.Sequential(Sub()), nn.ModuleList([Sub(), Sub()])])
@@ -11310,8 +11367,6 @@ a")
                 return {"1": x}
 
         class C(torch.nn.Module):
-            __constants__ = ['foo']
-
             def __init__(self):
                 super(C, self).__init__()
                 self.foo = torch.nn.Sequential(A(), B())
@@ -12375,8 +12430,6 @@ a")
 
         # zipping over two
         class ZipModLists(torch.nn.Module):
-            __constants__ = ['mods', 'mods2']
-
             def __init__(self, mods, mods2):
                 super(ZipModLists, self).__init__()
                 self.mods = mods
@@ -12390,7 +12443,7 @@ a")
                 return x, iter
 
         class ZipWithValues(torch.nn.Module):
-            __constants__ = ['mods', 'mods2', 'tup_larger', 'tup_smaller']
+            __constants__ = ['tup_larger', 'tup_smaller']
 
             def __init__(self, mods, mods2):
                 super(ZipWithValues, self).__init__()
@@ -12425,8 +12478,6 @@ a")
                 return thing * 2
 
         class Mod(torch.nn.Module):
-            __constants__ = ['mods']
-
             def __init__(self):
                 super(Mod, self).__init__()
                 self.mods = nn.ModuleList([Double(), Double()])
@@ -12518,8 +12569,6 @@ a")
                 return x + 10
 
         class M(torch.nn.Module):
-            __constants__ = ["module_list"]
-
             def __init__(self, mod_list):
                 super(M, self).__init__()
                 self.module_list = mod_list
