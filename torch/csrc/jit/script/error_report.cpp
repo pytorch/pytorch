@@ -7,7 +7,10 @@ namespace torch {
 namespace jit {
 namespace script {
 
+// Avoid storing objects with destructor in thread_local for mobile build.
+#ifndef C10_MOBILE
 thread_local std::vector<Call> calls;
+#endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
@@ -15,6 +18,7 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       the_message(e.the_message),
       error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
+#ifndef C10_MOBILE
 ErrorReport::ErrorReport()
     : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
 ErrorReport::ErrorReport(SourceRange r)
@@ -31,6 +35,21 @@ ErrorReport::CallStack::CallStack(const std::string& name) {
 ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
+#else // defined C10_MOBILE
+ErrorReport::ErrorReport()
+    : context(c10::nullopt) {}
+ErrorReport::ErrorReport(SourceRange r)
+    : context(std::move(r)) {}
+
+void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
+}
+
+ErrorReport::CallStack::CallStack(const std::string& name) {
+}
+
+ErrorReport::CallStack::~CallStack() {
+}
+#endif // C10_MOBILE
 
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
