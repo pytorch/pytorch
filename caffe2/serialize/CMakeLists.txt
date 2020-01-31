@@ -10,9 +10,10 @@ if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
   set_source_files_properties(
     ${SSE42_FILES}
     PROPERTIES COMPILE_FLAGS "-mpclmul -msse4.2 ")
-  set_source_files_properties(
-    ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
-    PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC ")
+  target_compile_options(torch_cpu PRIVATE "-DUSE_EXTERNAL_MZCRC")
+  #set_source_files_properties(
+  #  ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
+  #  PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC ")
 endif()
 
 list(APPEND Caffe2_CPU_SRCS
