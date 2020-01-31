@@ -5058,6 +5058,16 @@ def foo(x):
         traced = torch.jit.trace(TryTracing123(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_pickle(self):
+        f = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        x = pickle.dumps(f)
+        print(type(f))
+        with open('/home/jamesreed/lel.pkl', 'wb') as f:
+            f.write(x)
+        # f2 = pickle.loads(x)
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):

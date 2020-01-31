@@ -721,6 +721,10 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__getattr__",
           [](Object& self, const std::string& name) {
+            if (name == "__reduce__") {
+              if (self.type()->name()) {
+              }
+            }
             if (auto method = self.find_method(name)) {
               return py::cast(*method);
             }
