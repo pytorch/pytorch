@@ -25,7 +25,7 @@ list(APPEND Caffe2_CPU_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8)
 if (COMPILER_HAS_M_PCLMUL AND COMPILER_HAS_M_SSE42)
   set_source_files_properties(
     ${PROJECT_SOURCE_DIR}/third_party/miniz-2.0.8/miniz.c
-    PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC=1 ")
+    APPEND PROPERTIES COMPILE_FLAGS "-DUSE_EXTERNAL_MZCRC ")
 endif()
 
 
