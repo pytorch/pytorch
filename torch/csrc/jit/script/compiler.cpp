@@ -1130,8 +1130,12 @@ struct to_ir {
             }
           }
         }
-        return CondValue(
-            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+        auto expr_out = emitToBool(emitExpr(expr));
+        c10::optional<bool> static_if = c10::nullopt;
+        if (expr_out->node()->kind() == aten::is_scripting) {
+          static_if = true;
+        }
+        return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }
   }
