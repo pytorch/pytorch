@@ -24,6 +24,7 @@ ClassType::ClassType(
 }
 
 const std::vector<Function*>& ClassType::methods() const {
+  TORCH_INTERNAL_ASSERT(this);
   return methods_;
 }
 

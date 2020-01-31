@@ -5058,6 +5058,17 @@ def foo(x):
         traced = torch.jit.trace(TryTracing123(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
+    def test_torchbind_pickle_serialization(self):
+        nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
+        b = io.BytesIO()
+        torch.save(nt, b)
+        b.seek(0)
+        nt_loaded = torch.load(b)
+        for exp in [7, 3, 3, 1]:
+            self.assertEqual(nt_loaded.pop(), exp)
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
