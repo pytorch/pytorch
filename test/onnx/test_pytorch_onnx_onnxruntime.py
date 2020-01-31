@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -226,6 +226,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -265,6 +266,7 @@ class TestONNXRuntime(unittest.TestCase):
         images = [image]
         return images
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -272,6 +274,7 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
@@ -2442,39 +2445,39 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
-        class EinsumModel_1(torch.nn.Module):
+        class EinsumModelBatchDiagonal(torch.nn.Module):
             def forward(self, *tensor_list):
                 eqn = '...ii ->...i'
                 return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(3, 5, 5)
-        self.run_test(EinsumModel_1(), input=(x,))
+        self.run_test(EinsumModelBatchDiagonal(), input=(x,))
 
-        class EinsumModel_2(torch.nn.Module):
+        class EinsumModelBatchMatmul(torch.nn.Module):
             def forward(self, *tensor_list):
                 eqn = 'bij, bjk -> bik'
                 return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(5, 2, 3)
         y = torch.randn(5, 3, 4)
-        self.run_test(EinsumModel_2(), input=(x, y))
+        self.run_test(EinsumModelBatchMatmul(), input=(x, y))
 
-        class EinsumModel_3(torch.nn.Module):
+        class EinsumModelInnerProd(torch.nn.Module):
             def forward(self, *tensor_list):
                 eqn = 'i,i'
                 return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(5)
         y = torch.randn(5)
-        self.run_test(EinsumModel_3(), input=(x, y))
+        self.run_test(EinsumModelInnerProd(), input=(x, y))
 
-        class EinsumModel_4(torch.nn.Module):
+        class EinsumModelTranspose(torch.nn.Module):
             def forward(self, *tensor_list):
                 eqn = 'ij->ji'
                 return torch.einsum(eqn, *tensor_list)
 
         x = torch.randn(3, 4)
-        self.run_test(EinsumModel_4(), input=(x,))
+        self.run_test(EinsumModelTranspose(), input=(x,))
 
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
