@@ -1,6 +1,6 @@
 import torch
 
-class AutocastLists(object):
+class _AutocastTestLists(object):
     # Supplies autocast tests in test_cuda.py with ops and arguments.
     def __init__(self):
         super(AmpLists, self).__init__()
@@ -36,7 +36,7 @@ class AutocastLists(object):
         mat4_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
 
         # The lists below organize ops that autocast needs to test.
-        # self.list_name corresponds to test_autocast_list_name in test_cuda.py.
+        # self.list_name corresponds to test_autocast_list_name in test/test_cuda.py.
         # To assist tests, each op is associated with a tuple of valid arguments.
 
         # Some ops implement built-in type promotion.  These don't need autocasting,
@@ -51,6 +51,8 @@ class AutocastLists(object):
             ("add", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("div", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("mul", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+        ]
+        self.operators_expect_builtin_promote = [
         ]
 
         # The remaining lists organize ops that autocast treats explicitly.
@@ -170,6 +172,13 @@ class AutocastLists(object):
             ("multilabel_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
             ("soft_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
             ("multi_margin_loss", mat0_fp16 + (torch.ones((8,), device="cuda", dtype=torch.long),)),
+        ]
+        self.operators_fp16 = [
+            ("__matmul__", mat0_fp32 + mat1_fp32)
+        ]
+        self.operators_fp32 = [
+        ]
+        self.operators_need_autocast_promote = [
         ]
         self.banned = [
           ("binary_cross_entropy", (torch.rand((8,8), device="cuda", dtype=torch.float32),

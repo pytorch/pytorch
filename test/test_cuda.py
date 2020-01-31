@@ -7,6 +7,7 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
+import operator
 if sys.version_info[0] == 3:
     import queue
 else:
@@ -97,11 +98,10 @@ class TestCuda(TestCase):
 
     def setUp(self):
         super(TestCuda, self).setUp()
-        from amp_lists import AutocastLists
-        self.amp_lists = AutocastLists()
+        self.autocast_lists = torch.cuda.amp._AutocastLists()
 
     def tearDown(self):
-        del self.amp_lists
+        del self.autocast_lists
         super(TestCuda, self).tearDown()
 
     def _check_memory_stat_consistency(self):
@@ -2211,44 +2211,68 @@ t2.start()
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        for op, args in self.amp_lists.torch_fp16:
+        for op, args in self.autocast_lists.torch_fp16:
             self._run_autocast_outofplace(op, args, torch.float16)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
-        for op_with_args in self.amp_lists.torch_fp32:
+        for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
             self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_need_autocast_promote(self):
-        for op, args in self.amp_lists.torch_need_autocast_promote:
+        for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_expect_builtin_promote(self):
-        for op, args, out_type in self.amp_lists.torch_expect_builtin_promote:
+        for op, args, out_type in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args, torch.float32, out_type=out_type)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
-        for op, args in self.amp_lists.nn_fp16:
+        for op, args in self.autocast_lists.nn_fp16:
             self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp32(self):
-        for op, args in self.amp_lists.nn_fp32:
+        for op, args in self.autocast_lists.nn_fp32:
             self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_operators_fp16(self):
+        for op, args in self.autocast_lists.operators_fp16:
+            self._run_autocast_outofplace(op, args, torch.float16, module=operator)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_operators_fp32(self):
+        for op, args in self.autocast_lists.operators_fp16:
+            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_operators_need_autocast_promote(self):
+        for op, args in self.autocast_lists.operators_fp16:
+            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
+
+    @skipIfRocm
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_autocast_operators_expect_builtin_promote(self):
+        for op, args in self.autocast_lists.operators_fp16:
+            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
 
     @skipIfRocm
     def test_autocast_banned(self):
         with torch.cuda.amp.autocast():
-            for op, args, module in self.amp_lists.banned:
+            for op, args, module in self.autocast_lists.banned:
                 with self.assertRaises(RuntimeError):
                     getattr(module, op)(*args)
 

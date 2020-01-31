@@ -60,9 +60,7 @@ Logic to extract the promote type from any Tensor or TensorList args.
 // current best guess for the promote type, and update if necessary.
 inline at::ScalarType
 prioritize(at::ScalarType current, const Tensor& nextArg) {
-  if (!nextArg.is_floating_point()) {
-    return current;
-  } else {
+  if (nextArg.is_cuda() && nextArg.is_floating_point()) {
     auto next = nextArg.scalar_type();
     // For promotion purposes, prioritize double, then float, then half.
     if (current == at::kDouble || next == at::kDouble) {
@@ -72,9 +70,11 @@ prioritize(at::ScalarType current, const Tensor& nextArg) {
     } else if (current == at::kHalf && next == at::kHalf) {
       return at::kHalf;
     } else {
-      AT_ERROR("Unexpected floating ScalarType in autograd::prioritize");
+      AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
       return current;
     }
+  } else {
+    return current;
   }
 }
 
@@ -115,7 +115,7 @@ Logic to apply cached casting to any Tensor argument.
 // Overload to catch Tensor args
 inline Tensor
 cached_cast(at::ScalarType to_type, const Tensor& arg) {
-  if (arg.is_floating_point() && arg.scalar_type() != to_type) {
+  if (arg.is_cuda() && arg.is_floating_point() && arg.scalar_type() != to_type) {
     // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
