@@ -7,19 +7,6 @@
 namespace torch{
 namespace jit{
 
-namespace {
-
-// Different from the implementation in register_prim_ops.cpp,
-// where named tuple is not supported yet.
-void tupleConstructFunc(int num_inputs, Stack& stack) {
-  std::vector<IValue> elems{
-    std::make_move_iterator(stack.end() - num_inputs),
-    std::make_move_iterator(stack.end())};
-  drop(stack, num_inputs);
-  push(stack, c10::ivalue::Tuple::create(std::move(elems)));
-}
-}
-
 char const * toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
@@ -28,7 +15,7 @@ Function::Function(c10::QualifiedName name)
 void Function::append_instruction(OpCode op, int X, int N) {
   TORCH_CHECK(isOpSupportedInMobile(op), toString(op),
               " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
+  code_->instructions_.emplace_back(op, X, N, 0);
 }
 
 void Function::append_operator(const std::string& name,
@@ -50,24 +37,10 @@ void Function::build_vararg_operator_table() {
   for (auto& ins : code_->instructions_) {
     if (ins.op == OPN) {
       auto opname = code_->op_names_[ins.X];
-      if (opname.name == "prim::ListConstruct") {
-        if (opname.overload_name == "int") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<int64_t>);
-        } else if (opname.overload_name == "float") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<double>);
-        } else if (opname.overload_name == "bool") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<bool>);
-        } else if (opname.overload_name == "Tensor") {
-          code_->vararg_operators_.emplace_back(tensorListConstructFunc);
-        } else {
-          AT_ERROR("Type of ListConstruct is not supported.");
-        }
-      } else if (opname.name == "prim::TupleConstruct") {
-        code_->vararg_operators_.emplace_back(tupleConstructFunc);
-      } else if (opname.name == "prim::TupleUnpack") {
-        code_->vararg_operators_.emplace_back(tupleUnpackFunc);
+      if (opname.name == "prim::TupleConstruct") {
+        code_->vararg_operators_.emplace_back(tupleConstruct);
       } else if (opname.name == "aten::format") {
-        code_->vararg_operators_.emplace_back(formatFunc);
+        code_->vararg_operators_.emplace_back(format);
       }
       else {
         AT_ERROR("OPN operator ", opname.name, " is not supported.");

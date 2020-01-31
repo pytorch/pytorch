@@ -171,15 +171,10 @@ class ScriptModuleSerializer {
         if (ins.op == OP) {
           if (opnames[ins.X].name == "prim::ListConstruct" ||
               opnames[ins.X].name == "prim::TupleConstruct" ||
-              opnames[ins.X].name == "prim::TupleUnpack" ||
               opnames[ins.X].name == "aten::format") {
             auto node = code.instructions_source()[i];
             ins.op = OPN;
-            if (opnames[ins.X].name == "prim::TupleUnpack") {
-              ins.N = node->outputs().size();
-            } else {
-              ins.N = node->inputs().size();
-            }
+            ins.N = node->inputs().size();
             if (opnames[ins.X].name == "prim::ListConstruct") {
               ListTypePtr lt = node->output()->type()->expect<ListType>();
               if (lt->getElementType() == IntType::get()) {

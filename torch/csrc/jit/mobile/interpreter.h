@@ -8,7 +8,7 @@ namespace torch{
 namespace jit{
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
-using VarargFuncton = std::function<void(int, Stack&)>;
+using VarargFuncton = std::function<void(Stack&, size_t)>;
 struct Code {
   std::vector<Instruction> instructions_;
   std::vector<c10::OperatorName> op_names_;

@@ -61,7 +61,7 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case OPN: {
-        code_->vararg_operators_[inst.X](inst.N, stack);
+        code_->vararg_operators_[inst.X](stack, inst.N);
         ++pc;
       } break;
       case LOAD:
