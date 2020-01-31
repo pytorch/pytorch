@@ -151,8 +151,8 @@ graph(%x):
 graph(%0 : Tensor,
       %1 : Tensor,
       %2 : Tensor):
-  %3 : int, %4 : Tensor = qqq::qqq[i_asdf=2, f_asdf=3.14, s_asdf="hello", ss_asdf=["hello world", "bye bye"]](%0)
-  %5 : int, %6 : Tensor = ppp::ppp[i_asdf=2, f_asdf=3.14, s_asdf="\"\"\"\"\nhe\"llo", q=[3, 2, 4]](%0)
+  %3 : int, %4 : Tensor = qqq::qqq[i_asdf=2, f_asdf=3., s_asdf="hello", ss_asdf=["hello world", "bye bye"]](%0)
+  %5 : int, %6 : Tensor = ppp::ppp[i_asdf=2, f_asdf=3., s_asdf="\"\"\"\"\nhe\"llo", q=[3, 2, 4]](%0)
   %7 : float = vvv::vvv[s_asdf="hello"](%0)
   %8 : string = z::z()
   return (%7)
@@ -200,6 +200,17 @@ graph(%0 : Tensor,
       %2 : Tensor):
   %3 : Double(4, 4, 5) = prim::Constant()
   return (%3)
+)IR");
+  }
+
+  {
+    checkRoundtrip(
+        R"IR(
+graph():
+  %0 : float[] = prim::Constant[value=[1., 2., 3.]]()
+  %1 : str[] = prim::Constant[value=["ab", "cd", "ef"]]()
+  %2 : (float[], str[]) = prim::TupleConstruct(%0, %1)
+  return (%2)
 )IR");
   }
 

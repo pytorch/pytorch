@@ -25,23 +25,24 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+                                                  suppress_warnings, slowTest,
+                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
-                                        create_input, unpack_variables,
-                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                        exclude_tensor_method,
-                                        mask_not_all_zeros,
-                                        S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+from torch.testing._internal.common_methods_invocations import (method_tests,
+                                                                create_input, unpack_variables,
+                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                                                exclude_tensor_method,
+                                                                mask_not_all_zeros,
+                                                                S)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3017,14 +3018,14 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
         torch.autograd.grad(g.sum(), [x])
-        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+        self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
@@ -3853,7 +3854,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -4272,7 +4273,7 @@ class TestAutogradDeviceType(TestCase):
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
+            gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
     @skipCUDAIfRocm

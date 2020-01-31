@@ -137,7 +137,9 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
-      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
+      .def(
+          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
+          PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -295,16 +297,10 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
-      .def("_jit_has_cpp_tests", []() {
-        return true;
-      })
+      .def("_jit_has_cpp_tests", []() { return true; })
 #else
-      .def("_jit_run_cpp_tests", []() {
-        throw std::exception();
-      })
-      .def("_jit_has_cpp_tests", []() {
-        return false;
-      })
+      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def("_jit_has_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
@@ -357,6 +353,20 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def(
+          "_jit_set_num_profiled_runs",
+          [](size_t num) {
+            size_t old_num = getNumProfiledRuns();
+            getNumProfiledRuns() = num;
+            return old_num;
+          })
+      .def(
+          "_jit_set_bailout_depth",
+          [](size_t depth) {
+            size_t old_depth = getBailoutDepth();
+            getBailoutDepth() = depth;
+            return old_depth;
+          })
+      .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
@@ -376,20 +386,22 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
           })
-      .def("_jit_pass_onnx_unpack_quantized_weights",
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                UnpackQuantizedWeights(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_quantization_insert_permutes",
+             std::map<std::string, at::Tensor>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_quantization_insert_permutes",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                insertPermutes(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move);
+             std::map<std::string, at::Tensor>& paramsDict) {
+            insertPermutes(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -400,13 +412,20 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
-    std::vector<GraphExecutorState> states;
-    for (auto& e : c.grad_executors()) {
-      states.emplace_back(e->getDebugState());
-    }
-    return states;
-  });
+  py::class_<Code>(m, "Code")
+      .def(
+          "grad_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
+      .def("request_bailout", [](Code& c, size_t index) {
+        c.request_bailout(index);
+      });
 
   py::class_<ExecutionPlan>(m, "ExecutionPlan")
       .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })

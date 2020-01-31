@@ -766,11 +766,12 @@ class Module(object):
                 try:
                     with torch.no_grad():
                         param.copy_(input_param)
-                except Exception:
+                except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
-                                      'whose dimensions in the checkpoint are {}.'
-                                      .format(key, param.size(), input_param.size()))
+                                      'whose dimensions in the checkpoint are {}, '
+                                      'an exception occured : {}.'
+                                      .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
 

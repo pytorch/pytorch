@@ -13,7 +13,7 @@ TEST(DispatchKeySet, Empty) {
   ASSERT_TRUE(empty_set.empty());
   DispatchKeySet empty_set2;
   ASSERT_TRUE(empty_set == empty_set2);
-  ASSERT_EQ(empty_set.highestPriorityTypeId(), DispatchKey::UndefinedTensorId);
+  ASSERT_EQ(empty_set.highestPriorityTypeId(), DispatchKey::Undefined);
 }
 
 TEST(DispatchKeySet, Singleton) {
