@@ -867,6 +867,20 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
+- func: cumlogsumexp(Tensor self, int dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cumlogsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+- func: cumlogsumexp.dimname(Tensor self, Dimname dim) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
+- func: cumlogsumexp.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
   variants: function, method

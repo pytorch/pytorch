@@ -430,6 +430,9 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
   return -at::matmul(grad_self, solution.transpose(-2, -1));
 }
 
+Tensor cumlogsumexp_backward(const Tensor & x, int64_t dim) {
+}
+
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   // Need to check numel to see if there are no values (such as shape [0,2], and dim to see if x is a scalar.
   if (x.dim() == 0 || x.numel() == 0) {

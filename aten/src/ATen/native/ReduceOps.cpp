@@ -180,6 +180,25 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
 }
 
+Tensor cumlogsumexp(const Tensor& self, int64_t dim) {
+  auto result = at::empty(self.sizes(), self.options());
+  at::cumlogsumexp_out(result, self, dim);
+  return result;
+}
+
+Tensor& cumlogsumexp_out(Tensor& result, const Tensor& self, int64_t dim) {
+  check_scalar_type_device_layout_equal(result, self);
+  {
+    NoNamesGuard guard;
+    result.resize_(self.sizes());
+    auto cummax_values = std::get<0>(at::cummax(self, dim));
+    result = at::exp(self - cummax_values);
+    at::_cumsum(result, dim);
+    result.log_().add_(cummax_values);
+  }
+  return result;
+}
+
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -942,6 +961,12 @@ Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
 }
 Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("all");
+}
+Tensor cumlogsumexp(const Tensor& self, Dimname dim) {
+  return at::cumlogsumexp(self, dimname_to_position(self, dim));
+}
+Tensor& cumlogsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
+  return at::cumlogsumexp_out(result, self, dimname_to_position(self, dim));
 }
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
