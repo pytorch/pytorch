@@ -100,7 +100,7 @@ struct TensorDataContainer {
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
       sizes_(), \
-      scalar_type_(compute_desired_dtype(at::k##S)), \
+      scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
@@ -134,7 +134,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #define TENSOR(T, S) \
   TensorDataContainer(at::ArrayRef<T> values) : \
       sizes_({(int64_t)values.size()}), \
-      scalar_type_(compute_desired_dtype(at::k##S)), \
+      scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true); \
     if (scalar_type_ == at::kBool) { \
@@ -205,7 +205,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   at::Tensor convert_to_tensor(at::TensorOptions options) const {
     if (!options.has_dtype()) {
-      options = options.dtype(scalar_type_);
+      options = options.dtype(compute_desired_dtype(scalar_type_));
     }
 
     if (is_scalar()) {
