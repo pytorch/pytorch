@@ -63,6 +63,16 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             AT_ASSERT(iter->isString());
             tracer::addInputs(
                 node, args[i].name().c_str(), iter->toStringRef());
+          } else if (type->kind() == TypeKind::NumberType) {
+            AT_ASSERT(iter->isDouble() || iter->isInt());
+            if (iter->isDouble()) {
+              tracer::addInputs(node, args[i].name().c_str(), iter->toDouble());
+            } else if (iter->isInt()) {
+              tracer::addInputs(node, args[i].name().c_str(), iter->toInt());
+            } else {
+              throw std::runtime_error(
+                "unsupported input list type: " + elem_type->str());
+            }
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
