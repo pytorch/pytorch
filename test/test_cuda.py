@@ -97,8 +97,8 @@ class TestCuda(TestCase):
 
     def setUp(self):
         super(TestCuda, self).setUp()
-        from amp_lists import AmpLists
-        self.amp_lists = AmpLists()
+        from amp_lists import AutocastLists
+        self.amp_lists = AutocastLists()
 
     def tearDown(self):
         del self.amp_lists

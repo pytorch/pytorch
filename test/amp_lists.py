@@ -1,10 +1,10 @@
 import torch
 
-# test_cuda.py's setUp creates an instance of this class to supply the ops Amp needs to test.
-class AmpLists(object):
+class AutocastLists(object):
+    # Supplies autocast tests in test_cuda.py with ops and arguments.
     def __init__(self):
         super(AmpLists, self).__init__()
-        # Prepare some utility args.
+        # Utility arguments, created as one-element tuples
         conv_args_fp16 = [(torch.randn((8, 8, *(8,) * dims), dtype=torch.float16, device="cuda"),
                      torch.randn((8, *(8,) * (dims + 1)), dtype=torch.float16, device="cuda"))
                      for dims in (1, 2, 3)]
@@ -35,14 +35,25 @@ class AmpLists(object):
         mat3_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
         mat4_fp32 = (torch.randn((8, 8), dtype=torch.float32, device="cuda"),)
 
-        # The lists below organize the different kinds of ops Amp needs to handle.
+        # The lists below organize ops that autocast needs to test.
+        # self.list_name corresponds to test_autocast_list_name in test_cuda.py.
         # To assist tests, each op is associated with a tuple of valid arguments.
-        # Most of the lists are empty, but writing them all out makes the classification
-        # clear(er).  If I only wrote the non-empty ones, it would look like a total mess of
-        # special cases (and it still is), but there's a method to the madness and seeing
-        # the full classification gives you a sense why each case exists.
-        #
-        # Only non-empty lists are given a test in test_cuda.py.
+
+        # Some ops implement built-in type promotion.  These don't need autocasting,
+        # but autocasting relies on their behavior, so we include a test to double-check.
+        self.torch_expect_builtin_promote = [
+            ("eq", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("ge", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("gt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("le", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("lt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("ne", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("add", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("div", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("mul", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+        ]
+
+        # The remaining lists organize ops that autocast treats explicitly.
         self.torch_fp16 = [
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1, False, False, True)),
             ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
@@ -75,8 +86,6 @@ class AmpLists(object):
             ("bmm", (torch.randn((8,8,8), device="cuda", dtype=torch.float32),
                      torch.randn((8,8,8), device="cuda", dtype=torch.float32))),
         ]
-        # self.torch_fp16_inplace = []
-        # self.torch_fp16_user_supplied_out = []
         self.torch_fp32 = [
             ("acos", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
             ("asin", (pointwise0_fp16[0].clamp(-.9, 0.9),)),
@@ -128,11 +137,6 @@ class AmpLists(object):
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
         ]
-        # self.torch_fp32_inplace = []
-        # self.torch_fp32_user_supplied_out = []
-        # self.torch_fp32 = []
-        # self.torch_fp32_inplace = []
-        # self.torch_fp32_user_supplied_out = []
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
             ("addcmul", pointwise0_fp32 + pointwise1_fp16 + pointwise2_fp16),
@@ -150,31 +154,9 @@ class AmpLists(object):
             ("cat", (pointwise0_fp16 + pointwise1_fp32,)),
             ("stack", (pointwise0_fp16 + pointwise1_fp32,)),
         ]
-        # self.torch_passthrough_user_supplied_out = []
-        # self.torch_firstarg_inplace = []
-        # self.torch_firstarg_user_supplied_out = []
-        self.torch_expect_builtin_promote = [
-            ("eq", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("ge", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("gt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("le", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("lt", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("ne", pointwise0_fp32 + pointwise1_fp16, torch.bool),
-            ("add", pointwise0_fp32 + pointwise1_fp16, torch.float32),
-            ("div", pointwise0_fp32 + pointwise1_fp16, torch.float32),
-            ("mul", pointwise0_fp32 + pointwise1_fp16, torch.float32),
-        ]
-        # self.torch_expect_builtin_promote_inplace = []
-        # self.torch_expect_builtin_promote_user_supplied_out = []
-        # self.torch_need_autocast_sequence_cast_ops = [
-        #     ("cat", mat1_fp16 + mat1_fp32 + mat1_fp16),
-        #     ("stack", mat1_fp16 + mat1_fp32 + mat1_fp16)]
-
         self.nn_fp16 = [
             ("linear", mat0_fp32 + mat1_fp32 + mat2_fp32),
         ]
-        # self.nn_fp16_inplace = []
-        # self.nn_fp16_user_supplied_out = []
         self.nn_fp32 = [
             ("softplus", pointwise0_fp16),
             ("gelu", pointwise0_fp16),
@@ -189,34 +171,6 @@ class AmpLists(object):
             ("soft_margin_loss", mat0_fp16 + (torch.ones((8,8), device="cuda", dtype=torch.long),)),
             ("multi_margin_loss", mat0_fp16 + (torch.ones((8,), device="cuda", dtype=torch.long),)),
         ]
-        # self.nn_fp32_inplace = []
-        # self.nn_fp32_user_supplied_out = []
-        # self.nn_fp32 = []
-        # self.nn_fp32_inplace = []
-        # self.nn_fp32_user_supplied_out = []
-        # self.nn_need_autocast_promote = []
-        # self.nn_firstarg_inplace = []
-        # self.nn_firstarg_user_supplied_out = []
-        # self.nn_expect_builtin_promote = []
-        # self.nn_expect_builtin_promote_inplace = []
-        # self.nn_expect_builtin_promote_user_supplied_out = []
-
-        # self.tensor_only_fp16 = []
-        # self.tensor_only_fp16_inplace = []
-        # self.tensor_only_fp16_user_supplied_out = []
-        # self.tensor_only_fp32 = []
-        # self.tensor_only_fp32_inplace = []
-        # self.tensor_only_fp32_user_supplied_out = []
-        # self.tensor_only_fp32 = []
-        # self.tensor_only_fp32_inplace = []
-        # self.tensor_only_fp32_user_supplied_out = []
-        # self.tensor_only_need_autocast_promote = []
-        # self.tensor_only_firstarg_inplace = []
-        # self.tensor_only_firstarg_user_supplied_out = []
-        # self.tensor_only_expect_builtin_promote = []
-        # self.tensor_only_expect_builtin_promote_inplace = []
-        # self.tensor_only_expect_builtin_promote_user_supplied_out = []
-
         self.banned = [
           ("binary_cross_entropy", (torch.rand((8,8), device="cuda", dtype=torch.float32),
                                     torch.rand((8,8), device="cuda", dtype=torch.float32)), torch._C._nn),
