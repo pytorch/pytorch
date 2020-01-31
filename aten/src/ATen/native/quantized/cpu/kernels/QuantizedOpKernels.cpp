@@ -193,6 +193,62 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
+void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
+  int64_t zero_point = qx.q_zero_point();
+  float scale = qx.q_scale();
+  auto scale_vec = Vec256<float>(scale);
+  auto zero_point_vec = Vec256<float>((float)zero_point);
+  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // - Output scale is set to 1.0 / 2^(BIT_NUM)
+    // - For signed types output zero point is set to 0
+    // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
+    // See https://stackoverflow.com/a/34448562/3606192 for potential
+    // optimizations
+    float output_scale = 0.00390625;  // 1.0 / 2^8
+    int64_t output_zero_point = 0;
+    if (SCALAR_TYPE == at::kQInt32) {
+      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
+    } else if (SCALAR_TYPE == at::kQInt8) {
+      output_zero_point = -128;
+    }
+    float inv_output_scale = 1.0 / output_scale;
+
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU).dtype(SCALAR_TYPE),
+        output_scale,
+        output_zero_point,
+        qx.suggest_memory_format());
+    auto iter = TensorIterator::unary_op(qy, qx);
+
+    using Vec = Vec256<scalar_t>;
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t value_qx) -> scalar_t {
+        const auto value_dx = at::dequantize_val(scale, zero_point, value_qx);
+        const auto value_dy = 1.0f / (1.0 + std::exp((-value_dx)));
+        return at::quantize_val<scalar_t>(output_scale, output_zero_point,
+                                          value_dy);
+      },
+      [&](Vec value_qx) -> Vec {
+        auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec,
+                                            scale_neg_zp_premul_vec);
+        for (int idx = 0; idx < value_dx.size(); ++idx) {
+          value_dx[idx] = value_dx[idx].neg();
+          value_dx[idx] = value_dx[idx].exp();
+          value_dx[idx] = Vec256<float>(1.0f) + value_dx[idx];
+          value_dx[idx] = value_dx[idx].reciprocal();
+        }
+        return Vec::quantize(value_dx, output_scale, output_zero_point,
+                             inv_output_scale);
+      }
+    );
+  });
+}
+
 void qclamp_kernel(
     const Tensor& qx,
     Scalar min_scalar,
@@ -903,6 +959,7 @@ void qtopk_kernel(Tensor& values,
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
