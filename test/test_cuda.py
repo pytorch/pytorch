@@ -2011,7 +2011,7 @@ t2.start()
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
         # Ensure that different instances of "device" objects that point to the same device
-        # are treated as identical keys by dicts.  AmpScaler relies on this behavior, and may
+        # are treated as identical keys by dicts.  GradScaler relies on this behavior, and may
         # error otherwise in a way that's difficult to detect (a silent performance hit).
         d = {}
         dev0a = torch.device("cuda:0")
@@ -2034,7 +2034,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_scale(self):
-        scaler = torch.cuda.amp.AmpScaler(init_scale=2.)
+        scaler = torch.cuda.amp.GradScaler(init_scale=2.)
         t0 = torch.tensor([4.0], dtype=torch.float32, device="cuda:0")
         t1 = torch.tensor([4.0], dtype=torch.float32, device="cuda:1")
         # Create some nested iterables of tensors on different devices.
@@ -2046,8 +2046,8 @@ t2.start()
 
     def test_grad_scaling_state_dict(self):
         for lazy_init_scale in True, False:
-            s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=.5)
-            s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=.8)
+            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5)
+            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8)
 
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
@@ -2093,7 +2093,7 @@ t2.start()
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
-            scaler = torch.cuda.amp.AmpScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
 
             run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
             run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
@@ -2220,7 +2220,7 @@ t2.start()
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
                 self._create_scaling_models_optimizers()
 
-            scaler = torch.cuda.amp.AmpScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
                 for i, (input, target) in enumerate(data):
@@ -2264,7 +2264,7 @@ t2.start()
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
-        # AmpScaler should transparently handle losses and gradients on multiple devices.
+        # GradScaler should transparently handle losses and gradients on multiple devices.
         # This test could be combined with the test above, but I think it makes sense to treat
         # multi-GPU operations separately.
         dev0 = torch.device("cuda:0")
@@ -2276,7 +2276,7 @@ t2.start()
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
                 self._create_scaling_models_optimizers(device=dev1)
 
-            scaler = torch.cuda.amp.AmpScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
                 for i, (input, target) in enumerate(data):

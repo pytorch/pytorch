@@ -20,9 +20,9 @@ class _MultiDeviceReplicator(object):
         return retval
 
 
-class AmpScaler(object):
+class GradScaler(object):
     """
-    An instance ``scaler`` of :class:`AmpScaler` helps perform the steps of gradient scaling
+    An instance ``scaler`` of :class:`GradScaler` helps perform the steps of gradient scaling
     conveniently.
 
     * ``scaler.scale(loss)`` multiplies a given loss by ``scaler``'s current scale factor.
@@ -31,8 +31,8 @@ class AmpScaler(object):
 
     Here's how that looks::
 
-        # Create an AmpScaler instance.
-        scaler = AmpScaler()
+        # Create an GradScaler instance.
+        scaler = GradScaler()
         ...
         for input, target in data:
             optimizer.zero_grad()
@@ -112,7 +112,7 @@ class AmpScaler(object):
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
 
         Returns:
-            Scaled outputs.  If this instance of :class:`AmpScaler` is not enabled, outputs are returned unmodified.
+            Scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned unmodified.
         """
         if not self._enabled:
             return outputs
@@ -232,7 +232,7 @@ class AmpScaler(object):
             return optimizer.step(*args, **kwargs)
 
         if "closure" in kwargs:
-            raise RuntimeError("Closure use is not currently supported if AmpScaler is enabled.")
+            raise RuntimeError("Closure use is not currently supported if GradScaler is enabled.")
 
         assert self._scale is not None, self._scale_not_initialized_error("step")
 
@@ -246,9 +246,9 @@ class AmpScaler(object):
         if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
             # The contract with custom optimizers is that their step() should accept an additional,
-            # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
+            # optional grad_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
             # it can query its own state, invoke unscale_ on itself, etc
-            retval = optimizer.step(*args, **dict(kwargs, amp_scaler=self))
+            retval = optimizer.step(*args, **dict(kwargs, grad_scaler=self))
             optimizer_state["stage"] == self.STEPPED
             return retval
 
@@ -395,7 +395,7 @@ class AmpScaler(object):
 
         if len(state_dict) == 0:
             raise RuntimeError("The source state dict is empty, possibly because it was saved "
-                               "from a disabled instance of AmpScaler.")
+                               "from a disabled instance of GradScaler.")
 
         self._init_scale = state_dict["scale"]
         if self._scale is not None:

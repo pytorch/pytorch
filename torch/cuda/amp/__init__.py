@@ -1,1 +1,1 @@
-from .amp_scaler import AmpScaler  # noqa: F401
+from .grad_scaler import GradScaler  # noqa: F401

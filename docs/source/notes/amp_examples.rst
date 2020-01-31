@@ -15,7 +15,7 @@ Gradient Scaling
 Gradient scaling helps prevent gradient underflow when training with mixed precision,
 as explained :ref:`here<gradient-scaling>`.
 
-Instances of :class:`torch.cuda.amp.AmpScaler` help perform the steps of
+Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
 gradient scaling conveniently, as shown in the following code snippets.
 
 
@@ -24,8 +24,8 @@ Typical Use
 
 ::
 
-    # Create an AmpScaler instance.
-    scaler = AmpScaler()
+    # Create an GradScaler instance.
+    scaler = GradScaler()
     ...
     for input, target in data:
         optimizer.zero_grad()
@@ -66,7 +66,7 @@ Gradient clipping
 
 Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unscaled gradients as usual::
 
-    scaler = AmpScaler()
+    scaler = GradScaler()
     ...
     for input, target in data:
         optimizer.zero_grad()
@@ -136,7 +136,7 @@ penalty scalar.
 
 Here's how that looks for the same L2 penalty::
 
-    scaler = AmpScaler()
+    scaler = GradScaler()
     ...
     for input, target in data:
         optimizer.zero_grad()
@@ -174,7 +174,7 @@ and you must call ``scaler.step`` on each of them individually.
 However, ``scaler.update()`` should only be called once,
 after all optimizers used in this iteration have been stepped::
 
-    scaler = torch.cuda.amp.AmpScaler()
+    scaler = torch.cuda.amp.GradScaler()
     ...
     for input, target in data:
         optimizer0.zero_grad()

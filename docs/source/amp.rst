@@ -33,5 +33,5 @@ so they don't flush to zero.
 The parameters' gradients (``.grad`` attributes) should be unscaled before the optimizer uses them
 to update the parameters, so the scale factor does not interfere with the learning rate.
 
-.. autoclass:: AmpScaler
+.. autoclass:: GradScaler
     :members:
