@@ -537,11 +537,10 @@ struct CodeImpl {
           // so we will use an empty inputs list
           // for emitCall, emitInterfaceCall, emitGetAttr
           at::ArrayRef<Value*> empty{};
+          WithCurrentNode guard(&current_node_, node);
           switch (node->kind()) {
             default:
-              insertInstruction(OP, operator_table_.size());
-              GRAPH_DEBUG("Inserting operator ", operator_table_.size());
-              operator_table_.emplace_back(getOperation(node));
+              emitOperator(node, empty);
               break;
             case prim::CallFunction:
               emitCall(
@@ -560,7 +559,8 @@ struct CodeImpl {
                       node->inputs().at(0)->type()->cast<ClassType>()) {
                 emitCall(class_type->getMethod(node->s(attr::name)), empty);
               } else {
-                emitInterfaceCall(node->s(attr::name), empty);
+                auto method_name = insertConstant(node->s(attr::name));
+                insertInstruction(INTERFACE_CALL, method_name, node->inputs().size());
               }
               break;
           }
@@ -571,12 +571,20 @@ struct CodeImpl {
               pushArguments(val, node->inputs(), stack, seen);
               break;
             case prim::Drop:
-            case prim::BailOut:
             case prim::SetAttr:
-            case prim::If:
-            case prim::Loop:
               TORCH_INTERNAL_ASSERT(
                   false, "emitUseInline should never see these nodes");
+              break;
+            case prim::BailOut:
+              emitBailOut(node);
+              break;
+            case prim::If:
+              TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+              emitIf(node);
+              break;
+            case prim::Loop:
+              TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+              emitLoop(node);
               break;
             case prim::Constant:
               emitConstant(node);
@@ -601,10 +609,11 @@ struct CodeImpl {
     }
   }
 
-  void emitOperator(Node* node) {
-    emitLoadInputs(node->inputs());
+  void emitOperator(Node* node, at::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
+    GRAPH_DEBUG("Inserting operator ", operator_table_.size());
   }
 
   void emitWait(Node* node) {
@@ -727,8 +736,8 @@ struct CodeImpl {
     createBailoutBlock(jf_index);
   }
 
-  void emitGetAttr(Node* node) {
-    emitLoadInputs(node->inputs());
+  void emitGetAttr(Node* node, at::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
     const auto type = node->input()->type()->expect<ClassType>();
     const auto& field = node->s(attr::name);
     const auto slot = type->getAttributeSlot(field);
@@ -770,7 +779,7 @@ struct CodeImpl {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
       default:
-        emitOperator(node);
+        emitOperator(node, node->inputs());
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -805,7 +814,7 @@ struct CodeImpl {
         emitBailOut(node);
         break;
       case prim::GetAttr:
-        emitGetAttr(node);
+        emitGetAttr(node, node->inputs());
         break;
       case prim::SetAttr:
         emitSetAttr(node);
@@ -959,8 +968,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+        if (is_enabled(__FILE__, JitLoggingLevels::GRAPH_DEBUG)) {
+          std::cerr << "RUNNING ";
+          frames.back().function->dump(std::cerr, af.pc);
+        }
+
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
