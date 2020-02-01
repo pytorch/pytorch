@@ -80,6 +80,7 @@ namespace jit {
   _(LiteInterpreterPrimOverload)       \
   _(LiteInterpreterUpsampleNearest2d)  \
   _(CommonAncestor)                    \
+<<<<<<< HEAD
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
   _(LiteInterpreterBuiltinFunction)    \
@@ -88,15 +89,20 @@ namespace jit {
   _(LiteInterpreterWrongMethodName)    \
   _(LiteInterpreterParams)             \
   _(LiteInterpreterSetState)
+=======
+
+>>>>>>> Move tests for GPU fusion.
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
   _(CompleteArgumentSpec)       \
-  _(GPUFusion)                  \
-  _(GPUHelloFusion)             \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
   _(Interp)                     \
+  _(GPU_FusionSimpleArith)       \
+  _(GPU_FusionContainer)         \
+  _(GPU_FusionSimpleTypePromote) \
+  _(GPU_FusionDispatch)          \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

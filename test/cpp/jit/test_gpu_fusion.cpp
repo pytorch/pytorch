@@ -16,9 +16,8 @@ using namespace torch::jit::fuser;
 
 // 1. Test cases are void() functions.
 // 2. They start with the prefix `test`
-void testFusionCPU(){}
 
-void testFusionDispatch(){
+void testGPU_FusionDispatch(){
 
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -41,7 +40,7 @@ void testFusionDispatch(){
 
 }
 
-void testFusionSimpleArith(){
+void testGPU_FusionSimpleArith(){
   Fusion fusion;
   FusionGuard fg(&fusion);
   
@@ -55,7 +54,7 @@ void testFusionSimpleArith(){
 
 }
 
-void testFusionContainer(){
+void testGPU_FusionContainer(){
   Fusion fusion1;
   FusionGuard fg(&fusion1);
   
@@ -78,7 +77,7 @@ void testFusionContainer(){
   
 }
 
-void testFusionSimpleTypePromote(){
+void testGPU_FusionSimpleTypePromote(){
   Fusion fusion;
   FusionGuard fg(&fusion);
   
@@ -89,25 +88,7 @@ void testFusionSimpleTypePromote(){
   TORCH_CHECK(f5->getValType() == ValType::Float);
 }
 
-void testGPUFusion() {
-  /*
-  Fusion fusion;
-  Manager m(&fusion);
-  Tensor* T1 = new Tensor{};
-  Tensor* T2 = new Tensor{};
-  Float* F1 = new Float{1.0};
-  Val* T3 = add(T2, F1);
+void testGPU_Fusion() {}
 
-  fusion.addInput(T1);
-  fusion.addInput(T2);
-  fusion.addOutput(T3);
-
-  std::cout << fusion << std::endl;
-*/
-}
-
-void testGPUHelloFusion(){
-  // std::cout << "Hello world from testGPUHelloFusion" << std::endl;
-}
 
 }} // torch::jit
