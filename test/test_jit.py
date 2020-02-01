@@ -7871,6 +7871,38 @@ a")
 
         self.checkScript(func, (), optimize=True)
 
+    def test_nested_select_assign(self):
+        class SubSubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubSubModule, self).__init__()
+                self.abc = 11
+
+            def forward(self, x):
+                return self.abc
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 11
+                self.nested = SubSubModule()
+
+            def forward(self, x):
+                return self.a
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+                self.hi = 1
+
+            def forward(self):
+                self.hi = 5
+                self.sub.a = 1
+                self.sub.nested.abc = 5
+                return self.sub.a * 20 + self.sub.nested.abc * 3 + self.hi
+
+        self.checkModule(TestModule(), ())
+
     def test_number_neg(self):
         # int -> int
         def func1():
