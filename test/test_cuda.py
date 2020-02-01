@@ -2146,7 +2146,7 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
-    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs={}):
+    def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
         # helper to cast args
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
@@ -2155,6 +2155,9 @@ t2.start()
                 return type(val)(cast(v, to_type) for v in val)
             else:
                 return val
+
+        if add_kwargs is None:
+            add_kwargs = {}
 
         with torch.cuda.amp.autocast():
             out_type = out_type if out_type is not None else run_as_type
@@ -2184,7 +2187,7 @@ t2.start()
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = torch.equal(output, output_method) if isinstance(output, torch.Tensor) \
-                             else (output == output_method)
+                    else (output == output_method)
                 self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
@@ -2197,7 +2200,7 @@ t2.start()
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
-                             else (output_to_compare == control)
+                    else (output_to_compare == control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
 
     def args_maybe_kwargs(self, op_with_args):
