@@ -231,6 +231,7 @@ class CMake:
              'CUDA_NVCC_EXECUTABLE',
              'CUDNN_LIBRARY',
              'CUDNN_INCLUDE_DIR',
+             'CUDNN_ROOT',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'JAVA_HOME',
