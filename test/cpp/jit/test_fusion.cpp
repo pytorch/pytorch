@@ -21,7 +21,7 @@ void testFusionCPU(){}
 void testFusionDispatch(){
 
   Fusion fusion;
-  Manager m(&fusion);
+  FusionGuard fg(&fusion);
   
   Float* f = new Float{2.f};
   
@@ -43,7 +43,8 @@ void testFusionDispatch(){
 
 void testFusionSimpleArith(){
   Fusion fusion;
-  Manager m(&fusion);
+  FusionGuard fg(&fusion);
+  
  
   Float* f1 = new Float(1.f);
   Float* f2 = new Float{2.f};
@@ -56,8 +57,8 @@ void testFusionSimpleArith(){
 
 void testFusionContainer(){
   Fusion fusion1;
-  Manager m(&fusion1);
-  Manager *inst = &(m.instance());
+  FusionGuard fg(&fusion1);
+  
   
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
@@ -66,22 +67,20 @@ void testFusionContainer(){
 
   Fusion fusion2;
   {
-    Manager m2(&fusion2);
+    FusionGuard fg2(&fusion2);
     Float* f3 = new Float(1.f);
     Float* f4 = new Float(2.f);
     auto f5 = add(f3, f4);
-    TORCH_CHECK(m.fusion() == &fusion2);
-    TORCH_CHECK(&(m2.instance()) == inst);
+    TORCH_CHECK(FusionGuard::getCurFusion() == &fusion2);
   }
 
-  TORCH_CHECK(m.fusion() == &fusion1);
-  TORCH_CHECK(&(m.instance()) == inst);
+  TORCH_CHECK(FusionGuard::getCurFusion() == &fusion1);
+  
 }
 
 void testFusionSimpleTypePromote(){
   Fusion fusion;
-  Manager m(&fusion);
-  Manager *inst = &(m.instance());
+  FusionGuard fg(&fusion);
   
   Float* f4 = new Float{4.f};
   Int* i1 = new Int{3};
