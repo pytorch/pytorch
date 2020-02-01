@@ -2,7 +2,7 @@ import torch
 
 
 class _AutocastTestLists(object):
-    # Supplies autocast tests in test_cuda.py with ops and arguments.
+    # Supplies ops and arguments for test_autocast_* in test/test_cuda.py
     def __init__(self):
         super(_AutocastTestLists, self).__init__()
         n = 8
@@ -28,10 +28,10 @@ class _AutocastTestLists(object):
 
         # The lists below organize ops that autocast needs to test.
         # self.list_name corresponds to test_autocast_list_name in test/test_cuda.py.
-        # To assist tests, each op is associated with a tuple of valid arguments.
+        # Each op is associated with a tuple of valid arguments.
 
         # Some ops implement built-in type promotion.  These don't need autocasting,
-        # but autocasting relies on their behavior, so we include a test to double-check.
+        # but autocasting relies on their promotion, so we include tests to double-check.
         self.torch_expect_builtin_promote = [
             ("eq", pointwise0_fp32 + pointwise1_fp16, torch.bool),
             ("ge", pointwise0_fp32 + pointwise1_fp16, torch.bool),
@@ -43,7 +43,16 @@ class _AutocastTestLists(object):
             ("div", pointwise0_fp32 + pointwise1_fp16, torch.float32),
             ("mul", pointwise0_fp32 + pointwise1_fp16, torch.float32),
         ]
-        self.operators_expect_builtin_promote = [
+        self.methods_expect_builtin_promote = [
+            ("__eq__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__ge__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__gt__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__le__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__lt__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__ne__", pointwise0_fp32 + pointwise1_fp16, torch.bool),
+            ("__add__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("__div__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
+            ("__mul__", pointwise0_fp32 + pointwise1_fp16, torch.float32),
         ]
 
         # The remaining lists organize ops that autocast treats explicitly.
@@ -166,12 +175,11 @@ class _AutocastTestLists(object):
             ("soft_margin_loss", mat0_fp16 + (torch.ones((n, n), device="cuda", dtype=torch.long),)),
             ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device="cuda", dtype=torch.long),)),
         ]
-        self.operators_fp16 = [
+        self.methods_fp16 = [
             ("__matmul__", mat0_fp32 + mat1_fp32)
         ]
-        self.operators_fp32 = [
-        ]
-        self.operators_need_autocast_promote = [
+        self.methods_fp32 = [
+            ("__pow__", pointwise0_fp16 + (1.5,)),
         ]
         self.banned = [
             ("binary_cross_entropy", (torch.rand((n, n), device="cuda", dtype=torch.float32),

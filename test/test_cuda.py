@@ -7,7 +7,6 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
-import operator
 if sys.version_info[0] == 3:
     import queue
 else:
@@ -98,7 +97,7 @@ class TestCuda(TestCase):
 
     def setUp(self):
         super(TestCuda, self).setUp()
-        self.autocast_lists = torch.cuda.amp._AutocastLists()
+        self.autocast_lists = torch.cuda.amp._AutocastTestLists()
 
     def tearDown(self):
         del self.autocast_lists
@@ -2161,8 +2160,8 @@ t2.start()
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
 
-            # Try torch.* variant:
-            if hasattr(module, op):
+            # Try module.* variant, if requested:
+            if module is not None and hasattr(module, op):
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
@@ -2176,7 +2175,6 @@ t2.start()
                     self.assertTrue(out_type == output_method.dtype,
                                     "autocast for torch.{} produced {}, should produce torch.{}"
                                     .format(op, output_method.dtype, out_type))
-
 
             self.assertTrue((output is not None) or (output_method is not None),
                             "{} not found as an attribute on either Tensor or the requested module {}".format(
@@ -2193,11 +2191,11 @@ t2.start()
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.cuda.amp.autocast(enabled=False):
-                if hasattr(module, op):
+                if module is not None and hasattr(module, op):
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
                 else:
-                    control = getattr(args[0], op)(*cast(args[:1], run_as_type), **add_kwargs)
-                self.assertTrue(type(output) == type(control))
+                    control = getattr(args[0], op)(*cast(args[1:], run_as_type), **add_kwargs)
+                self.assertTrue(type(output_to_compare) == type(control))
                 comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
                              else (output_to_compare == control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
@@ -2247,27 +2245,21 @@ t2.start()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_autocast_operators_fp16(self):
-        for op, args in self.autocast_lists.operators_fp16:
-            self._run_autocast_outofplace(op, args, torch.float16, module=operator)
+    def test_autocast_methods_fp16(self):
+        for op, args in self.autocast_lists.methods_fp16:
+            self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_autocast_operators_fp32(self):
-        for op, args in self.autocast_lists.operators_fp16:
-            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
+    def test_autocast_methods_fp32(self):
+        for op, args in self.autocast_lists.methods_fp32:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_autocast_operators_need_autocast_promote(self):
-        for op, args in self.autocast_lists.operators_fp16:
-            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
-
-    @skipIfRocm
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
-    def test_autocast_operators_expect_builtin_promote(self):
-        for op, args in self.autocast_lists.operators_fp16:
-            self._run_autocast_outofplace(op, args, torch.float32, module=operator)
+    def test_autocast_methods_expect_builtin_promote(self):
+        for op, args, out_type in self.autocast_lists.methods_expect_builtin_promote:
+            self._run_autocast_outofplace(op, args, torch.float32, module=None, out_type=out_type)
 
     @skipIfRocm
     def test_autocast_banned(self):
