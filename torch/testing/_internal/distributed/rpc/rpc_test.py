@@ -29,6 +29,10 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 )
 
 
+def foo_add():
+    return torch.add(torch.ones(1), torch.ones(1))
+
+
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
@@ -65,6 +69,9 @@ def _stub_init_rpc_backend_handler(store, name, rank, world_size, rpc_backend_op
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
+def wait_for_value_future():
+    return VALUE_FUTURE.result()
 
 
 def set_and_check_done(value):
@@ -1679,3 +1686,28 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+    @dist_init
+    def test_function_not_on_callee(self):
+        # test that if a function does not exist on a callee, we don't crash,
+        # instead we get an AttributeError indicating that the func does not exist.
+        this_module = sys.modules[__name__]
+        caller_worker = "worker0"
+        callee_worker = "worker1"
+
+        if self.rank == 1:
+            # Use delattr to remove the binding of a func on this nodes
+            delattr(this_module, "foo_add")
+            # notify remote end that we have removed it.
+            rpc.rpc_sync(caller_worker, set_value, args=(self.rank,))
+
+        if self.rank == 0:
+            # func exists on caller, but not callee.
+            # TODO: Need to enhance RemoteException to return the correct
+            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
+            # wait for remote end to remove the binding of foo_add func.
+            wait_for_value_future()
+            # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
+            self.assertTrue(hasattr(this_module, "foo_add"))
+            with self.assertRaisesRegex(Exception, "AttributeError"):
+                rpc.rpc_sync(callee_worker, foo_add, args=())
