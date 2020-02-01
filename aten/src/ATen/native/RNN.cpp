@@ -35,6 +35,28 @@ struct relu_f {
   Tensor operator()(const Tensor& t) const { return at::relu(t); }
 };
 
+Tensor _fix_reshape(Tensor& input_post_linear,
+                    IntArrayRef input_shape_pre_linear) {
+  // In some implementations of the linear (i.e. QNNPACK) the result is of
+  // incorrect shape. Input to the rnn is [seq_len, batch_size, input_size],
+  // and post-linear it is supposed to be [seq_len, batch_size, 4*hidden_size].
+  // However, if the linear does not understand the multiplication between
+  // 3d and 2d matrices, it returns a 2d matrix. This reshapes it back to the
+  // required shape.
+  // GitHub issue tracker: https://github.com/pytorch/pytorch/issues/32901
+  const auto input_shape_post_linear = input_post_linear.sizes();
+  if (input_shape_post_linear.size() != input_shape_pre_linear.size()) {
+    std::vector<int64_t> new_size;
+    new_size.reserve(input_shape_pre_linear.size());
+    for (uint32_t idx = 0; idx < input_shape_pre_linear.size()-1; ++idx) {
+      new_size.push_back(input_shape_pre_linear[idx]);
+    }
+    new_size.push_back(input_shape_post_linear[input_shape_post_linear.size()-1]);
+    input_post_linear = input_post_linear.view(IntArrayRef(new_size));
+  }
+  return input_post_linear;
+}
+
 struct PackedSequence {
   PackedSequence() = default;
   PackedSequence(Tensor _data, Tensor _batch_sizes)
@@ -532,8 +554,8 @@ struct qLSTMCell : Cell<std::tuple<Tensor, Tensor>, QuantizedCellParamsStatic> {
     // h@w_hh shape: [num_layers*num_directions, batch_num, 4*hsize]
     // need to `expand` the input.
     // Note: we don't want to use `repeat`, to avoid the copy
-    const auto _input = pre_compute_input ? input : params.linear_ih(input);
-    const auto h_w_hh = params.linear_hh(hx);
+    auto _input = pre_compute_input ? input : params.linear_ih(input);
+    auto h_w_hh = params.linear_hh(hx);
     const auto i_w_ih = _input.expand({hx.size(0), -1});
     const auto gates = elementwise_arithmetic("quantized::add_out",
                                               i_w_ih, h_w_hh,
@@ -691,7 +713,8 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const hidden_type& input_hidden,
       const cell_params& params) const override {
     if (inputs.device().is_cpu()) {
-      const auto inputs_w = params.linear_ih(inputs);
+      auto inputs_w = params.linear_ih(inputs);
+      _fix_reshape(inputs_w, inputs.sizes());
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
       return {at::stack(unstacked_output.outputs, 0),
@@ -722,11 +745,13 @@ struct FullBidirectionalLayer
     std::vector<Tensor> step_inputs;
     if (input.device().is_cpu()) {
       auto input_w = params.first.linear_ih(input);
+      _fix_reshape(input_w, input.sizes());
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
+      _fix_reshape(input_w, input.sizes());
       step_inputs = input_w.unbind(0);
       auto rev_step_inputs = reverse(std::move(step_inputs));
       auto rev_result =

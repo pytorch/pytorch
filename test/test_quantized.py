@@ -15,6 +15,10 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
+    override_quantized_engine
+
 from torch.testing._internal.common_utils import (TEST_WITH_UBSAN,
                                                   TestCase,
                                                   run_tests,
@@ -1101,6 +1105,10 @@ class TestStaticRNN(TestCase):
         qh = quantize(h, torch.quint8)
         qc = quantize(c, torch.qint32, scale=1e-6, zero_point=0)
 
+        dqx = qx.dequantize()
+        dqh = qh.dequantize()
+        dqc = qc.dequantize()
+
         f_lstm = torch.nn.LSTM(input_size=input_size,
                                hidden_size=hidden_size,
                                num_layers=num_layers,
@@ -1123,12 +1131,12 @@ class TestStaticRNN(TestCase):
                                          weights_scale=None,
                                          weights_zero_point=None)
 
-        f_out, (f_h, f_c) = f_lstm(x, (h, c))
+        f_out, (f_h, f_c) = f_lstm(dqx, (dqh, dqc))
         q_out, (q_h, q_c) = q_lstm(qx, (qh, qc))
 
         self.assertEqual(f_out, q_out.dequantize(), prec=0.2,
                          message="Output not equal: {} vs. {}".format(f_out, q_out))
-        self.assertEqual(f_h, q_h.dequantize(), prec=0.2,
+        self.assertEqual(f_h, q_h.dequantize(), prec=0.3,
                          message="H not equal: {} vs. {}".format(f_h, q_h))
         self.assertEqual(f_c, q_c.dequantize(), prec=0.2,
                          message="C not equal: {} vs. {}".format(f_c, q_c))
