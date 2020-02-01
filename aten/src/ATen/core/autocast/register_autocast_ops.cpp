@@ -263,7 +263,8 @@ template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16_with_tensorlist, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)()
+    // The TensorList that receives vec will use vec's raw data pointer.
+    // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)().
     std::vector<Tensor> vec = get_casted_vector(at::kHalf, args...);
     return (*F)(cached_cast_with_vector(at::kHalf, vec, args)...);
   }

@@ -13,22 +13,12 @@ namespace autocast {
 /// when we are not in mobile build or when FEATURE_TORCH_MOBILE
 /// is on.
 #if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
-namespace {
-  thread_local std::unique_ptr<c10::impl::IncludeDispatchKeyGuard> guard_holder;
-}
-
 bool AutocastMode::is_enabled() {
-  return bool(guard_holder.get());
+  return c10::impl::tls_is_dispatch_key_included(DispatchKey::AutocastTensorId);
 }
 
-void AutocastMode::set_enabled(bool enabled) {
-  if (enabled) {
-    if (!is_enabled()) {
-      guard_holder.reset(new c10::impl::IncludeDispatchKeyGuard(DispatchKey::AutocastTensorId));
-    }
-  } else {
-    guard_holder.reset(nullptr);
-  }
+void AutocastMode::set_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::AutocastTensorId, new_enabled);
 }
 
 void clear_cache();
