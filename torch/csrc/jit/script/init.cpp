@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
@@ -107,6 +108,12 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+
+    if (py::isinstance<ScriptClass>(obj)) {
+      auto script_class = py::cast<ScriptClass>(obj);
+      return script_class.class_type_.type_;
+    }
+
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
     if (!py::cast<bool>(isClass)) {
       return nullptr;
@@ -673,13 +680,15 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // STL containers are not mutable by default and hence we need to bind as
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
   py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
@@ -755,6 +764,15 @@ void initJitScriptBindings(PyObject* module) {
             m.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "_save_for_mobile",
+          [](Module& m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m._save_for_mobile(filename, _extra_files);
+          },
+          py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
@@ -1124,6 +1142,15 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
+  m.def("_ivalue_debug_python_object", [](py::object py_obj) {
+    // convert to IValue first, IValue will incref via py::object
+    IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
+    // convert back to PyObject by borrowing the reference, which also
+    // incref, after the return of this function, IValue is out of scope
+    // which decref, so the return value is original refcount + 1
+    py::object ret = toPyObject(pyobj_ivalue);
+    return ret;
+  });
   m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
@@ -1297,6 +1324,12 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
+  m.def("_check_onnx_proto",
+     [](const std::string& proto_string) {
+            check_onnx_proto(proto_string);
+        },
+        py::arg("proto_string")
+      );
 }
 } // namespace script
 } // namespace jit
