@@ -47,6 +47,7 @@ pytorch_windows_params: &pytorch_windows_params
     BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: "10"
+    PYTHON_VERSION: "3.6"
     VC_VERSION: "14.11"
     VC_YEAR: "2017"
     VC_PRODUCT: "BuildTools"
