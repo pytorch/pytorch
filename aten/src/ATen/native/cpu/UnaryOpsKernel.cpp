@@ -371,24 +371,37 @@ static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t 
 }
 
 static void random_kernel(TensorIterator& iter, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_cpu", [&] {
-    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    if (std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, float>::value) {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
-      });
-    } else if (std::is_same<scalar_t, bool>::value) {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random() & 1;
-      });
-    } else {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
-      });
-    }
-  });
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cpu", [&] {
+      if (std::is_same<scalar_t, double>::value) {
+        cpu_serial_kernel(iter, [generator]() -> scalar_t {
+          return generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+        });
+      } else {
+        cpu_serial_kernel(iter, [generator]() -> scalar_t {
+          return generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+        });
+      }
+    });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_cpu", [&] {
+      if (std::is_same<scalar_t, int64_t>::value) {
+        cpu_serial_kernel(iter, [generator]() -> scalar_t {
+          return generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
+        });
+      } else if (std::is_same<scalar_t, bool>::value) {
+        cpu_serial_kernel(iter, [generator]() -> scalar_t {
+          return generator->random() & 1;
+        });
+      } else {
+        cpu_serial_kernel(iter, [generator]() -> scalar_t {
+          return generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
+        });
+      }
+    });
+  }
 }
 
 // This is the special kernel to handle single specific case:
