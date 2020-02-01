@@ -464,7 +464,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
-               && input.size(0) <= 131070
+               && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
+                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
+                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
+                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
                && detail::getCUDAHooks().compiledWithCuDNN()
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
@@ -532,7 +535,11 @@ Tensor batch_norm(
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
   if (input.numel()==0){
-    return input; //return input instead of new empty tensor, because new empty tensor breaks the gradient chain
+    //don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return out; 
   }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
