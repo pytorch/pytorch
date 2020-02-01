@@ -182,7 +182,7 @@ class BasePruningMethod(ABC):
             # reparametrize by saving mask to `module[name + '_mask']`...
             module.register_buffer(name + "_mask", mask)
             # ... and the new pruned tensor to `module[name]`
-            module.register_parameter(name,  method.apply_mask(module))
+            module.register_parameter(name,  torch.nn.Parameter(method.apply_mask(module)))
             # associate the pruning method to the module via a hook to
             # compute the function before every forward() (compile by run)
             module.register_forward_pre_hook(method)
