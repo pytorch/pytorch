@@ -2194,7 +2194,7 @@ t2.start()
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
                 else:
-                    control = getattr(args[0], op)(*cast(args[1:], run_as_type), **add_kwargs)
+                    control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
                              else (output_to_compare == control)

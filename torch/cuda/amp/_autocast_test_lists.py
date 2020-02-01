@@ -179,7 +179,7 @@ class _AutocastTestLists(object):
             ("__matmul__", mat0_fp32 + mat1_fp32)
         ]
         self.methods_fp32 = [
-            ("__pow__", pointwise0_fp16 + (1.5,)),
+            ("__pow__", (torch.rand(n, device="cuda", dtype=torch.float16), 1.5)),
         ]
         self.banned = [
             ("binary_cross_entropy", (torch.rand((n, n), device="cuda", dtype=torch.float32),
