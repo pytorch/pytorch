@@ -68,6 +68,11 @@ class Adagrad(Optimizer):
                 grad = p.grad.data
                 state = self.state[p]
 
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['sum'] = torch.full_like(p.data, group['initial_accumulator_value'], memory_format=torch.preserve_format)
+
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
