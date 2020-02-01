@@ -20,28 +20,23 @@ namespace fuser {
 Val::Val(
   const ValType _type) 
   : type_{_type} {
-    //TODO: should this be a runtime error?
-    if(Manager::instance().fusion() != nullptr){
-      auto* fusion = Manager::instance().fusion();
-      fusion->registerVal(this);
+    if(FusionGuard::getCurFusion() != nullptr){
+      FusionGuard::getCurFusion()->registerVal(this);
     }else{
-      std::cout<<"Warning no fusion group found when creating a Val."<<std::endl;
+      throw std::runtime_error("No fusion group found when creating a Val.");
     }
+    
 }
 
 Expr::Expr(
     const ExprType _type)
   : type_{_type} {
-   
-    //TODO: should this be a runtime error?
-    if(Manager::instance().fusion() != nullptr){
-      auto* fusion = Manager::instance().fusion();
-      fusion->registerExpr(this);
-      fusion->insertAtEnd(this);
+    if(FusionGuard::getCurFusion() != nullptr){
+      FusionGuard::getCurFusion()->registerExpr(this);
+      FusionGuard::getCurFusion()->insertAtEnd(this);
     }else{
-      std::cout<<"Warning no fusion group found when creating an Expr."<<std::endl;
+      throw std::runtime_error("No fusion group found when creating an Expr.");
     }
-    
 }
 
 Statement::~Statement() { }

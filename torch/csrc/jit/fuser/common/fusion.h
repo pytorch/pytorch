@@ -26,43 +26,25 @@ namespace fuser {
 
 struct Fusion;
 
-struct TORCH_API Manager{
-
-private:
-
-  std::stack<Fusion*> fusion_;
-
-  Manager(){}
-
-  // Not copyable
-  Manager(const Manager& other) = delete;
-  Manager& operator=(const Manager& other) = delete;
-
-  Manager(Manager&& other) = delete;
-  Manager& operator=(Manager&& other) = delete;
-
+struct TORCH_API FusionGuard{
 
 public:
+  static thread_local Fusion* cur_fusion;
+  Fusion* prev_fusion;
 
-  Manager(Fusion* _fusion){
-    instance().fusion_.push(_fusion);
+  FusionGuard(Fusion* const fusion) {
+    prev_fusion = cur_fusion;
+    cur_fusion = fusion;
   }
 
-  ~Manager(){
-    if(instance().fusion_.size() > 0)
-      instance().fusion_.pop();
+  ~FusionGuard() {
+    cur_fusion = prev_fusion;
   }
 
-  static Manager& instance(){
-    static Manager m;
-    return m;
+  static Fusion* getCurFusion() {
+    return cur_fusion;
   }
 
-  Fusion* fusion(){
-    if(instance().fusion_.size() > 0)
-      return instance().fusion_.top();
-    return nullptr;
-  }
 };
 
 struct TORCH_API Fusion {

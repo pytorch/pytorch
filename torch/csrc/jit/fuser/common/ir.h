@@ -255,6 +255,8 @@ struct TORCH_API Region : public IRInputOutput {
     return (stmt->region() == this);
   }
 
+  // TODO: Lets put some safety into these 2 functions. Run through a quick dependency check
+  // on the expr's inputs.
   void insertAtStart(Expr* expr) {
     registerExpr(expr);
     exprs_.push_front(expr);

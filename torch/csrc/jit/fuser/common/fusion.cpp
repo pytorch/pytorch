@@ -4,6 +4,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+thread_local Fusion* FusionGuard::cur_fusion = nullptr;
+
 std::ostream& operator<<(std::ostream& os, const std::deque<Val*>& vals) {
   os << "( ";
   for (auto* val : vals) {
