@@ -10013,6 +10013,22 @@ class TestTorchDeviceType(TestCase):
                                                        [0, 0, 0],
                                                        [0, 0, 0]]))
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cumlogsumexp(self):
+        a = torch.randn(5, 4)
+        a[0, 0] = inf
+        a[1, :] = -inf
+        actual = a.cumlogsumexp(1)
+        max = np.maximum.accumulate(a.numpy(), axis=1)
+        expected = np.log(max + np.cumsum(np.exp(a - max), axis=1))
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(np.allclose(expected, actual.numpy()))
+        # check that out is actually inplace
+        b = torch.zeros(5, 2)
+        c = b[:, 0]
+        torch.cumlogsumexp(a, 1, out=c)
+        self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
+
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):

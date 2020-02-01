@@ -258,8 +258,8 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumlogsumexp(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumlogsumexp_backward(grad.to(self.scalar_type()), dim)
+- name: cumlogsumexp(Tensor self, int dim) -> Tensor
+  self: cumlogsumexp_backward(grad, self, result, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim)

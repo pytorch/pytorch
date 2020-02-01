@@ -430,7 +430,20 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
   return -at::matmul(grad_self, solution.transpose(-2, -1));
 }
 
-Tensor cumlogsumexp_backward(const Tensor & x, int64_t dim) {
+Tensor cumlogsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {
+  if (self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+    result = unsqueeze_multiple(result, dim, self.sizes().size());
+  }
+  grad = grad * (self - result).exp();
+  if (grad.dim() == 0 || grad.numel() == 0) {
+    return grad;
+  }
+  auto ret = at::cumsum(-grad, dim);
+  auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone(at::MemoryFormat::Preserve);
+  ret -= ret_sum.expand(ret.sizes());
+  ret += grad;
+  return ret;
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
