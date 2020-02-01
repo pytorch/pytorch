@@ -14,16 +14,22 @@ namespace rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
-void confirmPendingUser(
+void TORCH_API confirmPendingUser(
     const rpc::Message& message,
     const c10::optional<utils::FutureError>& futErr);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
-class RRefContext {
+class TORCH_API RRefContext {
  public:
   static RRefContext& getInstance();
-  static void destroyInstance(bool ignoreRRefLeak = true);
+  // NB: This method must be called before destructing RRefContext singleton.
+  // Similar to delForkOfOwner, this method returns a vector of OwnerRRefs that
+  // hold py::object. The call-site is also responsible for resetting those
+  // shared_ptr objects with a GIL. See comments at delForkOfOwner() for more
+  // details.
+  static std::vector<std::shared_ptr<RRef>> destroyInstance(
+      bool ignoreRRefLeak = true);
 
   static void handleException(const c10::optional<utils::FutureError>& futErr);
 
@@ -93,7 +99,16 @@ class RRefContext {
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
   // IValue or py::object. For the later, this method will acquire GIL.
-  void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  // NB: If this fork deletion triggered deleting OwnerRRef, this method will
+  // return a shared_ptr to the OwnerRRef, which is likely to be the last
+  // shared_ptr instance for it. Therefore, deleting this shared_ptr<OwnerRRef>
+  // will also trigger deleting the object it points to. If OwnerRRef holds a
+  // py::object, deleting it require GIL. The call site should guarded it with
+  // a GIL and reset the shared_ptr. The GIL-guarded deletion is intentionally
+  // left out of this function to avoid creating dependency on pybind.
+  std::shared_ptr<RRef> delForkOfOwner(
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
