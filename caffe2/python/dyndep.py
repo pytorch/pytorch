@@ -30,7 +30,7 @@ def InitOpsLibrary(name):
         # Note(jiayq): if the name does not exist, instead of immediately
         # failing we will simply print a warning, deferring failure to the
         # time when an actual call is made.
-        print('Ignoring {} as it is not a valid file.'.format(name))
+        print("Ignoring {} as it is not a valid file.".format(name))
         return
     _init_impl(name)
 

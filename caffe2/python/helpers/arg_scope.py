@@ -12,13 +12,15 @@ _threadlocal_scope = threading.local()
 def arg_scope(single_helper_or_list, **kwargs):
     global _threadlocal_scope
     if not isinstance(single_helper_or_list, list):
-        assert callable(single_helper_or_list), \
-            "arg_scope is only supporting single or a list of helper functions."
+        assert callable(
+            single_helper_or_list
+        ), "arg_scope is only supporting single or a list of helper functions."
         single_helper_or_list = [single_helper_or_list]
     old_scope = copy.deepcopy(get_current_scope())
     for helper in single_helper_or_list:
-        assert callable(helper), \
-            "arg_scope is only supporting a list of callable helper functions."
+        assert callable(
+            helper
+        ), "arg_scope is only supporting a list of callable helper functions."
         helper_key = helper.__name__
         if helper_key not in old_scope:
             _threadlocal_scope.current_scope[helper_key] = {}

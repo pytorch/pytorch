@@ -13,7 +13,6 @@ import numpy as np
 
 
 class TestReductionOps(serial.SerializedTestCase):
-
     @serial.given(n=st.integers(5, 8), **hu.gcs)
     def test_elementwise_sum(self, n, gc, dc):
         X = np.random.rand(n).astype(np.float32)
@@ -21,17 +20,10 @@ class TestReductionOps(serial.SerializedTestCase):
         def sum_op(X):
             return [np.sum(X)]
 
-        op = core.CreateOperator(
-            "SumElements",
-            ["X"],
-            ["y"]
-        )
+        op = core.CreateOperator("SumElements", ["X"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=sum_op,
+            device_option=gc, op=op, inputs=[X], reference=sum_op
         )
 
         self.assertGradientChecks(
@@ -49,22 +41,17 @@ class TestReductionOps(serial.SerializedTestCase):
         def sum_op(X):
             return [np.sum(X)]
 
-        op = core.CreateOperator(
-            "SumElementsInt",
-            ["X"],
-            ["y"]
-        )
+        op = core.CreateOperator("SumElementsInt", ["X"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=sum_op,
+            device_option=gc, op=op, inputs=[X], reference=sum_op
         )
 
-    @serial.given(n=st.integers(1, 65536),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @serial.given(
+        n=st.integers(1, 65536),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_elementwise_sqrsum(self, n, dtype, gc, dc):
         if dtype == np.float16:
             # fp16 is only supported with CUDA/HIP
@@ -76,11 +63,7 @@ class TestReductionOps(serial.SerializedTestCase):
         def sumsqr_op(X):
             return [np.sum(X * X)]
 
-        op = core.CreateOperator(
-            "SumSqrElements",
-            ["X"],
-            ["y"]
-        )
+        op = core.CreateOperator("SumSqrElements", ["X"], ["y"])
 
         threshold = 0.01 if dtype == np.float16 else 0.005
 
@@ -99,18 +82,10 @@ class TestReductionOps(serial.SerializedTestCase):
         def avg_op(X):
             return [np.mean(X)]
 
-        op = core.CreateOperator(
-            "SumElements",
-            ["X"],
-            ["y"],
-            average=1
-        )
+        op = core.CreateOperator("SumElements", ["X"], ["y"], average=1)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=avg_op,
+            device_option=gc, op=op, inputs=[X], reference=avg_op
         )
 
         self.assertGradientChecks(
@@ -121,48 +96,32 @@ class TestReductionOps(serial.SerializedTestCase):
             outputs_with_grads=[0],
         )
 
-    @serial.given(batch_size=st.integers(1, 3),
-           m=st.integers(1, 3),
-           n=st.integers(1, 4),
-           **hu.gcs)
+    @serial.given(
+        batch_size=st.integers(1, 3), m=st.integers(1, 3), n=st.integers(1, 4), **hu.gcs
+    )
     def test_rowwise_max(self, batch_size, m, n, gc, dc):
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 
         def rowwise_max(X):
             return [np.max(X, axis=2)]
 
-        op = core.CreateOperator(
-            "RowwiseMax",
-            ["x"],
-            ["y"]
-        )
+        op = core.CreateOperator("RowwiseMax", ["x"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=rowwise_max,
+            device_option=gc, op=op, inputs=[X], reference=rowwise_max
         )
 
-    @serial.given(batch_size=st.integers(1, 3),
-           m=st.integers(1, 3),
-           n=st.integers(1, 4),
-           **hu.gcs)
+    @serial.given(
+        batch_size=st.integers(1, 3), m=st.integers(1, 3), n=st.integers(1, 4), **hu.gcs
+    )
     def test_columnwise_max(self, batch_size, m, n, gc, dc):
         X = np.random.rand(batch_size, m, n).astype(np.float32)
 
         def columnwise_max(X):
             return [np.max(X, axis=1)]
 
-        op = core.CreateOperator(
-            "ColwiseMax",
-            ["x"],
-            ["y"]
-        )
+        op = core.CreateOperator("ColwiseMax", ["x"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=columnwise_max,
+            device_option=gc, op=op, inputs=[X], reference=columnwise_max
         )

@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import object
 import caffe2.python._import_c_extension as C
 from caffe2.python import core
 from caffe2.proto import caffe2_pb2
@@ -25,8 +27,9 @@ class NNModule(object):
                 serialized_device_map = {}
                 for k in device_map:
                     serialized_device_map[k] = device_map[k].SerializeToString()
-                self._NNModule = C.NNModuleFromProtobufDistributed(serialized_proto,
-                        serialized_device_map)
+                self._NNModule = C.NNModuleFromProtobufDistributed(
+                    serialized_proto, serialized_device_map
+                )
             # Default
             elif serialized_proto:
                 self._NNModule, self._OpList = C.NNModuleFromProtobuf(serialized_proto)

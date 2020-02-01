@@ -16,7 +16,7 @@ class TestMKLBasic(test_util.TestCase):
         # test a batch size of 1 since this may be the most frequent use
         # case for MKL during deployment time.
         X = np.random.rand(1, 256, 6, 6).astype(np.float32) - 0.5
-        #X = np.random.rand(32, 256*6*6).astype(np.float32) - 0.5
+        # X = np.random.rand(32, 256*6*6).astype(np.float32) - 0.5
         W = np.random.rand(4096, 9216).astype(np.float32) - 0.5
         b = np.random.rand(4096).astype(np.float32) - 0.5
         mkl_do = core.DeviceOption(caffe2_pb2.MKLDNN)
@@ -36,10 +36,8 @@ class TestMKLBasic(test_util.TestCase):
         workspace.RunNet(net)
         # makes sure that the results are good.
         np.testing.assert_allclose(
-            workspace.FetchBlob("Y"),
-            workspace.FetchBlob("Y_mkl"),
-            atol=1e-2,
-            rtol=1e-2)
+            workspace.FetchBlob("Y"), workspace.FetchBlob("Y_mkl"), atol=1e-2, rtol=1e-2
+        )
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
         print("FC CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
@@ -72,25 +70,28 @@ class TestMKLBasic(test_util.TestCase):
         net.Conv(["X", "W", "b"], "C", pad=1, stride=1, kernel=3)
         net.Relu("C", "R")
         net.MaxPool("R", "P", stride=2, kernel=3)
-        net.FC(["P","w_fc", "b_fc"], "Y")
+        net.FC(["P", "w_fc", "b_fc"], "Y")
 
-        net.Conv(["X_mkl", "W_mkl", "b_mkl"], "C_mkl",
-                 pad=1, stride=1, kernel=3, device_option=mkl_do)
+        net.Conv(
+            ["X_mkl", "W_mkl", "b_mkl"],
+            "C_mkl",
+            pad=1,
+            stride=1,
+            kernel=3,
+            device_option=mkl_do,
+        )
         net.Relu("C_mkl", "R_mkl", device_option=mkl_do)
-        net.MaxPool("R_mkl", "P_mkl",
-                 stride=2, kernel=3, device_option=mkl_do)
-        net.FC(["P_mkl","w_fc_mkl", "b_fc_mkl"], "Y_mkl", device_option=mkl_do)
+        net.MaxPool("R_mkl", "P_mkl", stride=2, kernel=3, device_option=mkl_do)
+        net.FC(["P_mkl", "w_fc_mkl", "b_fc_mkl"], "Y_mkl", device_option=mkl_do)
 
         workspace.CreateNet(net)
         workspace.RunNet(net)
         # makes sure that the results are good.
         np.testing.assert_allclose(
-            workspace.FetchBlob("Y"),
-            workspace.FetchBlob("Y_mkl"),
-            atol=1e-2,
-            rtol=1e-2)
+            workspace.FetchBlob("Y"), workspace.FetchBlob("Y_mkl"), atol=1e-2, rtol=1e-2
+        )
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

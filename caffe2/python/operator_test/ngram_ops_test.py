@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
@@ -14,7 +15,7 @@ import numpy as np
 
 class TestNGramOps(hu.HypothesisTestCase):
     @given(
-        seed=st.integers(0, 2**32 - 1),
+        seed=st.integers(0, 2 ** 32 - 1),
         N=st.integers(min_value=10, max_value=100),
         D=st.integers(min_value=2, max_value=10),
         out_of_vcb=st.floats(min_value=0, max_value=0.5),
@@ -23,15 +24,7 @@ class TestNGramOps(hu.HypothesisTestCase):
         **hu.gcs_cpu_only
     )
     def test_ngram_from_categorical_op(
-        self,
-        seed,
-        N,
-        D,
-        out_of_vcb,
-        max_categorical_limit,
-        max_in_vcb_val,
-        gc,
-        dc,
+        self, seed, N, D, out_of_vcb, max_categorical_limit, max_in_vcb_val, gc, dc
     ):
         np.random.seed(seed)
         col_num = max(int(D / 2), 1)
@@ -39,10 +32,7 @@ class TestNGramOps(hu.HypothesisTestCase):
         categorical_limits = np.random.randint(
             2, high=max_categorical_limit, size=col_num
         ).astype(np.int32)
-        vcb = [
-            np.random.choice(max_in_vcb_val, x, False)
-            for x in categorical_limits
-        ]
+        vcb = [np.random.choice(max_in_vcb_val, x, False) for x in categorical_limits]
         vals = np.array([x for l in vcb for x in l], dtype=np.int32)
 
         # Enforce round(floats) to be negative.
@@ -61,15 +51,15 @@ class TestNGramOps(hu.HypothesisTestCase):
         expected_output = np.array(expected_output, dtype=np.int32)
 
         workspace.ResetWorkspace()
-        workspace.FeedBlob('floats', floats)
+        workspace.FeedBlob("floats", floats)
         op = core.CreateOperator(
             "NGramFromCategorical",
-            ['floats'],
-            ['output'],
+            ["floats"],
+            ["output"],
             col_ids=col_ids,
             categorical_limits=categorical_limits,
             vals=vals,
         )
         workspace.RunOperatorOnce(op)
-        output = workspace.blobs['output']
+        output = workspace.blobs["output"]
         np.testing.assert_array_equal(output, expected_output)

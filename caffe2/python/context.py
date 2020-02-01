@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import object
 import threading
 import six
 
@@ -18,7 +19,7 @@ class _ContextInfo(object):
 
     @property
     def _stack(self):
-        if not hasattr(self._local_stack, 'obj'):
+        if not hasattr(self._local_stack, "obj"):
             self._local_stack.obj = []
         return self._local_stack.obj
 
@@ -26,7 +27,7 @@ class _ContextInfo(object):
         self._stack.append(value)
 
     def exit(self, value):
-        assert len(self._stack) > 0, 'Context %s is empty.' % self.cls
+        assert len(self._stack) > 0, "Context %s is empty." % self.cls
         assert self._stack.pop() == value
 
     def get_active(self, required=True):
@@ -34,7 +35,8 @@ class _ContextInfo(object):
             if not required:
                 return None
             assert self.allow_default, (
-                'Context %s is required but none is active.' % self.cls)
+                "Context %s is required but none is active." % self.cls
+            )
             self.enter(self.cls())
         return self._stack[-1]
 
@@ -45,12 +47,13 @@ class _ContextRegistry(object):
 
     def register(self, ctx_info):
         assert isinstance(ctx_info, _ContextInfo)
-        assert (ctx_info.cls not in self._ctxs), (
-            'Context %s already registered' % ctx_info.cls)
+        assert ctx_info.cls not in self._ctxs, (
+            "Context %s already registered" % ctx_info.cls
+        )
         self._ctxs[ctx_info.cls] = ctx_info
 
     def get(self, cls):
-        assert cls in self._ctxs, 'Context %s not registered.' % cls
+        assert cls in self._ctxs, "Context %s not registered." % cls
         return self._ctxs[cls]
 
 
@@ -80,6 +83,7 @@ def __call__(self, func):
     def wrapper(*args, **kwargs):
         with self:
             return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -94,17 +98,17 @@ class define_context(object):
         self.allow_default = allow_default
 
     def __call__(self, cls):
-        assert not hasattr(cls, '_ctx_class'), (
-            '%s parent class (%s) already defines context.' % (
-                cls, cls._ctx_class))
+        assert not hasattr(
+            cls, "_ctx_class"
+        ), "%s parent class (%s) already defines context." % (cls, cls._ctx_class)
         cls._ctx_class = cls
 
         _context_registry().register(
             _ContextInfo(cls, self.allow_default, self.arg_name)
         )
 
-        cls._prev_enter = cls.__enter__ if hasattr(cls, '__enter__') else None
-        cls._prev_exit = cls.__exit__ if hasattr(cls, '__exit__') else None
+        cls._prev_enter = cls.__enter__ if hasattr(cls, "__enter__") else None
+        cls._prev_exit = cls.__exit__ if hasattr(cls, "__exit__") else None
 
         cls.__enter__ = __enter__
         cls.__exit__ = __exit__
@@ -117,7 +121,9 @@ class define_context(object):
 def _get_active_context(cls, val=None, required=True):
     ctx_info = _context_registry().get(cls)
     if val is not None:
-        assert isinstance(val, cls), (
-            'Wrong context type. Expected: %s, got %s.' % (cls, type(val)))
+        assert isinstance(val, cls), "Wrong context type. Expected: %s, got %s." % (
+            cls,
+            type(val),
+        )
         return val
     return ctx_info.get_active(required=required)

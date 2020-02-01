@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
+from builtins import str
+from builtins import range
 import collections
 import functools
 import os
@@ -745,12 +747,7 @@ class TestConvolution(serial.SerializedTestCase):
     @given(
         num_workers=st.integers(1, 4),
         net_type=st.sampled_from(
-            ["simple", "dag"]
-            + (
-                ["async_dag"]
-                if workspace.has_gpu_support
-                else []
-            )
+            ["simple", "dag"] + (["async_dag"] if workspace.has_gpu_support else [])
         ),
         engine=st.sampled_from(["CUDNN", ""]),
         **hu.gcs_no_hip
@@ -769,7 +766,7 @@ class TestConvolution(serial.SerializedTestCase):
 
         np.random.seed(1701)
         # Build a binary tree of conv layers, summing at each node.
-        for i in reversed(range(depth)):
+        for i in reversed(list(range(depth))):
             for j in range(2 ** i):
                 bottom_1 = "{}_{}".format(i + 1, 2 * j)
                 bottom_2 = "{}_{}".format(i + 1, 2 * j + 1)

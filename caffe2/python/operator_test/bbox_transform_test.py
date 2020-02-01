@@ -34,7 +34,7 @@ def bbox_transform(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0)):
     dh = deltas[:, 3::4] / wh
 
     # Prevent sending too large values into np.exp()
-    BBOX_XFORM_CLIP = np.log(1000. / 16.)
+    BBOX_XFORM_CLIP = np.log(1000.0 / 16.0)
     dw = np.minimum(dw, BBOX_XFORM_CLIP)
     dh = np.minimum(dh, BBOX_XFORM_CLIP)
 
@@ -62,9 +62,7 @@ def clip_tiled_boxes(boxes, im_shape):
     has shape (N, 4 * num_tiled_boxes)."""
     assert (
         boxes.shape[1] % 4 == 0
-    ), "boxes.shape[1] is {:d}, but must be divisible by 4.".format(
-        boxes.shape[1]
-    )
+    ), "boxes.shape[1] is {:d}, but must be divisible by 4.".format(boxes.shape[1])
     # x1 >= 0
     boxes[:, 0::4] = np.maximum(np.minimum(boxes[:, 0::4], im_shape[1] - 1), 0)
     # y1 >= 0
@@ -133,7 +131,7 @@ def bbox_transform_rotated(
     da = deltas[:, 4::5] * 180.0 / np.pi
 
     # Prevent sending too large values into np.exp()
-    BBOX_XFORM_CLIP = np.log(1000. / 16.)
+    BBOX_XFORM_CLIP = np.log(1000.0 / 16.0)
     dw = np.minimum(dw, BBOX_XFORM_CLIP)
     dh = np.minimum(dh, BBOX_XFORM_CLIP)
 
@@ -162,9 +160,7 @@ def clip_tiled_boxes_rotated(boxes, im_shape, angle_thresh=1.0):
     """
     assert (
         boxes.shape[1] % 5 == 0
-    ), "boxes.shape[1] is {:d}, but must be divisible by 5.".format(
-        boxes.shape[1]
-    )
+    ), "boxes.shape[1] is {:d}, but must be divisible by 5.".format(boxes.shape[1])
 
     (H, W) = im_shape[:2]
 
@@ -195,8 +191,8 @@ def generate_rois_rotated(roi_counts, im_dims):
     # [batch_id, ctr_x, ctr_y, w, h, angle]
     rotated_rois = np.empty((rois.shape[0], 6)).astype(np.float32)
     rotated_rois[:, 0] = rois[:, 0]  # batch_id
-    rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / 2.  # ctr_x = (x1 + x2) / 2
-    rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.  # ctr_y = (y1 + y2) / 2
+    rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / 2.0  # ctr_x = (x1 + x2) / 2
+    rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.0  # ctr_y = (y1 + y2) / 2
     rotated_rois[:, 3] = rois[:, 3] - rois[:, 1] + 1.0  # w = x2 - x1 + 1
     rotated_rois[:, 4] = rois[:, 4] - rois[:, 2] + 1.0  # h = y2 - y1 + 1
     rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees

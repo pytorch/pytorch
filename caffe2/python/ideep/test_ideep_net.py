@@ -14,84 +14,70 @@ import os.path
 
 def GetArgumentParser():
     parser = argparse.ArgumentParser(description="Caffe2 benchmark.")
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=128,
-        help="The batch size."
-    )
+    parser.add_argument("--batch_size", type=int, default=128, help="The batch size.")
     parser.add_argument("--model", type=str, help="The model to benchmark.")
     parser.add_argument(
-        "--order",
-        type=str,
-        default="NCHW",
-        help="The order to evaluate."
+        "--order", type=str, default="NCHW", help="The order to evaluate."
     )
     parser.add_argument(
-        "--device",
-        type=str,
-        default="CPU",
-        help="device to evaluate on."
+        "--device", type=str, default="CPU", help="device to evaluate on."
     )
-    parser.add_argument(
-        "--cudnn_ws",
-        type=int,
-        help="The cudnn workspace size."
-    )
+    parser.add_argument("--cudnn_ws", type=int, help="The cudnn workspace size.")
     parser.add_argument(
         "--iterations",
         type=int,
         default=10,
-        help="Number of iterations to run the network."
+        help="Number of iterations to run the network.",
     )
     parser.add_argument(
         "--warmup_iterations",
         type=int,
         default=10,
-        help="Number of warm-up iterations before benchmarking."
+        help="Number of warm-up iterations before benchmarking.",
     )
     parser.add_argument(
-        "--forward_only",
-        action='store_true',
-        help="If set, only run the forward pass."
+        "--forward_only", action="store_true", help="If set, only run the forward pass."
     )
     parser.add_argument(
         "--layer_wise_benchmark",
-        action='store_true',
-        help="If True, run the layer-wise benchmark as well."
+        action="store_true",
+        help="If True, run the layer-wise benchmark as well.",
     )
     parser.add_argument(
         "--engine",
         type=str,
         default="",
-        help="If set, blindly prefer the given engine(s) for every op.")
+        help="If set, blindly prefer the given engine(s) for every op.",
+    )
     parser.add_argument(
         "--dump_model",
-        action='store_true',
-        help="If True, dump the model prototxts to disk."
+        action="store_true",
+        help="If True, dump the model prototxts to disk.",
     )
     parser.add_argument("--net_type", type=str, default="simple")
     parser.add_argument("--num_workers", type=int, default=2)
-    parser.add_argument("--use-nvtx", default=False, action='store_true')
+    parser.add_argument("--use-nvtx", default=False, action="store_true")
     parser.add_argument("--htrace_span_log_path", type=str)
     return parser
 
 
 def benchmark(args):
-    print('Batch size: {}'.format(args.batch_size))
+    print("Batch size: {}".format(args.batch_size))
     mf = ModelDownloader()
     init_net, pred_net, value_info = mf.get_c2_model(args.model)
-    input_shapes = {k : [args.batch_size] + v[-1][1:] for (k, v) in value_info.items()}
+    input_shapes = {
+        k: [args.batch_size] + v[-1][1:] for (k, v) in list(value_info.items())
+    }
     print("input info: {}".format(input_shapes))
     external_inputs = {}
-    for k, v in input_shapes.items():
+    for k, v in list(input_shapes.items()):
         external_inputs[k] = np.random.randn(*v).astype(np.float32)
 
-    if args.device == 'CPU':
+    if args.device == "CPU":
         device_option = core.DeviceOption(caffe2_pb2.CPU)
-    elif args.device == 'MKL':
+    elif args.device == "MKL":
         device_option = core.DeviceOption(caffe2_pb2.MKLDNN)
-    elif args.device == 'IDEEP':
+    elif args.device == "IDEEP":
         device_option = core.DeviceOption(caffe2_pb2.IDEEP)
     else:
         raise Exception("Unknown device: {}".format(args.device))
@@ -106,26 +92,27 @@ def benchmark(args):
     weights = {}
     for b in bb:
         weights[b] = workspace.FetchBlob(b)
-    for k, v in external_inputs.items():
+    for k, v in list(external_inputs.items()):
         weights[k] = v
     workspace.ResetWorkspace()
 
     with core.DeviceScope(device_option):
-        for name, blob in weights.items():
-            #print("{}".format(name))
+        for name, blob in list(weights.items()):
+            # print("{}".format(name))
             workspace.FeedBlob(name, blob, device_option)
         workspace.CreateNet(pred_net)
         start = time.time()
-        res = workspace.BenchmarkNet(pred_net.name,
-                                     args.warmup_iterations,
-                                     args.iterations,
-                                     args.layer_wise_benchmark)
-        print("FPS: {:.2f}".format(1/res[0]*1000*args.batch_size))
+        res = workspace.BenchmarkNet(
+            pred_net.name,
+            args.warmup_iterations,
+            args.iterations,
+            args.layer_wise_benchmark,
+        )
+        print("FPS: {:.2f}".format(1 / res[0] * 1000 * args.batch_size))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     args, extra_args = GetArgumentParser().parse_known_args()
-    if (
-        not args.batch_size or not args.model or not args.order
-    ):
+    if not args.batch_size or not args.model or not args.order:
         GetArgumentParser().print_help()
     benchmark(args)

@@ -3,6 +3,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import str
+from builtins import range
+from builtins import object
 from caffe2.python import workspace
 from caffe2.python.core import Plan, to_execution_step, Net
 from caffe2.python.task import Task, TaskGroup, final_output
@@ -64,8 +68,7 @@ def _test_outer():
     with ops.stop_guard() as g3:
         pass
 
-    return (
-        g1.has_stopped(), g2.has_stopped(), g3.has_stopped(), g4.has_stopped())
+    return (g1.has_stopped(), g2.has_stopped(), g3.has_stopped(), g4.has_stopped())
 
 
 def _test_if(x):
@@ -86,7 +89,7 @@ class TestNetBuilder(unittest.TestCase):
             z, w, a, b = _test_outer()
             p = _test_if(ops.Const(75))
             q = _test_if(ops.Const(25))
-        plan = Plan('name')
+        plan = Plan("name")
         plan.AddStep(to_execution_step(nb))
         ws = workspace.C.Workspace()
         ws.run(plan)
@@ -137,15 +140,12 @@ class TestNetBuilder(unittest.TestCase):
                 with c.Else():
                     ops.Add([total_tiny, val], [total_tiny])
                 ops.Add([total, val], total)
-        return [
-            final_output(x)
-            for x in [total, total_large, total_small, total_tiny]
-        ]
+        return [final_output(x) for x in [total, total_large, total_small, total_tiny]]
 
     def test_net_multi_use(self):
         with Task() as task:
             total = ops.Const(0)
-            net = Net('my_net')
+            net = Net("my_net")
             net.Add([total, net.Const(1)], [total])
             ops.net(net)
             ops.net(net)
@@ -212,13 +212,13 @@ class TestNetBuilder(unittest.TestCase):
         with TaskGroup() as tg:
             with Task(num_instances=NUM_INSTANCES):
                 with ops.task_init():
-                    counter1 = ops.CreateCounter([], ['global_counter'])
-                    counter2 = ops.CreateCounter([], ['global_counter2'])
-                    counter3 = ops.CreateCounter([], ['global_counter3'])
+                    counter1 = ops.CreateCounter([], ["global_counter"])
+                    counter2 = ops.CreateCounter([], ["global_counter2"])
+                    counter3 = ops.CreateCounter([], ["global_counter3"])
                 # both task_counter and local_counter should be thread local
                 with ops.task_instance_init():
-                    task_counter = ops.CreateCounter([], ['task_counter'])
-                local_counter = ops.CreateCounter([], ['local_counter'])
+                    task_counter = ops.CreateCounter([], ["task_counter"])
+                local_counter = ops.CreateCounter([], ["local_counter"])
                 with ops.loop(NUM_ITERS):
                     ops.CountUp(counter1)
                     ops.CountUp(task_counter)
@@ -292,7 +292,7 @@ class TestNetBuilder(unittest.TestCase):
                 # empty else
                 pass
 
-        plan = Plan('if_net_test')
+        plan = Plan("if_net_test")
         plan.AddStep(to_execution_step(nb))
         ws = workspace.C.Workspace()
         ws.run(plan)
@@ -320,7 +320,7 @@ class TestNetBuilder(unittest.TestCase):
                     ops.LT([x, ops.Const(7)])
                 ops.Add([x, y], [y])
 
-        plan = Plan('while_net_test')
+        plan = Plan("while_net_test")
         plan.AddStep(to_execution_step(nb))
         ws = workspace.C.Workspace()
         ws.run(plan)

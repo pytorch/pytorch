@@ -6,7 +6,13 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-'''
+from future import standard_library
+
+standard_library.install_aliases()
+from builtins import zip
+from builtins import range
+
+"""
 This module provides a python-land multithreaded data input mechanism
 for Caffe2 nets.
 
@@ -60,10 +66,10 @@ For a dummy example, see the data_workers_test unit test.
 Note that for data_parallel_models, init_data_input_workers will be called
 for each GPU. Note that the 'coordinator' returned by the function is same
 each time.
-'''
+"""
 
 try:
-    import Queue
+    import queue
 except ImportError:
     # Py3
     import queue as Queue
@@ -75,8 +81,14 @@ import time
 
 from caffe2.python import workspace, core, scope, utils
 from caffe2.proto import caffe2_pb2
-from caffe2.python.parallel_workers import Metrics, State, \
-    WorkerCoordinator, GlobalWorkerCoordinator, Worker, run_worker
+from caffe2.python.parallel_workers import (
+    Metrics,
+    State,
+    WorkerCoordinator,
+    GlobalWorkerCoordinator,
+    Worker,
+    run_worker,
+)
 
 log = logging.getLogger("data_workers")
 log.setLevel(logging.INFO)
@@ -99,11 +111,11 @@ def init_data_input_workers(
     external_loggers=None,
     dont_rebatch=False,
     batch_columns=None,
-    timeout=600
+    timeout=600,
 ):
     global global_coordinator
     device_option = scope.CurrentDeviceScope()
-    if (device_option is None):
+    if device_option is None:
         device_option = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CPU)
 
     metrics = Metrics(external_loggers)
@@ -118,33 +130,40 @@ def init_data_input_workers(
         metrics,
         dont_rebatch,
         batch_columns,
-        timeout=timeout
+        timeout=timeout,
     )
 
     # Launch fetch worker threads
     worker_ids = [
-        global_coordinator.get_new_worker_id()
-        for i in range(num_worker_threads)
+        global_coordinator.get_new_worker_id() for i in range(num_worker_threads)
     ]
 
     # Create coordinator object
     coordinator = WorkerCoordinator(
-        input_source_name, worker_ids, init_fun, batch_feeder)
+        input_source_name, worker_ids, init_fun, batch_feeder
+    )
 
     workers = [
         threading.Thread(
             target=run_worker,
             name="data_workers fetcher id {}".format(worker_id),
-            args=[coordinator,
-                  DataWorker(coordinator, worker_id, fetch_fun, metrics,
-                             batch_size, batch_feeder)],
-        ) for worker_id in worker_ids
+            args=[
+                coordinator,
+                DataWorker(
+                    coordinator, worker_id, fetch_fun, metrics, batch_size, batch_feeder
+                ),
+            ],
+        )
+        for worker_id in worker_ids
     ]
 
-    workers.append(threading.Thread(
-        target=enqueuer,
-        name="Enqueuer {} {}".format(input_source_name, scope.CurrentNameScope()),
-        args=[coordinator, batch_feeder]))
+    workers.append(
+        threading.Thread(
+            target=enqueuer,
+            name="Enqueuer {} {}".format(input_source_name, scope.CurrentNameScope()),
+            args=[coordinator, batch_feeder],
+        )
+    )
     coordinator._workers = workers
     global_coordinator.add(coordinator)
 
@@ -152,9 +171,20 @@ def init_data_input_workers(
 
 
 class BatchFeeder(State):
-    def __init__(self, net, input_blob_names, batch_size,
-                 device_option, namescope, input_source_name, queue,
-                 metrics, dont_rebatch, batch_columns, timeout=600):
+    def __init__(
+        self,
+        net,
+        input_blob_names,
+        batch_size,
+        device_option,
+        namescope,
+        input_source_name,
+        queue,
+        metrics,
+        dont_rebatch,
+        batch_columns,
+        timeout=600,
+    ):
         self._counter = 0
         self._input_blob_names = input_blob_names
         self._batch_size = batch_size
@@ -192,8 +222,8 @@ class BatchFeeder(State):
             self._log_inputs_per_interval(0, force=True)
 
     def cleanup(self):
-        utils.ResetBlobs(self._scratch_blob.values())
-        utils.ResetBlobs(self._scratch_status.values())
+        utils.ResetBlobs(list(self._scratch_blob.values()))
+        utils.ResetBlobs(list(self._scratch_status.values()))
 
     def _get(self, data_input_coordinator):
         start_time = time.time()
@@ -201,10 +231,13 @@ class BatchFeeder(State):
         while data_input_coordinator.is_active():
             try:
                 return self._internal_queue.get(block=True, timeout=0.5)
-            except Queue.Empty:
+            except queue.Empty:
                 if time.time() - last_warning > 10.0:
-                    log.warning("** Data input is slow: (still) no data in {} secs.".format(
-                        time.time() - start_time))
+                    log.warning(
+                        "** Data input is slow: (still) no data in {} secs.".format(
+                            time.time() - start_time
+                        )
+                    )
                     last_warning = time.time()
                 continue
         return None
@@ -214,17 +247,20 @@ class BatchFeeder(State):
             log.warning("Fetcher function returned None")
             return False
 
-        assert len(chunk) == len(self._input_blob_names), \
-            "Expecting data blob for each input"
+        assert len(chunk) == len(
+            self._input_blob_names
+        ), "Expecting data blob for each input"
         for d in chunk:
-            assert isinstance(d, np.ndarray), \
-                "Fetcher function must return a numpy array"
+            assert isinstance(
+                d, np.ndarray
+            ), "Fetcher function must return a numpy array"
         if not self._dont_rebatch:
             j = 1
             for d in chunk[1:]:
-                assert d.shape[self._batch_columns[j]] == \
-                    chunk[0].shape[self._batch_columns[0]], \
-                    "Each returned input must have equal number of samples"
+                assert (
+                    d.shape[self._batch_columns[j]]
+                    == chunk[0].shape[self._batch_columns[0]]
+                ), "Each returned input must have equal number of samples"
                 j += 1
 
         if len(chunk) == 0:
@@ -241,14 +277,18 @@ class BatchFeeder(State):
             try:
                 qsize = self._internal_queue.qsize()
                 if qsize < 2 and (time.time() - self._last_warning) > LOG_INT_SECS:
-                    log.warning("Warning, data loading lagging behind: " +
-                                "queue size={}, name={}".format(qsize, self._input_source_name))
+                    log.warning(
+                        "Warning, data loading lagging behind: "
+                        + "queue size={}, name={}".format(
+                            qsize, self._input_source_name
+                        )
+                    )
                     self._last_warning = time.time()
                 self._counter += 1
                 self._internal_queue.put(chunk, block=True, timeout=0.5)
                 self._log_inputs_per_interval(chunk[0].shape[0])
                 return
-            except Queue.Full:
+            except queue.Full:
                 log.debug("Queue full: stalling fetchers...")
                 continue
 
@@ -261,10 +301,10 @@ class BatchFeeder(State):
                 self._enqueue(b, q, c)
 
     def _enqueue_batch(self, data_input_coordinator):
-        '''
+        """
         This pulls data from the python-side queue and collects them
         into batch-sized pieces, unless dont_rebatch is set to true.
-        '''
+        """
         if self._dont_rebatch:
             self._enqueue_batch_direct(data_input_coordinator)
             return
@@ -274,8 +314,8 @@ class BatchFeeder(State):
 
         # Collect data until we have a full batch size
         while (
-            cur_batch[0].shape[0] == 0 or
-            cur_batch[0].shape[first_batch_col] < self._batch_size
+            cur_batch[0].shape[0] == 0
+            or cur_batch[0].shape[first_batch_col] < self._batch_size
         ) and data_input_coordinator.is_active():
             chunk = self._get(data_input_coordinator)
             if chunk is None:
@@ -292,9 +332,10 @@ class BatchFeeder(State):
         start_time = time.time()
         try:
             # Return data over the batch size back to queue
-            if cur_batch[0].shape[0] > 0 and cur_batch[0].shape[
-                first_batch_col
-            ] > self._batch_size:
+            if (
+                cur_batch[0].shape[0] > 0
+                and cur_batch[0].shape[first_batch_col] > self._batch_size
+            ):
                 leftover = []
                 trimmed_batch = []
                 for j, b in enumerate(cur_batch):
@@ -306,25 +347,24 @@ class BatchFeeder(State):
                 cur_batch = trimmed_batch
                 try:
                     self._internal_queue.put(leftover, block=False)
-                except Queue.Full:
+                except queue.Full:
                     pass
 
                 assert cur_batch[0].shape[first_batch_col] == self._batch_size
 
             if data_input_coordinator.is_active():
-                for b, q, c in zip(
-                    self._input_blob_names, self._queues, cur_batch
-                ):
+                for b, q, c in zip(self._input_blob_names, self._queues, cur_batch):
                     self._enqueue(b, q, c)
         finally:
-            self._metrics.put_metric('enqueue_time', time.time() - start_time)
+            self._metrics.put_metric("enqueue_time", time.time() - start_time)
 
     def _init_scratch(self):
         self._scratch_blob = {}
         self._scratch_status = {}
         for blob_name in self._input_blob_names:
-            scratch_name = self._namescope + blob_name + \
-                "_scratch_" + self._input_source_name
+            scratch_name = (
+                self._namescope + blob_name + "_scratch_" + self._input_source_name
+            )
             self._scratch_blob[blob_name] = core.BlobReference(scratch_name)
             self._scratch_status[blob_name] = core.BlobReference(
                 scratch_name + "_status"
@@ -334,56 +374,50 @@ class BatchFeeder(State):
         # race conditions when calling FeedBlob (which calls wworkspace
         # CreateBlob()) from enqueue threads
         for b in chain(
-            self._scratch_blob.values(), self._scratch_status.values()
+            list(self._scratch_blob.values()), list(self._scratch_status.values())
         ):
             workspace.FeedBlob(
-                b,
-                np.array([]).astype(np.float32),
-                device_option=self._device_option,
+                b, np.array([]).astype(np.float32), device_option=self._device_option
             )
 
     def _enqueue(self, blob_name, queue, data_arr):
-        '''
+        """
         Enqueue the correctly sized batch arrays to Caffe2's queue.
-        '''
+        """
         workspace.FeedBlob(
-            self._scratch_blob[blob_name],
-            data_arr,
-            device_option=self._device_option
+            self._scratch_blob[blob_name], data_arr, device_option=self._device_option
         )
 
         op = core.CreateOperator(
             "SafeEnqueueBlobs",
             [queue, self._scratch_blob[blob_name]],
             [self._scratch_blob[blob_name], self._scratch_status[blob_name]],
-            device_option=self._device_option
+            device_option=self._device_option,
         )
         workspace.RunOperatorOnce(op)
 
     def _create_caffe2_queues(self, net):
-        '''
+        """
         Creates queues on caffe2 side
-        '''
+        """
+
         def create_queue(queue_name, num_blobs, capacity):
             workspace.RunOperatorOnce(
                 core.CreateOperator(
-                    "CreateBlobsQueue",
-                    [], [queue_name],
-                    num_blobs=1,
-                    capacity=capacity))
+                    "CreateBlobsQueue", [], [queue_name], num_blobs=1, capacity=capacity
+                )
+            )
             return core.ScopedBlobReference(queue_name)
 
         for blob_name in self._input_blob_names:
             qname = blob_name + "_c2queue" + "_" + self._input_source_name
-            q = create_queue(
-                qname, num_blobs=1, capacity=self._c2_queue_capacity
-            )
+            q = create_queue(qname, num_blobs=1, capacity=self._c2_queue_capacity)
             self._queues.append(q)
 
     def _create_caffe2_ops(self, net):
-        '''
+        """
         Creates dequeue-ops on caffe2 side
-        '''
+        """
         for q, blob_name in zip(self._queues, self._input_blob_names):
             # Add operator to the Caffe2 network to dequeue
             net.DequeueBlobs(q, blob_name, timeout_secs=float(self._timeout))
@@ -395,18 +429,16 @@ class BatchFeeder(State):
         if delta_seconds >= LOG_INT_SECS or force:
             inputs_per_sec = int(self._inputs / delta_seconds)
             qsize = self._internal_queue.qsize()
-            log.info("{}/{}: {} inputs/sec".format(
-                self._input_source_name,
-                self._namescope,
-                inputs_per_sec,
-            ))
+            log.info(
+                "{}/{}: {} inputs/sec".format(
+                    self._input_source_name, self._namescope, inputs_per_sec
+                )
+            )
             log.info("-- queue: {} batches".format(qsize))
             # log and reset perf metrics
-            self._metrics.put_metric(
-                'inputs_per_sec', inputs_per_sec, False)
-            self._metrics.put_metric('queue_size', qsize, False)
-            self._metrics.put_metric(
-                'time_elapsed', delta_seconds, False)
+            self._metrics.put_metric("inputs_per_sec", inputs_per_sec, False)
+            self._metrics.put_metric("queue_size", qsize, False)
+            self._metrics.put_metric("time_elapsed", delta_seconds, False)
             self._metrics.log_metrics()
             self._metrics.reset_metrics()
             self._inputs = 0
@@ -421,7 +453,7 @@ class GlobalCoordinator(GlobalWorkerCoordinator):
     def get_queue(self, queue_name, max_buffered_batches):
         assert isinstance(max_buffered_batches, int)
         if queue_name not in self._queues:
-            self._queues[queue_name] = Queue.Queue(maxsize=max_buffered_batches)
+            self._queues[queue_name] = queue.Queue(maxsize=max_buffered_batches)
         return self._queues[queue_name]
 
     def reset_data_input(self, namescope, name, net, batch_size):
@@ -434,16 +466,11 @@ class GlobalCoordinator(GlobalWorkerCoordinator):
 
 class DataWorker(Worker):
     def __init__(
-        self,
-        coordinator,
-        worker_id,
-        worker_fun,
-        metrics,
-        batch_size,
-        batch_feeder
+        self, coordinator, worker_id, worker_fun, metrics, batch_size, batch_feeder
     ):
-        Worker.__init__(self, coordinator, worker_id, worker_fun=worker_fun,
-                        metrics=metrics)
+        Worker.__init__(
+            self, coordinator, worker_id, worker_fun=worker_fun, metrics=metrics
+        )
         self._batch_size = batch_size
         self._batch_feeder = batch_feeder
 
@@ -453,8 +480,7 @@ class DataWorker(Worker):
         self._batch_feeder.put(input_data, self._coordinator)
 
     def finish(self):
-        self._metrics.put_metric(
-            'fetcher_time', time.time() - self._start_time)
+        self._metrics.put_metric("fetcher_time", time.time() - self._start_time)
 
 
 global_coordinator = GlobalCoordinator()

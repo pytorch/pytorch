@@ -5,29 +5,25 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
+from builtins import object
 from caffe2.python import brew
 import logging
 
-'''
+"""
 Utility for creating ResNe(X)t
 "Deep Residual Learning for Image Recognition" by He, Zhang et. al. 2015
 "Aggregated Residual Transformations for Deep Neural Networks" by Xie et. al. 2016
-'''
+"""
 
 
-class ResNetBuilder():
-    '''
+class ResNetBuilder(object):
+    """
     Helper class for constructing residual blocks.
-    '''
+    """
 
     def __init__(
-        self,
-        model,
-        prev_blob,
-        no_bias,
-        is_test,
-        bn_epsilon=1e-5,
-        bn_momentum=0.9,
+        self, model, prev_blob, no_bias, is_test, bn_epsilon=1e-5, bn_momentum=0.9
     ):
         self.model = model
         self.comp_count = 0
@@ -38,20 +34,12 @@ class ResNetBuilder():
         self.bn_momentum = bn_momentum
         self.no_bias = 1 if no_bias else 0
 
-    def add_conv(
-        self,
-        in_filters,
-        out_filters,
-        kernel,
-        stride=1,
-        group=1,
-        pad=0,
-    ):
+    def add_conv(self, in_filters, out_filters, kernel, stride=1, group=1, pad=0):
         self.comp_idx += 1
         self.prev_blob = brew.conv(
             self.model,
             self.prev_blob,
-            'comp_%d_conv_%d' % (self.comp_count, self.comp_idx),
+            "comp_%d_conv_%d" % (self.comp_count, self.comp_idx),
             in_filters,
             out_filters,
             weight_init=("MSRAFill", {}),
@@ -65,9 +53,7 @@ class ResNetBuilder():
 
     def add_relu(self):
         self.prev_blob = brew.relu(
-            self.model,
-            self.prev_blob,
-            self.prev_blob,  # in-place
+            self.model, self.prev_blob, self.prev_blob  # in-place
         )
         return self.prev_blob
 
@@ -75,7 +61,7 @@ class ResNetBuilder():
         self.prev_blob = brew.spatial_bn(
             self.model,
             self.prev_blob,
-            'comp_%d_spatbn_%d' % (self.comp_count, self.comp_idx),
+            "comp_%d_spatbn_%d" % (self.comp_count, self.comp_idx),
             num_filters,
             epsilon=self.bn_epsilon,
             momentum=self.bn_momentum,
@@ -83,14 +69,14 @@ class ResNetBuilder():
         )
         return self.prev_blob
 
-    '''
+    """
     Add a "bottleneck" component as described in He et. al. Figure 3 (right)
-    '''
+    """
 
     def add_bottleneck(
         self,
-        input_filters,   # num of feature maps from preceding layer
-        base_filters,    # num of filters internally in the component
+        input_filters,  # num of feature maps from preceding layer
+        base_filters,  # num of filters internally in the component
         output_filters,  # num of feature maps to output
         stride=1,
         group=1,
@@ -100,12 +86,7 @@ class ResNetBuilder():
         shortcut_blob = self.prev_blob
 
         # 1x1
-        self.add_conv(
-            input_filters,
-            base_filters,
-            kernel=1,
-            stride=1,
-        )
+        self.add_conv(input_filters, base_filters, kernel=1, stride=1)
 
         if spatial_batch_norm:
             self.add_spatial_bn(base_filters)
@@ -114,12 +95,7 @@ class ResNetBuilder():
 
         # 3x3 (note the pad, required for keeping dimensions)
         self.add_conv(
-            base_filters,
-            base_filters,
-            kernel=3,
-            stride=stride,
-            group=group,
-            pad=1,
+            base_filters, base_filters, kernel=3, stride=stride, group=group, pad=1
         )
 
         if spatial_batch_norm:
@@ -139,7 +115,7 @@ class ResNetBuilder():
             shortcut_blob = brew.conv(
                 self.model,
                 shortcut_blob,
-                'shortcut_projection_%d' % self.comp_count,
+                "shortcut_projection_%d" % self.comp_count,
                 input_filters,
                 output_filters,
                 weight_init=("MSRAFill", {}),
@@ -151,7 +127,7 @@ class ResNetBuilder():
                 shortcut_blob = brew.spatial_bn(
                     self.model,
                     shortcut_blob,
-                    'shortcut_projection_%d_spatbn' % self.comp_count,
+                    "shortcut_projection_%d_spatbn" % self.comp_count,
                     output_filters,
                     epsilon=self.bn_epsilon,
                     momentum=self.bn_momentum,
@@ -159,8 +135,9 @@ class ResNetBuilder():
                 )
 
         self.prev_blob = brew.sum(
-            self.model, [shortcut_blob, last_conv],
-            'comp_%d_sum_%d' % (self.comp_count, self.comp_idx)
+            self.model,
+            [shortcut_blob, last_conv],
+            "comp_%d_sum_%d" % (self.comp_count, self.comp_idx),
         )
         self.comp_idx += 1
         self.add_relu()
@@ -171,11 +148,7 @@ class ResNetBuilder():
         return output_filters
 
     def add_simple_block(
-        self,
-        input_filters,
-        num_filters,
-        down_sampling=False,
-        spatial_batch_norm=True
+        self, input_filters, num_filters, down_sampling=False, spatial_batch_norm=True
     ):
         self.comp_idx = 0
         shortcut_blob = self.prev_blob
@@ -186,7 +159,7 @@ class ResNetBuilder():
             num_filters,
             kernel=3,
             stride=(1 if down_sampling is False else 2),
-            pad=1
+            pad=1,
         )
 
         if spatial_batch_norm:
@@ -198,11 +171,11 @@ class ResNetBuilder():
             last_conv = self.add_spatial_bn(num_filters)
 
         # Increase of dimensions, need a projection for the shortcut
-        if (num_filters != input_filters):
+        if num_filters != input_filters:
             shortcut_blob = brew.conv(
                 self.model,
                 shortcut_blob,
-                'shortcut_projection_%d' % self.comp_count,
+                "shortcut_projection_%d" % self.comp_count,
                 input_filters,
                 num_filters,
                 weight_init=("MSRAFill", {}),
@@ -214,15 +187,16 @@ class ResNetBuilder():
                 shortcut_blob = brew.spatial_bn(
                     self.model,
                     shortcut_blob,
-                    'shortcut_projection_%d_spatbn' % self.comp_count,
+                    "shortcut_projection_%d_spatbn" % self.comp_count,
                     num_filters,
                     epsilon=1e-3,
                     is_test=self.is_test,
                 )
 
         self.prev_blob = brew.sum(
-            self.model, [shortcut_blob, last_conv],
-            'comp_%d_sum_%d' % (self.comp_count, self.comp_idx)
+            self.model,
+            [shortcut_blob, last_conv],
+            "comp_%d_sum_%d" % (self.comp_count, self.comp_idx),
         )
         self.comp_idx += 1
         self.add_relu()
@@ -234,39 +208,33 @@ class ResNetBuilder():
 def create_resnet_32x32(
     model, data, num_input_channels, num_groups, num_labels, is_test=False
 ):
-    '''
+    """
     Create residual net for smaller images (sec 4.2 of He et. al (2015))
     num_groups = 'n' in the paper
-    '''
+    """
     # conv1 + maxpool
-    brew.conv(
-        model, data, 'conv1', num_input_channels, 16, kernel=3, stride=1
-    )
-    brew.spatial_bn(
-        model, 'conv1', 'conv1_spatbn', 16, epsilon=1e-3, is_test=is_test
-    )
-    brew.relu(model, 'conv1_spatbn', 'relu1')
+    brew.conv(model, data, "conv1", num_input_channels, 16, kernel=3, stride=1)
+    brew.spatial_bn(model, "conv1", "conv1_spatbn", 16, epsilon=1e-3, is_test=is_test)
+    brew.relu(model, "conv1_spatbn", "relu1")
 
     # Number of blocks as described in sec 4.2
     filters = [16, 32, 64]
 
-    builder = ResNetBuilder(model, 'relu1', no_bias=0, is_test=is_test)
+    builder = ResNetBuilder(model, "relu1", no_bias=0, is_test=is_test)
     prev_filters = 16
     for groupidx in range(0, 3):
         for blockidx in range(0, 2 * num_groups):
             builder.add_simple_block(
                 prev_filters if blockidx == 0 else filters[groupidx],
                 filters[groupidx],
-                down_sampling=(True if blockidx == 0 and
-                               groupidx > 0 else False))
+                down_sampling=(True if blockidx == 0 and groupidx > 0 else False),
+            )
         prev_filters = filters[groupidx]
 
     # Final layers
-    brew.average_pool(
-        model, builder.prev_blob, 'final_avg', kernel=8, stride=1
-    )
-    brew.fc(model, 'final_avg', 'last_out', 64, num_labels)
-    softmax = brew.softmax(model, 'last_out', 'softmax')
+    brew.average_pool(model, builder.prev_blob, "final_avg", kernel=8, stride=1)
+    brew.fc(model, "final_avg", "last_out", 64, num_labels)
+    softmax = brew.softmax(model, "last_out", "softmax")
     return softmax
 
 
@@ -324,31 +292,37 @@ def create_resnext(
     conv_blob = brew.conv(
         model,
         data,
-        'conv1',
+        "conv1",
         num_input_channels,
         num_filters[0],
         weight_init=("MSRAFill", {}),
         kernel=conv1_kernel,
         stride=conv1_stride,
         pad=3,
-        no_bias=no_bias
+        no_bias=no_bias,
     )
 
     bn_blob = brew.spatial_bn(
         model,
         conv_blob,
-        'conv1_spatbn_relu',
+        "conv1_spatbn_relu",
         num_filters[0],
         epsilon=bn_epsilon,
         momentum=bn_momentum,
-        is_test=is_test
+        is_test=is_test,
     )
     relu_blob = brew.relu(model, bn_blob, bn_blob)
-    max_pool = brew.max_pool(model, relu_blob, 'pool1', kernel=3, stride=2, pad=1)
+    max_pool = brew.max_pool(model, relu_blob, "pool1", kernel=3, stride=2, pad=1)
 
     # Residual blocks...
-    builder = ResNetBuilder(model, max_pool, no_bias=no_bias,
-                            is_test=is_test, bn_epsilon=1e-5, bn_momentum=0.9)
+    builder = ResNetBuilder(
+        model,
+        max_pool,
+        no_bias=no_bias,
+        is_test=is_test,
+        bn_epsilon=1e-5,
+        bn_momentum=0.9,
+    )
 
     inner_dim = num_groups * num_width_per_group
 
@@ -373,7 +347,7 @@ def create_resnext(
     final_avg = brew.average_pool(
         model,
         builder.prev_blob,
-        'final_avg',
+        "final_avg",
         kernel=final_avg_kernel,
         stride=1,
         global_pooling=True,
@@ -381,18 +355,15 @@ def create_resnext(
 
     # Final dimension of the "image" is reduced to 7x7
     last_out = brew.fc(
-        model, final_avg, 'last_out_L{}'.format(num_labels), num_features, num_labels
+        model, final_avg, "last_out_L{}".format(num_labels), num_features, num_labels
     )
 
     if no_loss:
         return last_out
 
     # If we create model for training, use softmax-with-loss
-    if (label is not None):
-        (softmax, loss) = model.SoftmaxWithLoss(
-            [last_out, label],
-            ["softmax", "loss"],
-        )
+    if label is not None:
+        (softmax, loss) = model.SoftmaxWithLoss([last_out, label], ["softmax", "loss"])
 
         return (softmax, loss)
     else:

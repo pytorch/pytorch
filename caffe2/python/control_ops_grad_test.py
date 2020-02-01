@@ -45,5 +45,5 @@ class TestControl(test_util.TestCase):
                 self.assertEqual(arg.name, "then_net")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

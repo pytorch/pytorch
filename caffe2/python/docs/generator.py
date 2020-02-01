@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import object
 import argparse
 import os
 from caffe2.python import core, workspace
@@ -50,9 +51,9 @@ class OpDocGenerator(DocGenerator):
         def filePriority(x):
             if x == "caffe2/caffe2/operators":
                 return 0
-            if 'contrib' in x.split('/'):
+            if "contrib" in x.split("/"):
                 return 2
-            if 'experiments' in x.split('/'):
+            if "experiments" in x.split("/"):
                 return 3
             return 1
 
@@ -81,10 +82,7 @@ class OpDocGenerator(DocGenerator):
                 self.operators[name].addEngines(engines)
 
         # Generate a sorted list of operators
-        return sorted(
-            viewvalues(self.operators),
-            key=lambda op: (op.priority, op.name)
-        )
+        return sorted(viewvalues(self.operators), key=lambda op: (op.priority, op.name))
 
     def createBody(self):
         operators = self.getOperators()
@@ -102,8 +100,10 @@ class OperatorEngine(object):
 
     def getDeviceImpl(self):
         deviceImplList = []
-        for device, impl in [('CPU', OpSchema.get_cpu_impl(self.op_name)),
-                             ('CUDA', OpSchema.get_cuda_impl(self.op_name))]:
+        for device, impl in [
+            ("CPU", OpSchema.get_cpu_impl(self.op_name)),
+            ("CUDA", OpSchema.get_cuda_impl(self.op_name)),
+        ]:
             if not impl:
                 continue
             deviceImplList.append((device, impl))
@@ -112,9 +112,10 @@ class OperatorEngine(object):
     def generateDoc(self, formatter):
         for device, impl in self.getDeviceImpl():
             formatter.addLine(
-                '{engine} on {device}: {impl}'.format(engine=self.engine,
-                                                      device=device,
-                                                      impl=impl))
+                "{engine} on {device}: {impl}".format(
+                    engine=self.engine, device=device, impl=impl
+                )
+            )
 
 
 class OperatorDoc(object):
@@ -143,41 +144,41 @@ class OperatorDoc(object):
             if title_row:
                 table = [title_row]
             for name, doc in tuples:
-                table.append([name, doc or ''])
+                table.append([name, doc or ""])
             formatter.addTable(table, (table == []))
 
     def generateInterface(self, formatter):
         def makeDesc(title, args):
             f = formatter.clone()
             f.addEmphasis(title, 1)
-            out = [(f.dump(), '')]
+            out = [(f.dump(), "")]
             for arg in args:
                 f = formatter.clone()
                 if isinstance(arg, tuple):
                     name = arg[0]
                     if len(arg) > 1:
-                        description = arg[1] or ''
+                        description = arg[1] or ""
                     else:
-                        description = ''
+                        description = ""
                 else:
                     name = arg.name
-                    description = arg.description or ''
+                    description = arg.description or ""
                 f.addCode(name, inline=True)
-                out.append((f.dump(), description or ''))
+                out.append((f.dump(), description or ""))
             return out
 
         tuples = []
 
         if self.schema.args:
-            tuples += makeDesc('Arguments', self.schema.args)
+            tuples += makeDesc("Arguments", self.schema.args)
 
         if self.schema.input_desc:
-            tuples += makeDesc('Inputs', self.schema.input_desc)
+            tuples += makeDesc("Inputs", self.schema.input_desc)
 
         if self.schema.output_desc:
-            tuples += makeDesc('Outputs', self.schema.output_desc)
+            tuples += makeDesc("Outputs", self.schema.output_desc)
 
-        self.generateTable(formatter, tuples, None, 'Interface')
+        self.generateTable(formatter, tuples, None, "Interface")
         print("Generated interface for {}".format(self.name))
 
     def generateCodeLink(self, formatter):
@@ -191,10 +192,8 @@ class OperatorDoc(object):
     def generateDevices(self, formatter):
         formatter.addHeader("Devices", 3)
         devices = [
-            self.getInfo(formatter,
-                         'CPU', OpSchema.get_cpu_impl(self.name)),
-            self.getInfo(formatter,
-                         'GPU', OpSchema.get_cuda_impl(self.name)),
+            self.getInfo(formatter, "CPU", OpSchema.get_cpu_impl(self.name)),
+            self.getInfo(formatter, "GPU", OpSchema.get_cuda_impl(self.name)),
         ]
         formatter.addList([i for i in devices if i])
 
@@ -221,11 +220,12 @@ class OperatorDoc(object):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Operators catalog generator.")
-    parser.add_argument('catalog_path', type=str,
-                        help='operators-catalogue.md to write out to')
+    parser.add_argument(
+        "catalog_path", type=str, help="operators-catalogue.md to write out to"
+    )
     args = parser.parse_args()
 
-    with open(args.catalog_path, 'w') as fp:
+    with open(args.catalog_path, "w") as fp:
         ops = OpDocGenerator(Markdown(), DocUploader())
         ops.createBody()
         fp.write(ops.content_body)

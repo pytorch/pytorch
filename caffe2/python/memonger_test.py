@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import range
 import numpy as np
 
 from caffe2.python import workspace, memonger, core, model_helper, brew
@@ -33,11 +35,13 @@ def count_blobs(proto):
 
 
 class MemongerTest(hu.HypothesisTestCase):
-    @given(input_dim=st.integers(min_value=1, max_value=10),
-           output_dim=st.integers(min_value=1, max_value=10),
-           batch_size=st.integers(min_value=1, max_value=10),
-           do=st.sampled_from(hu.device_options),
-           algo=st.sampled_from(memonger.AssignmentAlgorithm))
+    @given(
+        input_dim=st.integers(min_value=1, max_value=10),
+        output_dim=st.integers(min_value=1, max_value=10),
+        batch_size=st.integers(min_value=1, max_value=10),
+        do=st.sampled_from(hu.device_options),
+        algo=st.sampled_from(memonger.AssignmentAlgorithm),
+    )
     @settings(max_examples=5, timeout=120)
     def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
         m = model_helper.ModelHelper()
@@ -45,22 +49,26 @@ class MemongerTest(hu.HypothesisTestCase):
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
         fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
 
-        fc3.Relu([], fc3)\
-           .Softmax([], "pred") \
-           .LabelCrossEntropy(["label"], ["xent"]) \
-           .AveragedLoss([], "loss")
+        fc3.Relu([], fc3).Softmax([], "pred").LabelCrossEntropy(
+            ["label"], ["xent"]
+        ).AveragedLoss([], "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
         m.net.Proto().device_option.CopyFrom(do)
         m.param_init_net.Proto().device_option.CopyFrom(do)
-        static_blobs = \
-            [o for op in m.param_init_net.Proto().op for o in op.output] + \
-            ["data", "label", "loss", input_to_grad["fc1_w"]]
+        static_blobs = [o for op in m.param_init_net.Proto().op for o in op.output] + [
+            "data",
+            "label",
+            "loss",
+            input_to_grad["fc1_w"],
+        ]
 
         optimization = memonger.optimize_interference(
-            m.Proto(), static_blobs, algo=algo)
+            m.Proto(), static_blobs, algo=algo
+        )
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("data", data, device_option=do)
         workspace.FeedBlob("label", label, device_option=do)
@@ -78,7 +86,8 @@ class MemongerTest(hu.HypothesisTestCase):
         # run with blob sizes
         blob_sizes = memonger.collect_blob_sizes(m.Proto())
         optimization1 = memonger.optimize_interference(
-            m.Proto(), static_blobs, blob_sizes=blob_sizes, algo=algo)
+            m.Proto(), static_blobs, blob_sizes=blob_sizes, algo=algo
+        )
         workspace.RunNetOnce(optimization1.net)
         optimized_loss = workspace.FetchBlob("loss")
         optimized_grad = workspace.FetchBlob(str(input_to_grad["fc1_w"]))
@@ -87,10 +96,12 @@ class MemongerTest(hu.HypothesisTestCase):
         stats = memonger.compute_statistics(optimization1.assignments)
         self.assertLessEqual(stats.optimized_nbytes, stats.baseline_nbytes)
 
-    @given(input_dim=st.integers(min_value=1, max_value=10),
-           output_dim=st.integers(min_value=1, max_value=10),
-           batch_size=st.integers(min_value=1, max_value=10),
-           do=st.sampled_from(hu.device_options))
+    @given(
+        input_dim=st.integers(min_value=1, max_value=10),
+        output_dim=st.integers(min_value=1, max_value=10),
+        batch_size=st.integers(min_value=1, max_value=10),
+        do=st.sampled_from(hu.device_options),
+    )
     @settings(max_examples=5, timeout=120)
     def test_fast_memonger(self, input_dim, output_dim, batch_size, do):
         m = model_helper.ModelHelper()
@@ -98,22 +109,24 @@ class MemongerTest(hu.HypothesisTestCase):
         fc2 = brew.fc(m, fc1, "fc2", dim_in=output_dim, dim_out=output_dim)
         fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
 
-        fc3.Relu([], fc3)\
-           .Softmax([], "pred") \
-           .LabelCrossEntropy(["label"], ["xent"]) \
-           .AveragedLoss([], "loss")
+        fc3.Relu([], fc3).Softmax([], "pred").LabelCrossEntropy(
+            ["label"], ["xent"]
+        ).AveragedLoss([], "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
         m.net.Proto().device_option.CopyFrom(do)
         m.param_init_net.Proto().device_option.CopyFrom(do)
-        static_blobs = \
-            [o for op in m.param_init_net.Proto().op for o in op.output] + \
-            ["data", "label", "loss", input_to_grad["fc1_w"]]
+        static_blobs = [o for op in m.param_init_net.Proto().op for o in op.output] + [
+            "data",
+            "label",
+            "loss",
+            input_to_grad["fc1_w"],
+        ]
 
-        optimized_net = memonger.optimize_inference_fast(
-            m.Proto(), static_blobs)
+        optimized_net = memonger.optimize_inference_fast(m.Proto(), static_blobs)
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("data", data, device_option=do)
         workspace.FeedBlob("label", label, device_option=do)
@@ -132,8 +145,7 @@ class MemongerTest(hu.HypothesisTestCase):
         m = model_helper.ModelHelper()
         fc = []
         for i in range(2):
-            z = brew.fc(
-                m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)
+            z = brew.fc(m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)
             fc.append(z)
         r = []
         # Trick is here to have same input appear twice in a same Sum
@@ -143,18 +155,21 @@ class MemongerTest(hu.HypothesisTestCase):
         concated = brew.concat(m, r, "concated")
         brew.relu(m, concated, "merged")
 
-        static_blobs = \
-            [o for op in m.param_init_net.Proto().op for o in op.output] + \
-            ["merged"] + ["data{}".format(i) for i in range(len(fc))]
+        static_blobs = (
+            [o for op in m.param_init_net.Proto().op for o in op.output]
+            + ["merged"]
+            + ["data{}".format(i) for i in range(len(fc))]
+        )
 
-        optimized_net = memonger.optimize_inference_fast(
-            m.Proto(), static_blobs)
+        optimized_net = memonger.optimize_inference_fast(m.Proto(), static_blobs)
         for op in optimized_net.op:
             self.assertEqual(len(op.output), len(set(op.output)), str(op))
 
-    @given(input_dim=st.integers(min_value=1, max_value=4),
-           output_dim=st.integers(min_value=1, max_value=4),
-           batch_size=st.integers(min_value=1, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=1, max_value=4),
+        output_dim=st.integers(min_value=1, max_value=4),
+        batch_size=st.integers(min_value=1, max_value=4),
+    )
     def test_gradient_optim(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
@@ -163,10 +178,9 @@ class MemongerTest(hu.HypothesisTestCase):
             fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
             fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
             fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
-            fc5.Relu([], fc5)\
-               .Softmax([], "pred") \
-               .LabelCrossEntropy(["label"], ["xent"]) \
-               .AveragedLoss([], "loss")
+            fc5.Relu([], fc5).Softmax([], "pred").LabelCrossEntropy(
+                ["label"], ["xent"]
+            ).AveragedLoss([], "loss")
         input_to_grad = m.AddGradientOperators(["name_x/loss"])
 
         blobs_before = count_blobs(m.net.Proto())
@@ -194,14 +208,14 @@ class MemongerTest(hu.HypothesisTestCase):
         # Check that the last activations are not shared
         self.assertTrue(has_blob(optim_proto, "name_x/fc5"))
         self.assertTrue(
-            has_blob(optim_proto_wacts, "name_x/fc5"),
-            "Dont remap final activation",
+            has_blob(optim_proto_wacts, "name_x/fc5"), "Dont remap final activation"
         )
 
         # Test networks produce exactly same gradients
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("name_x/data", data)
         workspace.FeedBlob("name_x/label", label)
@@ -225,9 +239,9 @@ class MemongerTest(hu.HypothesisTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def test_memonger_mix_cpu_gpu(self):
-        '''
+        """
         Check that memonger does not make blobs cross CPU/GPU boundary
-        '''
+        """
         m = model_helper.ModelHelper()
         with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             fc1 = brew.fc(m, "data", "fc1", dim_in=2, dim_out=2)
@@ -239,10 +253,9 @@ class MemongerTest(hu.HypothesisTestCase):
             fc5_cpu = brew.fc(m, fc4_cpu, "fc5_cpu", dim_in=2, dim_out=2)
             fc6_cpu = brew.fc(m, fc5_cpu, "fc6_cpu", dim_in=2, dim_out=2)
             fc7_cpu = brew.fc(m, fc6_cpu, "fc7_cpu", dim_in=2, dim_out=2)
-            fc7_cpu.Relu([], fc7_cpu) \
-               .Softmax([], "pred") \
-               .LabelCrossEntropy(["label"], ["xent"]) \
-               .AveragedLoss([], "loss")
+            fc7_cpu.Relu([], fc7_cpu).Softmax([], "pred").LabelCrossEntropy(
+                ["label"], ["xent"]
+            ).AveragedLoss([], "loss")
         m.AddGradientOperators(["loss"])
 
         blobs_before = count_blobs(m.net.Proto())
@@ -261,7 +274,7 @@ class MemongerTest(hu.HypothesisTestCase):
         # overlap
         device_blobs = {caffe2_pb2.CPU: set(), workspace.GpuDeviceType: set()}
         for op in optim_proto.op:
-            if op.type not in ['CopyCPUToGPU', "CopyGPUToCPU"]:
+            if op.type not in ["CopyCPUToGPU", "CopyGPUToCPU"]:
                 dev = op.device_option.device_type
                 for b in list(op.input) + list(op.output):
                     device_blobs[dev].add(b)
@@ -271,9 +284,11 @@ class MemongerTest(hu.HypothesisTestCase):
         )
         self.assertEquals(device_crossers, set())
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_gradient_optim_tree(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
@@ -282,15 +297,13 @@ class MemongerTest(hu.HypothesisTestCase):
             fc3 = brew.fc(m, fc2, "fc3", dim_in=output_dim, dim_out=output_dim)
             fc4 = brew.fc(m, fc3, "fc4", dim_in=output_dim, dim_out=output_dim)
             fc5 = brew.fc(m, fc4, "fc5", dim_in=output_dim, dim_out=output_dim)
-            fc5.Relu([], fc5) \
-               .Softmax([], "pred1") \
-               .LabelCrossEntropy(["label"], ["xent1"]) \
-               .AveragedLoss([], "loss1")
+            fc5.Relu([], fc5).Softmax([], "pred1").LabelCrossEntropy(
+                ["label"], ["xent1"]
+            ).AveragedLoss([], "loss1")
             fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
-            fc6.Relu([], fc6) \
-               .Softmax([], "pred2") \
-               .LabelCrossEntropy(["label"], ["xent2"]) \
-               .AveragedLoss([], "loss2")
+            fc6.Relu([], fc6).Softmax([], "pred2").LabelCrossEntropy(
+                ["label"], ["xent2"]
+            ).AveragedLoss([], "loss2")
         input_to_grad = m.AddGradientOperators(["name_x/loss1", "name_x/loss2"])
 
         blobs_before = count_blobs(m.net.Proto())
@@ -300,8 +313,9 @@ class MemongerTest(hu.HypothesisTestCase):
             set(viewvalues(m.param_to_grad)),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
             share_activations=True,
-            dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
-                                   str(input_to_grad["name_x/fc1_w"])]),
+            dont_share_blobs=set(
+                ["name_x/fc6", "name_x/fc5", str(input_to_grad["name_x/fc1_w"])]
+            ),
         )
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
@@ -309,8 +323,9 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Test networks produce exactly same gradients
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("name_x/data", data)
         workspace.FeedBlob("name_x/label", label)
@@ -328,9 +343,11 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss2, optimized_loss2)
         np.testing.assert_almost_equal(grad, optimized_grad)
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -351,15 +368,13 @@ class MemongerTest(hu.HypothesisTestCase):
 
             fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
 
-            fc5.Relu([], fc5sum) \
-               .Softmax([], "pred1") \
-               .LabelCrossEntropy(["label"], ["xent1"]) \
-               .AveragedLoss([], "loss1")
+            fc5.Relu([], fc5sum).Softmax([], "pred1").LabelCrossEntropy(
+                ["label"], ["xent1"]
+            ).AveragedLoss([], "loss1")
             fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
-            fc6.Relu([], fc6) \
-               .Softmax([], "pred2") \
-               .LabelCrossEntropy(["label"], ["xent2"]) \
-               .AveragedLoss([], "loss2")
+            fc6.Relu([], fc6).Softmax([], "pred2").LabelCrossEntropy(
+                ["label"], ["xent2"]
+            ).AveragedLoss([], "loss2")
 
         blobs_before = count_blobs(m.net.Proto())
         optim_proto = memonger.optimize_inference_for_dag(
@@ -370,8 +385,9 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Test networks produce exactly same results
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("name_x/data", data)
         workspace.FeedBlob("name_x/label", label)
@@ -384,9 +400,11 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(loss2, optimized_loss2)
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"
@@ -408,15 +426,13 @@ class MemongerTest(hu.HypothesisTestCase):
             fc5b = brew.fc(m, fc4b, "fc5b", dim_in=output_dim, dim_out=output_dim)
 
             fc5sum = brew.sum(m, [fc5, fc5b], "fc5sum")
-            fc5sum.Relu([], "relu1") \
-               .Softmax([], "pred1") \
-               .LabelCrossEntropy(["label"], ["xent1"]) \
-               .AveragedLoss([], "loss1")
+            fc5sum.Relu([], "relu1").Softmax([], "pred1").LabelCrossEntropy(
+                ["label"], ["xent1"]
+            ).AveragedLoss([], "loss1")
             fc6 = brew.fc(m, fc5, "fc6", dim_in=output_dim, dim_out=output_dim)
-            fc6.Relu([], fc6) \
-               .Softmax([], "pred2") \
-               .LabelCrossEntropy(["label"], ["xent2"]) \
-               .AveragedLoss([], "loss2")
+            fc6.Relu([], fc6).Softmax([], "pred2").LabelCrossEntropy(
+                ["label"], ["xent2"]
+            ).AveragedLoss([], "loss2")
 
         blobs_before = count_blobs(m.net.Proto())
         optim_proto = memonger.optimize_inference_for_dag(
@@ -439,8 +455,9 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Test networks produce exactly same results
         data = np.random.randn(batch_size, input_dim).astype(np.float32)
-        label = np.random.randint(
-            low=0, high=output_dim, size=(batch_size,)).astype(np.int32)
+        label = np.random.randint(low=0, high=output_dim, size=(batch_size,)).astype(
+            np.int32
+        )
         workspace.RunNetOnce(m.param_init_net)
         workspace.FeedBlob("name_x/data", data)
         workspace.FeedBlob("name_x/label", label)
@@ -455,17 +472,14 @@ class MemongerTest(hu.HypothesisTestCase):
 
     def test_rnn(self):
         from caffe2.python import rnn_cell
+
         T = 5
         model = model_helper.ModelHelper()
-        seq_lengths, labels = \
-            model.net.AddExternalInputs(
-                'seq_lengths', 'labels',
-            )
+        seq_lengths, labels = model.net.AddExternalInputs("seq_lengths", "labels")
         init_blobs = []
         for i in range(2):
             hidden_init, cell_init = model.net.AddExternalInputs(
-                "hidden_init_{}".format(i),
-                "cell_init_{}".format(i)
+                "hidden_init_{}".format(i), "cell_init_{}".format(i)
             )
             init_blobs.extend([hidden_init, cell_init])
         model.param_init_net.ConstantFill([], ["input"], shape=[T, 4, 10])
@@ -482,8 +496,7 @@ class MemongerTest(hu.HypothesisTestCase):
             return_last_layer_only=True,
         )
         softmax, loss = model.net.SoftmaxWithLoss(
-            [model.Flatten(output), "labels"],
-            ['softmax', 'loss'],
+            [model.Flatten(output), "labels"], ["softmax", "loss"]
         )
 
         model.AddGradientOperators([loss])
@@ -501,9 +514,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Run once to see all blobs are set up correctly
         for init_blob in init_blobs:
-            workspace.FeedBlob(init_blob, np.zeros(
-                [1, 4, 10], dtype=np.float32
-            ))
+            workspace.FeedBlob(init_blob, np.zeros([1, 4, 10], dtype=np.float32))
         workspace.FeedBlob("seq_lengths", np.array([T] * 4, dtype=np.int32))
         workspace.FeedBlob("labels", np.random.rand(T).astype(np.int32))
 
@@ -587,10 +598,10 @@ class MemongerTest(hu.HypothesisTestCase):
     def test_compute_assignments_greedy(self):
         LiveRange = memonger.LiveRange
         ranges_sorted = [
-            ('b1', LiveRange(1, 3, 10)),
-            ('b2', LiveRange(3, 4, 1)),
-            ('b3', LiveRange(5, 6, 1)),
-            ('b4', LiveRange(5, 7, 10)),
+            ("b1", LiveRange(1, 3, 10)),
+            ("b2", LiveRange(3, 4, 1)),
+            ("b3", LiveRange(5, 6, 1)),
+            ("b4", LiveRange(5, 7, 10)),
         ]
         assignment_gt = [
             [ranges_sorted[0], ranges_sorted[3]],
@@ -604,10 +615,10 @@ class MemongerTest(hu.HypothesisTestCase):
     def test_compute_assignments_dp(self):
         LiveRange = memonger.LiveRange
         ranges_sorted = [
-            ('b1', LiveRange(1, 3, 10)),
-            ('b2', LiveRange(3, 4, 1)),
-            ('b3', LiveRange(5, 6, 1)),
-            ('b4', LiveRange(5, 7, 10)),
+            ("b1", LiveRange(1, 3, 10)),
+            ("b2", LiveRange(3, 4, 1)),
+            ("b3", LiveRange(5, 6, 1)),
+            ("b4", LiveRange(5, 7, 10)),
         ]
 
         best = memonger.compute_assignments_dp(ranges_sorted, None)
@@ -616,17 +627,19 @@ class MemongerTest(hu.HypothesisTestCase):
     def test_compute_assignments_dp1(self):
         LiveRange = memonger.LiveRange
         ranges_sorted = [
-            ('b1', LiveRange(1, 2, 10)),
-            ('b2', LiveRange(4, 6, 1)),
-            ('b3', LiveRange(5, 6, 10)),
+            ("b1", LiveRange(1, 2, 10)),
+            ("b2", LiveRange(4, 6, 1)),
+            ("b3", LiveRange(5, 6, 10)),
         ]
 
         best = memonger.compute_assignments_dp(ranges_sorted, [])
         self.assertEqual(memonger.get_memory_usage(best), 11)
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_verify_graph_equality(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -648,9 +661,11 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_verify_graph_equality_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -676,9 +691,11 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertTrue(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_verify_graph_inequality(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -700,9 +717,11 @@ class MemongerTest(hu.HypothesisTestCase):
 
         self.assertFalse(memonger.verify_graph_equality(m.net.Proto(), m2.net.Proto()))
 
-    @given(input_dim=st.integers(min_value=4, max_value=4),
-           output_dim=st.integers(min_value=4, max_value=4),
-           batch_size=st.integers(min_value=4, max_value=4))
+    @given(
+        input_dim=st.integers(min_value=4, max_value=4),
+        output_dim=st.integers(min_value=4, max_value=4),
+        batch_size=st.integers(min_value=4, max_value=4),
+    )
     def test_verify_graph_inequality_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -741,7 +760,7 @@ class MemongerTest(hu.HypothesisTestCase):
         with_frees = memonger.release_blobs_when_used(m.net.Proto(), set("data"))
 
         expect_frees = {"x", "y", "z"}  # out is external output
-                                        # and u is aliased so cannot be freed
+        # and u is aliased so cannot be freed
         found_frees = set()
         for op in with_frees.op:
             if op.type == "Free":
@@ -757,5 +776,5 @@ class MemongerTest(hu.HypothesisTestCase):
         self.assertEqual(expect_frees, found_frees)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

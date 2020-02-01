@@ -12,7 +12,6 @@ import numpy as np
 
 
 class TestNegateGradient(serial.SerializedTestCase):
-
     @serial.given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
     def test_forward(self, X, inplace, gc, dc):
         def neg_grad_ref(X):
@@ -22,8 +21,9 @@ class TestNegateGradient(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], neg_grad_ref)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @given(size=st.lists(st.integers(min_value=1, max_value=20),
-                         min_size=1, max_size=5))
+    @given(
+        size=st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=5)
+    )
     def test_grad(self, size):
         X = np.random.random_sample(size)
         workspace.ResetWorkspace()
@@ -36,8 +36,7 @@ class TestNegateGradient(serial.SerializedTestCase):
         workspace.RunNetOnce(net)
 
         # check X_grad == negate of Y_grad
-        x_val, y_val = workspace.FetchBlobs(['X', 'Y'])
-        x_grad_val, y_grad_val = workspace.FetchBlobs([grad_map['X'],
-                                                        grad_map['Y']])
+        x_val, y_val = workspace.FetchBlobs(["X", "Y"])
+        x_grad_val, y_grad_val = workspace.FetchBlobs([grad_map["X"], grad_map["Y"]])
         np.testing.assert_array_equal(x_val, y_val)
         np.testing.assert_array_equal(x_grad_val, y_grad_val * (-1))

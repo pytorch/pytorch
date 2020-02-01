@@ -3,6 +3,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import str
+from builtins import range
 import numpy as np
 import hypothesis.strategies as st
 import unittest
@@ -14,15 +16,19 @@ import caffe2.python.ideep_test_util as mu
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestWeightedSumOp(hu.HypothesisTestCase):
-    @given(n=st.integers(5, 8), m=st.integers(1, 1),
-           d=st.integers(2, 4), grad_on_w=st.booleans(),
-           **mu.gcs_ideep_only)
+    @given(
+        n=st.integers(5, 8),
+        m=st.integers(1, 1),
+        d=st.integers(2, 4),
+        grad_on_w=st.booleans(),
+        **mu.gcs_ideep_only
+    )
     def test_weighted_sum(self, n, m, d, grad_on_w, gc, dc):
         input_names = []
         input_vars = []
         for i in range(m):
-            X_name = 'X' + str(i)
-            w_name = 'w' + str(i)
+            X_name = "X" + str(i)
+            w_name = "w" + str(i)
             input_names.extend([X_name, w_name])
             var = np.random.rand(n, d).astype(np.float32)
             vars()[X_name] = var
@@ -36,20 +42,12 @@ class TestWeightedSumOp(hu.HypothesisTestCase):
             for i in range(m):
                 res = res + args[2 * i + 1] * args[2 * i]
 
-            return (res, )
+            return (res,)
 
-        op = core.CreateOperator(
-            "WeightedSum",
-            input_names,
-            ['Y'],
-            grad_on_w=grad_on_w,
-        )
+        op = core.CreateOperator("WeightedSum", input_names, ["Y"], grad_on_w=grad_on_w)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=input_vars,
-            reference=weighted_sum_op_ref,
+            device_option=gc, op=op, inputs=input_vars, reference=weighted_sum_op_ref
         )
 
 

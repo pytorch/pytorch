@@ -122,9 +122,7 @@ class TestAdagrad(serial.SerializedTestCase):
         **hu.gcs
     )
     def test_sparse_adagrad(self, inputs, lr, epsilon, gc, dc):
-        adagrad_sparse_test_helper(
-            self, inputs, lr, epsilon, None, ref_adagrad, gc, dc
-        )
+        adagrad_sparse_test_helper(self, inputs, lr, epsilon, None, ref_adagrad, gc, dc)
 
     @serial.given(
         inputs=hu.tensors(n=2),
@@ -162,7 +160,8 @@ class TestAdagrad(serial.SerializedTestCase):
                 None,
                 ref_adagrad,
                 gc,
-                dc)
+                dc,
+            )
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
@@ -200,9 +199,7 @@ class TestAdagrad(serial.SerializedTestCase):
         ),
         **hu.gcs
     )
-    def test_row_wise_sparse_adagrad_empty(
-        self, inputs, lr, epsilon, gc, dc
-    ):
+    def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
         adagrad_sparse_test_helper(

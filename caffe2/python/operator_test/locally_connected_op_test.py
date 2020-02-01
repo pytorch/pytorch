@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 import numpy as np
 from hypothesis import given
 import hypothesis.strategies as st
@@ -12,18 +13,19 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 class TestLocallyConnectedOp(serial.SerializedTestCase):
-    @serial.given(N=st.integers(1, 3),
-           C=st.integers(1, 3),
-           H=st.integers(1, 5),
-           W=st.integers(1, 5),
-           M=st.integers(1, 3),
-           kernel=st.integers(1, 3),
-           op_name=st.sampled_from(["LC", "LC2D"]),
-           order=st.sampled_from(["NCHW", "NHWC"]),
-           use_bias=st.booleans(),
-           **hu.gcs)
-    def test_lc_2d(
-            self, N, C, H, W, M, kernel, op_name, order, use_bias, gc, dc):
+    @serial.given(
+        N=st.integers(1, 3),
+        C=st.integers(1, 3),
+        H=st.integers(1, 5),
+        W=st.integers(1, 5),
+        M=st.integers(1, 3),
+        kernel=st.integers(1, 3),
+        op_name=st.sampled_from(["LC", "LC2D"]),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        use_bias=st.booleans(),
+        **hu.gcs
+    )
+    def test_lc_2d(self, N, C, H, W, M, kernel, op_name, order, use_bias, gc, dc):
         if H < kernel:
             kernel = H
         if W < kernel:
@@ -42,12 +44,10 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
         Y_W = W - kernel + 1
         if order == "NCHW":
             X = np.random.rand(N, C, H, W).astype(np.float32) - 0.5
-            W = np.random.rand(Y_H, Y_W, M, C, kernel,
-                               kernel).astype(np.float32) - 0.5
+            W = np.random.rand(Y_H, Y_W, M, C, kernel, kernel).astype(np.float32) - 0.5
         else:
             X = np.random.rand(N, H, W, C).astype(np.float32) - 0.5
-            W = np.random.rand(Y_H, Y_W, M, kernel, kernel,
-                               C).astype(np.float32) - 0.5
+            W = np.random.rand(Y_H, Y_W, M, kernel, kernel, C).astype(np.float32) - 0.5
         b = np.random.rand(Y_H, Y_W, M).astype(np.float32) - 0.5
         inputs = [X, W, b] if use_bias else [X, W]
 
@@ -82,23 +82,22 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
         ref_op = lc_2d_nchw if order == "NCHW" else lc_2d_nhwc
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref_op,
+            device_option=gc, op=op, inputs=inputs, reference=ref_op
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    @given(N=st.integers(1, 3),
-           C=st.integers(1, 3),
-           size=st.integers(1, 5),
-           M=st.integers(1, 3),
-           kernel=st.integers(1, 3),
-           op_name=st.sampled_from(["LC", "LC1D"]),
-           use_bias=st.booleans(),
-           **hu.gcs)
+    @given(
+        N=st.integers(1, 3),
+        C=st.integers(1, 3),
+        size=st.integers(1, 5),
+        M=st.integers(1, 3),
+        kernel=st.integers(1, 3),
+        op_name=st.sampled_from(["LC", "LC1D"]),
+        use_bias=st.booleans(),
+        **hu.gcs
+    )
     def test_lc_1d(self, N, C, size, M, kernel, op_name, use_bias, gc, dc):
         if size < kernel:
             kernel = size
@@ -138,25 +137,24 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
             return [output]
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=lc_1d_nchw,
+            device_option=gc, op=op, inputs=inputs, reference=lc_1d_nchw
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    @given(N=st.integers(1, 1),
-           C=st.integers(1, 1),
-           T=st.integers(2, 2),
-           H=st.integers(2, 2),
-           W=st.integers(2, 2),
-           M=st.integers(1, 1),
-           kernel=st.integers(2, 2),
-           op_name=st.sampled_from(["LC", "LC3D"]),
-           use_bias=st.booleans(),
-           **hu.gcs)
+    @given(
+        N=st.integers(1, 1),
+        C=st.integers(1, 1),
+        T=st.integers(2, 2),
+        H=st.integers(2, 2),
+        W=st.integers(2, 2),
+        M=st.integers(1, 1),
+        kernel=st.integers(2, 2),
+        op_name=st.sampled_from(["LC", "LC3D"]),
+        use_bias=st.booleans(),
+        **hu.gcs
+    )
     def test_lc_3d(self, N, C, T, H, W, M, kernel, op_name, use_bias, gc, dc):
         if T < kernel:
             kernel = T
@@ -178,8 +176,12 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
         Y_H = H - kernel + 1
         Y_W = W - kernel + 1
         X = np.random.rand(N, C, T, H, W).astype(np.float32) - 0.5
-        W = np.random.rand(Y_T, Y_H, Y_W, M, C, kernel,
-                           kernel, kernel).astype(np.float32) - 0.5
+        W = (
+            np.random.rand(Y_T, Y_H, Y_W, M, C, kernel, kernel, kernel).astype(
+                np.float32
+            )
+            - 0.5
+        )
         b = np.random.rand(Y_T, Y_H, Y_W, M).astype(np.float32) - 0.5
         inputs = [X, W, b] if use_bias else [X, W]
 
@@ -196,8 +198,10 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
                                 tt = yt + kt
                                 hh = yh + kh
                                 ww = yw + kw
-                                sum += X[n, c, tt, hh, ww] * \
-                                    W[yt, yh, yw, m, c, kt, kh, kw]
+                                sum += (
+                                    X[n, c, tt, hh, ww]
+                                    * W[yt, yh, yw, m, c, kt, kh, kw]
+                                )
                 return sum
 
             output = np.zeros((N, M, YT, YH, YW), dtype=np.float32)
@@ -206,15 +210,11 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
                     for yt in range(YT):
                         for yh in range(YH):
                             for yw in range(YW):
-                                output[n, m, yt, yh, yw] = conv(
-                                    n, m, yt, yh, yw)
+                                output[n, m, yt, yh, yw] = conv(n, m, yt, yh, yw)
             return [output]
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=lc_3d_nchw,
+            device_option=gc, op=op, inputs=inputs, reference=lc_3d_nchw
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):

@@ -18,6 +18,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import object
 import caffe2.python._import_c_extension as C
 
 
@@ -33,11 +34,11 @@ class Transformer(object):
         elif C.workspace_transform_exists(transform_name):
             output = C.run_workspace_transform(transform_name, pb)
         else:
-            raise AttributeError('Transformation {} not found.'.format(transform_name))
+            raise AttributeError("Transformation {} not found.".format(transform_name))
         net.Proto().ParseFromString(output)
 
     def __getattr__(self, transform_name):
-        return lambda net : self.runTransform(transform_name, net)
+        return lambda net: self.runTransform(transform_name, net)
 
 
 def fuseNNPACKConvRelu(net):
@@ -46,13 +47,11 @@ def fuseNNPACKConvRelu(net):
     )
 
 
-def optimizeForMKLDNN(net, training_mode = False):
+def optimizeForMKLDNN(net, training_mode=False):
     net.Proto().ParseFromString(
         C.transform_optimizeForMKLDNN(net.Proto().SerializeToString(), training_mode)
     )
 
 
 def fuseConvBN(net):
-    net.Proto().ParseFromString(
-        C.transform_fuseConvBN(net.Proto().SerializeToString())
-    )
+    net.Proto().ParseFromString(C.transform_fuseConvBN(net.Proto().SerializeToString()))

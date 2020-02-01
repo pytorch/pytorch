@@ -15,7 +15,8 @@ def cond(model, cond_blob, external_blobs, then_model, else_model=None):
         cond_blob,
         external_blobs,
         then_model.net,
-        else_model.net if else_model else None)
+        else_model.net if else_model else None,
+    )
 
 
 def loop(model, cond_blob, external_blobs, loop_model, cond_model=None):
@@ -25,4 +26,5 @@ def loop(model, cond_blob, external_blobs, loop_model, cond_model=None):
         cond_blob,
         external_blobs,
         loop_model.net,
-        cond_model.net if cond_model else None)
+        cond_model.net if cond_model else None,
+    )

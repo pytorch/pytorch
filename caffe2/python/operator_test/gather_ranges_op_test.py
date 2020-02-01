@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import zip
+from builtins import range
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
@@ -55,7 +57,7 @@ def _tensor_splits(draw):
         )
     )
 
-    key = draw(st.permutations(range(offset)))
+    key = draw(st.permutations(list(range(offset))))
 
     return (
         np.array(data).astype(np.float32),
@@ -96,7 +98,7 @@ def _bad_tensor_splits(draw):
         )
     )
 
-    key = draw(st.permutations(range(offset)))
+    key = draw(st.permutations(list(range(offset))))
 
     return (
         np.array(data).astype(np.float32),
@@ -154,8 +156,8 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
                 out.append([0] * lengths[i])
             else:
                 assert length == lengths[i]
-                key_data_list = zip(
-                    key[start : start + length], data[start : start + length]
+                key_data_list = list(
+                    zip(key[start : start + length], data[start : start + length])
                 )
                 sorted_key_data_list = sorted(key_data_list, key=lambda x: x[0])
                 sorted_data = [d for (k, d) in sorted_key_data_list]

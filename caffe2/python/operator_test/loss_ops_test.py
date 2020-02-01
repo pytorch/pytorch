@@ -12,7 +12,6 @@ import numpy as np
 
 
 class TestLossOps(serial.SerializedTestCase):
-
     @serial.given(n=st.integers(1, 8), **hu.gcs)
     def test_averaged_loss(self, n, gc, dc):
         X = np.random.rand(n).astype(np.float32)
@@ -20,17 +19,10 @@ class TestLossOps(serial.SerializedTestCase):
         def avg_op(X):
             return [np.mean(X)]
 
-        op = core.CreateOperator(
-            "AveragedLoss",
-            ["X"],
-            ["y"],
-        )
+        op = core.CreateOperator("AveragedLoss", ["X"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=avg_op,
+            device_option=gc, op=op, inputs=[X], reference=avg_op
         )
 
         self.assertGradientChecks(

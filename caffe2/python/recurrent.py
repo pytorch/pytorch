@@ -5,15 +5,25 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import str
 from caffe2.python import core, workspace
 from future.utils import viewitems, viewkeys
 
+
 def recurrent_net(
-        net, cell_net, inputs, initial_cell_inputs,
-        links, timestep=None, scope=None, outputs_with_grads=(0,),
-        recompute_blobs_on_backward=None, forward_only=False,
+    net,
+    cell_net,
+    inputs,
+    initial_cell_inputs,
+    links,
+    timestep=None,
+    scope=None,
+    outputs_with_grads=(0,),
+    recompute_blobs_on_backward=None,
+    forward_only=False,
 ):
-    '''
+    """
     net: the main net operator should be added to
 
     cell_net: cell_net which is executed in a recurrent fasion
@@ -45,12 +55,12 @@ def recurrent_net(
                  stored for each forward timestep.
 
     forward_only: if True, only forward steps are executed
-    '''
+    """
     assert len(inputs) == 1, "Only one input blob is supported so far"
 
     input_blobs = [str(i[0]) for i in inputs]
     initial_input_blobs = [str(x[1]) for x in initial_cell_inputs]
-    op_name = net.NextName('recurrent')
+    op_name = net.NextName("recurrent")
 
     def s(name):
         # We have to manually scope due to our internal/external blob
@@ -65,17 +75,20 @@ def recurrent_net(
     if timestep is not None:
         known_inputs.append(str(timestep))
     references = [
-        core.BlobReference(b) for b in cell_net.Proto().external_input
-        if b not in known_inputs]
+        core.BlobReference(b)
+        for b in cell_net.Proto().external_input
+        if b not in known_inputs
+    ]
 
     inner_outputs = list(cell_net.Proto().external_output)
     # These gradients are expected to be available during the backward pass
-    inner_outputs_map = {o: o + '_grad' for o in inner_outputs}
+    inner_outputs_map = {o: o + "_grad" for o in inner_outputs}
 
     # compute the backward pass of the cell net
     if not forward_only:
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
-            cell_net.Proto().op, inner_outputs_map)
+            cell_net.Proto().op, inner_outputs_map
+        )
         backward_mapping = {str(k): v for k, v in viewitems(backward_mapping)}
 
         backward_cell_net = core.Net("RecurrentBackwardStep")
@@ -85,8 +98,7 @@ def recurrent_net(
             # Insert operators to re-compute the specified blobs.
             # They are added in the same order as for the forward pass, thus
             # the order is correct.
-            recompute_blobs_on_backward = {str(b) for b in
-                                           recompute_blobs_on_backward}
+            recompute_blobs_on_backward = {str(b) for b in recompute_blobs_on_backward}
 
             for op in cell_net.Proto().op:
                 if not recompute_blobs_on_backward.isdisjoint(set(op.output)):
@@ -97,8 +109,7 @@ def recurrent_net(
 
         backward_cell_net.Proto().op.extend(backward_ops)
         # compute blobs used but not defined in the backward pass
-        backward_ssa, backward_blob_versions = core.get_ssa(
-            backward_cell_net.Proto())
+        backward_ssa, backward_blob_versions = core.get_ssa(backward_cell_net.Proto())
         undefined = core.get_undefined_blobs(backward_ssa)
 
         # also add to the output list the intermediate outputs of fwd_step that
@@ -107,20 +118,23 @@ def recurrent_net(
         scratches = [
             blob
             for blob, ver in viewitems(blob_versions)
-            if (ver > 0 and
-                blob in undefined and
-                blob not in cell_net.Proto().external_output)
+            if (
+                ver > 0
+                and blob in undefined
+                and blob not in cell_net.Proto().external_output
+            )
         ]
         backward_cell_net.Proto().external_input.extend(scratches)
-        backward_cell_net.Proto().type = 'simple'
+        backward_cell_net.Proto().type = "simple"
     else:
         backward_cell_net = None
 
-    all_inputs = [i[1] for i in inputs] + [
-        x[1] for x in initial_cell_inputs] + references
+    all_inputs = (
+        [i[1] for i in inputs] + [x[1] for x in initial_cell_inputs] + references
+    )
     all_outputs = []
 
-    cell_net.Proto().type = 'simple'
+    cell_net.Proto().type = "simple"
 
     # Internal arguments used by RecurrentNetwork operator
 
@@ -158,8 +172,7 @@ def recurrent_net(
 
         if backward_cell_net is not None:
             backward_links.append((cell_output + "_grad", states_grad, 1))
-            backward_cell_net.Proto().external_input.append(
-                str(cell_output) + "_grad")
+            backward_cell_net.Proto().external_input.append(str(cell_output) + "_grad")
 
             recurrent_input_grad = cell_input + "_grad"
             if not backward_blob_versions.get(recurrent_input_grad, 0):
@@ -167,28 +180,26 @@ def recurrent_net(
                 # to make sure it gets to the states grad blob after all.
                 # We do this by using backward_links which triggers an alias
                 # This logic is being used for example in a SumOp case
-                backward_links.append(
-                    (backward_mapping[cell_input], states_grad, 0))
+                backward_links.append((backward_mapping[cell_input], states_grad, 0))
             else:
                 backward_links.append((recurrent_input_grad, states_grad, 0))
-
 
     for input_t, input_blob in inputs:
         forward_links.append((str(input_t), str(input_blob), 0))
 
     if backward_cell_net is not None:
         for input_t, input_blob in inputs:
-            backward_links.append((
-                backward_mapping[str(input_t)], str(input_blob) + "_grad", 0
-            ))
+            backward_links.append(
+                (backward_mapping[str(input_t)], str(input_blob) + "_grad", 0)
+            )
+        backward_cell_net.Proto().external_input.extend(cell_net.Proto().external_input)
         backward_cell_net.Proto().external_input.extend(
-            cell_net.Proto().external_input)
-        backward_cell_net.Proto().external_input.extend(
-            cell_net.Proto().external_output)
+            cell_net.Proto().external_output
+        )
 
     def unpack_triple(x):
         if x:
-            a, b, c = zip(*x)
+            a, b, c = list(zip(*x))
             return a, b, c
         return [], [], []
 
@@ -222,42 +233,36 @@ def recurrent_net(
                     output_blob = core.BlobReference(output_blob)
                     accum_blob = output_blob + "_accum"
                     proto.op[-1].output[j] = str(accum_blob)
-                    backward_cell_net.Sum(
-                        [output_blob, accum_blob],
-                        [output_blob],
-                    )
+                    backward_cell_net.Sum([output_blob, accum_blob], [output_blob])
 
     def map_to_dual_list(m):
-        return [str(x) for x in list(m.keys())] + \
-               [str(x) for x in list(m.values())]
+        return [str(x) for x in list(m.keys())] + [str(x) for x in list(m.values())]
 
     backward_args = {}
     if backward_cell_net is not None:
         backward_mapping_keys = set(viewkeys(backward_mapping))
-        backward_link_internal, backward_link_external, backward_link_offset = \
-            unpack_triple(backward_links)
+        backward_link_internal, backward_link_external, backward_link_offset = unpack_triple(
+            backward_links
+        )
         params = [x for x in references if x in backward_mapping_keys]
         param_grads = [
-            str(backward_mapping[x])
-            for x in references
-            if x in backward_mapping_keys
+            str(backward_mapping[x]) for x in references if x in backward_mapping_keys
         ]
         if recompute_blobs_on_backward is None:
             recompute_blobs_on_backward = set()
         backward_args = {
-            'param': [all_inputs.index(p) for p in params],
-            'backward_link_internal': [str(l) for l in backward_link_internal],
-            'backward_link_external': [str(l) for l in backward_link_external],
-            'backward_link_offset': backward_link_offset,
-            'outputs_with_grads': outputs_with_grads,
-            'recompute_blobs_on_backward': [
+            "param": [all_inputs.index(p) for p in params],
+            "backward_link_internal": [str(l) for l in backward_link_internal],
+            "backward_link_external": [str(l) for l in backward_link_external],
+            "backward_link_offset": backward_link_offset,
+            "outputs_with_grads": outputs_with_grads,
+            "recompute_blobs_on_backward": [
                 str(b) for b in recompute_blobs_on_backward
             ],
-            'param_grads': param_grads,
+            "param_grads": param_grads,
         }
         if len(backward_cell_net.Proto().op) != 0:
-            backward_args['backward_step_net'] = backward_cell_net.Proto()
-
+            backward_args["backward_step_net"] = backward_cell_net.Proto()
 
     results = net.RecurrentNetwork(
         all_inputs,
@@ -266,9 +271,7 @@ def recurrent_net(
         alias_dst=[str(a) for a in alias_dst],
         alias_offset=alias_offset,
         recurrent_states=recurrent_states,
-        initial_recurrent_state_ids=[
-            all_inputs.index(i) for i in recurrent_inputs
-        ],
+        initial_recurrent_state_ids=[all_inputs.index(i) for i in recurrent_inputs],
         link_internal=[str(l) for l in link_internal],
         link_external=[str(l) for l in link_external],
         link_offset=link_offset,
@@ -279,7 +282,7 @@ def recurrent_net(
     )
 
     # Restore net type since 'rnn' is not recognized outside RNNs
-    cell_net.Proto().type = 'simple'
+    cell_net.Proto().type = "simple"
 
     # The last output is a list of step workspaces,
     # which is only needed internally for gradient propogation
@@ -288,7 +291,8 @@ def recurrent_net(
 
 def set_rnn_executor_config(rnn_op, num_threads=None, max_cuda_streams=None):
     from caffe2.proto import caffe2_pb2
-    assert rnn_op.type in {'RecurrentNetwork', 'RecurrentNetworkGradient'}
+
+    assert rnn_op.type in {"RecurrentNetwork", "RecurrentNetworkGradient"}
 
     def add_arg(s, v):
         a = caffe2_pb2.Argument()
@@ -297,13 +301,13 @@ def set_rnn_executor_config(rnn_op, num_threads=None, max_cuda_streams=None):
         rnn_op.arg.extend([a])
 
     if num_threads is not None:
-        add_arg('num_threads', num_threads)
+        add_arg("num_threads", num_threads)
     if max_cuda_streams is not None:
-        add_arg('max_cuda_streams', max_cuda_streams)
+        add_arg("max_cuda_streams", max_cuda_streams)
 
 
-def retrieve_step_blobs(net, prefix='rnn'):
-    '''
+def retrieve_step_blobs(net, prefix="rnn"):
+    """
     Retrieves blobs from step workspaces (which contain intermediate recurrent
     network computation for each timestep) and puts them in the global
     workspace. This allows access to the contents of this intermediate
@@ -313,7 +317,7 @@ def retrieve_step_blobs(net, prefix='rnn'):
 
     prefix: prefix to append to extracted blob names when placing them in the
     global workspace
-    '''
+    """
     count = 1
     output_list = []
     for op in net.Proto().op:
@@ -326,7 +330,7 @@ def retrieve_step_blobs(net, prefix='rnn'):
                     "RecurrentNetworkBlobFetcher",
                     [scratch_workspaces_blob_name],
                     [blob_name],
-                    prefix=prefix
+                    prefix=prefix,
                 )
             )
             output_list += workspace.FetchBlob(blob_name).tolist()

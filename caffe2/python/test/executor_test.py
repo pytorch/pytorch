@@ -9,7 +9,8 @@ from caffe2.python.test.executor_test_util import (
     run_resnet50_epoch,
     ExecutorTestBase,
     executor_test_settings,
-    executor_test_model_names)
+    executor_test_model_names,
+)
 
 from caffe2.python.test_util import TestCase
 
@@ -24,10 +25,12 @@ ITERATIONS = 1
 
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
-    @given(executor=st.sampled_from(EXECUTORS),
-           model_name=st.sampled_from(executor_test_model_names()),
-           batch_size=st.sampled_from([1]),
-           num_workers=st.sampled_from([8]))
+    @given(
+        executor=st.sampled_from(EXECUTORS),
+        model_name=st.sampled_from(executor_test_model_names()),
+        batch_size=st.sampled_from([1]),
+        num_workers=st.sampled_from([8]),
+    )
     @executor_test_settings
     def test_executor(self, executor, model_name, batch_size, num_workers):
         model = build_conv_model(model_name, batch_size)
@@ -49,12 +52,12 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
 
 @unittest.skipIf(not workspace.has_gpu_support, "no gpu")
 class ExecutorGPUResNetTest(ExecutorTestBase):
-    @given(executor=st.sampled_from(EXECUTORS),
-           num_workers=st.sampled_from([8]))
+    @given(executor=st.sampled_from(EXECUTORS), num_workers=st.sampled_from([8]))
     @executor_test_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
-            num_gpus=workspace.NumGpuDevices(), batch_size=8, epoch_size=8)
+            num_gpus=workspace.NumGpuDevices(), batch_size=8, epoch_size=8
+        )
         model.Proto().num_workers = num_workers
 
         def run_model():
@@ -99,5 +102,5 @@ class ExecutorFailingOpTest(TestCase):
         self.assertFalse(res)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

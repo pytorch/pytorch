@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from hypothesis import assume, given, settings, HealthCheck
@@ -20,7 +21,7 @@ class TestFcOperator(serial.SerializedTestCase):
             assume(core.IsGPUDeviceType(gc.device_type))
             dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
 
-        if engine == 'TENSORCORE':
+        if engine == "TENSORCORE":
             # TensorCore only makes sense with CUDA
             assume(gc.device_type == caffe2_pb2.CUDA)
             # ensures TensorCore kernels can be called
@@ -48,9 +49,9 @@ class TestFcOperator(serial.SerializedTestCase):
             return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
 
         op = core.CreateOperator(
-            'FCTransposed' if transposed else 'FC',
-            ['X', 'W', 'b'],
-            'out',
+            "FCTransposed" if transposed else "FC",
+            ["X", "W", "b"],
+            "out",
             engine=engine,
         )
 
@@ -62,13 +63,15 @@ class TestFcOperator(serial.SerializedTestCase):
 
         # Check against numpy reference
         # ReferenceChecks is flaky on rocm with threshold of 1e-4 for fp16. Relaxing to 1e-3.
-        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP and dtype == np.float16) else 1e-4
+        threshold = (
+            1e-3 if (gc.device_type == caffe2_pb2.HIP and dtype == np.float16) else 1e-4
+        )
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X, W, b],
             reference=fc_transposed_op if transposed else fc_op,
-            threshold=threshold
+            threshold=threshold,
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, W, b], [0])
@@ -77,32 +80,38 @@ class TestFcOperator(serial.SerializedTestCase):
         threshold = 0.5 if dtype == np.float16 else 0.005
         stepsize = 0.5 if dtype == np.float16 else 0.05
         for i in range(3):
-            self.assertGradientChecks(gc, op, [X, W, b], i, [0],
-                                      threshold=threshold, stepsize=stepsize)
+            self.assertGradientChecks(
+                gc, op, [X, W, b], i, [0], threshold=threshold, stepsize=stepsize
+            )
 
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
-    @serial.given(n=st.integers(1, 5),
-           m=st.integers(0, 5),
-           k=st.integers(1, 5),
-           multi_dim=st.sampled_from([True, False]),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           engine=st.sampled_from(['', 'TENSORCORE']),
-           **hu.gcs)
+    @serial.given(
+        n=st.integers(1, 5),
+        m=st.integers(0, 5),
+        k=st.integers(1, 5),
+        multi_dim=st.sampled_from([True, False]),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        engine=st.sampled_from(["", "TENSORCORE"]),
+        **hu.gcs
+    )
     def test_fc(self, **kwargs):
         self._run_test(transposed=False, **kwargs)
 
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
-    @given(n=st.integers(1, 5),
-           m=st.integers(0, 5),
-           k=st.integers(1, 5),
-           multi_dim=st.sampled_from([True, False]),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           engine=st.sampled_from(['', 'TENSORCORE']),
-           **hu.gcs)
+    @given(
+        n=st.integers(1, 5),
+        m=st.integers(0, 5),
+        k=st.integers(1, 5),
+        multi_dim=st.sampled_from([True, False]),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        engine=st.sampled_from(["", "TENSORCORE"]),
+        **hu.gcs
+    )
     def test_fc_transposed(self, **kwargs):
         self._run_test(transposed=True, **kwargs)
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

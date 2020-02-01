@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -17,7 +18,7 @@ def calculate_ap(predictions, labels):
     for k in range(D):
         scores = predictions[:N, k]
         label = labels[:N, k]
-        sortind = np.argsort(-scores, kind='mergesort')
+        sortind = np.argsort(-scores, kind="mergesort")
         truth = label[sortind]
         precision = np.cumsum(truth) / num_range
         ap[k] = precision[truth.astype(np.bool)].sum() / max(1, truth.sum())
@@ -25,60 +26,56 @@ def calculate_ap(predictions, labels):
 
 
 class TestAPMeterOps(hu.HypothesisTestCase):
-    @given(predictions=hu.arrays(dims=[10, 3],
-           elements=st.floats(allow_nan=False,
-                              allow_infinity=False,
-                              min_value=0.1,
-                              max_value=1)),
-           labels=hu.arrays(dims=[10, 3],
-                            dtype=np.int32,
-                            elements=st.integers(min_value=0,
-                                                 max_value=1)),
-           **hu.gcs_cpu_only)
+    @given(
+        predictions=hu.arrays(
+            dims=[10, 3],
+            elements=st.floats(
+                allow_nan=False, allow_infinity=False, min_value=0.1, max_value=1
+            ),
+        ),
+        labels=hu.arrays(
+            dims=[10, 3], dtype=np.int32, elements=st.integers(min_value=0, max_value=1)
+        ),
+        **hu.gcs_cpu_only
+    )
     def test_average_precision(self, predictions, labels, gc, dc):
         op = core.CreateOperator(
-            "APMeter",
-            ["predictions", "labels"],
-            ["AP"],
-            buffer_size=10,
+            "APMeter", ["predictions", "labels"], ["AP"], buffer_size=10
         )
 
         def op_ref(predictions, labels):
             ap = calculate_ap(predictions, labels)
-            return (ap, )
+            return (ap,)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[predictions, labels],
-            reference=op_ref)
+            device_option=gc, op=op, inputs=[predictions, labels], reference=op_ref
+        )
 
-    @given(predictions=hu.arrays(dims=[10, 3],
-           elements=st.floats(allow_nan=False,
-                              allow_infinity=False,
-                              min_value=0.1,
-                              max_value=1)),
-           labels=hu.arrays(dims=[10, 3],
-                            dtype=np.int32,
-                            elements=st.integers(min_value=0,
-                                                 max_value=1)),
-           **hu.gcs_cpu_only)
+    @given(
+        predictions=hu.arrays(
+            dims=[10, 3],
+            elements=st.floats(
+                allow_nan=False, allow_infinity=False, min_value=0.1, max_value=1
+            ),
+        ),
+        labels=hu.arrays(
+            dims=[10, 3], dtype=np.int32, elements=st.integers(min_value=0, max_value=1)
+        ),
+        **hu.gcs_cpu_only
+    )
     def test_average_precision_small_buffer(self, predictions, labels, gc, dc):
         op_small_buffer = core.CreateOperator(
-            "APMeter",
-            ["predictions", "labels"],
-            ["AP"],
-            buffer_size=5,
+            "APMeter", ["predictions", "labels"], ["AP"], buffer_size=5
         )
 
         def op_ref(predictions, labels):
             # We can only hold the last 5 in the buffer
             ap = calculate_ap(predictions[5:], labels[5:])
-            return (ap, )
+            return (ap,)
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op_small_buffer,
             inputs=[predictions, labels],
-            reference=op_ref
+            reference=op_ref,
         )

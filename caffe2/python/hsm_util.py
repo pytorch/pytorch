@@ -7,14 +7,14 @@ from __future__ import unicode_literals
 
 from caffe2.proto import hsm_pb2
 
-'''
+"""
     Hierarchical softmax utility methods that can be used to:
     1) create TreeProto structure given list of word_ids or NodeProtos
     2) create HierarchyProto structure using the user-inputted TreeProto
-'''
+"""
 
 
-def create_node_with_words(words, name='node'):
+def create_node_with_words(words, name="node"):
     node = hsm_pb2.NodeProto()
     node.name = name
     for word in words:
@@ -22,7 +22,7 @@ def create_node_with_words(words, name='node'):
     return node
 
 
-def create_node_with_nodes(nodes, name='node'):
+def create_node_with_nodes(nodes, name="node"):
     node = hsm_pb2.NodeProto()
     node.name = name
     for child_node in nodes:
@@ -46,15 +46,13 @@ def create_hierarchy(tree_proto):
 
     def recursive_path_builder(node_proto, path, hierarchy_proto, max_index):
         node_proto.offset = max_index
-        path.append([max_index,
-                    len(node_proto.word_ids) + len(node_proto.children), 0])
+        path.append([max_index, len(node_proto.word_ids) + len(node_proto.children), 0])
         max_index += len(node_proto.word_ids) + len(node_proto.children)
         if hierarchy_proto.size < max_index:
             hierarchy_proto.size = max_index
         for target, node in enumerate(node_proto.children):
             path[-1][2] = target
-            max_index = recursive_path_builder(node, path, hierarchy_proto,
-                                               max_index)
+            max_index = recursive_path_builder(node, path, hierarchy_proto, max_index)
         for target, word in enumerate(node_proto.word_ids):
             path[-1][2] = target + len(node_proto.children)
             path_entry = create_path(path, word)

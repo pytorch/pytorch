@@ -3,6 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from future import standard_library
+
+standard_library.install_aliases()
+from builtins import range
+from builtins import object
 from caffe2.python import context, test_util
 from threading import Thread
 

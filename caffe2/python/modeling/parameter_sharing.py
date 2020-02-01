@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import object
 from caffe2.python import scope
 
 import contextlib
@@ -40,7 +41,7 @@ class ParameterSharingContext(object):
         best_scope_idx = 0
         sub_scopes = candidate_scope.split(scope._NAMESCOPE_SEPARATOR)
 
-        cur_scope = ''
+        cur_scope = ""
         for idx, sub_scope in enumerate(sub_scopes):
             cur_scope = cur_scope + sub_scope + scope._NAMESCOPE_SEPARATOR
             if cur_scope in self._scope_overrides:
@@ -49,16 +50,19 @@ class ParameterSharingContext(object):
         if best_scope == candidate_scope:
             return candidate_scope
         else:
-            return (self._resolve_scope_overrides(best_scope) +
-                    scope._NAMESCOPE_SEPARATOR.join(
-                        sub_scopes[best_scope_idx + 1:]))
+            return self._resolve_scope_overrides(
+                best_scope
+            ) + scope._NAMESCOPE_SEPARATOR.join(sub_scopes[best_scope_idx + 1 :])
 
     def get_parameter_name(self, name):
         candidate_scope = scope.CurrentNameScope()
         best_scope = self._resolve_scope_overrides(candidate_scope)
         if best_scope != candidate_scope:
-            logger.info("Overwriting scope {0} with scope {1}".format(
-                candidate_scope, best_scope))
+            logger.info(
+                "Overwriting scope {0} with scope {1}".format(
+                    candidate_scope, best_scope
+                )
+            )
 
         return best_scope + name
 
@@ -100,10 +104,10 @@ def ParameterSharing(shared_scopes):
 
     shared_scope_overrides = {}
     current_scope = scope.CurrentNameScope()
-    for k, v in shared_scopes.items():
-        assert not v.startswith(k), (
-            "Illegal override for parameter sharing. {} is prefix of {}".
-            format(k, v))
+    for k, v in list(shared_scopes.items()):
+        assert not v.startswith(
+            k
+        ), "Illegal override for parameter sharing. {} is prefix of {}".format(k, v)
         k = current_scope + k
         v = current_scope + v
         # Normalize all the scopes, so scope_a and scope_a/ are equivalent

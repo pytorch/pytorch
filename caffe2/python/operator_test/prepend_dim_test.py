@@ -16,20 +16,20 @@ class TestPrependDim(TestCase):
         X = np.random.rand(*old_shape).astype(np.float32)
         Y = np.random.rand(*new_shape).astype(np.float32)
 
-        net = core.Net('net')
+        net = core.Net("net")
 
-        net.GivenTensorFill([], 'X', shape=old_shape, values=X.flatten())
-        net.GivenTensorFill([], 'Y', shape=new_shape, values=Y.flatten())
+        net.GivenTensorFill([], "X", shape=old_shape, values=X.flatten())
+        net.GivenTensorFill([], "Y", shape=new_shape, values=Y.flatten())
 
-        net.PrependDim(['X'], ['X_out'], dim_size=8)
-        net.DotProduct(['X_out', 'Y'], 'Z')
-        net.AddGradientOperators(['Z'])
+        net.PrependDim(["X"], ["X_out"], dim_size=8)
+        net.DotProduct(["X_out", "Y"], "Z")
+        net.AddGradientOperators(["Z"])
 
         workspace.RunNetOnce(net)
 
-        X_out = workspace.FetchBlob('X_out')
-        X_grad = workspace.FetchBlob('X_grad')
-        Y_grad = workspace.FetchBlob('Y_grad')
+        X_out = workspace.FetchBlob("X_out")
+        X_grad = workspace.FetchBlob("X_grad")
+        Y_grad = workspace.FetchBlob("Y_grad")
 
         # Check the shape of the gradient
         np.testing.assert_array_equal(X_out.shape, Y.shape)
@@ -48,4 +48,5 @@ class TestPrependDim(TestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

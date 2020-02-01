@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 
@@ -30,33 +31,36 @@ def _inputs(draw):
     return (
         N,
         D,
-        draw(st.lists(
-            min_size=N * D,
-            max_size=N * D,
-            elements=st.one_of(
-                st.floats(min_value=-10, max_value=1 - TOLERANCE),
-                st.floats(min_value=1 + TOLERANCE, max_value=10))
-        )),
-        draw(st.lists(
-            elements=st.one_of(
-                st.floats(min_value=-2, max_value=-TOLERANCE),
-                st.floats(min_value=TOLERANCE, max_value=2)),
-            min_size=D,
-            max_size=D,
-        )),
-        draw(st.lists(
-            elements=st.floats(min_value=-2, max_value=2),
-            min_size=D,
-            max_size=D,
-        )),
+        draw(
+            st.lists(
+                min_size=N * D,
+                max_size=N * D,
+                elements=st.one_of(
+                    st.floats(min_value=-10, max_value=1 - TOLERANCE),
+                    st.floats(min_value=1 + TOLERANCE, max_value=10),
+                ),
+            )
+        ),
+        draw(
+            st.lists(
+                elements=st.one_of(
+                    st.floats(min_value=-2, max_value=-TOLERANCE),
+                    st.floats(min_value=TOLERANCE, max_value=2),
+                ),
+                min_size=D,
+                max_size=D,
+            )
+        ),
+        draw(
+            st.lists(
+                elements=st.floats(min_value=-2, max_value=2), min_size=D, max_size=D
+            )
+        ),
     )
 
 
 class TestBatchBoxCox(serial.SerializedTestCase):
-    @serial.given(
-        inputs=_inputs(),
-        **hu.gcs_cpu_only
-    )
+    @serial.given(inputs=_inputs(), **hu.gcs_cpu_only)
     def test_batch_box_cox(self, inputs, gc, dc):
         self.batch_box_cox(inputs, gc, dc)
 
@@ -73,23 +77,48 @@ class TestBatchBoxCox(serial.SerializedTestCase):
 
     @given(**hu.gcs_cpu_only)
     def test_lambda1_is_partially_zero(self, gc, dc):
-        inputs = (1, 5, [[1, 2, 3, 4, 5]],
-                  [0, -.5, 0, .5, 0], [0.1, 0.2, 0.3, 0.4, 0.5])
+        inputs = (
+            1,
+            5,
+            [[1, 2, 3, 4, 5]],
+            [0, -0.5, 0, 0.5, 0],
+            [0.1, 0.2, 0.3, 0.4, 0.5],
+        )
         self.batch_box_cox(inputs, gc, dc)
-        inputs = (3, 5, [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [1, 2, 3, 4, 5]],
-                  [0, -.5, 0, .5, 0], [0.1, 0.2, 0.3, 0.4, 0.5])
+        inputs = (
+            3,
+            5,
+            [[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [1, 2, 3, 4, 5]],
+            [0, -0.5, 0, 0.5, 0],
+            [0.1, 0.2, 0.3, 0.4, 0.5],
+        )
         self.batch_box_cox(inputs, gc, dc)
-        inputs = (2, 6, [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]],
-                  [0, -.5, 0, .5, 0, 1], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        inputs = (
+            2,
+            6,
+            [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]],
+            [0, -0.5, 0, 0.5, 0, 1],
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        )
         self.batch_box_cox(inputs, gc, dc)
-        inputs = (2, 7, [[1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14]],
-                  [0, -.5, 0, .5, 0, 1, 0], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+        inputs = (
+            2,
+            7,
+            [[1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14]],
+            [0, -0.5, 0, 0.5, 0, 1, 0],
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        )
         self.batch_box_cox(inputs, gc, dc)
 
     @given(**hu.gcs_cpu_only)
     def test_bound_base_away_from_zero(self, gc, dc):
-        inputs = (2, 3, [[1e-5, 1e-6, 1e-7], [1e-7, -1e-6, 1e-5]],
-                  [0, 0, 0], [0, 0, 1e-6])
+        inputs = (
+            2,
+            3,
+            [[1e-5, 1e-6, 1e-7], [1e-7, -1e-6, 1e-5]],
+            [0, 0, 0],
+            [0, 0, 1e-6],
+        )
         self.batch_box_cox(inputs, gc, dc)
 
     def batch_box_cox(self, inputs, gc, dc):
@@ -115,23 +144,23 @@ class TestBatchBoxCox(serial.SerializedTestCase):
                 if lambda1[i] == 0:
                     output[:, i] = np.log(output[:, i])
                 else:
-                    output[:, i] =\
-                        (np.power(output[:, i], lambda1[i]) - 1) / lambda1[i]
+                    output[:, i] = (np.power(output[:, i], lambda1[i]) - 1) / lambda1[i]
             return [output]
 
         for naive in [False, True]:
             op = core.CreateOperator(
-                'BatchBoxCox',
-                ['data', 'lambda1', 'lambda2'],
-                ['output'],
+                "BatchBoxCox",
+                ["data", "lambda1", "lambda2"],
+                ["output"],
                 naive=naive,
                 # Note examples above with D=5, 6, 7.
                 # A zero value falls back to the naive implementation.
-                min_block_size=0 if naive else 6
+                min_block_size=0 if naive else 6,
             )
             self.assertReferenceChecks(gc, op, [data, lambda1, lambda2], ref)
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

@@ -3,16 +3,26 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import onnx
 import onnx.defs
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
+from onnx.helper import (
+    make_node,
+    make_graph,
+    make_tensor,
+    make_tensor_value_info,
+    make_model,
+)
 from onnx.backend.base import namedtupledict
 from caffe2.python.models.download import ModelDownloader
 import caffe2.python.onnx.backend as c2
 from caffe2.python.onnx.workspace import Workspace
-from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
+from caffe2.python.trt.transform import (
+    convert_onnx_model_to_trt_op,
+    transform_caffe2_net,
+)
 from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
@@ -23,6 +33,7 @@ import tarfile
 import tempfile
 import shutil
 from six.moves.urllib.request import urlretrieve
+
 
 def _print_net(net):
     for i in net.external_input:
@@ -38,20 +49,22 @@ def _print_net(net):
 
 
 def _base_url(opset_version):
-    return 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(opset_version)
+    return "https://s3.amazonaws.com/download.onnx/models/opset_{}".format(
+        opset_version
+    )
+
 
 # TODO: This is copied from https://github.com/onnx/onnx/blob/master/onnx/backend/test/runner/__init__.py. Maybe we should
 # expose a model retrival API from ONNX
 def _download_onnx_model(model_name, opset_version):
-    onnx_home = os.path.expanduser(os.getenv('ONNX_HOME', os.path.join('~', '.onnx')))
-    models_dir = os.getenv('ONNX_MODELS',
-                           os.path.join(onnx_home, 'models'))
+    onnx_home = os.path.expanduser(os.getenv("ONNX_HOME", os.path.join("~", ".onnx")))
+    models_dir = os.getenv("ONNX_MODELS", os.path.join(onnx_home, "models"))
     model_dir = os.path.join(models_dir, model_name)
-    if not os.path.exists(os.path.join(model_dir, 'model.onnx')):
+    if not os.path.exists(os.path.join(model_dir, "model.onnx")):
         if os.path.exists(model_dir):
             bi = 0
             while True:
-                dest = '{}.old.{}'.format(model_dir, bi)
+                dest = "{}.old.{}".format(model_dir, bi)
                 if os.path.exists(dest):
                     bi += 1
                     continue
@@ -61,23 +74,22 @@ def _download_onnx_model(model_name, opset_version):
 
         # On Windows, NamedTemporaryFile can not be opened for a
         # second time
-        url = '{}/{}.tar.gz'.format(_base_url(opset_version), model_name)
+        url = "{}/{}.tar.gz".format(_base_url(opset_version), model_name)
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
-            print('Start downloading model {} from {}'.format(
-                model_name, url))
+            print("Start downloading model {} from {}".format(model_name, url))
             urlretrieve(url, download_file.name)
-            print('Done')
+            print("Done")
             with tarfile.open(download_file.name) as t:
                 t.extractall(models_dir)
         except Exception as e:
-            print('Failed to prepare data for model {}: {}'.format(
-                model_name, e))
+            print("Failed to prepare data for model {}: {}".format(model_name, e))
             raise
         finally:
             os.remove(download_file.name)
     return model_dir
+
 
 class TensorRTOpTest(TestCase):
     def setUp(self):
@@ -89,9 +101,18 @@ class TensorRTOpTest(TestCase):
         graph_def = make_graph(
             [node_def],
             name="test",
-            inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2])],
-            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2])])
-        model_def = make_model(graph_def, producer_name='relu-test')
+            inputs=[
+                make_tensor_value_info(
+                    "X", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2]
+                )
+            ],
+            outputs=[
+                make_tensor_value_info(
+                    "Y", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2]
+                )
+            ],
+        )
+        model_def = make_model(graph_def, producer_name="relu-test")
         op_outputs = [x.name for x in model_def.graph.output]
         op = convert_onnx_model_to_trt_op(model_def, max_batch_size=trt_max_batch_size)
         device_option = core.DeviceOption(caffe2_pb2.CUDA, 0)
@@ -102,25 +123,28 @@ class TensorRTOpTest(TestCase):
             ws.FeedBlob("X", X)
             ws.RunOperatorsOnce([op])
             output_values = [ws.FetchBlob(name) for name in op_outputs]
-            Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
+            Y_trt = namedtupledict("Outputs", op_outputs)(*output_values)
         np.testing.assert_almost_equal(Y_c2, Y_trt)
-
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_relu_graph_simple(self):
         X = np.random.randn(1, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 1, 50)
 
-
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_relu_graph_big_batch(self):
         X = np.random.randn(52, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 52, 50)
 
-    def _test_onnx_importer(self, model_name, data_input_index, opset_version=onnx.defs.onnx_opset_version()):
+    def _test_onnx_importer(
+        self, model_name, data_input_index, opset_version=onnx.defs.onnx_opset_version()
+    ):
         model_dir = _download_onnx_model(model_name, opset_version)
-        model_def = onnx.load(os.path.join(model_dir, 'model.onnx'))
-        input_blob_dims = [int(x.dim_value) for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim]
+        model_def = onnx.load(os.path.join(model_dir, "model.onnx"))
+        input_blob_dims = [
+            int(x.dim_value)
+            for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim
+        ]
         op_inputs = [x.name for x in model_def.graph.input]
         op_outputs = [x.name for x in model_def.graph.output]
         print("{}".format(op_inputs))
@@ -138,44 +162,46 @@ class TensorRTOpTest(TestCase):
                 ws.FeedBlob("data_0", data)
             ws.RunOperatorsOnce([op])
             output_values = [ws.FetchBlob(name) for name in op_outputs]
-            Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
+            Y_trt = namedtupledict("Outputs", op_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50(self):
-        self._test_onnx_importer('resnet50', 0, 9)
+        self._test_onnx_importer("resnet50", 0, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_bvlc_alexnet(self):
-        self._test_onnx_importer('bvlc_alexnet', 0, 9)
+        self._test_onnx_importer("bvlc_alexnet", 0, 9)
 
     @unittest.skip("Until fixing Unsqueeze op")
     def test_densenet121(self):
-        self._test_onnx_importer('densenet121', -1, 3)
+        self._test_onnx_importer("densenet121", -1, 3)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
-        self._test_onnx_importer('inception_v1', -3, 9)
+        self._test_onnx_importer("inception_v1", -3, 9)
 
     @unittest.skip("Until fixing Unsqueeze op")
     def test_inception_v2(self):
-        self._test_onnx_importer('inception_v2', 0, 9)
+        self._test_onnx_importer("inception_v2", 0, 9)
 
-    @unittest.skip('Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor')
+    @unittest.skip(
+        "Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor"
+    )
     def test_shufflenet(self):
-        self._test_onnx_importer('shufflenet', 0)
+        self._test_onnx_importer("shufflenet", 0)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_squeezenet(self):
-        self._test_onnx_importer('squeezenet', -1, 9)
+        self._test_onnx_importer("squeezenet", -1, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg16(self):
-        self._test_onnx_importer('vgg16', 0, 9)
+        self._test_onnx_importer("vgg16", 0, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
-        self._test_onnx_importer('vgg19', -2, 9)
+        self._test_onnx_importer("vgg19", -2, 9)
 
 
 class TensorRTTransformTest(TestCase):
@@ -211,9 +237,13 @@ class TensorRTTransformTest(TestCase):
         N = 2
         warmup = 20
         repeat = 100
-        print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
-        init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
-        self._add_head_tail(pred_net, 'real_data', 'real_softmax')
+        print(
+            "Batch size: {}, repeat inference {} times, warmup {} times".format(
+                N, repeat, warmup
+            )
+        )
+        init_net, pred_net, _ = self.model_downloader.get_c2_model("resnet50")
+        self._add_head_tail(pred_net, "real_data", "real_softmax")
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
 
@@ -222,10 +252,10 @@ class TensorRTTransformTest(TestCase):
         pred_net.device_option.CopyFrom(device_option)
         for op in pred_net.op:
             op.device_option.CopyFrom(device_option)
-            op.engine = 'CUDNN'
+            op.engine = "CUDNN"
         net_outputs = pred_net.external_output
         Y_c2 = None
-        data =  np.random.randn(*input_blob_dims).astype(np.float32)
+        data = np.random.randn(*input_blob_dims).astype(np.float32)
         c2_time = 1
         workspace.SwitchWorkspace("gpu_test", True)
         with core.DeviceScope(device_option):
@@ -240,7 +270,7 @@ class TensorRTTransformTest(TestCase):
             end = time.time()
             c2_time = end - start
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
-            Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
+            Y_c2 = namedtupledict("Outputs", net_outputs)(*output_values)
         workspace.ResetWorkspace()
 
         # Fill the workspace with the weights
@@ -249,14 +279,14 @@ class TensorRTTransformTest(TestCase):
 
         # Cut the graph
         start = time.time()
-        pred_net_cut = transform_caffe2_net(pred_net,
-                                            {input_name: input_blob_dims},
-                                            build_serializable_op=False)
+        pred_net_cut = transform_caffe2_net(
+            pred_net, {input_name: input_blob_dims}, build_serializable_op=False
+        )
         del init_net, pred_net
         pred_net_cut.device_option.CopyFrom(device_option)
         for op in pred_net_cut.op:
             op.device_option.CopyFrom(device_option)
-        #_print_net(pred_net_cut)
+        # _print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
@@ -265,7 +295,7 @@ class TensorRTTransformTest(TestCase):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
-            print("Conversion time: {:.2f}s".format(end -start))
+            print("Conversion time: {:.2f}s".format(end - start))
 
             for _ in range(warmup):
                 workspace.RunNet(pred_net_cut.name)
@@ -274,9 +304,11 @@ class TensorRTTransformTest(TestCase):
                 workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
-            print("TRT runtime: {}s, improvement: {}%".format(trt_time, (c2_time-trt_time)/c2_time*100))
+            print(
+                "TRT runtime: {}s, improvement: {}%".format(
+                    trt_time, (c2_time - trt_time) / c2_time * 100
+                )
+            )
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
-            Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
+            Y_trt = namedtupledict("Outputs", net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
-
-

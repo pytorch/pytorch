@@ -1,3 +1,4 @@
+from builtins import str
 import numpy as np
 import unittest
 
@@ -16,15 +17,15 @@ class TestToyRegression(test_util.TestCase):
         """
         workspace.ResetWorkspace()
         init_net = core.Net("init")
-        W = init_net.UniformFill([], "W", shape=[1, 2], min=-1., max=1.)
+        W = init_net.UniformFill([], "W", shape=[1, 2], min=-1.0, max=1.0)
         B = init_net.ConstantFill([], "B", shape=[1], value=0.0)
-        W_gt = init_net.GivenTensorFill(
-            [], "W_gt", shape=[1, 2], values=[2.0, 1.5])
+        W_gt = init_net.GivenTensorFill([], "W_gt", shape=[1, 2], values=[2.0, 1.5])
         B_gt = init_net.GivenTensorFill([], "B_gt", shape=[1], values=[0.5])
         LR = init_net.ConstantFill([], "LR", shape=[1], value=-0.1)
-        ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.)
-        ITER = init_net.ConstantFill([], "ITER", shape=[1], value=0,
-                                     dtype=core.DataType.INT64)
+        ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
+        ITER = init_net.ConstantFill(
+            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT64
+        )
 
         train_net = core.Net("train")
         X = train_net.GaussianFill([], "X", shape=[64, 2], mean=0.0, std=1.0)
@@ -40,8 +41,9 @@ class TestToyRegression(test_util.TestCase):
         input_to_grad = train_net.AddGradientOperators([loss], skip=2)
         # updates
         train_net.Iter(ITER, ITER)
-        train_net.LearningRate(ITER, "LR", base_lr=-0.1,
-                               policy="step", stepsize=20, gamma=0.9)
+        train_net.LearningRate(
+            ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9
+        )
         train_net.WeightedSum([W, ONE, input_to_grad[str(W)], LR], W)
         train_net.WeightedSum([B, ONE, input_to_grad[str(B)], LR], B)
         for blob in [loss, W, B]:
@@ -60,5 +62,5 @@ class TestToyRegression(test_util.TestCase):
         workspace.ResetWorkspace()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

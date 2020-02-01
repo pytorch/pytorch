@@ -9,11 +9,11 @@ import os
 import tempfile
 from zipfile import ZipFile
 
-'''
+"""
 Generates a document in markdown format summrizing the coverage of serialized
 testing. The document lives in
 `caffe2/python/serialized_test/SerializedTestCoverage.md`
-'''
+"""
 
 OpSchema = workspace.C.OpSchema
 
@@ -25,44 +25,51 @@ def gen_serialized_test_coverage(source_dir, output_dir):
     num_schemaless = len(schemaless)
     total_ops = num_covered + num_not_covered
 
-    with open(os.path.join(output_dir, 'SerializedTestCoverage.md'), 'w+') as f:
-        f.write('# Serialized Test Coverage Report\n')
-        f.write("This is an automatically generated file. Please see "
+    with open(os.path.join(output_dir, "SerializedTestCoverage.md"), "w+") as f:
+        f.write("# Serialized Test Coverage Report\n")
+        f.write(
+            "This is an automatically generated file. Please see "
             "`caffe2/python/serialized_test/README.md` for details. "
-            "In the case of merge conflicts, please rebase and regenerate.\n")
-        f.write('## Summary\n')
+            "In the case of merge conflicts, please rebase and regenerate.\n"
+        )
+        f.write("## Summary\n")
         f.write(
-            'Serialized tests have covered {}/{} ({}%) operators\n\n'.format(
-                num_covered, total_ops,
-                (int)(num_covered / total_ops * 1000) / 10))
+            "Serialized tests have covered {}/{} ({}%) operators\n\n".format(
+                num_covered, total_ops, (int)(num_covered / total_ops * 1000) / 10
+            )
+        )
 
-        f.write('## Not covered operators\n')
-        f.write('<details>\n')
+        f.write("## Not covered operators\n")
+        f.write("<details>\n")
         f.write(
-            '<summary>There are {} not covered operators</summary>\n\n'.format(
-                num_not_covered))
+            "<summary>There are {} not covered operators</summary>\n\n".format(
+                num_not_covered
+            )
+        )
         for n in sorted(not_covered):
-            f.write('* ' + n + '\n')
-        f.write('</details>\n\n')
+            f.write("* " + n + "\n")
+        f.write("</details>\n\n")
 
-        f.write('## Covered operators\n')
-        f.write('<details>\n')
+        f.write("## Covered operators\n")
+        f.write("<details>\n")
         f.write(
-            '<summary>There are {} covered operators</summary>\n\n'.format(
-                num_covered))
+            "<summary>There are {} covered operators</summary>\n\n".format(num_covered)
+        )
         for n in sorted(covered):
-            f.write('* ' + n + '\n')
-        f.write('</details>\n\n')
+            f.write("* " + n + "\n")
+        f.write("</details>\n\n")
 
-        f.write('## Excluded from coverage statistics\n')
-        f.write('### Schemaless operators\n')
-        f.write('<details>\n')
+        f.write("## Excluded from coverage statistics\n")
+        f.write("### Schemaless operators\n")
+        f.write("<details>\n")
         f.write(
-            '<summary>There are {} schemaless operators</summary>\n\n'.format(
-                num_schemaless))
+            "<summary>There are {} schemaless operators</summary>\n\n".format(
+                num_schemaless
+            )
+        )
         for n in sorted(schemaless):
-            f.write('* ' + n + '\n')
-        f.write('</details>\n\n')
+            f.write("* " + n + "\n")
+        f.write("</details>\n\n")
 
 
 def gen_coverage_sets(source_dir):
@@ -98,19 +105,19 @@ def gen_covered_ops(source_dir):
         temp_dir = tempfile.mkdtemp()
         with ZipFile(zipfile) as z:
             z.extractall(temp_dir)
-        op_path = os.path.join(temp_dir, 'op.pb')
-        with open(op_path, 'rb') as f:
+        op_path = os.path.join(temp_dir, "op.pb")
+        with open(op_path, "rb") as f:
             loaded_op = f.read()
         op_proto = parse_proto(loaded_op)
         covered.add(op_proto.type)
 
         index = 0
-        grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(index))
+        grad_path = os.path.join(temp_dir, "grad_{}.pb".format(index))
         while os.path.isfile(grad_path):
-            with open(grad_path, 'rb') as f:
+            with open(grad_path, "rb") as f:
                 loaded_grad = f.read()
             grad_proto = parse_proto(loaded_grad)
             covered.add(grad_proto.type)
             index += 1
-            grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(index))
+            grad_path = os.path.join(temp_dir, "grad_{}.pb".format(index))
     return covered

@@ -10,7 +10,6 @@ import six
 
 
 class SamplingTrainableMixin(six.with_metaclass(abc.ABCMeta, object)):
-
     def __init__(self, *args, **kwargs):
         super(SamplingTrainableMixin, self).__init__(*args, **kwargs)
         self._train_param_blobs = None

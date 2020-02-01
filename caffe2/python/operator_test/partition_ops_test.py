@@ -2,45 +2,46 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import zip
+from builtins import str
+from builtins import range
 import numpy as np
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase, rand_array
 
 
 class TestPartitionOps(TestCase):
-
     def test_configs(self):
         # (main dims, partitions,  main type, [list of (extra dims, type)])
         configs = [
-            ((10, ), 3),
-            ((4, ), 10),
+            ((10,), 3),
+            ((4,), 10),
             ((10, 10), 4),
-            ((100, ), 2),
-            ((5, ), 1),
-            ((1, ), 1),
+            ((100,), 2),
+            ((5,), 1),
+            ((1,), 1),
             ((2, 10), 2),
         ]
-        suffixes = [
-            [],
-            [((2, 2), np.float32)],
-            [((3, ), np.int64), ((2, ), np.float32)],
-        ]
+        suffixes = [[], [((2, 2), np.float32)], [((3,), np.int64), ((2,), np.float32)]]
         return [
             (main_dims, parts, main_type, extra, pack)
             for main_dims, parts in configs
-            for main_type in [np.int32, np.int64] for extra in suffixes
+            for main_type in [np.int32, np.int64]
+            for extra in suffixes
             for pack in [False, True]
         ]
 
     def testPartition(self):
         for main_dims, parts, main_type, extra_ins, pack in self.test_configs():
-            ins = ['in' + str(i) for i in range(1 + len(extra_ins))]
+            ins = ["in" + str(i) for i in range(1 + len(extra_ins))]
             outs = [
-                'in{}_p{}'.format(j, i)
-                for i in range(parts) for j in range(1 + len(extra_ins))
+                "in{}_p{}".format(j, i)
+                for i in range(parts)
+                for j in range(1 + len(extra_ins))
             ]
             op = core.CreateOperator(
-                'Partition', ins, outs, pack_first_input=(1 if pack else 0))
+                "Partition", ins, outs, pack_first_input=(1 if pack else 0)
+            )
             x = []
             for i, (dims, t) in enumerate([((), main_type)] + extra_ins):
                 if t in [np.float32, np.float64]:
@@ -57,9 +58,9 @@ class TestPartitionOps(TestCase):
                 out = []
                 for i in range(parts):
                     for ind, v in enumerate(x):
-                        suffix_shape = v.shape[len(x[0].shape):]
+                        suffix_shape = v.shape[len(x[0].shape) :]
                         accum = []
-                        data = v.reshape((-1, ) + suffix_shape)
+                        data = v.reshape((-1,) + suffix_shape)
 
                         if pack and ind == 0:
                             data = data // parts
@@ -70,7 +71,7 @@ class TestPartitionOps(TestCase):
 
                         def join(a):
                             if not a:
-                                return np.empty(shape=(0, ) + suffix_shape)
+                                return np.empty(shape=(0,) + suffix_shape)
                             return np.stack(a)
 
                         out.append(join(accum))
@@ -81,9 +82,7 @@ class TestPartitionOps(TestCase):
             print(x)
             print(ref)
             for name, expected in zip(outs, ref):
-                np.testing.assert_array_equal(
-                    expected, workspace.FetchBlob(name)
-                )
+                np.testing.assert_array_equal(expected, workspace.FetchBlob(name))
 
             # test inverse operation (GatherByKey)
             if len(main_dims) == 1:
@@ -91,29 +90,28 @@ class TestPartitionOps(TestCase):
                 for i in range(len(extra_ins)):
                     expected_out = ins[i + 1]
                     gather_ins = [ins[0]] + [
-                        outs[len(ins) * p + i + 1] for p in range(parts)]
-                    actual_out = expected_out + '_actual'
-                    op = core.CreateOperator(
-                        'GatherByKey', gather_ins, actual_out)
+                        outs[len(ins) * p + i + 1] for p in range(parts)
+                    ]
+                    actual_out = expected_out + "_actual"
+                    op = core.CreateOperator("GatherByKey", gather_ins, actual_out)
                     workspace.RunOperatorOnce(op)
                     expected = workspace.FetchBlob(expected_out)
                     actual = workspace.FetchBlob(actual_out)
                     np.testing.assert_array_equal(expected, actual)
-
 
     def testLengthsPartition(self):
         for main_dims, parts, main_type, extra_ins, pack in self.test_configs():
             # For LengthsSharding only 1-D tensors supported as a first input
             if len(main_dims) > 1:
                 continue
-            ins = ['in' + str(i) for i in range(2 + len(extra_ins))]
+            ins = ["in" + str(i) for i in range(2 + len(extra_ins))]
             outs = [
-                'in{}_p{}'.format(j, i)
-                for i in range(parts) for j in range(2 + len(extra_ins))
+                "in{}_p{}".format(j, i)
+                for i in range(parts)
+                for j in range(2 + len(extra_ins))
             ]
             op = core.CreateOperator(
-                'LengthsPartition', ins, outs,
-                pack_first_input=(1 if pack else 0)
+                "LengthsPartition", ins, outs, pack_first_input=(1 if pack else 0)
             )
             x = []
             for i, (dims, t) in enumerate([((), main_type)] + extra_ins):
@@ -150,9 +148,9 @@ class TestPartitionOps(TestCase):
                     out.append(sharded_lengths)
 
                     for ind, v in enumerate(x):
-                        suffix_shape = v.shape[len(x[0].shape):]
+                        suffix_shape = v.shape[len(x[0].shape) :]
                         accum = []
-                        data = v.reshape((-1, ) + suffix_shape)
+                        data = v.reshape((-1,) + suffix_shape)
 
                         if pack and ind == 0:
                             data = data // parts
@@ -163,7 +161,7 @@ class TestPartitionOps(TestCase):
 
                         def join(a):
                             if not a:
-                                return np.empty(shape=(0, ) + suffix_shape)
+                                return np.empty(shape=(0,) + suffix_shape)
                             return np.stack(a)
 
                         out.append(join(accum))
@@ -172,10 +170,10 @@ class TestPartitionOps(TestCase):
             workspace.RunOperatorOnce(op)
             ref = sharding(x)
             for name, expected in zip(outs, ref):
-                np.testing.assert_array_equal(
-                    expected, workspace.FetchBlob(name)
-                )
+                np.testing.assert_array_equal(expected, workspace.FetchBlob(name))
+
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

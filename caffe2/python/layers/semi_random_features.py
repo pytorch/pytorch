@@ -51,31 +51,30 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
                                          will be constant across all distributed
                                          instances of the layer
     """
+
     def __init__(
-            self,
-            model,
-            input_record,
-            output_dims,
-            s=1,
-            scale_random=1.0,
-            scale_learned=1.0,
-            weight_init_random=None,
-            bias_init_random=None,
-            weight_init_learned=None,
-            bias_init_learned=None,
-            weight_optim=None,
-            bias_optim=None,
-            set_weight_as_global_constant=False,
-            name='semi_random_features',
-            **kwargs):
+        self,
+        model,
+        input_record,
+        output_dims,
+        s=1,
+        scale_random=1.0,
+        scale_learned=1.0,
+        weight_init_random=None,
+        bias_init_random=None,
+        weight_init_learned=None,
+        bias_init_learned=None,
+        weight_optim=None,
+        bias_optim=None,
+        set_weight_as_global_constant=False,
+        name="semi_random_features",
+        **kwargs
+    ):
 
         if isinstance(input_record, schema.Struct):
             schema.is_schema_subset(
-                schema.Struct(
-                    ('full', schema.Scalar()),
-                    ('random', schema.Scalar()),
-                ),
-                input_record
+                schema.Struct(("full", schema.Scalar()), ("random", schema.Scalar())),
+                input_record,
             )
             self.input_record_full = input_record.full
             self.input_record_random = input_record.random
@@ -89,7 +88,7 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             self.input_record_full,
             output_dims,
             s=s,
-            scale=scale_random,       # To initialize the random parameters
+            scale=scale_random,  # To initialize the random parameters
             weight_init=weight_init_random,
             bias_init=bias_init_random,
             weight_optim=None,
@@ -97,48 +96,57 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             set_weight_as_global_constant=set_weight_as_global_constant,
             initialize_output_schema=False,
             name=name,
-            **kwargs)
+            **kwargs
+        )
 
         self.output_schema = schema.Struct(
-            ('full', schema.Scalar(
-                (np.float32, output_dims),
-                model.net.NextScopedBlob(name + '_full_output')
-            ),),
-            ('random', schema.Scalar(
-                (np.float32, output_dims),
-                model.net.NextScopedBlob(name + '_random_output')
-            ),),
+            (
+                "full",
+                schema.Scalar(
+                    (np.float32, output_dims),
+                    model.net.NextScopedBlob(name + "_full_output"),
+                ),
+            ),
+            (
+                "random",
+                schema.Scalar(
+                    (np.float32, output_dims),
+                    model.net.NextScopedBlob(name + "_random_output"),
+                ),
+            ),
         )
 
         # To initialize the learnable parameters
-        assert (scale_learned > 0.0), \
+        assert scale_learned > 0.0, (
             "Expected scale (learned) > 0, got %s" % scale_learned
+        )
         self.stddev = scale_learned * np.sqrt(1.0 / self.input_dims)
 
         # Learned Parameters
         (self.learned_w, self.learned_b) = self._initialize_params(
-            'learned_w',
-            'learned_b',
+            "learned_w",
+            "learned_b",
             w_init=weight_init_learned,
             b_init=bias_init_learned,
             w_optim=weight_optim,
-            b_optim=bias_optim
+            b_optim=bias_optim,
         )
 
     def add_ops(self, net):
         # Learned features: wx + b
-        learned_features = net.FC(self.input_record_full.field_blobs() +
-                                  [self.learned_w, self.learned_b],
-                                  net.NextScopedBlob('learned_features'))
-        # Random features: wx + b
-        random_features = net.FC(self.input_record_random.field_blobs() +
-                                 [self.random_w, self.random_b],
-                                 net.NextScopedBlob('random_features'))
-        processed_random_features = self._heaviside_with_power(
-            net,
-            random_features,
-            self.output_schema.random.field_blobs(),
-            self.s
+        learned_features = net.FC(
+            self.input_record_full.field_blobs() + [self.learned_w, self.learned_b],
+            net.NextScopedBlob("learned_features"),
         )
-        net.Mul([processed_random_features, learned_features],
-                self.output_schema.full.field_blobs())
+        # Random features: wx + b
+        random_features = net.FC(
+            self.input_record_random.field_blobs() + [self.random_w, self.random_b],
+            net.NextScopedBlob("random_features"),
+        )
+        processed_random_features = self._heaviside_with_power(
+            net, random_features, self.output_schema.random.field_blobs(), self.s
+        )
+        net.Mul(
+            [processed_random_features, learned_features],
+            self.output_schema.full.field_blobs(),
+        )

@@ -30,11 +30,10 @@ def gradient_checker_device_option():
     return st.sampled_from(device_options)
 
 
-gcs = dict(
-    gc=gradient_checker_device_option(),
-    dc=device_checker_device_options()
-)
+gcs = dict(gc=gradient_checker_device_option(), dc=device_checker_device_options())
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_ideep_only = dict(gc=st.sampled_from([ideep_do]), dc=st.just([ideep_do]))
-gcs_cpu_ideep = dict(gc=st.sampled_from([cpu_do, ideep_do]), dc=st.just([cpu_do, ideep_do]))
+gcs_cpu_ideep = dict(
+    gc=st.sampled_from([cpu_do, ideep_do]), dc=st.just([cpu_do, ideep_do])
+)

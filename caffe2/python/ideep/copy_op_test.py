@@ -16,11 +16,7 @@ class CopyTest(unittest.TestCase):
         return caffe2_pb2.DeviceOption(device_type=caffe2_pb2.IDEEP)
 
     def test_copy_to_ideep(self):
-        op = core.CreateOperator(
-            "CopyCPUToIDEEP",
-            ["X"],
-            ["X_ideep"],
-        )
+        op = core.CreateOperator("CopyCPUToIDEEP", ["X"], ["X_ideep"])
         op.device_option.CopyFrom(self._get_deep_device())
         n = randint(1, 128)
         c = randint(1, 64)
@@ -33,11 +29,7 @@ class CopyTest(unittest.TestCase):
         np.testing.assert_allclose(X, X_ideep)
 
     def test_copy_to_ideep_zero_dim(self):
-        op = core.CreateOperator(
-            "CopyCPUToIDEEP",
-            ["X"],
-            ["X_ideep"],
-        )
+        op = core.CreateOperator("CopyCPUToIDEEP", ["X"], ["X_ideep"])
         op.device_option.CopyFrom(self._get_deep_device())
         n = 0
         c = randint(1, 128)
@@ -48,11 +40,7 @@ class CopyTest(unittest.TestCase):
         np.testing.assert_allclose(X, X_ideep)
 
     def test_copy_from_ideep(self):
-        op = core.CreateOperator(
-            "CopyIDEEPToCPU",
-            ["X_ideep"],
-            ["X"],
-        )
+        op = core.CreateOperator("CopyIDEEPToCPU", ["X_ideep"], ["X"])
         op.device_option.CopyFrom(self._get_deep_device())
         n = randint(1, 128)
         c = randint(1, 64)
@@ -65,11 +53,7 @@ class CopyTest(unittest.TestCase):
         np.testing.assert_allclose(X, X_ideep)
 
     def test_copy_from_ideep_zero_dim(self):
-        op = core.CreateOperator(
-            "CopyIDEEPToCPU",
-            ["X_ideep"],
-            ["X"],
-        )
+        op = core.CreateOperator("CopyIDEEPToCPU", ["X_ideep"], ["X"])
         op.device_option.CopyFrom(self._get_deep_device())
         n = 0
         c = randint(1, 64)
@@ -80,10 +64,7 @@ class CopyTest(unittest.TestCase):
         np.testing.assert_allclose(X, X_ideep)
 
     def test_copy_from_ideep_fallthrough(self):
-        op = core.CreateOperator(
-            "CopyIDEEPToCPU",
-            ["X_ideep"],
-            ["X"],)
+        op = core.CreateOperator("CopyIDEEPToCPU", ["X_ideep"], ["X"])
         op.device_option.CopyFrom(self._get_deep_device())
         n = randint(1, 128)
         c = randint(1, 64)
@@ -94,6 +75,7 @@ class CopyTest(unittest.TestCase):
         workspace.RunOperatorOnce(op)
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
+
 
 if __name__ == "__main__":
     unittest.main()

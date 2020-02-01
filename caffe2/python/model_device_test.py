@@ -1,18 +1,12 @@
+from builtins import str
 import numpy as np
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import (
-    workspace,
-    device_checker,
-    test_util,
-    model_helper,
-    brew,
-)
+from caffe2.python import workspace, device_checker, test_util, model_helper, brew
 
 
 class TestMiniAlexNet(test_util.TestCase):
-
     def _MiniAlexNetNoDropout(self, order):
         # First, AlexNet using the cnn wrapper.
         model = model_helper.ModelHelper(name="alexnet")
@@ -26,7 +20,7 @@ class TestMiniAlexNet(test_util.TestCase):
             ("XavierFill", {}),
             ("ConstantFill", {}),
             stride=4,
-            pad=0
+            pad=0,
         )
         relu1 = brew.relu(model, conv1, "relu1")
         norm1 = brew.lrn(model, relu1, "norm1", size=5, alpha=0.0001, beta=0.75)
@@ -42,7 +36,7 @@ class TestMiniAlexNet(test_util.TestCase):
             ("ConstantFill", {"value": 0.1}),
             group=2,
             stride=1,
-            pad=2
+            pad=2,
         )
         relu2 = brew.relu(model, conv2, "relu2")
         norm2 = brew.lrn(model, relu2, "norm2", size=5, alpha=0.0001, beta=0.75)
@@ -54,9 +48,9 @@ class TestMiniAlexNet(test_util.TestCase):
             32,
             64,
             3,
-            ("XavierFill", {'std': 0.01}),
+            ("XavierFill", {"std": 0.01}),
             ("ConstantFill", {}),
-            pad=1
+            pad=1,
         )
         relu3 = brew.relu(model, conv3, "relu3")
         conv4 = brew.group_conv(
@@ -69,7 +63,7 @@ class TestMiniAlexNet(test_util.TestCase):
             ("XavierFill", {}),
             ("ConstantFill", {"value": 0.1}),
             group=2,
-            pad=1
+            pad=1,
         )
         relu4 = brew.relu(model, conv4, "relu4")
         conv5 = brew.group_conv(
@@ -82,23 +76,38 @@ class TestMiniAlexNet(test_util.TestCase):
             ("XavierFill", {}),
             ("ConstantFill", {"value": 0.1}),
             group=2,
-            pad=1
+            pad=1,
         )
         relu5 = brew.relu(model, conv5, "relu5")
         pool5 = brew.max_pool(model, relu5, "pool5", kernel=3, stride=2)
         fc6 = brew.fc(
-            model, pool5, "fc6", 1152, 1024, ("XavierFill", {}),
-            ("ConstantFill", {"value": 0.1})
+            model,
+            pool5,
+            "fc6",
+            1152,
+            1024,
+            ("XavierFill", {}),
+            ("ConstantFill", {"value": 0.1}),
         )
         relu6 = brew.relu(model, fc6, "relu6")
         fc7 = brew.fc(
-            model, relu6, "fc7", 1024, 1024, ("XavierFill", {}),
-            ("ConstantFill", {"value": 0.1})
+            model,
+            relu6,
+            "fc7",
+            1024,
+            1024,
+            ("XavierFill", {}),
+            ("ConstantFill", {"value": 0.1}),
         )
         relu7 = brew.relu(model, fc7, "relu7")
         fc8 = brew.fc(
-            model, relu7, "fc8", 1024, 5, ("XavierFill", {}),
-            ("ConstantFill", {"value": 0.0})
+            model,
+            relu7,
+            "fc8",
+            1024,
+            5,
+            ("XavierFill", {}),
+            ("ConstantFill", {"value": 0.0}),
         )
         pred = brew.softmax(model, fc8, "pred")
         xent = model.LabelCrossEntropy([pred, "label"], "xent")
@@ -112,8 +121,7 @@ class TestMiniAlexNet(test_util.TestCase):
         workspace.ResetWorkspace()
         workspace.RunNetOnce(model.param_init_net)
         inputs = dict(
-            [(str(name), workspace.FetchBlob(str(name))) for name in
-             model.params]
+            [(str(name), workspace.FetchBlob(str(name))) for name in model.params]
         )
         if order == "NCHW":
             inputs["data"] = np.random.rand(4, 3, 227, 227).astype(np.float32)
@@ -132,21 +140,20 @@ class TestMiniAlexNet(test_util.TestCase):
             inputs,
             # The indices sometimes may be sensitive to small numerical
             # differences in the input, so we ignore checking them.
-            ignore=['_pool1_idx', '_pool2_idx', '_pool5_idx']
+            ignore=["_pool1_idx", "_pool2_idx", "_pool5_idx"],
         )
         self.assertEqual(ret, True)
 
-    @unittest.skipIf(not workspace.has_gpu_support,
-                     "No GPU support. Skipping test.")
+    @unittest.skipIf(not workspace.has_gpu_support, "No GPU support. Skipping test.")
     def testMiniAlexNetNCHW(self):
         self._testMiniAlexNet("NCHW")
 
     # No Group convolution support for NHWC right now
-    #@unittest.skipIf(not workspace.has_gpu_support,
+    # @unittest.skipIf(not workspace.has_gpu_support,
     #                 "No GPU support. Skipping test.")
-    #def testMiniAlexNetNHWC(self):
+    # def testMiniAlexNetNHWC(self):
     #    self._testMiniAlexNet("NHWC")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

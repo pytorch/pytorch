@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import scope, core, workspace
 from caffe2.proto import caffe2_pb2
 
@@ -34,7 +35,6 @@ def thread_runner(idx, testobj):
 
 
 class TestScope(unittest.TestCase):
-
     def testNamescopeBasic(self):
         self.assertEquals(scope.CurrentNameScope(), "")
 
@@ -133,10 +133,7 @@ class TestScope(unittest.TestCase):
 
         threads = []
         for i in range(4):
-            threads.append(threading.Thread(
-                target=thread_runner,
-                args=(i, self),
-            ))
+            threads.append(threading.Thread(target=thread_runner, args=(i, self)))
         for t in threads:
             t.start()
 

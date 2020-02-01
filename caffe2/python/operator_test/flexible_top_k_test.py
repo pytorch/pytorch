@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -26,7 +27,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
                     od[val] = []
                 od[val].append(j)
             k_ = 0
-            for val, idxs in sorted(od.items(), reverse=True):
+            for val, idxs in sorted(list(od.items()), reverse=True):
                 for idx in idxs:
                     indices_ref[offset + k_] = idx
                     values_ref[offset + k_] = val
@@ -42,12 +43,13 @@ class TestFlexibleTopK(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     def test_flexible_top_k(self, X, gc, dc):
         X = X.astype(dtype=np.float32)
-        k_shape = (int(X.size / X.shape[-1]), )
+        k_shape = (int(X.size / X.shape[-1]),)
         k = np.random.randint(1, high=X.shape[-1] + 1, size=k_shape)
 
         output_list = ["Values", "Indices"]
-        op = core.CreateOperator("FlexibleTopK", ["X", "k"], output_list,
-                                 device_option=gc)
+        op = core.CreateOperator(
+            "FlexibleTopK", ["X", "k"], output_list, device_option=gc
+        )
 
         def bind_ref(X_loc, k):
             ret = self.flexible_top_k_ref(X_loc, k)
@@ -58,7 +60,7 @@ class TestFlexibleTopK(serial.SerializedTestCase):
     @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
     def test_flexible_top_k_grad(self, X, gc, dc):
         X = X.astype(np.float32)
-        k_shape = (int(X.size / X.shape[-1]), )
+        k_shape = (int(X.size / X.shape[-1]),)
         k = np.random.randint(1, high=X.shape[-1] + 1, size=k_shape)
 
         # this try to make sure adding stepsize (0.05)

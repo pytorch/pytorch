@@ -14,6 +14,8 @@ If above cases are not satisfied, a fallback function which does not rely on
 peer access will be called.
 """
 
+from builtins import str
+from builtins import range
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
@@ -45,15 +47,20 @@ def Allreduce(net, blobs, reduced_affix="_reduced", gpu_indices=None):
         gpu_indices = list(range(len(blobs)))
     if len(gpu_indices) != len(blobs):
         raise RuntimeError(
-            "gpu_indices length and blobs length mismatch: %d vs %d" %
-            (len(gpu_indices), len(blobs))
+            "gpu_indices length and blobs length mismatch: %d vs %d"
+            % (len(gpu_indices), len(blobs))
         )
     pattern = workspace.GetGpuPeerAccessPattern()
     if len(blobs) == 2 and pattern.shape[0] >= 2 and np.all(pattern[:2, :2]):
         return Allreduce2(net, blobs, reduced_affix, gpu_indices)
     elif len(blobs) == 4 and pattern.shape[0] >= 4 and np.all(pattern[:4, :4]):
         return Allreduce4(net, blobs, reduced_affix, gpu_indices)
-    elif len(blobs) == 4 and pattern.shape[0] >= 4 and np.all(pattern[:2, :2]) and np.all(pattern[2:4, 2:4]):
+    elif (
+        len(blobs) == 4
+        and pattern.shape[0] >= 4
+        and np.all(pattern[:2, :2])
+        and np.all(pattern[2:4, 2:4])
+    ):
         return Allreduce4Group2(net, blobs, reduced_affix, gpu_indices)
     elif len(blobs) == 8 and pattern.shape[0] >= 8 and np.all(pattern[:8, :8]):
         return Allreduce8(net, blobs, reduced_affix, gpu_indices)
@@ -69,11 +76,7 @@ def Allreduce2(net, blobs, reduced_affix, gpu_indices):
     a, b = blobs
     gpu_a, gpu_b = gpu_indices
     a_reduced = net.Add([a, b], a + reduced_affix, device_option=OnGPU(gpu_a))
-    b_reduced = a_reduced.Copy(
-        [],
-        b + reduced_affix,
-        device_option=OnGPU(gpu_b)
-    )
+    b_reduced = a_reduced.Copy([], b + reduced_affix, device_option=OnGPU(gpu_b))
     return a_reduced, b_reduced
 
 
@@ -89,31 +92,15 @@ def Allreduce4(net, blobs, reduced_affix, gpu_indices):
     a, b, c, d = blobs
     gpu_a, gpu_b, gpu_c, gpu_d = gpu_indices
     # a_reduced <- a+b, c_reduced <- c + d
-    a_reduced = net.Add(
-        [a, b],
-        str(a) + reduced_affix,
-        device_option=OnGPU(gpu_a)
-    )
-    c_reduced = net.Add(
-        [c, d],
-        str(c) + reduced_affix,
-        device_option=OnGPU(gpu_c)
-    )
+    a_reduced = net.Add([a, b], str(a) + reduced_affix, device_option=OnGPU(gpu_a))
+    c_reduced = net.Add([c, d], str(c) + reduced_affix, device_option=OnGPU(gpu_c))
     # a_reduced <- a_reduced + c_reduced
     a_reduced = a_reduced.Add(c_reduced, a_reduced, device_option=OnGPU(gpu_a))
     # broadcast a_reduced to c_reduced
     c_reduced = a_reduced.Copy([], c_reduced, device_option=OnGPU(gpu_c))
     # broadcast to b and d
-    b_reduced = a_reduced.Copy(
-        [],
-        str(b) + reduced_affix,
-        device_option=OnGPU(gpu_b)
-    )
-    d_reduced = c_reduced.Copy(
-        [],
-        str(d) + reduced_affix,
-        device_option=OnGPU(gpu_d)
-    )
+    b_reduced = a_reduced.Copy([], str(b) + reduced_affix, device_option=OnGPU(gpu_b))
+    d_reduced = c_reduced.Copy([], str(d) + reduced_affix, device_option=OnGPU(gpu_d))
     return a_reduced, b_reduced, c_reduced, d_reduced
 
 
@@ -129,37 +116,19 @@ def Allreduce4Group2(net, blobs, reduced_affix, gpu_indices):
     a, b, c, d = blobs
     gpu_a, gpu_b, gpu_c, gpu_d = gpu_indices
     # a_reduced <- a+b, c_reduced <- c + d
-    a_reduced = net.Add(
-        [a, b],
-        str(a) + reduced_affix,
-        device_option=OnGPU(gpu_a)
-    )
-    c_reduced = net.Add(
-        [c, d],
-        str(c) + reduced_affix,
-        device_option=OnGPU(gpu_c)
-    )
+    a_reduced = net.Add([a, b], str(a) + reduced_affix, device_option=OnGPU(gpu_a))
+    c_reduced = net.Add([c, d], str(c) + reduced_affix, device_option=OnGPU(gpu_c))
     # copy from c_reduce(gpu_c) to c_reduce_copy(gpu_a)
     c_reduced_copy = c_reduced.Copy(
-        [],
-        str(c_reduced) + '_copy',
-        device_option=OnGPU(gpu_a)
+        [], str(c_reduced) + "_copy", device_option=OnGPU(gpu_a)
     )
     # a_reduced <- a_reduced + c_reduced_copy
     a_reduced = a_reduced.Add(c_reduced_copy, a_reduced, device_option=OnGPU(gpu_a))
     # broadcast a_reduced to c_reduced
     c_reduced = a_reduced.Copy([], c_reduced, device_option=OnGPU(gpu_c))
     # broadcast to b and d
-    b_reduced = a_reduced.Copy(
-        [],
-        str(b) + reduced_affix,
-        device_option=OnGPU(gpu_b)
-    )
-    d_reduced = c_reduced.Copy(
-        [],
-        str(d) + reduced_affix,
-        device_option=OnGPU(gpu_d)
-    )
+    b_reduced = a_reduced.Copy([], str(b) + reduced_affix, device_option=OnGPU(gpu_b))
+    d_reduced = c_reduced.Copy([], str(d) + reduced_affix, device_option=OnGPU(gpu_d))
     return a_reduced, b_reduced, c_reduced, d_reduced
 
 
@@ -180,45 +149,33 @@ def Allreduce8(net, blobs, reduced_affix, gpu_indices):
         reduced[i] = net.Add(
             [blobs[i], blobs[i + 1]],
             blobs[i] + reduced_affix,
-            device_option=OnGPU(gpu_indices[i])
+            device_option=OnGPU(gpu_indices[i]),
         )
     # Reduction level 2
     for i in [0, 4]:
         reduced[i] = net.Add(
             [reduced[i], reduced[i + 2]],
             str(blobs[i]) + reduced_affix,
-            device_option=OnGPU(gpu_indices[i])
+            device_option=OnGPU(gpu_indices[i]),
         )
     # Reduction level 3: this involves a copy.
     reduced_4_copy = reduced[4].Copy(
-        [],
-        str(reduced[4]) + '_copy',
-        device_option=OnGPU(gpu_indices[0])
+        [], str(reduced[4]) + "_copy", device_option=OnGPU(gpu_indices[0])
     )
     reduced[0] = reduced[0].Add(
-        reduced_4_copy,
-        reduced[0],
-        device_option=OnGPU(gpu_indices[0])
+        reduced_4_copy, reduced[0], device_option=OnGPU(gpu_indices[0])
     )
     # Broadcast level 1
-    reduced[4] = reduced[0].Copy(
-        [],
-        reduced[4],
-        device_option=OnGPU(gpu_indices[4])
-    )
+    reduced[4] = reduced[0].Copy([], reduced[4], device_option=OnGPU(gpu_indices[4]))
     # Broadcast level 2
     for i in [2, 6]:
         reduced[i] = reduced[i - 2].Copy(
-            [],
-            reduced[i],
-            device_option=OnGPU(gpu_indices[i])
+            [], reduced[i], device_option=OnGPU(gpu_indices[i])
         )
     # Broadcast level 3
     for i in [1, 3, 5, 7]:
         reduced[i] = reduced[i - 1].Copy(
-            [],
-            blobs[i] + reduced_affix,
-            device_option=OnGPU(gpu_indices[i])
+            [], blobs[i] + reduced_affix, device_option=OnGPU(gpu_indices[i])
         )
     return reduced
 
@@ -232,33 +189,23 @@ def AllreduceFallback(net, blobs, reduced_affix, gpu_indices):
       ir <- 0r for i in gpu_indices[1:]
   """
     reduced = [None] * len(gpu_indices)
-    if reduced_affix != '':
+    if reduced_affix != "":
         # copy first
         reduced[0] = net.Copy(
-            blobs[0],
-            blobs[0] + reduced_affix,
-            device_option=OnGPU(gpu_indices[0])
+            blobs[0], blobs[0] + reduced_affix, device_option=OnGPU(gpu_indices[0])
         )
     else:
         reduced[0] = blobs[0]
     # do temp copy and add
-    temp_name = reduced[0] + '_temp_copy'
+    temp_name = reduced[0] + "_temp_copy"
     for i in range(1, len(gpu_indices)):
-        temp = net.Copy(
-            blobs[i],
-            temp_name,
-            device_option=OnGPU(gpu_indices[0])
-        )
+        temp = net.Copy(blobs[i], temp_name, device_option=OnGPU(gpu_indices[0]))
         reduced[0] = net.Add(
-            [temp, reduced[0]],
-            reduced[0],
-            device_option=OnGPU(gpu_indices[0])
+            [temp, reduced[0]], reduced[0], device_option=OnGPU(gpu_indices[0])
         )
     # Broadcast to everyone else
     for i in range(1, len(gpu_indices)):
         reduced[i] = net.Copy(
-            reduced[0],
-            blobs[i] + reduced_affix,
-            device_option=OnGPU(gpu_indices[i])
+            reduced[0], blobs[i] + reduced_affix, device_option=OnGPU(gpu_indices[i])
         )
     return reduced

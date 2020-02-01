@@ -4,6 +4,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import range
+from builtins import object
 from caffe2.python.docs.parser import Parser
 
 
@@ -22,37 +24,37 @@ class Formatter(object):
         self.addRaw(text)
 
     def addRaw(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addLine(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addLinebreak(self):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addHeader(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addEmphasis(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addList(self, textList):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addLink(self, text, url):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addCode(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addCodeLink(self, text):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addTable(self, table):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
     def addBreak(self):
-        raise Exception('Not yet implemented.')
+        raise Exception("Not yet implemented.")
 
 
 class Markdown(Formatter):
@@ -60,17 +62,18 @@ class Markdown(Formatter):
         self.content += "{text}".format(text=text)
 
     def addLine(self, text, new_line=False):
-        self.content += "{line}{text}\n".format(line=('\n' if new_line else ''),
-                                                text=text)
+        self.content += "{line}{text}\n".format(
+            line=("\n" if new_line else ""), text=text
+        )
 
     def addLinebreak(self):
         self.content += "\n"
 
     def addHeader(self, text, h=1):
-        self.addLine("{header} {text}".format(header=h * '#', text=text), True)
+        self.addLine("{header} {text}".format(header=h * "#", text=text), True)
 
     def addEmphasis(self, text, s=1):
-        self.addRaw("{stars}{text}{stars}".format(stars=s * '*', text=text))
+        self.addRaw("{stars}{text}{stars}".format(stars=s * "*", text=text))
 
     def addList(self, textList):
         for text in textList:
@@ -84,21 +87,21 @@ class Markdown(Formatter):
         self.addRaw("({path})".format(path=path))
 
     def addCode(self, text, inline=False):
-        if (inline):
+        if inline:
             self.content += "`{text}`".format(text=text)
         else:
             self.addRaw("\n\n```\n{text}```\n\n".format(text=text))
 
     def addTable(self, table, noTitle=False):
         self.addLinebreak()
-        assert(len(table) > 1)
+        assert len(table) > 1
         if noTitle:
-            table.insert(0, [' ' for i in range(len(table[0]))])
-        self.addLine(' | '.join(table[0]))
-        self.addLine(' | '.join(['----' for i in range(len(table[0]))]))
+            table.insert(0, [" " for i in range(len(table[0]))])
+        self.addLine(" | ".join(table[0]))
+        self.addLine(" | ".join(["----" for i in range(len(table[0]))]))
         for row in table[1:]:
-            self.addLine(' | '.join(row))
+            self.addLine(" | ".join(row))
         self.addLinebreak()
 
     def addBreak(self):
-        self.addLine('\n---\n', True)
+        self.addLine("\n---\n", True)

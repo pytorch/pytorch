@@ -6,6 +6,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import range
 import numpy as np
 from caffe2.python import (
     brew,
@@ -27,16 +28,14 @@ if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_option.device_type = workspace.GpuDeviceType
     cpu_device_option = caffe2_pb2.DeviceOption()
-    gpu_device_checker = device_checker.DeviceChecker(
-        0.01, [gpu_device_option]
-    )
+    gpu_device_checker = device_checker.DeviceChecker(0.01, [gpu_device_option])
     device_checker = device_checker.DeviceChecker(
         0.01, [gpu_device_option, cpu_device_option]
     )
     gpu_gradient_checkers = [
         gradient_checker.GradientChecker(
             0.005, 0.05, gpu_device_option, "gpu_checker_ws"
-        ),
+        )
     ]
     gradient_checkers = [
         gradient_checker.GradientChecker(
@@ -49,9 +48,7 @@ if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
 else:
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_option = None
-    gpu_device_checker = device_checker.DeviceChecker(
-        0.01, []
-    )
+    gpu_device_checker = device_checker.DeviceChecker(0.01, [])
     device_checker = device_checker.DeviceChecker(0.01, [cpu_device_option])
 
     gradient_checkers = [
@@ -63,23 +60,22 @@ else:
 
 
 class TestLRN(test_util.TestCase):
-
     def setUp(self):
-        self.test_configs = [(6, 10), (3, 13), ]
+        self.test_configs = [(6, 10), (3, 13)]
 
     def testLRN(self):
         for input_size, depth in self.test_configs:
-            op = core.CreateOperator("LRN",
-                                     ["X"],
-                                     ["Y", "Y_scale"],
-                                     size=11,
-                                     alpha=0.001,
-                                     beta=0.5,
-                                     bias=2.0,
-                                     order="NHWC"
-                                     )
-            X = np.random.rand(2, input_size, input_size,
-                               depth).astype(np.float32)
+            op = core.CreateOperator(
+                "LRN",
+                ["X"],
+                ["Y", "Y_scale"],
+                size=11,
+                alpha=0.001,
+                beta=0.5,
+                bias=2.0,
+                order="NHWC",
+            )
+            X = np.random.rand(2, input_size, input_size, depth).astype(np.float32)
             res = device_checker.CheckSimple(op, [X], [0])
             self.assertTrue(res)
             for checker in gradient_checkers:
@@ -88,7 +84,6 @@ class TestLRN(test_util.TestCase):
 
 
 class TestFlatten(test_util.TestCase):
-
     def testFlatten(self):
         op = core.CreateOperator("Flatten", ["X"], ["Y"])
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
@@ -100,7 +95,6 @@ class TestFlatten(test_util.TestCase):
 
 
 class TestConcat(test_util.TestCase):
-
     def setUp(self):
         self.test_configs = [
             # input_size, depth1, depth2, depth3, depth4
@@ -110,55 +104,42 @@ class TestConcat(test_util.TestCase):
 
     def testConcatNHWC(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
-            op = core.CreateOperator("Concat",
-                                     ["X1", "X2", "X3", "X4"],
-                                     ["Y", "Y_dims"],
-                                     order="NHWC"
-                                     )
+            op = core.CreateOperator(
+                "Concat", ["X1", "X2", "X3", "X4"], ["Y", "Y_dims"], order="NHWC"
+            )
             Xs = [
-                np.random.rand(2, input_size, input_size,
-                               d1).astype(np.float32),
-                np.random.rand(2, input_size, input_size,
-                               d2).astype(np.float32),
-                np.random.rand(2, input_size, input_size,
-                               d3).astype(np.float32),
-                np.random.rand(2, input_size, input_size, d4).astype(np.float32)
+                np.random.rand(2, input_size, input_size, d1).astype(np.float32),
+                np.random.rand(2, input_size, input_size, d2).astype(np.float32),
+                np.random.rand(2, input_size, input_size, d3).astype(np.float32),
+                np.random.rand(2, input_size, input_size, d4).astype(np.float32),
             ]
             for i in range(4):
                 res = device_checker.CheckSimple(op, Xs, [0])
                 self.assertTrue(res)
                 for checker in gradient_checkers:
-                    res, grad, grad_estimated = checker.CheckSimple(op, Xs, i,
-                                                                    [0])
+                    res, grad, grad_estimated = checker.CheckSimple(op, Xs, i, [0])
                     self.assertTrue(res)
 
     def testConcatNCHW(self):
         for input_size, d1, d2, d3, d4 in self.test_configs:
-            op = core.CreateOperator("Concat",
-                                     ["X1", "X2", "X3", "X4"],
-                                     ["Y", "Y_dims"],
-                                     order="NCHW"
-                                     )
+            op = core.CreateOperator(
+                "Concat", ["X1", "X2", "X3", "X4"], ["Y", "Y_dims"], order="NCHW"
+            )
             Xs = [
-                np.random.rand(2, d1, input_size,
-                               input_size).astype(np.float32),
-                np.random.rand(2, d2, input_size,
-                               input_size).astype(np.float32),
-                np.random.rand(2, d3, input_size,
-                               input_size).astype(np.float32),
-                np.random.rand(2, d4, input_size, input_size).astype(np.float32)
+                np.random.rand(2, d1, input_size, input_size).astype(np.float32),
+                np.random.rand(2, d2, input_size, input_size).astype(np.float32),
+                np.random.rand(2, d3, input_size, input_size).astype(np.float32),
+                np.random.rand(2, d4, input_size, input_size).astype(np.float32),
             ]
             for i in range(4):
                 res = device_checker.CheckSimple(op, Xs, [0])
                 self.assertTrue(res)
                 for checker in gradient_checkers:
-                    res, grad, grad_estimated = checker.CheckSimple(op, Xs, i,
-                                                                    [0])
+                    res, grad, grad_estimated = checker.CheckSimple(op, Xs, i, [0])
                     self.assertTrue(res)
 
 
 class TestRelu(test_util.TestCase):
-
     def setUp(self):
         self.test_configs = [
             # input size
@@ -186,7 +167,6 @@ class TestRelu(test_util.TestCase):
 
 
 class TestTanh(test_util.TestCase):
-
     def setUp(self):
         self.test_configs = [
             # (0, 1),
@@ -207,14 +187,8 @@ class TestTanh(test_util.TestCase):
 
 
 class TestAbs(test_util.TestCase):
-
     def setUp(self):
-        self.test_configs = [
-            (1, 1),
-            (2, 3),
-            (2, 3, 4),
-            (2, 3, 4, 5),
-        ]
+        self.test_configs = [(1, 1), (2, 3), (2, 3, 4), (2, 3, 4, 5)]
 
     def testAbs(self):
         for input_size in self.test_configs:
@@ -229,8 +203,8 @@ class TestAbs(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
-class TestExp(test_util.TestCase):
 
+class TestExp(test_util.TestCase):
     def setUp(self):
         self.test_configs = [
             # (0, 1),
@@ -249,15 +223,10 @@ class TestExp(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
-class TestCos(test_util.TestCase):
 
+class TestCos(test_util.TestCase):
     def setUp(self):
-        self.test_configs = [
-            (1, 1),
-            (2, 3),
-            (2, 3, 4),
-            (2, 3, 4, 5),
-        ]
+        self.test_configs = [(1, 1), (2, 3), (2, 3, 4), (2, 3, 4, 5)]
 
     def testCos(self):
         for input_size in self.test_configs:
@@ -269,15 +238,10 @@ class TestCos(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
-class TestSin(test_util.TestCase):
 
+class TestSin(test_util.TestCase):
     def setUp(self):
-        self.test_configs = [
-            (1, 1),
-            (2, 3),
-            (2, 3, 4),
-            (2, 3, 4, 5),
-        ]
+        self.test_configs = [(1, 1), (2, 3), (2, 3, 4), (2, 3, 4, 5)]
 
     def testSin(self):
         for input_size in self.test_configs:
@@ -289,8 +253,8 @@ class TestSin(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(op, [X], 0, [0])
                 self.assertTrue(res)
 
-class TestSigmoid(test_util.TestCase):
 
+class TestSigmoid(test_util.TestCase):
     def setUp(self):
         self.test_configs = [
             # (0, 1),
@@ -311,32 +275,30 @@ class TestSigmoid(test_util.TestCase):
 
 
 class TestSum(test_util.TestCase):
-
     def setUp(self):
         self.test_configs = [
             # ((0, 1), False),
             ((1, 2, 3, 4), True),
-            ((1, 2, 3, 4), False)]
+            ((1, 2, 3, 4), False),
+        ]
 
     def testSum(self):
         for (input_size, in_place) in self.test_configs:
-            op = core.CreateOperator("Sum", ["X1", "X2"],
-                                     ["Y" if not in_place else "X1"])
+            op = core.CreateOperator(
+                "Sum", ["X1", "X2"], ["Y" if not in_place else "X1"]
+            )
             X1 = np.random.rand(*input_size).astype(np.float32) - 0.5
             X2 = np.random.rand(*input_size).astype(np.float32) - 0.5
             res = device_checker.CheckSimple(op, [X1, X2], [0])
             self.assertTrue(res)
             for checker in gradient_checkers:
-                res, grad, grad_estimated = checker.CheckSimple(
-                    op, [X1, X2], 0, [0])
+                res, grad, grad_estimated = checker.CheckSimple(op, [X1, X2], 0, [0])
                 self.assertTrue(res)
-                res, grad, grad_estimated = checker.CheckSimple(
-                    op, [X1, X2], 1, [0])
+                res, grad, grad_estimated = checker.CheckSimple(op, [X1, X2], 1, [0])
                 self.assertTrue(res)
 
 
 class TestMakeTwoClass(test_util.TestCase):
-
     def setUp(self):
         self.test_configs = [
             # input size
@@ -373,9 +335,11 @@ class TestNetGradientChecker(test_util.TestCase):
         NetGradientChecker.Check(
             model.net,
             outputs_with_grad=losses,
-            input_values={"X": np.array([1, 2, 3], dtype="float32"),
-                          const[0]: np.array([1, 1, 1, 1], dtype="float32"),
-                          const[1]: np.array([2, 2, 2, 2], dtype="float32")},
+            input_values={
+                "X": np.array([1, 2, 3], dtype="float32"),
+                const[0]: np.array([1, 1, 1, 1], dtype="float32"),
+                const[1]: np.array([2, 2, 2, 2], dtype="float32"),
+            },
             input_to_check="X",
         )
 
@@ -394,11 +358,14 @@ class TestNetGradientChecker(test_util.TestCase):
         bd = net2.Mul([b, d], "bd")
         y = net2.Sum([ac, ad, bc, bd], "y")
 
-        input_values = {blob: np.array([i], dtype=np.float32)
-                        for i, blob in enumerate([a, b, c, d])}
+        input_values = {
+            blob: np.array([i], dtype=np.float32) for i, blob in enumerate([a, b, c, d])
+        }
 
         NetGradientChecker.CompareNets(
-            [net1, net2], [[x], [y]], [0],
+            [net1, net2],
+            [[x], [y]],
+            [0],
             inputs_with_grads=[a, b, c, d],
             input_values=input_values,
         )
@@ -412,16 +379,14 @@ class TestIf(test_util.TestCase):
         B_b_values = [1.5]
 
         with NetBuilder(_use_control_ops=True) as init_nb:
-            W_a = ops.UniformFill([], "W_a", shape=[1, 2], min=-1., max=1.)
+            W_a = ops.UniformFill([], "W_a", shape=[1, 2], min=-1.0, max=1.0)
             B_a = ops.ConstantFill([], "B_a", shape=[1], value=0.0)
-            W_b = ops.UniformFill([], "W_b", shape=[1, 2], min=-1., max=1.)
+            W_b = ops.UniformFill([], "W_b", shape=[1, 2], min=-1.0, max=1.0)
             B_b = ops.ConstantFill([], "B_b", shape=[1], value=0.0)
 
-            W_gt_a = ops.GivenTensorFill(
-                [], "W_gt_a", shape=[1, 2], values=W_a_values)
+            W_gt_a = ops.GivenTensorFill([], "W_gt_a", shape=[1, 2], values=W_a_values)
             B_gt_a = ops.GivenTensorFill([], "B_gt_a", shape=[1], values=B_a_values)
-            W_gt_b = ops.GivenTensorFill(
-                [], "W_gt_b", shape=[1, 2], values=W_b_values)
+            W_gt_b = ops.GivenTensorFill([], "W_gt_b", shape=[1, 2], values=W_b_values)
             B_gt_b = ops.GivenTensorFill([], "B_gt_b", shape=[1], values=B_b_values)
 
         params = [W_gt_a, B_gt_a, W_a, B_a, W_gt_b, B_gt_b, W_b, B_b]
@@ -431,12 +396,15 @@ class TestIf(test_util.TestCase):
             Y_noise = ops.ConstantFill([], "Y_noise", shape=[1], value=0.0)
 
             switch = ops.UniformFill(
-                [], "switch", shape=[1], min=-1., max=1., run_once=0)
+                [], "switch", shape=[1], min=-1.0, max=1.0, run_once=0
+            )
             zero = ops.ConstantFill([], "zero", shape=[1], value=0.0)
             X = ops.GaussianFill(
-                [], "X", shape=[4096, 2], mean=0.0, std=1.0, run_once=0)
+                [], "X", shape=[4096, 2], mean=0.0, std=1.0, run_once=0
+            )
             noise = ops.GaussianFill(
-                [], "noise", shape=[4096, 1], mean=0.0, std=1.0, run_once=0)
+                [], "noise", shape=[4096, 1], mean=0.0, std=1.0, run_once=0
+            )
 
             with ops.IfNet(ops.LT([switch, zero])):
                 Y_gt = ops.FC([X, W_gt_a, B_gt_a], "Y_gt")
@@ -458,11 +426,13 @@ class TestIf(test_util.TestCase):
 
         init_net = init_nb.get()[0]
         ITER = init_net.ConstantFill(
-            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT64)
+            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT64
+        )
         train_net.Iter(ITER, ITER)
-        LR = train_net.LearningRate(ITER, "LR", base_lr=-0.1,
-                                        policy="step", stepsize=20, gamma=0.9)
-        ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.)
+        LR = train_net.LearningRate(
+            ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9
+        )
+        ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.0)
         train_net.WeightedSum([W_a, ONE, gradient_map[W_a], LR], W_a)
         train_net.WeightedSum([B_a, ONE, gradient_map[B_a], LR], B_a)
         train_net.WeightedSum([W_b, ONE, gradient_map[W_b], LR], W_b)
@@ -496,7 +466,7 @@ class TestIf(test_util.TestCase):
 
         train_eps = 0.01
 
-        for blob_name, values in values_map.items():
+        for blob_name, values in list(values_map.items()):
             trained_values = workspace.FetchBlob(blob_name)
             if trained_values.ndim == 2:
                 self.assertEqual(trained_values.shape[0], 1)
@@ -550,6 +520,6 @@ class TestWhile(test_util.TestCase):
         self.assertAlmostEqual(workspace.FetchBlob("z"), 8)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     workspace.GlobalInit(["python"])
     unittest.main()

@@ -12,10 +12,11 @@ import numpy as np
 
 
 class TestFindOperator(serial.SerializedTestCase):
-
-    @serial.given(n=st.sampled_from([1, 4, 8, 31, 79, 150]),
+    @serial.given(
+        n=st.sampled_from([1, 4, 8, 31, 79, 150]),
         idxsize=st.sampled_from([2, 4, 8, 1000, 5000]),
-        **hu.gcs)
+        **hu.gcs
+    )
     def test_find(self, n, idxsize, gc, dc):
         maxval = 10
 
@@ -35,15 +36,8 @@ class TestFindOperator(serial.SerializedTestCase):
         X = (np.random.rand(n) * maxval).astype(np.int32)
         idx = (np.random.rand(idxsize) * maxval).astype(np.int32)
 
-        op = core.CreateOperator(
-            "Find",
-            ["idx", "X"],
-            ["y"],
-        )
+        op = core.CreateOperator("Find", ["idx", "X"], ["y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[idx, X],
-            reference=findop,
+            device_option=gc, op=op, inputs=[idx, X], reference=findop
         )

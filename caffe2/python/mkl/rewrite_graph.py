@@ -13,6 +13,7 @@ def rewrite_init_net_simple(net):
     for op in net.op:
         op.device_option.device_type = caffe2_pb2.IDEEP
 
+
 def last_producer(ops, blob):
     for (i, op) in reversed(list(enumerate(ops))):
         if blob in op.output:
@@ -23,15 +24,15 @@ def last_producer(ops, blob):
 def fix_BoxWithNMSLimit(net):
     outputs = set()
     for op in net.op:
-        if op.type == 'BoxWithNMSLimit':
+        if op.type == "BoxWithNMSLimit":
             outputs.add(op.output[0])
             outputs.add(op.output[1])
             outputs.add(op.output[2])
     for op in net.op:
-        if op.type == 'CopyIDEEPToCPU':
+        if op.type == "CopyIDEEPToCPU":
             if op.input[0] in outputs:
                 print("Chaning CopyIDEEPToCPU to Copy for {}".format(op.input[0]))
-                op.type = 'Copy'
+                op.type = "Copy"
                 op.device_option.device_type = caffe2_pb2.CPU
 
 
@@ -46,27 +47,32 @@ def rewrite_run_net_simple(net):
     if input_blob != net.op[0].input[0]:
         raise Exception(
             "Input blob: {} is not consumed by first op: {}".format(
-                input_blob, net.op[0]))
+                input_blob, net.op[0]
+            )
+        )
     # Modify input/outputs to point to copied MKL blobs.
     from_cpu = "CopyCPUToIDEEP"
     to_cpu = "CopyIDEEPToCPU"
-    copy_input_op = core.CreateOperator(
-        from_cpu, input_blob, mkl_tmp(input_blob))
+    copy_input_op = core.CreateOperator(from_cpu, input_blob, mkl_tmp(input_blob))
     net.op[0].input[0] = mkl_tmp(input_blob)
 
     copy_output_ops = [
         core.CreateOperator(to_cpu, mkl_tmp(output_blob), output_blob)
-        for output_blob in net.external_output]
+        for output_blob in net.external_output
+    ]
 
     for output_blob in net.external_output:
         last_producer_idx = last_producer(net.op, output_blob)
-        renamed_outputs = [blob if blob != output_blob else mkl_tmp(blob)
-                           for blob in net.op[last_producer_idx].output]
+        renamed_outputs = [
+            blob if blob != output_blob else mkl_tmp(blob)
+            for blob in net.op[last_producer_idx].output
+        ]
         net.op[last_producer_idx].output[:] = renamed_outputs
         # Rename any subsequent consumers of an output blob.
-        for op in net.op[last_producer_idx + 1:]:
-            renamed_input = [blob if blob != output_blob else mkl_tmp(blob)
-                             for blob in op.input]
+        for op in net.op[last_producer_idx + 1 :]:
+            renamed_input = [
+                blob if blob != output_blob else mkl_tmp(blob) for blob in op.input
+            ]
             op.input[:] = renamed_input
 
     ops = [copy_input_op] + net.op[:] + copy_output_ops
@@ -74,8 +80,7 @@ def rewrite_run_net_simple(net):
     net.op.extend(ops)
     device = caffe2_pb2.IDEEP
     for op in net.op:
-        op.device_option.MergeFrom(
-            core.DeviceOption(device_type=device))
+        op.device_option.MergeFrom(core.DeviceOption(device_type=device))
         op.engine = ""
 
     # Temporarily disable conv+relu fusion until we verify further
@@ -103,12 +108,13 @@ def rewrite_run_net_simple_xrayocr_lstm(net):
     if input_blob != net.op[0].input[0]:
         raise Exception(
             "Input blob: {} is not consumed by first op: {}".format(
-                input_blob, net.op[0]))
+                input_blob, net.op[0]
+            )
+        )
     # Modify input/outputs to point to copied MKL blobs.
     from_cpu = "CopyCPUToIDEEP"
     to_cpu = "CopyIDEEPToCPU"
-    copy_input_op = core.CreateOperator(
-        from_cpu, input_blob, mkl_tmp(input_blob))
+    copy_input_op = core.CreateOperator(from_cpu, input_blob, mkl_tmp(input_blob))
     net.op[0].input[0] = mkl_tmp(input_blob)
 
     # the net may contain some external_inputs falsely added during ONNX->Caffe2
@@ -126,7 +132,7 @@ def rewrite_run_net_simple_xrayocr_lstm(net):
     for op_idx, op in enumerate(net.op):
         # the first Shape op mark the starting point of LSTM chunk of the net
         if not find_first_shape_op:
-            if op.type == 'Shape':
+            if op.type == "Shape":
                 external_output = op.input
                 find_first_shape_op = True
                 cpu_op_start_idx = op_idx
@@ -142,64 +148,78 @@ def rewrite_run_net_simple_xrayocr_lstm(net):
     # create op to copy external input blobs used in LSTM part from IDEEP to CPU
     copy_extra_input_ops = []
     for in_blob in external_inputs_to_cpu:
-        copy_extra_input_ops.append(core.CreateOperator(to_cpu, in_blob,
-                                                        cpu_tmp(in_blob)))
+        copy_extra_input_ops.append(
+            core.CreateOperator(to_cpu, in_blob, cpu_tmp(in_blob))
+        )
         # rename input blobs in LSTM part to use the CPU copy
         for op in net.op[cpu_op_start_idx:]:
-            renamed_input = [blob if blob != in_blob else cpu_tmp(in_blob)
-                             for blob in op.input]
+            renamed_input = [
+                blob if blob != in_blob else cpu_tmp(in_blob) for blob in op.input
+            ]
             op.input[:] = renamed_input
 
     copy_output_ops = [
         core.CreateOperator(to_cpu, mkl_tmp(output_blob), output_blob)
-        for output_blob in external_output]
+        for output_blob in external_output
+    ]
 
     for output_blob in external_output:
         last_producer_idx = last_producer(net.op, output_blob)
-        renamed_outputs = [blob if blob != output_blob else mkl_tmp(blob)
-                           for blob in net.op[last_producer_idx].output]
+        renamed_outputs = [
+            blob if blob != output_blob else mkl_tmp(blob)
+            for blob in net.op[last_producer_idx].output
+        ]
         net.op[last_producer_idx].output[:] = renamed_outputs
 
     # rearrange all ops in correct order
-    ops = [copy_input_op] + net.op[:cpu_op_start_idx] \
-          + copy_output_ops + copy_extra_input_ops + net.op[cpu_op_start_idx:]
+    ops = (
+        [copy_input_op]
+        + net.op[:cpu_op_start_idx]
+        + copy_output_ops
+        + copy_extra_input_ops
+        + net.op[cpu_op_start_idx:]
+    )
     del net.op[:]
     net.op.extend(ops)
 
     device = caffe2_pb2.IDEEP
     for op in net.op:
         # the first Shape op mark the starting point of LSTM chunk of the net
-        if op.type == 'Shape':
+        if op.type == "Shape":
             # all LSTM ops should run on CPU
             device = caffe2_pb2.CPU
-        op.device_option.MergeFrom(
-            core.DeviceOption(device_type=device))
+        op.device_option.MergeFrom(core.DeviceOption(device_type=device))
         op.engine = ""
 
         # RecurrentNetwork has a nested step_net that needs special treatment
-        if op.type == 'RecurrentNetwork':
+        if op.type == "RecurrentNetwork":
             for arg in op.arg:
-                if arg.name == 'step_net':
+                if arg.name == "step_net":
                     for nested_op in arg.n.op:
                         # set device to CPU
                         nested_op.device_option.MergeFrom(
-                            core.DeviceOption(device_type=device))
+                            core.DeviceOption(device_type=device)
+                        )
                         nested_op.engine = ""
 
                         # rename inputs in op of nested net
                         renamed_input = []
                         for blob in nested_op.input:
-                            renamed_input.append(blob
+                            renamed_input.append(
+                                blob
                                 if blob not in external_inputs_to_cpu
-                                else cpu_tmp(blob))
+                                else cpu_tmp(blob)
+                            )
                         nested_op.input[:] = renamed_input
 
                     # rename external inputs of nested net
                     new_external_input = []
                     for blob in arg.n.external_input:
-                        new_external_input.append(blob
+                        new_external_input.append(
+                            blob
                             if blob not in external_inputs_to_cpu
-                            else cpu_tmp(blob))
+                            else cpu_tmp(blob)
+                        )
                     arg.n.external_input[:] = new_external_input
 
     # Temporarily disable conv+relu fusion until we verify further

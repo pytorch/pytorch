@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import numpy as np
 
 from hypothesis import given
@@ -37,20 +38,13 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
         result_indices = workspace.FetchBlob("sample_indices")
         np.testing.assert_allclose(expected_indices, result_indices)
-        self.assertDeviceChecks(
-            dc,
-            op,
-            [weights.astype(np.float32)],
-            [0]
-        )
+        self.assertDeviceChecks(dc, op, [weights.astype(np.float32)], [0])
 
         # test shape input
         shape = np.zeros((num_samples))
         workspace.FeedBlob("shape", shape)
         op2 = core.CreateOperator(
-            "WeightedMultiSampling",
-            ["weights", "shape"],
-            ["sample_indices_2"]
+            "WeightedMultiSampling", ["weights", "shape"], ["sample_indices_2"]
         )
         workspace.RunOperatorOnce(op2)
         result_indices_2 = workspace.FetchBlob("sample_indices_2")
@@ -66,4 +60,5 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import numpy as np
 import struct
 import unittest
@@ -16,16 +17,22 @@ import caffe2.python.hypothesis_test_util as hu
 
 np.set_printoptions(precision=6)
 
+
 class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
-    @given(X=hu.tensor(min_dim=2, max_dim=2,
-                        min_value=1, max_value=17),  # only matrix is supported
-           bitwidth_=st.sampled_from([1, 2, 4, 8]),
-           random_=st.booleans(),
-           **hu.gcs)
-    @example(X=np.array([[0., 0., 0., 0.264019]]).astype(np.float32),
-            bitwidth_=2,
-            random_=False,
-            **hu.gcs)
+    @given(
+        X=hu.tensor(
+            min_dim=2, max_dim=2, min_value=1, max_value=17
+        ),  # only matrix is supported
+        bitwidth_=st.sampled_from([1, 2, 4, 8]),
+        random_=st.booleans(),
+        **hu.gcs
+    )
+    @example(
+        X=np.array([[0.0, 0.0, 0.0, 0.264019]]).astype(np.float32),
+        bitwidth_=2,
+        random_=False,
+        **hu.gcs
+    )
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28550")
     def test_rand_quantization(self, X, bitwidth_, random_, gc, dc):
 
@@ -55,8 +62,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
                     gap = (max_fval - min_fval) / ((1 << bitwidth_) - 1)
                     thetimes = (fval - min_fval) / (gap + 1e-8)
                     thetimes = np.around(thetimes).astype(np.uint8)
-                    out[r][10 + c % segment] += \
-                        (thetimes << (bitwidth_ * (c // segment)))
+                    out[r][10 + c % segment] += thetimes << (bitwidth_ * (c // segment))
             print("pY:\n{}\n".format(out))
             return (out,)
 
@@ -81,25 +87,28 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             segment = in_shape[1] - 10
             out = np.zeros((in_shape[0], output_cols), dtype=np.float)
             for r in range(in_shape[0]):
-                min_fval = struct.unpack('f', Y[r][2:6])[0]
-                max_fval = struct.unpack('f', Y[r][6:10])[0]
+                min_fval = struct.unpack("f", Y[r][2:6])[0]
+                max_fval = struct.unpack("f", Y[r][6:10])[0]
                 print(min_fval, max_fval)
-                gap = (max_fval - min_fval) / (2 ** bitwidth - 1.) + 1e-8
+                gap = (max_fval - min_fval) / (2 ** bitwidth - 1.0) + 1e-8
                 for out_c in range(output_cols):
                     bit_start = (out_c // segment) * bitwidth
-                    out[r][out_c] = min_fval + gap * \
-                        ((Y[r][10 + out_c % segment] >> bit_start) & mask)
+                    out[r][out_c] = min_fval + gap * (
+                        (Y[r][10 + out_c % segment] >> bit_start) & mask
+                    )
             print("pdecX:\n{}\n".format(out))
             return (out,)
 
         enc_op = core.CreateOperator(
             "FloatToFusedRandRowwiseQuantized",
-            ["X"], ["Y"],
+            ["X"],
+            ["Y"],
             bitwidth=bitwidth_,
-            random=random_)
+            random=random_,
+        )
         dec_op = core.CreateOperator(
-            "FusedRandRowwiseQuantizedToFloat",
-            ["Y"], ["decX"])
+            "FusedRandRowwiseQuantizedToFloat", ["Y"], ["decX"]
+        )
         workspace.FeedBlob("X", X)
         workspace.RunOperatorOnce(enc_op)
         print("X:\n{}\n".format(workspace.FetchBlob("X")))
@@ -119,12 +128,13 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             for r in range(Y.shape[0]):
                 # compare min
                 np.testing.assert_almost_equal(
-                    struct.unpack('f', Y[r][2:6])[0],
-                    struct.unpack('f', pY[r][2:6])[0])
+                    struct.unpack("f", Y[r][2:6])[0], struct.unpack("f", pY[r][2:6])[0]
+                )
                 # compare max
                 np.testing.assert_almost_equal(
-                    struct.unpack('f', Y[r][6:10])[0],
-                    struct.unpack('f', pY[r][6:10])[0])
+                    struct.unpack("f", Y[r][6:10])[0],
+                    struct.unpack("f", pY[r][6:10])[0],
+                )
             np.testing.assert_array_equal(Y[:, 0:2], pY[:, 0:2])
             np.testing.assert_array_equal(Y[:, 10:], pY[:, 10:])
 
@@ -141,9 +151,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
         print("err:\n{}\n".format(err))
         np.testing.assert_almost_equal(decX, pdecX, decimal=6)
 
-        np.testing.assert_array_less(
-            np.absolute(err),
-            err_thre)
+        np.testing.assert_array_less(np.absolute(err), err_thre)
 
         # test the expectation of stochastic quantized values
         # are near to the floating values
@@ -160,8 +168,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             print("X_avg:\n{}".format(X_avg))
             print("X    :\n{}".format(X))
             np.testing.assert_array_less(
-                np.absolute(X_avg - X),
-                5e-2 * get_allowed_errors(X) + 1e-4
+                np.absolute(X_avg - X), 5e-2 * get_allowed_errors(X) + 1e-4
             )
 
         # Check over multiple devices -- CUDA implementation is pending
@@ -170,4 +177,5 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

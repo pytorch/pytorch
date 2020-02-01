@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -36,24 +37,28 @@ class TestChannelBackpropStats(serial.SerializedTestCase):
                         for w in range(size):
                             biasGrad[c] += outputGrad[n, c, h, w]
                             scaleGrad[c] += (
-                                X[n, c, h, w] - mean[c]
-                            ) * invStdDev[c] * outputGrad[n, c, h, w]
+                                (X[n, c, h, w] - mean[c])
+                                * invStdDev[c]
+                                * outputGrad[n, c, h, w]
+                            )
             return scaleGrad, biasGrad
 
-        X = np.random.rand(batchSize, inputChannels, size, size)\
-                     .astype(np.float32) - 0.5
+        X = (
+            np.random.rand(batchSize, inputChannels, size, size).astype(np.float32)
+            - 0.5
+        )
         sums = np.sum(X, axis=(0, 2, 3), keepdims=False)
         numPixels = size * size * batchSize
         mean = sums / numPixels
-        sumsq = np.sum(X**2, axis=(0, 2, 3), keepdims=False)
-        var = ((sumsq -
-                (sums * sums) / numPixels) / numPixels).astype(np.float32)
+        sumsq = np.sum(X ** 2, axis=(0, 2, 3), keepdims=False)
+        var = ((sumsq - (sums * sums) / numPixels) / numPixels).astype(np.float32)
         invStdDev = 1 / np.sqrt(var)
-        outputGrad = np.random.rand(batchSize, inputChannels, size, size)\
-            .astype(np.float32) - 0.5
+        outputGrad = (
+            np.random.rand(batchSize, inputChannels, size, size).astype(np.float32)
+            - 0.5
+        )
         self.assertReferenceChecks(
-            gc, op, [X, mean, invStdDev, outputGrad],
-            referenceChannelBackpropStatsTest
+            gc, op, [X, mean, invStdDev, outputGrad], referenceChannelBackpropStatsTest
         )
 
 

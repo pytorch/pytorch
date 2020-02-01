@@ -14,35 +14,31 @@ import unittest
 
 
 class TestMathOps(serial.SerializedTestCase):
-
-    @given(X=hu.tensor(),
-           exponent=st.floats(min_value=2.0, max_value=3.0),
-           **hu.gcs)
+    @given(X=hu.tensor(), exponent=st.floats(min_value=2.0, max_value=3.0), **hu.gcs)
     def test_elementwise_power(self, X, exponent, gc, dc):
         # negative integer raised with non-integer exponent is domain error
         X = np.abs(X)
+
         def powf(X):
             return (X ** exponent,)
 
         def powf_grad(g_out, outputs, fwd_inputs):
             return (exponent * (fwd_inputs[0] ** (exponent - 1)) * g_out,)
 
-        op = core.CreateOperator(
-            "Pow", ["X"], ["Y"], exponent=exponent)
+        op = core.CreateOperator("Pow", ["X"], ["Y"], exponent=exponent)
 
-        self.assertReferenceChecks(gc, op, [X], powf,
-                                   output_to_grad="Y",
-                                   grad_reference=powf_grad),
+        self.assertReferenceChecks(
+            gc, op, [X], powf, output_to_grad="Y", grad_reference=powf_grad
+        ),
 
-    @serial.given(X=hu.tensor(),
-           exponent=st.floats(min_value=-3.0, max_value=3.0),
-           **hu.gcs)
+    @serial.given(
+        X=hu.tensor(), exponent=st.floats(min_value=-3.0, max_value=3.0), **hu.gcs
+    )
     def test_sign(self, X, exponent, gc, dc):
         def signf(X):
             return [np.sign(X)]
 
-        op = core.CreateOperator(
-            "Sign", ["X"], ["Y"])
+        op = core.CreateOperator("Sign", ["X"], ["Y"])
 
         self.assertReferenceChecks(gc, op, [X], signf),
         self.assertDeviceChecks(dc, op, [X], [0])

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from caffe2.python.test_util import caffe2_flaky
 from collections import defaultdict, Counter
@@ -32,34 +33,40 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
     ):
         if not beam_width:
             beam_width = DEFAULT_BEAM_WIDTH
-            op_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
-                ['INPUTS', 'SEQ_LEN'],
-                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
-                num_candidates=num_candidates)
+            op_seq_len = core.CreateOperator(
+                "CTCBeamSearchDecoder",
+                ["INPUTS", "SEQ_LEN"],
+                ["OUTPUT_LEN", "VALUES", "OUTPUT_PROB"],
+                num_candidates=num_candidates,
+            )
 
-            op_no_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
-                ['INPUTS'],
-                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
-                num_candidates=num_candidates)
+            op_no_seq_len = core.CreateOperator(
+                "CTCBeamSearchDecoder",
+                ["INPUTS"],
+                ["OUTPUT_LEN", "VALUES", "OUTPUT_PROB"],
+                num_candidates=num_candidates,
+            )
         else:
             num_candidates = min(num_candidates, beam_width)
-            op_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
-                ['INPUTS', 'SEQ_LEN'],
-                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+            op_seq_len = core.CreateOperator(
+                "CTCBeamSearchDecoder",
+                ["INPUTS", "SEQ_LEN"],
+                ["OUTPUT_LEN", "VALUES", "OUTPUT_PROB"],
                 beam_width=beam_width,
-                num_candidates=num_candidates)
+                num_candidates=num_candidates,
+            )
 
-            op_no_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
-                ['INPUTS'],
-                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+            op_no_seq_len = core.CreateOperator(
+                "CTCBeamSearchDecoder",
+                ["INPUTS"],
+                ["OUTPUT_LEN", "VALUES", "OUTPUT_PROB"],
                 beam_width=beam_width,
-                num_candidates=num_candidates)
+                num_candidates=num_candidates,
+            )
 
         def input_generater():
-            inputs = np.random.rand(max_time, batch, alphabet_size)\
-                .astype(np.float32)
-            seq_len = np.random.randint(1, max_time + 1, size=batch)\
-                .astype(np.int32)
+            inputs = np.random.rand(max_time, batch, alphabet_size).astype(np.float32)
+            seq_len = np.random.randint(1, max_time + 1, size=batch).astype(np.int32)
             return inputs, seq_len
 
         def ref_ctc_decoder(inputs, seq_len):
@@ -88,13 +95,14 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
                                     Pnb[t][l_plus] += ctc[t][c] * Pb[t - 1][l]
                                     Pnb[t][l] += ctc[t][c] * Pnb[t - 1][l]
                                 else:
-                                    Pnb[t][l_plus] += \
-                                        ctc[t][c] * (Pb[t - 1][l] + Pnb[t - 1][l])
+                                    Pnb[t][l_plus] += ctc[t][c] * (
+                                        Pb[t - 1][l] + Pnb[t - 1][l]
+                                    )
 
                                 if l_plus not in A_prev:
-                                    Pb[t][l_plus] += \
-                                        ctc[t][0] * \
-                                        (Pb[t - 1][l_plus] + Pnb[t - 1][l_plus])
+                                    Pb[t][l_plus] += ctc[t][0] * (
+                                        Pb[t - 1][l_plus] + Pnb[t - 1][l_plus]
+                                    )
                                     Pnb[t][l_plus] += ctc[t][c] * Pnb[t - 1][l_plus]
 
                     A_next = Pb[t] + Pnb[t]
@@ -106,7 +114,9 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
                 for candidate in candidates:
                     val = np.hstack((val, candidate))
                     output_len[i * num_candidates + index] = len(candidate)
-                    output_prob[i * num_candidates + index] = Pb[t][candidate] + Pnb[t][candidate]
+                    output_prob[i * num_candidates + index] = (
+                        Pb[t][candidate] + Pnb[t][candidate]
+                    )
                     index += 1
 
             return [output_len, val, output_prob]
@@ -133,5 +143,6 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
 
 if __name__ == "__main__":
     import random
+
     random.seed(2603)
     unittest.main()

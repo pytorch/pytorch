@@ -28,16 +28,16 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
         var = np.mean(np.square(X), axis=0)
         return [mu, var]
 
-    @serial.given(N=st.integers(1, 5), C=st.integers(1, 5),
-            H=st.integers(1, 5), W=st.integers(1, 5),
-            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @serial.given(
+        N=st.integers(1, 5),
+        C=st.integers(1, 5),
+        H=st.integers(1, 5),
+        W=st.integers(1, 5),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs
+    )
     def test_batch_moments_2d(self, N, C, H, W, order, gc, dc):
-        op = core.CreateOperator(
-            "BatchMoments",
-            ["X"],
-            ["mu", "var"],
-            order=order,
-        )
+        op = core.CreateOperator("BatchMoments", ["X"], ["mu", "var"], order=order)
 
         if order == "NCHW":
             X = np.random.randn(N, C, H, W).astype(np.float32)
@@ -50,25 +50,21 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
             else:
                 return self.batch_moments_nhwc_ref(X)
 
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=ref,
-        )
+        self.assertReferenceChecks(device_option=gc, op=op, inputs=[X], reference=ref)
         self.assertDeviceChecks(dc, op, [X], [0, 1])
         self.assertGradientChecks(gc, op, [X], 0, [0, 1])
 
-    @given(N=st.integers(1, 5), C=st.integers(1, 5), T=st.integers(1, 3),
-           H=st.integers(1, 3), W=st.integers(1, 3),
-           order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+    @given(
+        N=st.integers(1, 5),
+        C=st.integers(1, 5),
+        T=st.integers(1, 3),
+        H=st.integers(1, 3),
+        W=st.integers(1, 3),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs
+    )
     def test_batch_moments_3d(self, N, C, T, H, W, order, gc, dc):
-        op = core.CreateOperator(
-            "BatchMoments",
-            ["X"],
-            ["mu", "var"],
-            order=order,
-        )
+        op = core.CreateOperator("BatchMoments", ["X"], ["mu", "var"], order=order)
 
         if order == "NCHW":
             X = np.random.randn(N, C, T, H, W).astype(np.float32)
@@ -81,11 +77,6 @@ class TestBatchMomentsOp(serial.SerializedTestCase):
             else:
                 return self.batch_moments_nhwc_ref(X)
 
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=ref,
-        )
+        self.assertReferenceChecks(device_option=gc, op=op, inputs=[X], reference=ref)
         self.assertDeviceChecks(dc, op, [X], [0, 1])
         self.assertGradientChecks(gc, op, [X], 0, [0, 1])

@@ -11,9 +11,7 @@ import unittest
 
 
 class TestSoftplus(hu.HypothesisTestCase):
-
-    @given(X=hu.tensor(),
-           **hu.gcs)
+    @given(X=hu.tensor(), **hu.gcs)
     def test_softplus(self, X, gc, dc):
         op = core.CreateOperator("Softplus", ["X"], ["Y"])
         self.assertDeviceChecks(dc, op, [X], [0])

@@ -11,9 +11,12 @@ import numpy as np
 
 
 class TestFcOperator(hu.HypothesisTestCase):
-
-    @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           use_length=st.booleans(), **hu.gcs_cpu_only)
+    @given(
+        n=st.integers(1, 10),
+        k=st.integers(1, 5),
+        use_length=st.booleans(),
+        **hu.gcs_cpu_only
+    )
     def test_sparse_to_dense_mask(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -23,29 +26,26 @@ class TestFcOperator(hu.HypothesisTestCase):
         mask = np.arange(3)
         np.random.shuffle(mask)
 
-        input_str = ['indices', 'values', 'default']
+        input_str = ["indices", "values", "default"]
         input_data = [indices, values, default]
         if use_length and n > 1:
-            input_str.append('lengths')
+            input_str.append("lengths")
             input_data.append(lengths)
-        output_str = ['output']
+        output_str = ["output"]
 
-        op = core.CreateOperator(
-            'SparseToDenseMask',
-            input_str,
-            output_str,
-            mask=mask,
-        )
+        op = core.CreateOperator("SparseToDenseMask", input_str, output_str, mask=mask)
 
         # Check over multiple devices
-        self.assertDeviceChecks(
-            dc, op, input_data, [0])
+        self.assertDeviceChecks(dc, op, input_data, [0])
         # Gradient check for values
-        self.assertGradientChecks(
-            gc, op, input_data, 1, [0])
+        self.assertGradientChecks(gc, op, input_data, 1, [0])
 
-    @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           use_length=st.booleans(), **hu.gcs_cpu_only)
+    @given(
+        n=st.integers(1, 10),
+        k=st.integers(1, 5),
+        use_length=st.booleans(),
+        **hu.gcs_cpu_only
+    )
     def test_sparse_to_dense_mask_with_int64(self, n, k, use_length, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -56,29 +56,26 @@ class TestFcOperator(hu.HypothesisTestCase):
         mask = np.arange(3) + int64_mask
         np.random.shuffle(mask)
 
-        input_str = ['indices', 'values', 'default']
+        input_str = ["indices", "values", "default"]
         input_data = [indices, values, default]
         if use_length and n > 1:
-            input_str.append('lengths')
+            input_str.append("lengths")
             input_data.append(lengths)
-        output_str = ['output']
+        output_str = ["output"]
 
-        op = core.CreateOperator(
-            'SparseToDenseMask',
-            input_str,
-            output_str,
-            mask=mask,
-        )
+        op = core.CreateOperator("SparseToDenseMask", input_str, output_str, mask=mask)
 
         # Check over multiple devices
-        self.assertDeviceChecks(
-            dc, op, input_data, [0])
+        self.assertDeviceChecks(dc, op, input_data, [0])
         # Gradient check for values
-        self.assertGradientChecks(
-            gc, op, input_data, 1, [0])
+        self.assertGradientChecks(gc, op, input_data, 1, [0])
 
-    @given(n=st.integers(1, 10), k=st.integers(1, 5),
-           dim=st.integers(1, 3), **hu.gcs_cpu_only)
+    @given(
+        n=st.integers(1, 10),
+        k=st.integers(1, 5),
+        dim=st.integers(1, 3),
+        **hu.gcs_cpu_only
+    )
     def test_sparse_to_dense_mask_high_dim(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         N = sum(lengths)
@@ -90,20 +87,19 @@ class TestFcOperator(hu.HypothesisTestCase):
         np.random.shuffle(mask)
 
         op = core.CreateOperator(
-            'SparseToDenseMask',
-            ['indices', 'values', 'default', 'lengths'],
-            ['output'],
+            "SparseToDenseMask",
+            ["indices", "values", "default", "lengths"],
+            ["output"],
             mask=mask,
         )
 
         # Check over multiple devices
-        self.assertDeviceChecks(
-            dc, op, [indices, values, default, lengths], [0])
+        self.assertDeviceChecks(dc, op, [indices, values, default, lengths], [0])
         # Gradient check for values
-        self.assertGradientChecks(
-            gc, op, [indices, values, default, lengths], 1, [0])
+        self.assertGradientChecks(gc, op, [indices, values, default, lengths], 1, [0])
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

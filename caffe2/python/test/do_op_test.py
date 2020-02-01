@@ -11,7 +11,7 @@ import unittest
 class DoOpTest(TestCase):
     def test_operator(self):
         def make_net():
-            subnet = core.Net('subnet')
+            subnet = core.Net("subnet")
             subnet.Add(["X", "Y"], "Z")
 
             net = core.Net("net")
@@ -39,7 +39,7 @@ class DoOpTest(TestCase):
 
     def test_reuse_workspace(self):
         def make_net():
-            param_init_subnet = core.Net('param_init_subnet')
+            param_init_subnet = core.Net("param_init_subnet")
             param_init_subnet.ConstantFill([], "X", shape=[1], value=1)
             param_init_subnet.ConstantFill([], "Y", shape=[1], value=2)
 
@@ -49,14 +49,16 @@ class DoOpTest(TestCase):
             net = core.Net("net")
             net.CreateScope([], "W")
             net.Do(
-                "W", "W",
+                "W",
+                "W",
                 net=param_init_subnet.Proto(),
                 inner_blobs=[],
                 outer_blobs_idx=[],
             )
 
             net.Do(
-                "W", ["outer_Z", "W"],
+                "W",
+                ["outer_Z", "W"],
                 net=subnet.Proto(),
                 inner_blobs=["Z"],
                 outer_blobs_idx=[0],
@@ -73,5 +75,5 @@ class DoOpTest(TestCase):
         self.assertTrue(np.all(outer_Z_val == np.asarray([3])))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

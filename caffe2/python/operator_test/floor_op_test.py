@@ -14,10 +14,7 @@ import unittest
 
 
 class TestFloor(serial.SerializedTestCase):
-
-    @serial.given(X=hu.tensor(),
-           engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+    @serial.given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     def test_floor(self, X, gc, dc, engine):
         op = core.CreateOperator("Floor", ["X"], ["Y"], engine=engine)
 
@@ -25,10 +22,8 @@ class TestFloor(serial.SerializedTestCase):
             return (np.floor(X),)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=floor_ref)
+            device_option=gc, op=op, inputs=[X], reference=floor_ref
+        )
 
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])

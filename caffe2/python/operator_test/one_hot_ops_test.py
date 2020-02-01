@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 from hypothesis import given
@@ -14,8 +15,7 @@ import numpy as np
 
 def _one_hots():
     index_size = st.integers(min_value=1, max_value=5)
-    lengths = st.lists(
-        elements=st.integers(min_value=0, max_value=5))
+    lengths = st.lists(elements=st.integers(min_value=0, max_value=5))
     return st.tuples(index_size, lengths).flatmap(
         lambda x: st.tuples(
             st.just(x[0]),
@@ -23,15 +23,22 @@ def _one_hots():
             st.lists(
                 elements=st.integers(min_value=0, max_value=x[0] - 1),
                 min_size=sum(x[1]),
-                max_size=sum(x[1]))))
+                max_size=sum(x[1]),
+            ),
+        )
+    )
 
 
 class TestOneHotOps(serial.SerializedTestCase):
     @serial.given(
         x=hu.tensor(
-            min_dim=2, max_dim=2, dtype=np.int32,
-            elements=st.integers(min_value=0, max_value=10)),
-        **hu.gcs_cpu_only)
+            min_dim=2,
+            max_dim=2,
+            dtype=np.int32,
+            elements=st.integers(min_value=0, max_value=10),
+        ),
+        **hu.gcs_cpu_only
+    )
     def test_batch_one_hot(self, x, gc, dc):
         d = x.shape[1]
         lens = []
@@ -52,17 +59,21 @@ class TestOneHotOps(serial.SerializedTestCase):
                     v = vals[p + j]
                     ret[x[:, i] == v, p + j] = 1
                 p += lens[i]
-            return (ret, )
+            return (ret,)
 
-        op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
+        op = core.CreateOperator("BatchOneHot", ["X", "LENS", "VALS"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
 
     @serial.given(
         x=hu.tensor(
-            min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.integers(min_value=-5, max_value=5)),
+            min_dim=2,
+            max_dim=2,
+            dtype=np.float32,
+            elements=st.integers(min_value=-5, max_value=5),
+        ),
         seed=st.integers(min_value=0, max_value=1000),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only
+    )
     def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
         np.random.seed(seed)
         d = x.shape[1]
@@ -71,8 +82,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         for i in range(d):
             # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
-                cur_boundary = np.append(
-                    np.random.randn(lens[i] - 2) * 5, [0, 0])
+                cur_boundary = np.append(np.random.randn(lens[i] - 2) * 5, [0, 0])
             else:
                 cur_boundary = np.random.randn(lens[i]) * 5
             cur_boundary.sort()
@@ -89,51 +99,57 @@ class TestOneHotOps(serial.SerializedTestCase):
             for i, l in enumerate(lens):
                 bucket_idx_right = np.digitize(
                     x[:, i],
-                    boundaries[boundary_offset:boundary_offset + l],
-                    right=True
+                    boundaries[boundary_offset : boundary_offset + l],
+                    right=True,
                 )
                 bucket_idx_left = np.digitize(
                     x[:, i],
-                    boundaries[boundary_offset:boundary_offset + l],
-                    right=False
+                    boundaries[boundary_offset : boundary_offset + l],
+                    right=False,
                 )
                 bucket_idx = np.floor_divide(
-                    np.add(bucket_idx_right, bucket_idx_left), 2)
+                    np.add(bucket_idx_right, bucket_idx_left), 2
+                )
                 for j in range(x.shape[0]):
                     ret[j, output_offset + bucket_idx[j]] = 1.0
                 boundary_offset += lens[i]
-                output_offset += (lens[i] + 1)
-            return (ret, )
+                output_offset += lens[i] + 1
+            return (ret,)
 
-        op = core.CreateOperator('BatchBucketOneHot',
-                                 ["X", "LENS", "BOUNDARIES"], ["Y"])
+        op = core.CreateOperator(
+            "BatchBucketOneHot", ["X", "LENS", "BOUNDARIES"], ["Y"]
+        )
         self.assertReferenceChecks(gc, op, [x, lens, boundaries], ref)
 
     @serial.given(
         hot_indices=hu.tensor(
-            min_dim=1, max_dim=1, dtype=np.int64,
-            elements=st.integers(min_value=0, max_value=42)),
+            min_dim=1,
+            max_dim=1,
+            dtype=np.int64,
+            elements=st.integers(min_value=0, max_value=42),
+        ),
         end_padding=st.integers(min_value=0, max_value=2),
-        **hu.gcs)
+        **hu.gcs
+    )
     def test_one_hot(self, hot_indices, end_padding, gc, dc):
-
         def one_hot_ref(hot_indices, size):
             out = np.zeros([len(hot_indices), size], dtype=float)
             x = enumerate(hot_indices)
             for i, x in enumerate(hot_indices):
-                out[i, x] = 1.
-            return (out, )
+                out[i, x] = 1.0
+            return (out,)
 
         size = np.array(max(hot_indices) + end_padding + 1, dtype=np.int64)
         if size == 0:
             size = 1
-        op = core.CreateOperator('OneHot', ['hot_indices', 'size'], ['output'])
+        op = core.CreateOperator("OneHot", ["hot_indices", "size"], ["output"])
         self.assertReferenceChecks(
             gc,
             op,
             [hot_indices, size],
             one_hot_ref,
-            input_device_options={'size': core.DeviceOption(caffe2_pb2.CPU)})
+            input_device_options={"size": core.DeviceOption(caffe2_pb2.CPU)},
+        )
 
     @serial.given(hot_indices=_one_hots())
     def test_segment_one_hot(self, hot_indices):
@@ -147,27 +163,28 @@ class TestOneHotOps(serial.SerializedTestCase):
             offset = 0
             out = np.zeros([len(lengths), size], dtype=float)
             for i, length in enumerate(lengths):
-                for idx in hot_indices[offset:offset + length]:
-                    out[i, idx] = 1.
+                for idx in hot_indices[offset : offset + length]:
+                    out[i, idx] = 1.0
                 offset += length
-            return (out, )
+            return (out,)
 
         op = core.CreateOperator(
-            'SegmentOneHot',
-            ['lengths', 'hot_indices', 'size'],
-            ['output'])
+            "SegmentOneHot", ["lengths", "hot_indices", "size"], ["output"]
+        )
         self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [lengths, indices, index_size],
-            segment_one_hot_ref)
+            hu.cpu_do, op, [lengths, indices, index_size], segment_one_hot_ref
+        )
 
     @given(
         x=hu.tensor(
-            min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.integers(min_value=-5, max_value=5)),
+            min_dim=2,
+            max_dim=2,
+            dtype=np.float32,
+            elements=st.integers(min_value=-5, max_value=5),
+        ),
         seed=st.integers(min_value=0, max_value=1000),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only
+    )
     def test_batch_bucket_one_hot_shape_inference(self, x, seed, gc, dc):
         np.random.seed(seed)
         d = x.shape[1]
@@ -176,8 +193,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         for i in range(d):
             # add [0, 0] as duplicated boundary for duplicated bucketization
             if lens[i] > 2:
-                cur_boundary = np.append(
-                    np.random.randn(lens[i] - 2) * 5, [0, 0])
+                cur_boundary = np.append(np.random.randn(lens[i] - 2) * 5, [0, 0])
             else:
                 cur_boundary = np.random.randn(lens[i]) * 5
             cur_boundary.sort()
@@ -186,9 +202,9 @@ class TestOneHotOps(serial.SerializedTestCase):
         lens = np.array(lens, dtype=np.int32)
         boundaries = np.array(boundaries, dtype=np.float32)
 
-        workspace.FeedBlob('lens', lens)
-        workspace.FeedBlob('boundaries', boundaries)
-        workspace.FeedBlob('x', x)
+        workspace.FeedBlob("lens", lens)
+        workspace.FeedBlob("boundaries", boundaries)
+        workspace.FeedBlob("x", x)
 
         net = core.Net("batch_bucket_one_hot_test")
         result = net.BatchBucketOneHot(["x", "lens", "boundaries"], 1)
@@ -197,10 +213,12 @@ class TestOneHotOps(serial.SerializedTestCase):
 
         self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
         self.assertEqual(
-            shapes[result], [x.shape[0], lens.shape[0] + boundaries.shape[0]])
+            shapes[result], [x.shape[0], lens.shape[0] + boundaries.shape[0]]
+        )
         self.assertEqual(types[result], core.DataType.FLOAT)
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

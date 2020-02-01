@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -19,7 +21,7 @@ class TestMean(serial.SerializedTestCase):
         n=st.integers(1, 10),
         m=st.integers(1, 10),
         in_place=st.booleans(),
-        seed=st.integers(0, 2**32 - 1),
+        seed=st.integers(0, 2 ** 32 - 1),
         **hu.gcs
     )
     def test_mean(self, k, n, m, in_place, seed, gc, dc):
@@ -28,7 +30,7 @@ class TestMean(serial.SerializedTestCase):
         input_vars = []
 
         for i in range(k):
-            X_name = 'X' + str(i)
+            X_name = "X" + str(i)
             input_names.append(X_name)
             var = np.random.randn(n, m).astype(np.float32)
             input_vars.append(var)
@@ -36,17 +38,10 @@ class TestMean(serial.SerializedTestCase):
         def mean_ref(*args):
             return [np.mean(args, axis=0)]
 
-        op = core.CreateOperator(
-            "Mean",
-            input_names,
-            ['Y' if not in_place else 'X0'],
-        )
+        op = core.CreateOperator("Mean", input_names, ["Y" if not in_place else "X0"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=input_vars,
-            reference=mean_ref,
+            device_option=gc, op=op, inputs=input_vars, reference=mean_ref
         )
 
         self.assertGradientChecks(
@@ -62,4 +57,3 @@ class TestMean(serial.SerializedTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -6,7 +6,9 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-DEFAULT_MODIFIER = 'DEFAULT'
+from builtins import object
+
+DEFAULT_MODIFIER = "DEFAULT"
 
 
 class ModifierContext(object):
@@ -41,14 +43,14 @@ class ModifierContext(object):
 
 
 class UseModifierBase(object):
-    '''
+    """
     context class to allow setting the current context.
     Example usage with layer:
         modifiers = {'modifier1': modifier1, 'modifier2': modifier2}
         with Modifiers(modifiers):
             modifier = ModifierContext.current().get_modifier('modifier1')
             layer(modifier=modifier)
-    '''
+    """
 
     def __init__(self, modifier_or_dict):
         if isinstance(modifier_or_dict, dict):

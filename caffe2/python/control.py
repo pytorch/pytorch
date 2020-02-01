@@ -16,6 +16,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import range
 from caffe2.python import core
 from future.utils import viewitems
 
@@ -28,10 +30,10 @@ _used_step_names = set()
 
 def _get_next_step_name(control_name, base_name):
     global _current_idx, _used_step_names
-    concat_name = '%s/%s' % (base_name, control_name)
+    concat_name = "%s/%s" % (base_name, control_name)
     next_name = concat_name
     while next_name in _used_step_names:
-        next_name = '%s_%d' % (concat_name, _current_idx)
+        next_name = "%s_%d" % (concat_name, _current_idx)
         _current_idx += 1
     _used_step_names.add(next_name)
     return next_name
@@ -45,8 +47,7 @@ def _MakeList(input):
     ([a, b, c]) --> [a, b, c]
     """
     if len(input) == 0:
-        raise ValueError(
-            'input cannot be empty.')
+        raise ValueError("input cannot be empty.")
     elif len(input) == 1:
         output = input[0]
         if not isinstance(output, list):
@@ -69,7 +70,7 @@ def _PrependNets(nets_or_steps, *nets):
     if _IsNets(nets_or_steps):
         return nets + nets_or_steps
     else:
-        return [Do('prepend', nets)] + nets_or_steps
+        return [Do("prepend", nets)] + nets_or_steps
 
 
 def _AppendNets(nets_or_steps, *nets):
@@ -78,7 +79,7 @@ def _AppendNets(nets_or_steps, *nets):
     if _IsNets(nets_or_steps):
         return nets_or_steps + nets
     else:
-        return nets_or_steps + [Do('append', nets)]
+        return nets_or_steps + [Do("append", nets)]
 
 
 def GetConditionBlobFromNet(condition_net):
@@ -87,8 +88,9 @@ def GetConditionBlobFromNet(condition_net):
     be a single bool
     """
     assert len(condition_net.Proto().external_output) > 0, (
-        "Condition net %s must has at least one external output" %
-        condition_net.Proto.name)
+        "Condition net %s must has at least one external output"
+        % condition_net.Proto.name
+    )
     # we need to use a blob reference here instead of a string
     # otherwise, it will add another name_scope to the input later
     # when we create new ops (such as OR of two inputs)
@@ -114,14 +116,11 @@ def BoolNet(*blobs_with_bool_value):
     - BoolNet((cond_1, bool_value_1))
     """
     blobs_with_bool_value = _MakeList(blobs_with_bool_value)
-    bool_net = core.Net('bool_net')
+    bool_net = core.Net("bool_net")
     for blob, bool_value in blobs_with_bool_value:
         out_blob = bool_net.ConstantFill(
-            [],
-            [blob],
-            shape=[],
-            value=bool_value,
-            dtype=core.DataType.BOOL)
+            [], [blob], shape=[], value=bool_value, dtype=core.DataType.BOOL
+        )
         bool_net.AddExternalOutput(out_blob)
 
     return bool_net
@@ -144,7 +143,7 @@ def NotNet(condition_blob_or_net):
     else:
         condition_blob = condition_blob_or_net
 
-    not_net = core.Net('not_net')
+    not_net = core.Net("not_net")
     out_blob = not_net.Not(condition_blob)
     not_net.AddExternalOutput(out_blob)
 
@@ -161,7 +160,7 @@ def _CopyConditionBlobNet(condition_blob):
     not_net: the net NOT the input
     out_blob: the output blob of the not_net
     """
-    condition_net = core.Net('copy_condition_blob_net')
+    condition_net = core.Net("copy_condition_blob_net")
     out_blob = condition_net.Copy(condition_blob)
     condition_net.AddExternalOutput(out_blob)
 
@@ -232,7 +231,7 @@ def CombineConditions(name, condition_nets, relation):
     if not condition_nets:
         return None
     if not isinstance(condition_nets, list):
-        raise ValueError('condition_nets must be a list of nets.')
+        raise ValueError("condition_nets must be a list of nets.")
 
     if len(condition_nets) == 1:
         condition_blob = GetConditionBlobFromNet(condition_nets[0])
@@ -245,8 +244,7 @@ def CombineConditions(name, condition_nets, relation):
         if i == 0:
             last_cond = curr_cond
         else:
-            last_cond = combined_net.__getattr__(relation)(
-                [last_cond, curr_cond])
+            last_cond = combined_net.__getattr__(relation)([last_cond, curr_cond])
 
     combined_net.AddExternalOutput(last_cond)
 
@@ -264,12 +262,12 @@ def Do(name, *nets_or_steps):
     - Do('myDo', list_of_steps)
     """
     nets_or_steps = _MakeList(nets_or_steps)
-    if (len(nets_or_steps) == 1 and isinstance(
-            nets_or_steps[0], core.ExecutionStep)):
+    if len(nets_or_steps) == 1 and isinstance(nets_or_steps[0], core.ExecutionStep):
         return nets_or_steps[0]
     else:
         return core.scoped_execution_step(
-            _get_next_step_name('Do', name), nets_or_steps)
+            _get_next_step_name("Do", name), nets_or_steps
+        )
 
 
 def DoParallel(name, *nets_or_steps):
@@ -283,14 +281,14 @@ def DoParallel(name, *nets_or_steps):
     - DoParallel('pDo', list_of_steps)
     """
     nets_or_steps = _MakeList(nets_or_steps)
-    if (len(nets_or_steps) == 1 and isinstance(
-            nets_or_steps[0], core.ExecutionStep)):
+    if len(nets_or_steps) == 1 and isinstance(nets_or_steps[0], core.ExecutionStep):
         return nets_or_steps[0]
     else:
         return core.scoped_execution_step(
-            _get_next_step_name('DoParallel', name),
+            _get_next_step_name("DoParallel", name),
             nets_or_steps,
-            concurrent_substeps=True)
+            concurrent_substeps=True,
+        )
 
 
 def _RunOnceIf(name, condition_blob_or_net, nets_or_steps):
@@ -304,7 +302,8 @@ def _RunOnceIf(name, condition_blob_or_net, nets_or_steps):
     condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
         nets_or_steps = _PrependNets(
-            nets_or_steps, condition_blob_or_net, condition_not_net)
+            nets_or_steps, condition_blob_or_net, condition_not_net
+        )
     else:
         nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
@@ -318,10 +317,9 @@ def _RunOnceIf(name, condition_blob_or_net, nets_or_steps):
 
     if _IsNets(nets_or_steps):
         bool_net = BoolNet((stop_blob, False))
-        return Do(name + '/_RunOnceIf',
-                  bool_net, if_step('_RunOnceIf-inner'))
+        return Do(name + "/_RunOnceIf", bool_net, if_step("_RunOnceIf-inner"))
     else:
-        return if_step('_RunOnceIf')
+        return if_step("_RunOnceIf")
 
 
 def _RunOnceIfNot(name, condition_blob_or_net, nets_or_steps):
@@ -337,7 +335,7 @@ def _RunOnceIfNot(name, condition_blob_or_net, nets_or_steps):
         nets_or_steps = _PrependNets(nets_or_steps, copy_net)
 
     return core.scoped_execution_step(
-        _get_next_step_name('_RunOnceIfNot', name),
+        _get_next_step_name("_RunOnceIfNot", name),
         nets_or_steps,
         should_stop_blob=condition_blob,
         only_once=True,
@@ -356,18 +354,17 @@ def For(name, nets_or_steps, iter_num):
     Returns:
     A ExecutionStep instance.
     """
-    init_net = core.Net('init-net')
+    init_net = core.Net("init-net")
     iter_cnt = init_net.CreateCounter([], init_count=iter_num)
-    iter_net = core.Net('For-iter')
+    iter_net = core.Net("For-iter")
     iter_done = iter_net.CountDown([iter_cnt])
 
     for_step = core.scoped_execution_step(
-        _get_next_step_name('For-inner', name),
+        _get_next_step_name("For-inner", name),
         _PrependNets(nets_or_steps, iter_net),
-        should_stop_blob=iter_done)
-    return Do(name + '/For',
-              Do(name + '/For-init-net', init_net),
-              for_step)
+        should_stop_blob=iter_done,
+    )
+    return Do(name + "/For", Do(name + "/For-init-net", init_net), for_step)
 
 
 def While(name, condition_blob_or_net, nets_or_steps):
@@ -386,7 +383,8 @@ def While(name, condition_blob_or_net, nets_or_steps):
     condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
         nets_or_steps = _PrependNets(
-            nets_or_steps, condition_blob_or_net, condition_not_net)
+            nets_or_steps, condition_blob_or_net, condition_not_net
+        )
     else:
         nets_or_steps = _PrependNets(nets_or_steps, condition_not_net)
 
@@ -405,9 +403,9 @@ def While(name, condition_blob_or_net, nets_or_steps):
         # condition_blob_or_net. So we use BootNet to set stop_blob to
         # False.
         bool_net = BoolNet((stop_blob, False))
-        return Do(name + '/While', bool_net, while_step('While-inner'))
+        return Do(name + "/While", bool_net, while_step("While-inner"))
     else:
-        return while_step('While')
+        return while_step("While")
 
 
 def Until(name, condition_blob_or_net, nets_or_steps):
@@ -422,9 +420,8 @@ def Until(name, condition_blob_or_net, nets_or_steps):
         stop_blob = core.BlobReference(str(condition_blob_or_net))
 
     return core.scoped_execution_step(
-        _get_next_step_name('Until', name),
-        nets_or_steps,
-        should_stop_blob=stop_blob)
+        _get_next_step_name("Until", name), nets_or_steps, should_stop_blob=stop_blob
+    )
 
 
 def DoWhile(name, condition_blob_or_net, nets_or_steps):
@@ -444,7 +441,8 @@ def DoWhile(name, condition_blob_or_net, nets_or_steps):
     condition_not_net, stop_blob = NotNet(condition_blob_or_net)
     if isinstance(condition_blob_or_net, core.Net):
         nets_or_steps = _AppendNets(
-            nets_or_steps, condition_blob_or_net, condition_not_net)
+            nets_or_steps, condition_blob_or_net, condition_not_net
+        )
     else:
         nets_or_steps = _AppendNets(nets_or_steps, condition_not_net)
 
@@ -453,11 +451,15 @@ def DoWhile(name, condition_blob_or_net, nets_or_steps):
     # in nets_or_steps. This is not what we want. So we use BootNet to
     # set stop_blob to False.
     bool_net = BoolNet((stop_blob, False))
-    return Do(name + '/DoWhile', bool_net, core.scoped_execution_step(
-        _get_next_step_name('DoWhile-inner', name),
-        nets_or_steps,
-        should_stop_blob=stop_blob,
-    ))
+    return Do(
+        name + "/DoWhile",
+        bool_net,
+        core.scoped_execution_step(
+            _get_next_step_name("DoWhile-inner", name),
+            nets_or_steps,
+            should_stop_blob=stop_blob,
+        ),
+    )
 
 
 def DoUntil(name, condition_blob_or_net, nets_or_steps):
@@ -474,9 +476,10 @@ def DoUntil(name, condition_blob_or_net, nets_or_steps):
     if not isinstance(condition_blob_or_net, core.Net):
         stop_blob = core.BlobReference(condition_blob_or_net)
         return core.scoped_execution_step(
-            _get_next_step_name('DoUntil', name),
+            _get_next_step_name("DoUntil", name),
             nets_or_steps,
-            should_stop_blob=stop_blob)
+            should_stop_blob=stop_blob,
+        )
 
     nets_or_steps = _AppendNets(nets_or_steps, condition_blob_or_net)
     stop_blob = GetConditionBlobFromNet(condition_blob_or_net)
@@ -486,11 +489,15 @@ def DoUntil(name, condition_blob_or_net, nets_or_steps):
     # in nets_or_steps. This is not what we want. So we use BootNet to
     # set stop_blob to False.
     bool_net = BoolNet((stop_blob, False))
-    return Do(name + '/DoUntil', bool_net, core.scoped_execution_step(
-        _get_next_step_name('DoUntil-inner', name),
-        nets_or_steps,
-        should_stop_blob=stop_blob,
-    ))
+    return Do(
+        name + "/DoUntil",
+        bool_net,
+        core.scoped_execution_step(
+            _get_next_step_name("DoUntil-inner", name),
+            nets_or_steps,
+            should_stop_blob=stop_blob,
+        ),
+    )
 
 
 def Switch(name, *conditions):
@@ -509,8 +516,9 @@ def Switch(name, *conditions):
     """
     conditions = _MakeList(conditions)
     return core.scoped_execution_step(
-        _get_next_step_name('Switch', name),
-        [_RunOnceIf(name + '/Switch', cond, step) for cond, step in conditions])
+        _get_next_step_name("Switch", name),
+        [_RunOnceIf(name + "/Switch", cond, step) for cond, step in conditions],
+    )
 
 
 def SwitchNot(name, *conditions):
@@ -519,13 +527,12 @@ def SwitchNot(name, *conditions):
     """
     conditions = _MakeList(conditions)
     return core.scoped_execution_step(
-        _get_next_step_name('SwitchNot', name),
-        [_RunOnceIfNot(name + '/SwitchNot', cond, step)
-         for cond, step in conditions])
+        _get_next_step_name("SwitchNot", name),
+        [_RunOnceIfNot(name + "/SwitchNot", cond, step) for cond, step in conditions],
+    )
 
 
-def If(name, condition_blob_or_net,
-       true_nets_or_steps, false_nets_or_steps=None):
+def If(name, condition_blob_or_net, true_nets_or_steps, false_nets_or_steps=None):
     """
     condition_blob_or_net is first evaluated or executed. If the condition is
     true, true_nets_or_steps is then executed, otherwise, false_nets_or_steps
@@ -536,8 +543,7 @@ def If(name, condition_blob_or_net,
     true/false_nets_or_steps so as to get the condition.
     """
     if not false_nets_or_steps:
-        return _RunOnceIf(name + '/If',
-                          condition_blob_or_net, true_nets_or_steps)
+        return _RunOnceIf(name + "/If", condition_blob_or_net, true_nets_or_steps)
 
     if isinstance(condition_blob_or_net, core.Net):
         condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
@@ -545,22 +551,19 @@ def If(name, condition_blob_or_net,
         condition_blob = condition_blob_or_net
 
     return Do(
-        name + '/If',
-        _RunOnceIf(name + '/If-true',
-                   condition_blob_or_net, true_nets_or_steps),
-        _RunOnceIfNot(name + '/If-false', condition_blob, false_nets_or_steps)
+        name + "/If",
+        _RunOnceIf(name + "/If-true", condition_blob_or_net, true_nets_or_steps),
+        _RunOnceIfNot(name + "/If-false", condition_blob, false_nets_or_steps),
     )
 
 
-def IfNot(name, condition_blob_or_net,
-          true_nets_or_steps, false_nets_or_steps=None):
+def IfNot(name, condition_blob_or_net, true_nets_or_steps, false_nets_or_steps=None):
     """
     If condition_blob_or_net returns false, executes true_nets_or_steps,
     otherwise executes false_nets_or_steps
     """
     if not false_nets_or_steps:
-        return _RunOnceIfNot(name + '/IfNot',
-                             condition_blob_or_net, true_nets_or_steps)
+        return _RunOnceIfNot(name + "/IfNot", condition_blob_or_net, true_nets_or_steps)
 
     if isinstance(condition_blob_or_net, core.Net):
         condition_blob = GetConditionBlobFromNet(condition_blob_or_net)
@@ -568,8 +571,7 @@ def IfNot(name, condition_blob_or_net,
         condition_blob = condition_blob_or_net
 
     return Do(
-        name + '/IfNot',
-        _RunOnceIfNot(name + '/IfNot-true',
-                      condition_blob_or_net, true_nets_or_steps),
-        _RunOnceIf(name + '/IfNot-false', condition_blob, false_nets_or_steps)
+        name + "/IfNot",
+        _RunOnceIfNot(name + "/IfNot-true", condition_blob_or_net, true_nets_or_steps),
+        _RunOnceIf(name + "/IfNot-false", condition_blob, false_nets_or_steps),
     )

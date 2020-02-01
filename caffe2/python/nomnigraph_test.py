@@ -3,6 +3,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import str
+from builtins import range
 from caffe2.python import core, workspace, test_util
 from caffe2.proto import caffe2_pb2
 import caffe2.python.nomnigraph as ng
@@ -97,7 +100,7 @@ class TestBindings(test_util.TestCase):
         dfg.createEdge(x, op)
 
         # Dot generation
-        assert(str(dfg).startswith("digraph G"))
+        assert str(dfg).startswith("digraph G")
 
         # subgraph
         sg = ng.NNSubgraph()
@@ -107,7 +110,7 @@ class TestBindings(test_util.TestCase):
         assert len(sg) == 2
 
         # subgraph dot generation
-        assert(str(sg).startswith("digraph G"))
+        assert str(sg).startswith("digraph G")
 
     @given(size=st.sampled_from([10, 50]))
     def test_edges_complex(self, size):
@@ -165,7 +168,7 @@ class TestBindings(test_util.TestCase):
             assert len(match) == 1
             count += 1
             # Dot generation of subgraph
-            assert(str(match).startswith("digraph G"))
+            assert str(match).startswith("digraph G")
         assert count == 1
 
     def test_match_graph_node_strict(self):
@@ -427,7 +430,7 @@ class TestBindings(test_util.TestCase):
         node.setAnnotation(annot)
 
         new_annot = node.getAnnotation()
-        #assert new_annot.getLengthNode() == length
+        # assert new_annot.getLengthNode() == length
         assert new_annot.getKeyNode() == key
         assert len(new_annot.getComponentLevels()) == 3
         assert new_annot.getComponentLevels()[0] == ""

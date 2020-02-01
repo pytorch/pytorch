@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core, workspace, test_util
 import os
 import shutil
@@ -22,9 +23,14 @@ class CheckpointTest(test_util.TestCase):
         # new style if needed.
         net.Iter([], "iter")
         net.ConstantFill([], "value", shape=[1, 2, 3])
-        net.Checkpoint(["iter", "value"], [],
-                       db=os.path.join(temp_root, "test_checkpoint_at_%05d"),
-                       db_type="leveldb", every=10, absolute_path=True)
+        net.Checkpoint(
+            ["iter", "value"],
+            [],
+            db=os.path.join(temp_root, "test_checkpoint_at_%05d"),
+            db_type="leveldb",
+            every=10,
+            absolute_path=True,
+        )
         self.assertTrue(workspace.CreateNet(net))
         for i in range(100):
             self.assertTrue(workspace.RunNet("test_checkpoint"))
@@ -32,8 +38,11 @@ class CheckpointTest(test_util.TestCase):
             # Print statements are only for debugging purposes.
             # print("Asserting %d" % i)
             # print(os.path.join(temp_root, "test_checkpoint_at_%05d" % (i * 10)))
-            self.assertTrue(os.path.exists(
-                os.path.join(temp_root, "test_checkpoint_at_%05d" % (i * 10))))
+            self.assertTrue(
+                os.path.exists(
+                    os.path.join(temp_root, "test_checkpoint_at_%05d" % (i * 10))
+                )
+            )
 
         # Finally, clean up.
         shutil.rmtree(temp_root)

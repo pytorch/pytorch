@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import object
 from caffe2.python import core, context
 from caffe2.python.task import Task, TaskGroup
 from caffe2.python.control_ops_util import add_if_op, add_while_op
@@ -31,14 +33,22 @@ class NetBuilder(object):
             ops.Print(d, [])
         step = core.to_execution_step(nb)
     """
-    def __init__(self, name=None, initial_scope=None, _stop_blob_required=False,
-                 _stop_blob=None, _fullname=None, _use_control_ops=False):
+
+    def __init__(
+        self,
+        name=None,
+        initial_scope=None,
+        _stop_blob_required=False,
+        _stop_blob=None,
+        _fullname=None,
+        _use_control_ops=False,
+    ):
         parent = NetBuilder.current(required=False)
-        assert not _fullname or not name, 'Cannot set both _fullname and name'
-        assert not _use_control_ops or \
-            (not _stop_blob_required and not _stop_blob), \
-            'Stop blobs are not used with control operators'
-        self.name = _fullname or '/'.join(
+        assert not _fullname or not name, "Cannot set both _fullname and name"
+        assert not _use_control_ops or (
+            not _stop_blob_required and not _stop_blob
+        ), "Stop blobs are not used with control operators"
+        self.name = _fullname or "/".join(
             n for n in (parent.name if parent else None, name) if n
         )
         self._frozen = False
@@ -63,28 +73,30 @@ class NetBuilder(object):
         in the current net, so it doesn't initialize it if the current net is
         the first of the builder.
         """
-        assert not self._use_control_ops, \
-            'Stop blobs are not used with control operators'
+        assert (
+            not self._use_control_ops
+        ), "Stop blobs are not used with control operators"
         if self._stop_blob is None:
             net = self.current_net()
-            self._stop_blob = core.BlobReference(
-                net.NextName('stop_blob'), net=net)
+            self._stop_blob = core.BlobReference(net.NextName("stop_blob"), net=net)
             net.Const(False, blob_out=self._stop_blob)
             if self._current_net != self._children[0]:
-                self._children.insert(0, core.Net('stop_blob_init'))
+                self._children.insert(0, core.Net("stop_blob_init"))
                 self._children[0].Const(False, blob_out=self._stop_blob)
         return self._stop_blob
 
     def stop_if(self, blob):
-        assert not self._use_control_ops, \
-            'Stop blobs are not used with control operators'
+        assert (
+            not self._use_control_ops
+        ), "Stop blobs are not used with control operators"
         stop_blob = self.stop_blob()
         ops.Or([stop_blob, blob], [stop_blob])
         self._current_net = None
 
     def _assert_mutable(self):
         assert not self._frozen, (
-            'This NetBuilder (%s) has been built already.' % self.name)
+            "This NetBuilder (%s) has been built already." % self.name
+        )
 
     def _update_lexical_scope(self):
         """
@@ -109,8 +121,8 @@ class NetBuilder(object):
 
         if self._use_control_ops:
             assert isinstance(child, core.Net) or (
-                isinstance(child, NetBuilder) and child._use_control_ops), \
-                "Expected Net or NetBuilder with control ops"
+                isinstance(child, NetBuilder) and child._use_control_ops
+            ), "Expected Net or NetBuilder with control ops"
 
         self._current_net = None
         self._children.append(child)
@@ -128,7 +140,7 @@ class NetBuilder(object):
 
     def freeze(self):
         for child in self._children:
-            if hasattr(child, 'freeze'):
+            if hasattr(child, "freeze"):
                 child.freeze()
         self._current_net = None
         self._frozen = True
@@ -141,8 +153,7 @@ class NetBuilder(object):
         if self._use_control_ops and len(self._children) > 0:
             _children = self._children
             self._reset_children()
-            merged_net = NetBuilder.merge_nets(
-                _children, self._lexical_scope)
+            merged_net = NetBuilder.merge_nets(_children, self._lexical_scope)
             assert merged_net, "Expected a non-empty merge of children"
             self._children = [merged_net]
 
@@ -150,8 +161,9 @@ class NetBuilder(object):
         if etype is not None:
             return
         assert (not self._stop_blob_required) or self._stop_blob is not None, (
-            'This NetBuilder (%s) requires a stop condition ' % self.name +
-            'to be set with `stop` or `stop_if`')
+            "This NetBuilder (%s) requires a stop condition " % self.name
+            + "to be set with `stop` or `stop_if`"
+        )
 
     @staticmethod
     def merge_nets(nets_or_builders, outer_blob_names):
@@ -178,11 +190,13 @@ class NetBuilder(object):
         for n in nets_or_builders:
             cur = None
             if isinstance(n, NetBuilder):
-                assert n._use_control_ops, \
-                    "Merging of NetBuilder supported only for control ops"
+                assert (
+                    n._use_control_ops
+                ), "Merging of NetBuilder supported only for control ops"
                 nets = n.get()
-                assert len(nets) == 1 and isinstance(nets[0], core.Net), \
-                    "Invalid control op net builder"
+                assert len(nets) == 1 and isinstance(
+                    nets[0], core.Net
+                ), "Invalid control op net builder"
                 cur = nets[0]
             else:
                 assert isinstance(n, core.Net)
@@ -193,19 +207,21 @@ class NetBuilder(object):
                 net = cur
         if net:
             # correct external output
-            external_outputs = [o for o in net.Proto().external_output
-                                    if o in outer_blob_names]
+            external_outputs = [
+                o for o in net.Proto().external_output if o in outer_blob_names
+            ]
             net.Proto().external_output[:] = external_outputs
         return net
 
     def __str__(self):
-        return self.name or 'Un-named NetBuilder'
+        return self.name or "Un-named NetBuilder"
 
 
 class Operations(object):
     """
     Operations to be used in the context of a NetBuilder.
     """
+
     def net(self, net=None, name=None):
         """
         Retrieves the current net, or add a new net to the builder.
@@ -216,8 +232,7 @@ class Operations(object):
                    it the new current net of the active builder. Cannot
                    be provided if net is provided.
         """
-        assert name is None or net is None, (
-            'Cannot provide both `net` and `name`.')
+        assert name is None or net is None, "Cannot provide both `net` and `name`."
         if net is not None:
             NetBuilder.current().add(net)
             return net
@@ -227,11 +242,11 @@ class Operations(object):
         """
         Adds an operator call to the currently active Net.
         """
-        if op_type.startswith('__'):
+        if op_type.startswith("__"):
             raise AttributeError()
         # We want hasattr to work properly even if no context is active.
         if NetBuilder.current(required=False) is None:
-            raise AttributeError('No active NetBuilder.')
+            raise AttributeError("No active NetBuilder.")
         return getattr(self.net(), op_type)
 
     def task_group(self):
@@ -240,9 +255,10 @@ class Operations(object):
         the current NetBuilder.
         """
         from caffe2.python import task
+
         group = NetBuilder.current()
         with task.Cluster():
-            with task.Node('local'):
+            with task.Node("local"):
                 tg = task.TaskGroup()
                 group.add(tg)
                 return tg
@@ -317,7 +333,8 @@ class Operations(object):
             followed by True and False.
         """
         return NetBuilder.current().add(
-            _StopGuard(has_stopped_blob=has_stopped_blob, name=name))
+            _StopGuard(has_stopped_blob=has_stopped_blob, name=name)
+        )
 
     def If(self, cond, name=None):
         """
@@ -359,8 +376,9 @@ class Operations(object):
         """
         Loop's condition, executed within WhileNet context
         """
-        assert isinstance(NetBuilder.current(), _RunWhileNet), \
-            "Use of Condition outside of WhileNet"
+        assert isinstance(
+            NetBuilder.current(), _RunWhileNet
+        ), "Use of Condition outside of WhileNet"
         return _RunWhileCondition(name=name)
 
     def task_init(self):
@@ -489,14 +507,13 @@ class _ReporterBuilder(NetBuilder):
             if self._net:
                 self._net.add_attribute(Task.REPORT_STEP, step)
             else:
-                TaskGroup.current().report_step(
-                    step, interval_ms=self.interval_ms)
+                TaskGroup.current().report_step(step, interval_ms=self.interval_ms)
         NetBuilder.__exit__(self, etype, *args)
 
 
 class _SetupBuilder(NetBuilder):
-    INIT = 'init'
-    EXIT = 'exit'
+    INIT = "init"
+    EXIT = "exit"
 
     def __init__(self, type, name=None):
         NetBuilder.__init__(self, name)
@@ -543,7 +560,7 @@ class _StopGuard(_RunOnce):
         Return a blob that will be set to scalar bool `True` after
         this net builder ran, iff it was halted early.
         """
-        assert self._ran, 'Context not used yet.'
+        assert self._ran, "Context not used yet."
         return self._stopped
 
 
@@ -554,16 +571,18 @@ class _Loop(NetBuilder):
             self._inc = ops.Const(1)
             self._iter = ops.Const(0)
             self._num_iters = (
-                iters if isinstance(iters, core.BlobReference)
-                else ops.Const(iters))
+                iters if isinstance(iters, core.BlobReference) else ops.Const(iters)
+            )
         else:
             self._num_iters = None
 
     def iter(self):
-        assert self._num_iters is not None, (
-            'This loop does not have a number of iterations.')
-        assert self._iter is not None, (
-            'iter() must be called from inside the loop context')
+        assert (
+            self._num_iters is not None
+        ), "This loop does not have a number of iterations."
+        assert (
+            self._iter is not None
+        ), "iter() must be called from inside the loop context"
         return self._iter
 
     def __enter__(self):
@@ -588,8 +607,11 @@ class _RunIf(_RunOnce):
             self._already_ran = ops.Const(False)
         else:
             self._already_ran = _already_ran
-            self._else_blob = _already_ran if cond_blob is None else (
-                ops.Or([_already_ran, ops.Not(cond_blob)]))
+            self._else_blob = (
+                _already_ran
+                if cond_blob is None
+                else (ops.Or([_already_ran, ops.Not(cond_blob)]))
+            )
 
     def __enter__(self):
         r = _RunOnce.__enter__(self)
@@ -598,23 +620,26 @@ class _RunIf(_RunOnce):
         return r
 
     def Elif(self, cond, name=None):
-        assert not self._is_else, 'Else not allowed for an Else.'
-        return NetBuilder.current().add(_RunIf(
-            cond, name=name or self.name, _already_ran=self._already_ran))
+        assert not self._is_else, "Else not allowed for an Else."
+        return NetBuilder.current().add(
+            _RunIf(cond, name=name or self.name, _already_ran=self._already_ran)
+        )
 
     def Else(self, name=None):
-        assert not self._is_else, 'Elif not allowed for an Else.'
+        assert not self._is_else, "Elif not allowed for an Else."
         return NetBuilder.current().add(
-            _RunIf(name=name or self.name, _already_ran=self._already_ran))
+            _RunIf(name=name or self.name, _already_ran=self._already_ran)
+        )
 
 
 class _RunIfNet(NetBuilder):
     """
     Generates a single net that uses If operator
     """
+
     def __init__(self, cond_blob, name=None):
         NetBuilder.__init__(self, name=name, _use_control_ops=True)
-        assert cond_blob, 'Conditional blob is not specified for an If net'
+        assert cond_blob, "Conditional blob is not specified for an If net"
         self._cond_blob = cond_blob
         self._then_net = None
         self._else_net = None
@@ -627,14 +652,18 @@ class _RunIfNet(NetBuilder):
             _then_nets = self._children
             self._reset_children()
 
-            self._then_net = NetBuilder.merge_nets(
-                _then_nets, self._lexical_scope)
+            self._then_net = NetBuilder.merge_nets(_then_nets, self._lexical_scope)
             if not self._then_net:
-                self._then_net = core.Net('empty_then_net')
+                self._then_net = core.Net("empty_then_net")
 
-            if_net = core.Net(self.name + '/if_net')
-            add_if_op(if_net, self._cond_blob, self._lexical_scope,
-                        self._then_net, self._else_net)
+            if_net = core.Net(self.name + "/if_net")
+            add_if_op(
+                if_net,
+                self._cond_blob,
+                self._lexical_scope,
+                self._then_net,
+                self._else_net,
+            )
 
             self._current_net = if_net
             self._children = [if_net]
@@ -645,12 +674,15 @@ class _RunElseNet(NetBuilder):
     """
     Else branch for _RunIfNet builder
     """
+
     def __init__(self, name=None):
         NetBuilder.__init__(self, name=name, _use_control_ops=True)
         parent = NetBuilder.current(required=False)
-        assert parent and len(parent._children) > 0 and \
-            isinstance(parent._children[-1], _RunIfNet), \
-            'Invalid use of Else builder'
+        assert (
+            parent
+            and len(parent._children) > 0
+            and isinstance(parent._children[-1], _RunIfNet)
+        ), "Invalid use of Else builder"
         self._if_builder = parent._children[-1]
 
     def __exit__(self, type, *args):
@@ -659,15 +691,17 @@ class _RunElseNet(NetBuilder):
             self._reset_children()
 
             self._if_builder._else_net = NetBuilder.merge_nets(
-                _else_nets, self._lexical_scope)
+                _else_nets, self._lexical_scope
+            )
             if self._if_builder._else_net:
-                if_else_net = core.Net(self.name + '/if_else_net')
+                if_else_net = core.Net(self.name + "/if_else_net")
                 add_if_op(
                     if_else_net,
                     self._if_builder._cond_blob,
                     self._lexical_scope,
                     self._if_builder._then_net,
-                    self._if_builder._else_net)
+                    self._if_builder._else_net,
+                )
                 self._if_builder._current_net = if_else_net
                 self._if_builder._children = [if_else_net]
         NetBuilder.__exit__(self, type, *args)
@@ -677,28 +711,28 @@ class _RunWhileNet(NetBuilder):
     """
     Generates a single net that uses While operator
     """
+
     def __init__(self, name=None):
         NetBuilder.__init__(self, name=name, _use_control_ops=True)
         self._cond_builder = None
 
     def __exit__(self, type, *args):
         if type is None:
-            assert self._cond_builder, \
-                'Condition builder must be specified in While op'
+            assert self._cond_builder, "Condition builder must be specified in While op"
 
             _cond_blob = self._cond_builder._cond_blob
             _cond_net = self._cond_builder._cond_net
 
             loop_body = self._children
             self._reset_children()
-            loop_body_net = NetBuilder.merge_nets(
-                loop_body, self._lexical_scope)
+            loop_body_net = NetBuilder.merge_nets(loop_body, self._lexical_scope)
             if not loop_body_net:
-                loop_body_net = core.Net('empty_loop_body_net')
+                loop_body_net = core.Net("empty_loop_body_net")
 
-            while_net = core.Net(self.name + '/while_net')
-            add_while_op(while_net, _cond_blob, self._lexical_scope,
-                            loop_body_net, _cond_net)
+            while_net = core.Net(self.name + "/while_net")
+            add_while_op(
+                while_net, _cond_blob, self._lexical_scope, loop_body_net, _cond_net
+            )
 
             self._current_net = while_net
             self._children = [while_net]
@@ -712,15 +746,17 @@ class _RunWhileCondition(NetBuilder):
     as a condition value, no other blobs created in the condition net are
     visible outside of it
     """
+
     def __init__(self, name=None):
         NetBuilder.__init__(self, name=name, _use_control_ops=True)
         parent = NetBuilder.current(required=False)
-        assert parent and isinstance(parent, _RunWhileNet), \
-            'Invalid use of loop condition builder'
-        assert not parent._cond_builder, \
-            'Multiple loop condition builders specified'
-        assert len(parent._children) == 0, \
-            'Condition definition must be specified before the loop\'s body'
+        assert parent and isinstance(
+            parent, _RunWhileNet
+        ), "Invalid use of loop condition builder"
+        assert not parent._cond_builder, "Multiple loop condition builders specified"
+        assert (
+            len(parent._children) == 0
+        ), "Condition definition must be specified before the loop's body"
         parent._cond_builder = self
         self._cond_blob = None
         self._cond_net = None
@@ -729,12 +765,11 @@ class _RunWhileCondition(NetBuilder):
         if type is None:
             condition_body = self._children
             self._reset_children()
-            self._cond_net = NetBuilder.merge_nets(
-                condition_body, self._lexical_scope)
-            assert self._cond_net, 'Invalid loop condition specified'
-            assert len(self._cond_net.Proto().op) > 0, 'Invalid condition net'
+            self._cond_net = NetBuilder.merge_nets(condition_body, self._lexical_scope)
+            assert self._cond_net, "Invalid loop condition specified"
+            assert len(self._cond_net.Proto().op) > 0, "Invalid condition net"
             last_op = self._cond_net.Proto().op[-1]
-            assert len(last_op.output) == 1, 'Invalid condition net'
+            assert len(last_op.output) == 1, "Invalid condition net"
             self._cond_blob = core.BlobReference(name=last_op.output[0], net=None)
 
             self._current_net = self._cond_net

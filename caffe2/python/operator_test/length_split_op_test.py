@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -12,7 +13,6 @@ import numpy as np
 
 
 class TestLengthSplitOperator(serial.SerializedTestCase):
-
     def _length_split_op_ref(self, input_lengths, n_split_array):
         output = []
         n_split = n_split_array[0]
@@ -33,19 +33,13 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         n_split_ = np.array([5]).astype(np.int32)
         # Expected output:
         # [1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1]
-        op = core.CreateOperator(
-            'LengthsSplit',
-            ['input_lengths',
-             'n_split'],
-            ['Y'],
-        )
+        op = core.CreateOperator("LengthsSplit", ["input_lengths", "n_split"], ["Y"])
 
         # Check against numpy reference
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[input_lengths,
-                    n_split_],
+            inputs=[input_lengths, n_split_],
             reference=self._length_split_op_ref,
         )
         # Check over multiple devices
@@ -58,9 +52,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         # Expected output:
         # [3, 3, 3, 2, 1, 1, 2, 2, 1]
         op = core.CreateOperator(
-            'LengthsSplit',
-            ['input_lengths'],
-            ['Y'], n_split=n_split
+            "LengthsSplit", ["input_lengths"], ["Y"], n_split=n_split
         )
 
         # Check against numpy reference
@@ -68,7 +60,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
             device_option=gc,
             op=op,
             inputs=[input_lengths],
-            reference=lambda x : self._length_split_op_ref(x, [n_split]),
+            reference=lambda x: self._length_split_op_ref(x, [n_split]),
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [input_lengths], [0])
@@ -80,67 +72,49 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         n_split_used = np.array([3]).astype(np.int32)
 
         op = core.CreateOperator(
-            'LengthsSplit',
-            ['input_lengths',
-             'n_split'],
-            ['Y'], n_split=n_split_ignored
+            "LengthsSplit", ["input_lengths", "n_split"], ["Y"], n_split=n_split_ignored
         )
 
         # Check against numpy reference
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[input_lengths,
-                    n_split_used],
+            inputs=[input_lengths, n_split_used],
             reference=self._length_split_op_ref,
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_used], [0])
 
-    @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+    @given(m=st.integers(1, 100), n_split=st.integers(1, 20), **hu.gcs_cpu_only)
     def test_length_split_even_divide(self, m, n_split, gc, dc):
         # multiples of n_split
         input_lengths = np.random.randint(100, size=m).astype(np.int32) * n_split
         n_split_ = np.array([n_split]).astype(np.int32)
 
-        op = core.CreateOperator(
-            'LengthsSplit',
-            ['input_lengths',
-             'n_split'],
-            ['Y'],
-        )
+        op = core.CreateOperator("LengthsSplit", ["input_lengths", "n_split"], ["Y"])
 
         # Check against numpy reference
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[input_lengths,
-                    n_split_],
+            inputs=[input_lengths, n_split_],
             reference=self._length_split_op_ref,
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [input_lengths, n_split_], [0])
 
-    @given(m=st.integers(1, 100), n_split=st.integers(1, 20),
-           **hu.gcs_cpu_only)
+    @given(m=st.integers(1, 100), n_split=st.integers(1, 20), **hu.gcs_cpu_only)
     def test_length_split_random(self, m, n_split, gc, dc):
         input_lengths = np.random.randint(100, size=m).astype(np.int32)
         n_split_ = np.array([n_split]).astype(np.int32)
 
-        op = core.CreateOperator(
-            'LengthsSplit',
-            ['input_lengths',
-             'n_split'],
-            ['Y'],
-        )
+        op = core.CreateOperator("LengthsSplit", ["input_lengths", "n_split"], ["Y"])
 
         # Check against numpy reference
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[input_lengths,
-                    n_split_],
+            inputs=[input_lengths, n_split_],
             reference=self._length_split_op_ref,
         )
         # Check over multiple devices
@@ -149,4 +123,5 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

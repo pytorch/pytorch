@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -12,9 +13,12 @@ import numpy as np
 
 
 class TestPackRNNSequenceOperator(serial.SerializedTestCase):
-
-    @serial.given(n=st.integers(0, 10), k=st.integers(1, 5),
-           dim=st.integers(1, 5), **hu.gcs_cpu_only)
+    @serial.given(
+        n=st.integers(0, 10),
+        k=st.integers(1, 5),
+        dim=st.integers(1, 5),
+        **hu.gcs_cpu_only
+    )
     def test_pack_rnn_seqence(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         values = np.random.rand(sum(lengths), dim).astype(np.float32)
@@ -30,26 +34,23 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
                 offset += lengths[c]
             return [output]
 
-        op = core.CreateOperator(
-            'PackRNNSequence',
-            ['values', 'lengths'],
-            'out'
-        )
+        op = core.CreateOperator("PackRNNSequence", ["values", "lengths"], "out")
 
         # Check against numpy reference
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[values, lengths],
-            reference=pack_op,
+            device_option=gc, op=op, inputs=[values, lengths], reference=pack_op
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [values, lengths], [0])
         # Gradient check
         self.assertGradientChecks(gc, op, [values, lengths], 0, [0])
 
-    @serial.given(n=st.integers(0, 10), k=st.integers(2, 5),
-           dim=st.integers(1, 5), **hu.gcs_cpu_only)
+    @serial.given(
+        n=st.integers(0, 10),
+        k=st.integers(2, 5),
+        dim=st.integers(1, 5),
+        **hu.gcs_cpu_only
+    )
     def test_unpack_rnn_seqence(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
         T = max(lengths) if any(lengths) else 0
@@ -67,18 +68,11 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
                 offset += lengths[c]
             return [output]
 
-        op = core.CreateOperator(
-            'UnpackRNNSequence',
-            ['values', 'lengths'],
-            'out'
-        )
+        op = core.CreateOperator("UnpackRNNSequence", ["values", "lengths"], "out")
 
         # Check against numpy reference
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[values, lengths],
-            reference=unpack_op,
+            device_option=gc, op=op, inputs=[values, lengths], reference=unpack_op
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [values, lengths], [0])
@@ -88,4 +82,5 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

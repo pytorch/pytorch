@@ -8,10 +8,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import range
+from builtins import object
 from caffe2.python import core
 from caffe2.python.dataio import Reader, Writer
-from caffe2.python.schema import (
-    Struct, Field, from_column_list)
+from caffe2.python.schema import Struct, Field, from_column_list
 
 
 class _QueueReader(Reader):
@@ -25,7 +27,8 @@ class _QueueReader(Reader):
         with core.NameScope(read_net.NextName(self.name)):
             status = read_net.NextName()
             fields = read_net.SafeDequeueBlobs(
-                self.blobs_queue, self._schema.field_names() + [status])
+                self.blobs_queue, self._schema.field_names() + [status]
+            )
             return (fields[-1], fields[:-1])
 
 
@@ -37,11 +40,9 @@ class _QueueWriter(Writer):
     def write(self, writer_net, fields):
         if isinstance(fields, Field):
             fields = fields.field_blobs()
-        writer_net.CheckDatasetConsistency(
-            fields, [], fields=self.schema.field_names())
+        writer_net.CheckDatasetConsistency(fields, [], fields=self.schema.field_names())
         status = writer_net.NextName()
-        writer_net.SafeEnqueueBlobs(
-            [self.blobs_queue] + fields, fields + [status])
+        writer_net.SafeEnqueueBlobs([self.blobs_queue] + fields, fields + [status])
         return status
 
 
@@ -49,33 +50,38 @@ class RecordQueue(object):
     """ The class is used to feed data with some process from a reader into a
         queue and provider a reader interface for data fetching from the queue.
     """
-    def __init__(self, fields, name=None, capacity=1,
-                 enforce_unique_name=False, num_threads=1):
-        assert isinstance(fields, list) or isinstance(fields, Struct), (
-            'fields must be either a Struct or a list of raw field names.')
+
+    def __init__(
+        self, fields, name=None, capacity=1, enforce_unique_name=False, num_threads=1
+    ):
+        assert isinstance(fields, list) or isinstance(
+            fields, Struct
+        ), "fields must be either a Struct or a list of raw field names."
         if isinstance(fields, list):
             fields = from_column_list(fields)
         self.schema = fields
-        self.name = name or 'queue'
+        self.name = name or "queue"
         self.num_threads = num_threads
         num_blobs = len(self.schema.field_names())
-        init_net = core.Net(self.name + '/init_net')
+        init_net = core.Net(self.name + "/init_net")
         self.blobs_queue = init_net.CreateBlobsQueue(
-            [], 1,
+            [],
+            1,
             capacity=capacity,
             num_blobs=num_blobs,
-            enforce_unique_name=enforce_unique_name)
+            enforce_unique_name=enforce_unique_name,
+        )
         core.workspace.RunNetOnce(init_net)
 
         self.writer = _QueueWriter(self.blobs_queue, self.schema)
-        reader_name = self.name + '_reader'
+        reader_name = self.name + "_reader"
         self.reader = _QueueReader(self.blobs_queue, self.schema, reader_name)
 
-        exit_net = core.Net(self.name + '/exit_net')
+        exit_net = core.Net(self.name + "/exit_net")
         exit_net.CloseBlobsQueue(self.blobs_queue, 0)
         self.exit_step = core.execution_step(
-            '{}_close_step'.format(str(exit_net)),
-            exit_net)
+            "{}_close_step".format(str(exit_net)), exit_net
+        )
 
     def build(self, reader, process=None):
         """
@@ -93,12 +99,12 @@ class RecordQueue(object):
         """
         producer_steps = []
         for i in range(self.num_threads):
-            name = 'reader_' + str(i)
+            name = "reader_" + str(i)
             net_reader = core.Net(name)
             should_stop, fields = reader.read_record(net_reader)
             step_read = core.execution_step(name, net_reader)
 
-            name = 'queue_writer' + str(i)
+            name = "queue_writer" + str(i)
             net_prod = core.Net(name)
             field_blobs = fields.field_blobs()
             if process:
@@ -107,12 +113,12 @@ class RecordQueue(object):
             self.writer.write(net_prod, field_blobs)
             step_prod = core.execution_step(name, net_prod)
             step = core.execution_step(
-                'producer_' + str(i),
+                "producer_" + str(i),
                 [step_read, step_prod],
-                should_stop_blob=should_stop)
+                should_stop_blob=should_stop,
+            )
             producer_steps.append(step)
         producer_step = core.execution_step(
-            'producers',
-            producer_steps,
-            concurrent_substeps=True)
+            "producers", producer_steps, concurrent_substeps=True
+        )
         return self.reader, producer_step, self.exit_step, self.schema

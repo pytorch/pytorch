@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -25,7 +26,7 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
         positions_vec=hu.arrays(
             dims=[MAX_TEST_SEQUENCE_LENGTH],
             dtype=np.int32,
-            elements=st.integers(1, MAX_TEST_SEQUENCE_LENGTH)
+            elements=st.integers(1, MAX_TEST_SEQUENCE_LENGTH),
         ),
         embedding_size=st.integers(1, MAX_TEST_EMBEDDING_SIZE),
         batch_size=st.integers(1, MAX_TEST_BATCH_SIZE),
@@ -48,7 +49,7 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
         )
 
         def sinusoid_encoding(dim, position):
-            x = 1. * position / math.pow(alpha, 1. * dim / embedding_size)
+            x = 1.0 * position / math.pow(alpha, 1.0 * dim / embedding_size)
             if dim % 2 == 0:
                 return amplitude * math.sin(x)
             else:
@@ -64,8 +65,5 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
             return [ar]
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[positions],
-            reference=sinusoid_embedding_op,
+            device_option=gc, op=op, inputs=[positions], reference=sinusoid_embedding_op
         )

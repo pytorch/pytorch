@@ -41,14 +41,12 @@ class TestCopyRowsToTensor(hu.HypothesisTestCase):
             for idx in indices:
                 input_tensor[idx] = row
             return [input_tensor]
+
         op = core.CreateOperator(
             "CopyRowsToTensor", ["input_tensor", "indices", "row"], ["input_tensor"]
         )
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[input_tensor, indices, row],
-            reference=ref,
+            device_option=gc, op=op, inputs=[input_tensor, indices, row], reference=ref
         )
 
     @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)

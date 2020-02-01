@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -20,10 +21,7 @@ class TestConditionalOp(serial.SerializedTestCase):
         condition = np.random.choice(a=[True, False], size=rows_num)
 
         def ref(condition, data_t, data_f):
-            output = [
-                data_t[i] if condition[i] else data_f[i]
-                for i in range(rows_num)
-            ]
+            output = [data_t[i] if condition[i] else data_f[i] for i in range(rows_num)]
             return (output,)
 
         self.assertReferenceChecks(gc, op, [condition, data_t, data_f], ref)

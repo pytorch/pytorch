@@ -5,6 +5,10 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import str
+from builtins import range
+from builtins import object
 import numpy as np
 
 from caffe2.python import core, workspace, net_drawer
@@ -12,8 +16,7 @@ from caffe2.proto import caffe2_pb2
 
 
 def getGradientForOp(op):
-    return core.GradientRegistry.GetGradientForOp(
-        op, [s + '_grad' for s in op.output])
+    return core.GradientRegistry.GetGradientForOp(op, [s + "_grad" for s in op.output])
 
 
 def _get_grad_blob(grad_map, input_to_check):
@@ -26,9 +29,9 @@ def _get_grad_blob(grad_map, input_to_check):
     # To make it comparable with the estimiated gradient which is dense,
     # we need to first convert grad_blob to dense gradient.
     assert isinstance(grad_blob, core.GradientSlice)
-    dense_grad = 'tmp_dense_grad'
+    dense_grad = "tmp_dense_grad"
     sparse_to_dense_op = core.CreateOperator(
-        'SparseToDense',
+        "SparseToDense",
         [grad_blob.indices, grad_blob.values, input_to_check],
         dense_grad,
     )
@@ -40,28 +43,28 @@ def _get_grad(net, outputs, outputs_with_grad, input_values, inputs_with_grads):
     grad_net = net.Clone(net.Name() + "_copy")
     grad_map = grad_net.AddGradientOperators(outputs_with_grad)
 
-    for name, value in (input_values or {}).items():
+    for name, value in list((input_values or {}).items()):
         workspace.blobs[name] = value
 
     for input_to_check in inputs_with_grads:
-        assert input_to_check in grad_map, (
-            '{} has no gradient, cannot check net gradient.'.format(
-                input_to_check))
+        assert (
+            input_to_check in grad_map
+        ), "{} has no gradient, cannot check net gradient.".format(input_to_check)
         assert str(input_to_check) in workspace.blobs
 
     workspace.RunNetOnce(grad_net)
     forward_results = [(output, workspace.blobs[output]) for output in outputs]
-    grads = {input_to_check: _get_grad_blob(grad_map, input_to_check)
-             for input_to_check in inputs_with_grads}
+    grads = {
+        input_to_check: _get_grad_blob(grad_map, input_to_check)
+        for input_to_check in inputs_with_grads
+    }
 
     return forward_results, grads, grad_net
 
 
-def _assert_close(value1, value2, threshold, err_msg=''):
+def _assert_close(value1, value2, threshold, err_msg=""):
     np.testing.assert_allclose(
-        value1, value2,
-        atol=threshold, rtol=threshold,
-        err_msg=err_msg,
+        value1, value2, atol=threshold, rtol=threshold, err_msg=err_msg
     )
 
     delta = np.abs(value1 - value2).flatten()
@@ -70,68 +73,87 @@ def _assert_close(value1, value2, threshold, err_msg=''):
 
 class NetGradientChecker(object):
     @staticmethod
-    def CompareNets(nets, outputs, outputs_with_grad_ids,
-                    inputs_with_grads, input_values=None,
-                    threshold=0.0000001, print_net_images=False):
+    def CompareNets(
+        nets,
+        outputs,
+        outputs_with_grad_ids,
+        inputs_with_grads,
+        input_values=None,
+        threshold=0.0000001,
+        print_net_images=False,
+    ):
         def _get_output_with_grad_names(net_outputs):
             return [net_outputs[i] for i in outputs_with_grad_ids]
 
         if print_net_images:
             for i, net in enumerate(nets):
                 png = net_drawer.GetPydotGraph(net).create_png()
-                with open("caffe2_net_forward_" + str(i) + net.Name() + ".png",
-                          'wb') \
-                        as f:
+                with open(
+                    "caffe2_net_forward_" + str(i) + net.Name() + ".png", "wb"
+                ) as f:
                     f.write(png)
 
         results = [
-            _get_grad(net, net_outputs,
-                      _get_output_with_grad_names(net_outputs),
-                      input_values, inputs_with_grads)
+            _get_grad(
+                net,
+                net_outputs,
+                _get_output_with_grad_names(net_outputs),
+                input_values,
+                inputs_with_grads,
+            )
             for net, net_outputs in zip(nets, outputs)
         ]
 
         if print_net_images:
-            _, _, backward_nets = zip(*results)
+            _, _, backward_nets = list(zip(*results))
             for i, net in enumerate(backward_nets):
                 png = net_drawer.GetPydotGraph(net).create_png()
-                with open("caffe2_net_" + str(i) + net.Name() + ".png", 'wb') \
-                        as f:
+                with open("caffe2_net_" + str(i) + net.Name() + ".png", "wb") as f:
                     f.write(png)
 
         first_net_results, first_net_grads, _ = results[0]
         for net_results, net_grads, _ in results[1:]:
             assert len(net_results) == len(first_net_results)
             for idx, ((blob1, blob_value1), (blob2, blob_value2)) in enumerate(
-                    zip(first_net_results, net_results)):
+                zip(first_net_results, net_results)
+            ):
                 _assert_close(
-                    blob_value1, blob_value2, threshold,
+                    blob_value1,
+                    blob_value2,
+                    threshold,
                     err_msg="Different forward pass results for output id {}. "
-                    "Corresponding output blobs: {} and {}".format(
-                        idx, blob1, blob2))
+                    "Corresponding output blobs: {} and {}".format(idx, blob1, blob2),
+                )
 
-            assert net_grads.keys() == first_net_grads.keys()
-            for blob, blob_grad_value in net_grads.items():
+            assert list(net_grads.keys()) == list(first_net_grads.keys())
+            for blob, blob_grad_value in list(net_grads.items()):
                 _assert_close(
-                    first_net_grads[blob], blob_grad_value, threshold,
-                    err_msg="Different gradients for input {}".format(blob))
+                    first_net_grads[blob],
+                    blob_grad_value,
+                    threshold,
+                    err_msg="Different gradients for input {}".format(blob),
+                )
 
     @staticmethod
-    def Check(net, outputs_with_grad, input_values,
-              input_to_check, step_size=0.0001,
-              threshold=0.05, print_net=True):
+    def Check(
+        net,
+        outputs_with_grad,
+        input_values,
+        input_to_check,
+        step_size=0.0001,
+        threshold=0.05,
+        print_net=True,
+    ):
 
         net_results, net_grads, full_net = _get_grad(
-            net, [], outputs_with_grad, input_values, [input_to_check])
+            net, [], outputs_with_grad, input_values, [input_to_check]
+        )
         analytic_grad = net_grads[input_to_check]
 
         def GetLoss(new_value):
             workspace.blobs[input_to_check] = new_value
             workspace.RunNetOnce(full_net)
-            return sum([
-                workspace.blobs[output]
-                for output in outputs_with_grad
-            ]).sum()
+            return sum([workspace.blobs[output] for output in outputs_with_grad]).sum()
 
         def GetValue(dim, delta):
             input_value = input_values[input_to_check].copy()
@@ -144,15 +166,14 @@ class NetGradientChecker(object):
             neg_loss = GetLoss(GetValue(dim, -step_size))
             grad_estimate.flat[dim] = (pos_loss - neg_loss) / step_size / 2
 
-        err_msg = "Error in gradient check for net_copy {}".format(
-            net.Name())
+        err_msg = "Error in gradient check for net_copy {}".format(net.Name())
         if print_net:
             err_msg += ": {}".format(net.Proto())
 
         return _assert_close(analytic_grad, grad_estimate, threshold, err_msg)
 
 
-class GradientChecker:
+class GradientChecker(object):
     """A gradient checker in Python.
 
     This is not the most efficient way to check gradients, as the Python
@@ -178,50 +199,65 @@ class GradientChecker:
             self._input_device_options = input_device_options
 
     def GetLossAndGrad(
-        self, op, grad_ops, inputs, input_names, input_to_check, grad_name,
-        outputs_with_grads
+        self,
+        op,
+        grad_ops,
+        inputs,
+        input_names,
+        input_to_check,
+        grad_name,
+        outputs_with_grads,
     ):
         for i in range(len(inputs)):
-            workspace.FeedBlob(input_names[i], inputs[i],
-                               self._input_device_options.get(
-                input_names[i], self._device_option))
+            workspace.FeedBlob(
+                input_names[i],
+                inputs[i],
+                self._input_device_options.get(input_names[i], self._device_option),
+            )
         x = inputs[input_to_check]
         # Run.
         workspace.RunOperatorOnce(op)
-        loss = 0.
+        loss = 0.0
         # Get Loss and feed in the gradients, run gradient ops.
         for idx in outputs_with_grads:
             name = op.output[idx]
             arr = workspace.FetchBlob(name)
-            loss += (arr**2).sum()
-            workspace.FeedBlob(name + '_grad', arr, self._device_option)
-        loss /= 2.
+            loss += (arr ** 2).sum()
+            workspace.FeedBlob(name + "_grad", arr, self._device_option)
+        loss /= 2.0
         # Run gradient ops
         workspace.RunOperatorsOnce(grad_ops)
         # Get gradients
         if isinstance(grad_name, core.GradientSlice):
-            workspace.FeedBlob('zeros', np.zeros_like(x, dtype=np.float32))
-            workspace.FeedBlob('ones', np.ones(1, dtype=np.float32))
+            workspace.FeedBlob("zeros", np.zeros_like(x, dtype=np.float32))
+            workspace.FeedBlob("ones", np.ones(1, dtype=np.float32))
             gv_cpu_op = core.CreateOperator(
-                'EnsureCPUOutput', grad_name.values, grad_name.values + '_cpu',
-                device_option=self._device_option
+                "EnsureCPUOutput",
+                grad_name.values,
+                grad_name.values + "_cpu",
+                device_option=self._device_option,
             )
             gi_cpu_op = core.CreateOperator(
-                'EnsureCPUOutput', grad_name.indices, grad_name.indices + '_cpu',
-                device_option=self._device_option
+                "EnsureCPUOutput",
+                grad_name.indices,
+                grad_name.indices + "_cpu",
+                device_option=self._device_option,
             )
             sparse_to_dense_op = core.CreateOperator(
-                'ScatterWeightedSum',
+                "ScatterWeightedSum",
                 [
-                    'zeros', 'ones', grad_name.indices + '_cpu',
-                    grad_name.values + '_cpu', 'ones'
+                    "zeros",
+                    "ones",
+                    grad_name.indices + "_cpu",
+                    grad_name.values + "_cpu",
+                    "ones",
                 ],
-                'zeros',
+                "zeros",
             )
             workspace.RunOperatorOnce(gv_cpu_op)
             workspace.RunOperatorOnce(gi_cpu_op)
             workspace.RunOperatorOnce(sparse_to_dense_op)
-            grad = workspace.FetchBlob('zeros')
+            grad = workspace.FetchBlob("zeros")
         else:
             grad = workspace.FetchBlob(grad_name)
         return loss, grad
@@ -233,7 +269,7 @@ class GradientChecker:
         input_to_check,
         outputs_with_grads,
         grad_ops=None,
-        input_device_options=None
+        input_device_options=None,
     ):
         """Checks the operator in a very simple fashion by stacking a sum of
         squares on the top.
@@ -264,52 +300,70 @@ class GradientChecker:
             # hack.
             grad_ops, g_input = getGradientForOp(op)
 
-
-        _input_device_options = input_device_options or \
-            core.InferOpBlobDevicesAsDict(op)[0]
+        _input_device_options = (
+            input_device_options or core.InferOpBlobDevicesAsDict(op)[0]
+        )
         # First, feed in the input.
         for i, arr in enumerate(inputs):
             workspace.FeedBlob(
-                op.input[i], arr,
-                _input_device_options.get(
-                    op.input[i], self._device_option))
+                op.input[i],
+                arr,
+                _input_device_options.get(op.input[i], self._device_option),
+            )
 
         # Get the loss and gradient for the original.
         grad_name = g_input[input_to_check]
         loss, grad = self.GetLossAndGrad(
-            op, grad_ops, inputs, op.input, input_to_check, grad_name,
-            outputs_with_grads
+            op,
+            grad_ops,
+            inputs,
+            op.input,
+            input_to_check,
+            grad_name,
+            outputs_with_grads,
         )
         grad_estimate = np.zeros_like(inputs[input_to_check])
         if grad_estimate.shape != grad.shape:
             raise Exception(
                 "Mismatched gradient shapes: estimated ({}), grad ({})".format(
-                    grad_estimate.shape, grad.shape))
+                    grad_estimate.shape, grad.shape
+                )
+            )
 
         dims_to_check = inputs[input_to_check].size
         for current_dim in range(dims_to_check):
             # Positive gradient
             inputs[input_to_check].flat[current_dim] += self._stepsize
             pos_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs, op.input, input_to_check, grad_name,
-                outputs_with_grads
+                op,
+                grad_ops,
+                inputs,
+                op.input,
+                input_to_check,
+                grad_name,
+                outputs_with_grads,
             )
             # Negative gradient
             inputs[input_to_check].flat[current_dim] -= self._stepsize * 2
             neg_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs, op.input, input_to_check, grad_name,
-                outputs_with_grads
+                op,
+                grad_ops,
+                inputs,
+                op.input,
+                input_to_check,
+                grad_name,
+                outputs_with_grads,
             )
             # Recover the value
             inputs[input_to_check].flat[current_dim] += self._stepsize
-            grad_estimate.flat[current_dim] = (
-                pos_loss - neg_loss) / self._stepsize / 2
+            grad_estimate.flat[current_dim] = (pos_loss - neg_loss) / self._stepsize / 2
         # Now, check correctness
         fail_mat = ~np.isclose(
-            grad, grad_estimate, atol=self._threshold, rtol=self._threshold)
+            grad, grad_estimate, atol=self._threshold, rtol=self._threshold
+        )
         if np.any(fail_mat):
             idx = np.flatnonzero(fail_mat)
-            print('Failed. [idx, grad, grad_estimate] are:')
+            print("Failed. [idx, grad, grad_estimate] are:")
             print(np.vstack([idx, grad.flat[idx], grad_estimate.flat[idx]]).T)
             ret = False
         else:

@@ -13,14 +13,14 @@ class TestMobileExporter(TestCase):
     def test_mobile_exporter(self):
         model = ModelHelper(name="mobile_exporter_test_model")
         # Test LeNet
-        brew.conv(model, 'data', 'conv1', dim_in=1, dim_out=20, kernel=5)
-        brew.max_pool(model, 'conv1', 'pool1', kernel=2, stride=2)
-        brew.conv(model, 'pool1', 'conv2', dim_in=20, dim_out=50, kernel=5)
-        brew.max_pool(model, 'conv2', 'pool2', kernel=2, stride=2)
-        brew.fc(model, 'pool2', 'fc3', dim_in=50 * 4 * 4, dim_out=500)
-        brew.relu(model, 'fc3', 'fc3')
-        brew.fc(model, 'fc3', 'pred', 500, 10)
-        brew.softmax(model, 'pred', 'out')
+        brew.conv(model, "data", "conv1", dim_in=1, dim_out=20, kernel=5)
+        brew.max_pool(model, "conv1", "pool1", kernel=2, stride=2)
+        brew.conv(model, "pool1", "conv2", dim_in=20, dim_out=50, kernel=5)
+        brew.max_pool(model, "conv2", "pool2", kernel=2, stride=2)
+        brew.fc(model, "pool2", "fc3", dim_in=50 * 4 * 4, dim_out=500)
+        brew.relu(model, "fc3", "fc3")
+        brew.fc(model, "fc3", "pred", 500, 10)
+        brew.softmax(model, "pred", "out")
 
         # Create our mobile exportable networks
         workspace.RunNetOnce(model.param_init_net)
@@ -48,9 +48,7 @@ class TestMobileExporter(TestCase):
         workspace.CreateNet(predict_net, True)
         workspace.RunNet(predict_net.name)
         manual_run_out = workspace.FetchBlob("out")
-        np.testing.assert_allclose(
-            ref_out, manual_run_out, atol=1e-10, rtol=1e-10
-        )
+        np.testing.assert_allclose(ref_out, manual_run_out, atol=1e-10, rtol=1e-10)
 
         # Clear the workspace
         workspace.ResetWorkspace()
@@ -65,9 +63,7 @@ class TestMobileExporter(TestCase):
         assert len(predictor_out) == 1
         predictor_out = predictor_out[0]
 
-        np.testing.assert_allclose(
-            ref_out, predictor_out, atol=1e-10, rtol=1e-10
-        )
+        np.testing.assert_allclose(ref_out, predictor_out, atol=1e-10, rtol=1e-10)
 
     def test_mobile_exporter_datatypes(self):
         model = ModelHelper(name="mobile_exporter_test_model")
@@ -80,7 +76,7 @@ class TestMobileExporter(TestCase):
         workspace.RunNetOnce(model.param_init_net)
         np_data_int = np.random.randint(100, size=(1, 1, 28, 28), dtype=np.int32)
         workspace.FeedBlob("data_int", np_data_int)
-        np_data_obj = np.array(['aa', 'bb']).astype(np.dtype('O'))
+        np_data_obj = np.array(["aa", "bb"]).astype(np.dtype("O"))
         workspace.FeedBlob("data_obj", np_data_obj)
 
         init_net, predict_net = mobile_exporter.Export(
@@ -103,9 +99,7 @@ class TestMobileExporter(TestCase):
         workspace.RunNet(predict_net.name)
         manual_run_out = workspace.FetchBlob("out")
         manual_run_out_obj = workspace.FetchBlob("out_obj")
-        np.testing.assert_allclose(
-            ref_out, manual_run_out, atol=1e-10, rtol=1e-10
-        )
+        np.testing.assert_allclose(ref_out, manual_run_out, atol=1e-10, rtol=1e-10)
         np.testing.assert_equal(ref_out_obj, manual_run_out_obj)
 
         # Clear the workspace
@@ -126,7 +120,5 @@ class TestMobileExporter(TestCase):
         if isinstance(predictor_out[1][0], bytes):
             predictor_out_int = predictor_out[0]
             predictor_out_obj = predictor_out[1]
-        np.testing.assert_allclose(
-            ref_out, predictor_out_int, atol=1e-10, rtol=1e-10
-        )
+        np.testing.assert_allclose(ref_out, predictor_out_int, atol=1e-10, rtol=1e-10)
         np.testing.assert_equal(ref_out_obj, predictor_out_obj)

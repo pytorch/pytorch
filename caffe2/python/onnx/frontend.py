@@ -11,6 +11,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import object
 import itertools
 import logging
 import re
@@ -19,8 +21,19 @@ from caffe2.python import core as caffe2_core
 from caffe2.python.compatibility import container_abcs
 from caffe2.proto import caffe2_legacy_pb2
 from enum import Enum
-from onnx import (defs, checker, helper, numpy_helper, mapping,
-                  ModelProto, GraphProto, NodeProto, AttributeProto, TensorProto, OperatorSetIdProto)
+from onnx import (
+    defs,
+    checker,
+    helper,
+    numpy_helper,
+    mapping,
+    ModelProto,
+    GraphProto,
+    NodeProto,
+    AttributeProto,
+    TensorProto,
+    OperatorSetIdProto,
+)
 from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
 import numpy as np
 
@@ -41,37 +54,32 @@ class Caffe2Frontend(object):
     target_opset_version = 9
 
     _renamed_operators = {
-        'SpatialBN': 'BatchNormalization',
-        'Conv1D': 'Conv',
-        'Conv2D': 'Conv',
-        'Conv3D': 'Conv',
-        'ConvTranspose1D': 'ConvTranspose',
-        'ConvTranspose2D': 'ConvTranspose',
-        'ConvTranspose3D': 'ConvTranspose',
-        'MaxPool1D': 'MaxPool',
-        'MaxPool2D': 'MaxPool',
-        'MaxPool3D': 'MaxPool',
-        'AveragePool1D': 'AveragePool',
-        'AveragePool2D': 'AveragePool',
-        'AveragePool3D': 'AveragePool',
+        "SpatialBN": "BatchNormalization",
+        "Conv1D": "Conv",
+        "Conv2D": "Conv",
+        "Conv3D": "Conv",
+        "ConvTranspose1D": "ConvTranspose",
+        "ConvTranspose2D": "ConvTranspose",
+        "ConvTranspose3D": "ConvTranspose",
+        "MaxPool1D": "MaxPool",
+        "MaxPool2D": "MaxPool",
+        "MaxPool3D": "MaxPool",
+        "AveragePool1D": "AveragePool",
+        "AveragePool2D": "AveragePool",
+        "AveragePool3D": "AveragePool",
     }
 
     # caffe2 arguments that are completely removed in onnx
     _blacklist_caffe2_args = {
-        'order': {b'NCHW'},
-        'cudnn_exhaustive_search': {0, 1},
-        'exhaustive_search': {0, 1},
-        'use_cudnn': {0, 1},
+        "order": {b"NCHW"},
+        "cudnn_exhaustive_search": {0, 1},
+        "exhaustive_search": {0, 1},
+        "use_cudnn": {0, 1},
     }
 
-    _global_renamed_args = {
-        'kernels': 'kernel_shape',
-    }
+    _global_renamed_args = {"kernels": "kernel_shape"}
 
-    _per_op_renamed_args = {
-        'Squeeze': {'dims': 'axes'},
-        'Transpose': {'axes': 'perm'},
-    }
+    _per_op_renamed_args = {"Squeeze": {"dims": "axes"}, "Transpose": {"axes": "perm"}}
 
     _special_operators = {}
 
@@ -92,11 +100,11 @@ class Caffe2Frontend(object):
             name = cls._per_op_renamed_args[op_type].get(arg.name, name)
 
         # value
-        if arg.HasField('f'):
+        if arg.HasField("f"):
             value = arg.f
-        elif arg.HasField('i'):
+        elif arg.HasField("i"):
             value = arg.i
-        elif arg.HasField('s'):
+        elif arg.HasField("s"):
             value = arg.s
         elif arg.floats:
             value = arg.floats
@@ -105,7 +113,7 @@ class Caffe2Frontend(object):
         elif arg.strings:
             value = arg.strings
         else:
-            raise ValueError('Could not find data field in arg: {}'.format(arg))
+            raise ValueError("Could not find data field in arg: {}".format(arg))
 
         if name in cls._blacklist_caffe2_args:
             assert value in cls._blacklist_caffe2_args[arg.name]
@@ -127,8 +135,11 @@ class Caffe2Frontend(object):
         node_def.input.extend(op_def.input)
         node_def.output.extend(op_def.output)
 
-        attrs = filter(None, [cls.caffe2_arg_to_onnx_attr(op_def, arg)
-                              for arg in op_def.arg])
+        attrs = [
+            _f
+            for _f in [cls.caffe2_arg_to_onnx_attr(op_def, arg) for arg in op_def.arg]
+            if _f
+        ]
         node_def.attribute.extend(attrs)
 
         return node_def
@@ -136,7 +147,9 @@ class Caffe2Frontend(object):
     @classmethod
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
         if C.support_onnx_export(op_def.type):
-            node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
+            node_strs, tensor_strs = C.export_to_onnx(
+                cls._dummy_name, op_def.SerializeToString(), shapes
+            )
             nodes = []
             for s in node_strs:
                 node = NodeProto()
@@ -176,28 +189,26 @@ class Caffe2Frontend(object):
     @staticmethod
     def _extract_value_info(tensor):
         return make_tensor_value_info(
-            name=tensor.name,
-            elem_type=tensor.data_type,
-            shape=tensor.dims)
+            name=tensor.name, elem_type=tensor.data_type, shape=tensor.dims
+        )
 
     @classmethod
-    def caffe2_net_to_onnx_graph(cls,
-                                 predict_net,
-                                 init_net=None,
-                                 value_info=None):
+    def caffe2_net_to_onnx_graph(cls, predict_net, init_net=None, value_info=None):
         if value_info is None:
             value_info = {}
         if not isinstance(value_info, dict):
-            raise ValueError('Please pass value_info as a '
-                             'name -> (type, shape) dictionary')
+            raise ValueError(
+                "Please pass value_info as a " "name -> (type, shape) dictionary"
+            )
 
         cls._filter_fake_init(init_net, value_info)
         cls._ssa_rewrite(predict_net, init_net, value_info)
 
         if init_net:
             initializer = cls.caffe2_init_net_to_initializer(init_net)
-            value_info.update({init.name: (init.data_type, init.dims)
-                               for init in initializer})
+            value_info.update(
+                {init.name: (init.data_type, init.dims) for init in initializer}
+            )
         else:
             initializer = []
 
@@ -211,11 +222,11 @@ class Caffe2Frontend(object):
                     break
 
         # Check whether we have got type shape info of all input
-        missing = (set(list(predict_net.external_input)) -
-                   set(value_info.keys()))
+        missing = set(list(predict_net.external_input)) - set(value_info.keys())
         if missing:
-            raise RuntimeError('Could not find value info of inputs: {}'.format(
-                ', '.join(missing)))
+            raise RuntimeError(
+                "Could not find value info of inputs: {}".format(", ".join(missing))
+            )
 
         ws = None
         outputs = None
@@ -224,12 +235,10 @@ class Caffe2Frontend(object):
             for name in predict_net.external_input:
                 elem_type, shape = value_info[name]
                 inputs[name] = np.random.randn(*shape).astype(
-                    mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type])
+                    mapping.TENSOR_TYPE_TO_NP_TYPE[elem_type]
+                )
 
-            ws, outputs = c2_native_run_net(
-                init_net,
-                predict_net,
-                inputs)
+            ws, outputs = c2_native_run_net(init_net, predict_net, inputs)
 
             for name in predict_net.external_output:
                 output = outputs[name]
@@ -243,41 +252,50 @@ class Caffe2Frontend(object):
         # This is a mapping from Caffe2 names to ONNX names
         graph_def.input.extend(
             make_tensor_value_info(
-                name=name,
-                elem_type=value_info[name][0],
-                shape=value_info[name][1])
-            for name in predict_net.external_input)
+                name=name, elem_type=value_info[name][0], shape=value_info[name][1]
+            )
+            for name in predict_net.external_input
+        )
 
-        cls._dummy_name.reset(cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net))
+        cls._dummy_name.reset(
+            cls._all_names_in_net(predict_net) | cls._all_names_in_net(init_net)
+        )
 
         for op in predict_net.op:
             shapes = {}
             for name in itertools.chain(op.input, op.output):
                 if ws:
                     blob = ws.FetchBlob(name)
-                    if hasattr(blob, 'shape'):
+                    if hasattr(blob, "shape"):
                         shapes[name] = blob.shape
                 else:
                     shapes[name] = value_info[name][1]
             nodes, const_tensors = cls.caffe2_op_to_onnx_node(op, shapes=shapes)
             graph_def.node.extend(nodes)
             graph_def.initializer.extend(const_tensors)
-            graph_def.input.extend([cls._extract_value_info(tensor) for tensor in const_tensors])
+            graph_def.input.extend(
+                [cls._extract_value_info(tensor) for tensor in const_tensors]
+            )
 
-        all_output = set(sum((list(node.output) for node in graph_def.node),
-                             [init.name for init in graph_def.initializer]))
+        all_output = set(
+            sum(
+                (list(node.output) for node in graph_def.node),
+                [init.name for init in graph_def.initializer],
+            )
+        )
         redundant_output = set(vi.name for vi in graph_def.output) - all_output
         if redundant_output:
             logger.warning(
-                'There are graph output not produced by any node or initializer: {}'
-                '! Will drop them.'.format(', '.join(redundant_output)))
+                "There are graph output not produced by any node or initializer: {}"
+                "! Will drop them.".format(", ".join(redundant_output))
+            )
         graph_def.output.extend(
             make_tensor_value_info(
-                name=name,
-                elem_type=value_info[name][0],
-                shape=value_info[name][1])
+                name=name, elem_type=value_info[name][0], shape=value_info[name][1]
+            )
             for name in predict_net.external_output
-            if name in all_output)
+            if name in all_output
+        )
 
         return graph_def
 
@@ -287,16 +305,22 @@ class Caffe2Frontend(object):
         output_names = []
         for op in init_net.op:
             output_names.extend(op.output)
-        initializer = [numpy_helper.from_array(ws.FetchBlob(name), name=name)
-                       for name in sorted(set(output_names))]
+        initializer = [
+            numpy_helper.from_array(ws.FetchBlob(name), name=name)
+            for name in sorted(set(output_names))
+        ]
         return initializer
 
     @classmethod
     def _filter_fake_init(cls, init_net, value_info):
         if init_net:
-            fake_inits = [op for op in init_net.op
-                          if len(op.output) == 1 and op.output[0] in value_info and
-                          re.match('GivenTensor.*Fill|ConstantFill', op.type)]
+            fake_inits = [
+                op
+                for op in init_net.op
+                if len(op.output) == 1
+                and op.output[0] in value_info
+                and re.match("GivenTensor.*Fill|ConstantFill", op.type)
+            ]
             for fake_init in fake_inits:
                 init_net.op.remove(fake_init)
             del fake_inits[:]
@@ -313,11 +337,13 @@ class Caffe2Frontend(object):
                 return name
             if version_cnt and len(version_cnt.get(name, {})) <= 1:
                 return name
-            return '{}_{}'.format(name, version)
+            return "{}_{}".format(name, version)
 
         if init_net:
             for op in init_net.op:
-                assert re.match('GivenTensor.*Fill', op.type), "type is {}, \n{}".format(op.type, op)
+                assert re.match(
+                    "GivenTensor.*Fill", op.type
+                ), "type is {}, \n{}".format(op.type, op)
                 assert len(op.output) == 1
 
         ssa, blob_versions = caffe2_core.get_ssa(net)
@@ -335,22 +361,29 @@ class Caffe2Frontend(object):
 
         assert len(net.op) == len(ssa)
         for op, (versioned_inputs, versioned_outputs) in zip(net.op, ssa):
-            op.input[:] = [ssa_name(name, version, version_cnt)
-                           for name, version in versioned_inputs]
-            op.output[:] = [ssa_name(name, version, version_cnt)
-                            for name, version in versioned_outputs]
-        net.external_output[:] = [ssa_name(name, blob_versions[name], version_cnt)
-                                  for name in net.external_output]
+            op.input[:] = [
+                ssa_name(name, version, version_cnt)
+                for name, version in versioned_inputs
+            ]
+            op.output[:] = [
+                ssa_name(name, version, version_cnt)
+                for name, version in versioned_outputs
+            ]
+        net.external_output[:] = [
+            ssa_name(name, blob_versions[name], version_cnt)
+            for name in net.external_output
+        ]
 
     @classmethod
     def caffe2_net_to_onnx_model(cls, *args, **kwargs):
         opset_id = OperatorSetIdProto()
-        opset_id.domain = ''  # ONNX default domain
+        opset_id.domain = ""  # ONNX default domain
         opset_id.version = cls.target_opset_version
-        model = make_model(cls.caffe2_net_to_onnx_graph(*args, **kwargs),
-                           opset_imports=[opset_id],  # current supported opset version
-                           producer_name='onnx-caffe2',  # producer name
-                           )
+        model = make_model(
+            cls.caffe2_net_to_onnx_graph(*args, **kwargs),
+            opset_imports=[opset_id],  # current supported opset version
+            producer_name="onnx-caffe2",  # producer name
+        )
         checker.check_model(model)
         return model
 

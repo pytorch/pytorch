@@ -12,17 +12,12 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
+
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class ReluTest(hu.HypothesisTestCase):
-    @given(X=hu.tensor(),
-           inplace=st.booleans(),
-           **mu.gcs)
+    @given(X=hu.tensor(), inplace=st.booleans(), **mu.gcs)
     def test_relu(self, X, inplace, gc, dc):
-        op = core.CreateOperator(
-            "Relu",
-            ["X"],
-            ["Y"] if not inplace else ["X"],
-        )
+        op = core.CreateOperator("Relu", ["X"], ["Y"] if not inplace else ["X"])
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
         X[X == 0.0] += 0.02
@@ -31,26 +26,27 @@ class ReluTest(hu.HypothesisTestCase):
 
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @given(size=st.integers(7, 9),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
-           inplace=st.booleans(),
-           **mu.gcs)
+    @given(
+        size=st.integers(7, 9),
+        input_channels=st.integers(1, 3),
+        batch_size=st.integers(1, 3),
+        inplace=st.booleans(),
+        **mu.gcs
+    )
     def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc):
         relu_fp32 = core.CreateOperator(
-            "Relu",
-            ["X"],
-            ["Y"] if not inplace else ["X"],
-            device_option=dc[0]
+            "Relu", ["X"], ["Y"] if not inplace else ["X"], device_option=dc[0]
         )
 
-        X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        X = (
+            np.random.rand(batch_size, input_channels, size, size).astype(np.float32)
+            - 0.5
+        )
         # go away from the origin point to avoid kink problems
         X += 0.02 * np.sign(X)
         X[X == 0.0] += 0.02
 
-        if X.min() >=0:
+        if X.min() >= 0:
             scale = np.absolute(X).max() / 0xFF
             zero_point = 0
         else:
@@ -67,10 +63,7 @@ class ReluTest(hu.HypothesisTestCase):
         workspace.ResetWorkspace()
 
         sw2nhwc = core.CreateOperator(
-            "NCHW2NHWC",
-            ["Xi"],
-            ["Xi_nhwc"],
-            device_option=dc[1]
+            "NCHW2NHWC", ["Xi"], ["Xi_nhwc"], device_option=dc[1]
         )
 
         quantize = core.CreateOperator(
@@ -100,10 +93,7 @@ class ReluTest(hu.HypothesisTestCase):
         )
 
         sw2nchw = core.CreateOperator(
-            "NHWC2NCHW",
-            ["Y_nhwc"],
-            ["Y_out"],
-            device_option=dc[1]
+            "NHWC2NCHW", ["Y_nhwc"], ["Y_out"], device_option=dc[1]
         )
 
         net = caffe2_pb2.NetDef()
@@ -122,6 +112,7 @@ class ReluTest(hu.HypothesisTestCase):
             self.assertTrue(False)
 
         workspace.SwitchWorkspace(old_ws_name)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,7 @@ def rand_array(*dims):
 
 
 def randBlob(name, type, *dims, **kwargs):
-    offset = kwargs['offset'] if 'offset' in kwargs else 0.0
+    offset = kwargs["offset"] if "offset" in kwargs else 0.0
     workspace.FeedBlob(name, np.random.rand(*dims).astype(type) + offset)
 
 
@@ -45,10 +45,10 @@ def str_compare(a, b, encoding="utf8"):
 
 def get_default_test_flags():
     return [
-        'caffe2',
-        '--caffe2_log_level=0',
-        '--caffe2_cpu_allocator_do_zero_fill=0',
-        '--caffe2_cpu_allocator_do_junk_fill=1',
+        "caffe2",
+        "--caffe2_log_level=0",
+        "--caffe2_cpu_allocator_do_zero_fill=0",
+        "--caffe2_cpu_allocator_do_junk_fill=1",
     ]
 
 
@@ -65,7 +65,7 @@ def caffe2_flaky(test_method):
 
 
 def is_flaky_test_mode():
-    return os.getenv('CAFFE2_RUN_FLAKY_TESTS', '0') == '1'
+    return os.getenv("CAFFE2_RUN_FLAKY_TESTS", "0") == "1"
 
 
 class TestCase(unittest.TestCase):
@@ -81,9 +81,9 @@ class TestCase(unittest.TestCase):
         # the test is decorated as a flaky test.
         test_method = getattr(self, self._testMethodName)
         is_flaky_test = getattr(test_method, "__caffe2_flaky__", False)
-        if (is_flaky_test_mode() and not is_flaky_test):
+        if is_flaky_test_mode() and not is_flaky_test:
             raise unittest.SkipTest("Non-flaky tests are skipped in flaky test mode")
-        elif (not is_flaky_test_mode() and is_flaky_test):
+        elif not is_flaky_test_mode() and is_flaky_test:
             raise unittest.SkipTest("Flaky tests are skipped in regular test mode")
 
         self.ws = workspace.C.Workspace()

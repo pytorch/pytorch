@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
 from caffe2.python import core, workspace
 from caffe2.python import test_util as tu
 import caffe2.python.nomnigraph as ng
@@ -87,8 +88,7 @@ class TestNomnigraphTransformations(tu.TestCase):
         seed=st.integers(0, 65535),
         kernel=st.integers(3, 5),
     )
-    def test_transpose_network(self, batch_size, channels, height, width, seed,
-                               kernel):
+    def test_transpose_network(self, batch_size, channels, height, width, seed, kernel):
         net = core.Net("net")
         net.Conv(["X", "w1", "b1"], ["c1"], stride=1, pad=0, kernel=kernel)
         net.Conv(["X", "w2", "b2"], ["c2"], stride=1, pad=0, kernel=kernel)
@@ -126,12 +126,16 @@ class TestNomnigraphTransformations(tu.TestCase):
         # X, w1, w2, w3, w4 are channel-based inputs
         # c1, c2, c3, c4 are the outputs of convolutions
         # i.e. a total of 9.
-        self.assertEqual(postTransformNumOperators,
-                         preTransformNumOperators + 9,
-                         "expected 9 additional operators")
-        self.assertEqual(postTransformNumTensors,
-                         preTransformNumTensors + 9,
-                         "expected 9 additional tensors")
+        self.assertEqual(
+            postTransformNumOperators,
+            preTransformNumOperators + 9,
+            "expected 9 additional operators",
+        )
+        self.assertEqual(
+            postTransformNumTensors,
+            preTransformNumTensors + 9,
+            "expected 9 additional tensors",
+        )
         workspace.ResetWorkspace()
         for name, val in zip(all_inp_names, all_input):
             workspace.FeedBlob(name, val)

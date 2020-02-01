@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
@@ -12,43 +13,45 @@ import numpy as np
 
 
 class TestBooleanMaskOp(serial.SerializedTestCase):
-    @given(x=hu.tensor1d(min_len=1,
-                         max_len=100,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
-           **hu.gcs_cpu_only)
+    @given(
+        x=hu.tensor1d(
+            min_len=1, max_len=100, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        **hu.gcs_cpu_only
+    )
     def test_boolean_mask_gradient(self, x, gc, dc):
-        op = core.CreateOperator("BooleanMask",
-                                 ["data", "mask"],
-                                 "masked_data")
+        op = core.CreateOperator("BooleanMask", ["data", "mask"], "masked_data")
         mask = np.random.choice(a=[True, False], size=x.shape[0])
         expected_gradient = np.copy(mask).astype(int)
         self.assertDeviceChecks(dc, op, [x, mask], [0])
         self.assertGradientChecks(gc, op, [x, mask], 0, [0])
 
-
-    @given(x=hu.tensor1d(min_len=1,
-                         max_len=5,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
-           **hu.gcs)
+    @given(
+        x=hu.tensor1d(
+            min_len=1, max_len=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        **hu.gcs
+    )
     def test_boolean_mask(self, x, gc, dc):
-        op = core.CreateOperator("BooleanMask",
-                                 ["data", "mask"],
-                                 "masked_data")
+        op = core.CreateOperator("BooleanMask", ["data", "mask"], "masked_data")
         mask = np.random.choice(a=[True, False], size=x.shape[0])
 
         def ref(x, mask):
             return (x[mask],)
+
         self.assertReferenceChecks(gc, op, [x, mask], ref)
         self.assertDeviceChecks(dc, op, [x, mask], [0])
 
-    @given(x=hu.tensor1d(min_len=1,
-                         max_len=5,
-                         elements=st.floats(min_value=0.5, max_value=1.0)),
-           **hu.gcs)
+    @given(
+        x=hu.tensor1d(
+            min_len=1, max_len=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        **hu.gcs
+    )
     def test_boolean_mask_indices(self, x, gc, dc):
-        op = core.CreateOperator("BooleanMask",
-                                 ["data", "mask"],
-                                 ["masked_data", "masked_indices"])
+        op = core.CreateOperator(
+            "BooleanMask", ["data", "mask"], ["masked_data", "masked_indices"]
+        )
         mask = np.random.choice(a=[True, False], size=x.shape[0])
 
         def ref(x, mask):
@@ -66,27 +69,30 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
             x = x.astype(dtype)
         return x, dc
 
-    @given(x=hu.tensor(min_dim=2,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
         fill_val = 1e-3 if dtype == np.float16 else 1e-9
-        op = core.CreateOperator("SequenceMask",
-                                 ["data", "lengths"],
-                                 ["masked_data"],
-                                 mode="sequence",
-                                 axis=len(x.shape) - 1,
-                                 fill_val=fill_val)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data", "lengths"],
+            ["masked_data"],
+            mode="sequence",
+            axis=len(x.shape) - 1,
+            fill_val=fill_val,
+        )
         elem_dim = x.shape[-1]
         leading_dim = 1
         for dim in x.shape[:-1]:
             leading_dim *= dim
-        lengths = np.random.randint(0, elem_dim, [leading_dim])\
-            .astype(np.int32)
+        lengths = np.random.randint(0, elem_dim, [leading_dim]).astype(np.int32)
 
         def ref(x, lengths):
             ref = np.reshape(x, [leading_dim, elem_dim])
@@ -99,29 +105,32 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [x, lengths], ref)
         self.assertDeviceChecks(dc, op, [x, lengths], [0])
 
-    @given(x=hu.tensor(min_dim=2,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_with_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
         fill_val = 1e-3 if dtype == np.float16 else 1e-9
         radius = 2
-        op = core.CreateOperator("SequenceMask",
-                                 ["data", "centers"],
-                                 ["masked_data"],
-                                 mode="window",
-                                 radius=radius,
-                                 axis=len(x.shape) - 1,
-                                 fill_val=fill_val)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data", "centers"],
+            ["masked_data"],
+            mode="window",
+            radius=radius,
+            axis=len(x.shape) - 1,
+            fill_val=fill_val,
+        )
         elem_dim = x.shape[-1]
         leading_dim = 1
         for dim in x.shape[:-1]:
             leading_dim *= dim
-        centers = np.random.randint(0, elem_dim, [leading_dim])\
-            .astype(np.int32)
+        centers = np.random.randint(0, elem_dim, [leading_dim]).astype(np.int32)
 
         def ref(x, centers):
             ref = np.reshape(x, [leading_dim, elem_dim])
@@ -137,40 +146,50 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         # Gradient check with np.float16 is found to be flakey, disable for now
         # with high threshold (to repro, set threshold to 0.4).
         threshold = 1.0 if dtype == np.float16 else 0.005
-        self.assertGradientChecks(gc, op, [x, centers], 0, [0],
-                                  threshold=threshold)
+        self.assertGradientChecks(gc, op, [x, centers], 0, [0], threshold=threshold)
 
-    @given(x=hu.tensor(min_dim=2,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        mode=st.sampled_from(["upper", "lower", "upperdiag", "lowerdiag"]),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
         fill_val = 1e-3 if dtype == np.float16 else 1e-9
-        op = core.CreateOperator("SequenceMask",
-                                 ["data"],
-                                 ["masked_data"],
-                                 mode=mode,
-                                 axis=len(x.shape) - 1,
-                                 fill_val=fill_val)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data"],
+            ["masked_data"],
+            mode=mode,
+            axis=len(x.shape) - 1,
+            fill_val=fill_val,
+        )
         elem_dim = x.shape[-1]
         leading_dim = 1
         for dim in x.shape[:-1]:
             leading_dim *= dim
 
-        if mode == 'upper':
+        if mode == "upper":
+
             def compare(i, j):
                 return j > i
-        elif mode == 'lower':
+
+        elif mode == "lower":
+
             def compare(i, j):
                 return j < i
-        elif mode == 'upperdiag':
+
+        elif mode == "upperdiag":
+
             def compare(i, j):
                 return j >= i
-        elif mode == 'lowerdiag':
+
+        elif mode == "lowerdiag":
+
             def compare(i, j):
                 return j <= i
 
@@ -189,14 +208,17 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         # with high threshold (to repro, set threshold to 0.4).
         threshold = 1.0 if dtype == np.float16 else 0.005
         stepsize = 0.1 if dtype == np.float16 else 0.05
-        self.assertGradientChecks(gc, op, [x], 0, [0],
-                                  threshold=threshold, stepsize=stepsize)
+        self.assertGradientChecks(
+            gc, op, [x], 0, [0], threshold=threshold, stepsize=stepsize
+        )
 
-    @given(x=hu.tensor(min_dim=2,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_batching_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -209,20 +231,21 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
             np.random.shuffle(inds)
             batch = inds[0]
             axis = inds[1]
-        op = core.CreateOperator("SequenceMask",
-                                 ["data", "lengths"],
-                                 ["masked_data"],
-                                 mode='sequence',
-                                 axis=axis,
-                                 fill_val=fill_val,
-                                 batch=batch)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data", "lengths"],
+            ["masked_data"],
+            mode="sequence",
+            axis=axis,
+            fill_val=fill_val,
+            batch=batch,
+        )
 
-        before = int(np.prod(x.shape[:batch + 1]))
-        between = int(np.prod(x.shape[batch + 1:axis]))
+        before = int(np.prod(x.shape[: batch + 1]))
+        between = int(np.prod(x.shape[batch + 1 : axis]))
         after = int(np.prod(x.shape[axis:]))
 
-        lengths = np.random.randint(0, after, [between])\
-            .astype(np.int32)
+        lengths = np.random.randint(0, after, [between]).astype(np.int32)
 
         def ref(z, l):
             w = np.reshape(z, [before, between, after])
@@ -241,14 +264,15 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         # Gradient check with np.float16 is found to be flakey, disable for now
         # with high threshold (to repro, set threshold to 0.4).
         threshold = 1.0 if dtype == np.float16 else 0.005
-        self.assertGradientChecks(gc, op, [x, lengths], 0, [0],
-                                  threshold=threshold)
+        self.assertGradientChecks(gc, op, [x, lengths], 0, [0], threshold=threshold)
 
-    @given(x=hu.tensor(min_dim=4,
-                       max_dim=4,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=4, max_dim=4, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_batching_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -262,21 +286,22 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
             np.random.shuffle(inds)
             batch = inds[0]
             axis = inds[1]
-        op = core.CreateOperator("SequenceMask",
-                                 ["data", "centers"],
-                                 ["masked_data"],
-                                 mode='window',
-                                 radius=radius,
-                                 axis=axis,
-                                 fill_val=fill_val,
-                                 batch=batch)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data", "centers"],
+            ["masked_data"],
+            mode="window",
+            radius=radius,
+            axis=axis,
+            fill_val=fill_val,
+            batch=batch,
+        )
 
-        before = int(np.prod(x.shape[:batch + 1]))
-        between = int(np.prod(x.shape[batch + 1:axis]))
+        before = int(np.prod(x.shape[: batch + 1]))
+        between = int(np.prod(x.shape[batch + 1 : axis]))
         after = int(np.prod(x.shape[axis:]))
 
-        centers = np.random.randint(0, after, [between])\
-            .astype(np.int32)
+        centers = np.random.randint(0, after, [between]).astype(np.int32)
 
         def ref(z, c):
             w = np.reshape(z, [before, between, after])
@@ -295,15 +320,16 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         # Gradient check with np.float16 is found to be flakey, disable for now
         # with high threshold (to repro, set threshold to 0.4).
         threshold = 1.0 if dtype == np.float16 else 0.005
-        self.assertGradientChecks(gc, op, [x, centers], 0, [0],
-                                  threshold=threshold)
+        self.assertGradientChecks(gc, op, [x, centers], 0, [0], threshold=threshold)
 
-    @given(x=hu.tensor(min_dim=3,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=3, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        mode=st.sampled_from(["upper", "lower", "upperdiag", "lowerdiag"]),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_batching_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
@@ -316,30 +342,39 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
             np.random.shuffle(inds)
             batch = inds[0]
             axis = inds[1]
-        op = core.CreateOperator("SequenceMask",
-                                 ["data"],
-                                 ["masked_data"],
-                                 mode=mode,
-                                 axis=axis,
-                                 fill_val=fill_val,
-                                 batch=batch)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data"],
+            ["masked_data"],
+            mode=mode,
+            axis=axis,
+            fill_val=fill_val,
+            batch=batch,
+        )
 
-        if mode == 'upper':
+        if mode == "upper":
+
             def compare(i, j):
                 return j > i
-        elif mode == 'lower':
+
+        elif mode == "lower":
+
             def compare(i, j):
                 return j < i
-        elif mode == 'upperdiag':
+
+        elif mode == "upperdiag":
+
             def compare(i, j):
                 return j >= i
-        elif mode == 'lowerdiag':
+
+        elif mode == "lowerdiag":
+
             def compare(i, j):
                 return j <= i
 
         def ref(z):
-            before = int(np.prod(z.shape[:batch + 1]))
-            between = int(np.prod(z.shape[batch + 1:axis]))
+            before = int(np.prod(z.shape[: batch + 1]))
+            between = int(np.prod(z.shape[batch + 1 : axis]))
             after = int(np.prod(z.shape[axis:]))
 
             w = np.reshape(z, [before, between, after])
@@ -359,32 +394,36 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
         # with high threshold (to repro, set threshold to 0.4).
         threshold = 1.0 if dtype == np.float16 else 0.005
         stepsize = 0.1 if dtype == np.float16 else 0.05
-        self.assertGradientChecks(gc, op, [x], 0, [0],
-                                  threshold=threshold, stepsize=stepsize)
+        self.assertGradientChecks(
+            gc, op, [x], 0, [0], threshold=threshold, stepsize=stepsize
+        )
 
-    @given(x=hu.tensor(min_dim=3,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           **hu.gcs)
+    @given(
+        x=hu.tensor(
+            min_dim=3, max_dim=5, elements=st.floats(min_value=0.5, max_value=1.0)
+        ),
+        dtype=st.sampled_from([np.float32, np.float16]),
+        **hu.gcs
+    )
     def test_sequence_mask_repeated(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
         # finite fill value needed for gradient check
         fill_val = 1e-3 if dtype == np.float16 else 1e-9
-        op = core.CreateOperator("SequenceMask",
-                                 ["data", "lengths"],
-                                 ["masked_data"],
-                                 mode="sequence",
-                                 axis=len(x.shape) - 2,
-                                 repeat_from_axis=-1,
-                                 fill_val=fill_val)
+        op = core.CreateOperator(
+            "SequenceMask",
+            ["data", "lengths"],
+            ["masked_data"],
+            mode="sequence",
+            axis=len(x.shape) - 2,
+            repeat_from_axis=-1,
+            fill_val=fill_val,
+        )
 
         elem_dim = x.shape[-2]
         leading_dim = 1
         for dim in x.shape[:-2]:
             leading_dim *= dim
-        lengths = np.random.randint(0, elem_dim, [leading_dim])\
-            .astype(np.int32)
+        lengths = np.random.randint(0, elem_dim, [leading_dim]).astype(np.int32)
 
         def ref(x, lengths):
             ref = np.reshape(x, [leading_dim, elem_dim, -1])

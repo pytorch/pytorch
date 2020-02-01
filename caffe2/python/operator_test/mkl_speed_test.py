@@ -28,7 +28,8 @@ class TestMKLBasic(test_util.TestCase):
             workspace.FetchBlob("Y"),
             workspace.FetchBlob("Y_mkl"),
             atol=1e-10,
-            rtol=1e-10)
+            rtol=1e-10,
+        )
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
         # The returned runtime is the time of
@@ -38,7 +39,7 @@ class TestMKLBasic(test_util.TestCase):
         # Note(Yangqing): in fact, it seems that in optimized mode, this is
         # not always guaranteed - MKL runs slower than the Eigen vectorized
         # version, so I am turning this assertion off.
-        #self.assertTrue(runtime[1] >= runtime[2])
+        # self.assertTrue(runtime[1] >= runtime[2])
 
         print("Relu CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
 
@@ -78,5 +79,5 @@ class TestMKLBasic(test_util.TestCase):
     #     print("Conv CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

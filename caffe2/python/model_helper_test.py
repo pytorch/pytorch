@@ -2,6 +2,8 @@
 
 from __future__ import absolute_import, division, print_function
 
+from builtins import zip
+from builtins import map
 import unittest
 
 from caffe2.python import brew, model_helper

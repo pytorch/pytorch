@@ -17,6 +17,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -27,22 +28,32 @@ import unittest
 
 
 class TestUpSample(serial.SerializedTestCase):
-    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
-           width_scale=st.floats(1.0, 4.0) | st.just(2.0),
-           height=st.integers(4, 32),
-           width=st.integers(4, 32),
-           num_channels=st.integers(1, 4),
-           batch_size=st.integers(1, 4),
-           seed=st.integers(0, 65535),
-           **hu.gcs)
-    def test_upsample(self, height_scale, width_scale, height, width,
-                     num_channels, batch_size, seed,
-                     gc, dc):
+    @serial.given(
+        height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+        width_scale=st.floats(1.0, 4.0) | st.just(2.0),
+        height=st.integers(4, 32),
+        width=st.integers(4, 32),
+        num_channels=st.integers(1, 4),
+        batch_size=st.integers(1, 4),
+        seed=st.integers(0, 65535),
+        **hu.gcs
+    )
+    def test_upsample(
+        self,
+        height_scale,
+        width_scale,
+        height,
+        width,
+        num_channels,
+        batch_size,
+        seed,
+        gc,
+        dc,
+    ):
 
         np.random.seed(seed)
 
-        X = np.random.rand(
-            batch_size, num_channels, height, width).astype(np.float32)
+        X = np.random.rand(batch_size, num_channels, height, width).astype(np.float32)
         scales = np.array([height_scale, width_scale]).astype(np.float32)
 
         ops = [
@@ -57,30 +68,29 @@ class TestUpSample(serial.SerializedTestCase):
                 [X],
             ),
             (
-                core.CreateOperator(
-                    "UpsampleBilinear",
-                    ["X", "scales"],
-                    ["Y"],
-                ),
+                core.CreateOperator("UpsampleBilinear", ["X", "scales"], ["Y"]),
                 [X, scales],
             ),
         ]
 
         for op, inputs in ops:
+
             def ref(X, scales=None):
                 output_height = np.int32(height * height_scale)
                 output_width = np.int32(width * width_scale)
 
                 Y = np.random.rand(
-                    batch_size, num_channels, output_height,
-                    output_width).astype(np.float32)
+                    batch_size, num_channels, output_height, output_width
+                ).astype(np.float32)
 
-                rheight = ((height - 1) / (output_height - 1)
-                        if output_height > 1
-                        else float(0))
-                rwidth = ((width - 1) / (output_width - 1)
-                        if output_width > 1
-                        else float(0))
+                rheight = (
+                    (height - 1) / (output_height - 1)
+                    if output_height > 1
+                    else float(0)
+                )
+                rwidth = (
+                    (width - 1) / (output_width - 1) if output_width > 1 else float(0)
+                )
 
                 for i in range(output_height):
                     h1r = rheight * i
@@ -94,42 +104,53 @@ class TestUpSample(serial.SerializedTestCase):
                         w1p = 1 if w1 < width - 1 else 0
                         w1lambda = w1r - w1
                         w0lambda = float(1) - w1lambda
-                        Y[:, :, i, j] = (h0lambda * (
-                            w0lambda * X[:, :, h1, w1] +
-                            w1lambda * X[:, :, h1, w1 + w1p]) +
-                            h1lambda * (w0lambda * X[:, :, h1 + h1p, w1] +
-                            w1lambda * X[:, :, h1 + h1p, w1 + w1p]))
+                        Y[:, :, i, j] = h0lambda * (
+                            w0lambda * X[:, :, h1, w1]
+                            + w1lambda * X[:, :, h1, w1 + w1p]
+                        ) + h1lambda * (
+                            w0lambda * X[:, :, h1 + h1p, w1]
+                            + w1lambda * X[:, :, h1 + h1p, w1 + w1p]
+                        )
 
-                return Y,
+                return (Y,)
 
             self.assertReferenceChecks(gc, op, inputs, ref)
             self.assertDeviceChecks(dc, op, inputs, [0])
-            self.assertGradientChecks(gc, op, inputs, 0, [0], stepsize=0.1,
-                                      threshold=1e-2)
+            self.assertGradientChecks(
+                gc, op, inputs, 0, [0], stepsize=0.1, threshold=1e-2
+            )
 
-    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
-           width_scale=st.floats(1.0, 4.0) | st.just(2.0),
-           height=st.integers(4, 32),
-           width=st.integers(4, 32),
-           num_channels=st.integers(1, 4),
-           batch_size=st.integers(1, 4),
-           seed=st.integers(0, 65535),
-           **hu.gcs)
-    def test_upsample_grad(self, height_scale, width_scale, height, width,
-                          num_channels, batch_size, seed, gc, dc):
+    @serial.given(
+        height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+        width_scale=st.floats(1.0, 4.0) | st.just(2.0),
+        height=st.integers(4, 32),
+        width=st.integers(4, 32),
+        num_channels=st.integers(1, 4),
+        batch_size=st.integers(1, 4),
+        seed=st.integers(0, 65535),
+        **hu.gcs
+    )
+    def test_upsample_grad(
+        self,
+        height_scale,
+        width_scale,
+        height,
+        width,
+        num_channels,
+        batch_size,
+        seed,
+        gc,
+        dc,
+    ):
 
         np.random.seed(seed)
 
         output_height = np.int32(height * height_scale)
         output_width = np.int32(width * width_scale)
-        X = np.random.rand(batch_size,
-                           num_channels,
-                           height,
-                           width).astype(np.float32)
-        dY = np.random.rand(batch_size,
-                            num_channels,
-                            output_height,
-                            output_width).astype(np.float32)
+        X = np.random.rand(batch_size, num_channels, height, width).astype(np.float32)
+        dY = np.random.rand(
+            batch_size, num_channels, output_height, output_width
+        ).astype(np.float32)
         scales = np.array([height_scale, width_scale]).astype(np.float32)
 
         ops = [
@@ -145,24 +166,25 @@ class TestUpSample(serial.SerializedTestCase):
             ),
             (
                 core.CreateOperator(
-                    "UpsampleBilinearGradient",
-                    ["dY", "X", "scales"],
-                    ["dX"],
+                    "UpsampleBilinearGradient", ["dY", "X", "scales"], ["dX"]
                 ),
                 [dY, X, scales],
             ),
         ]
 
         for op, inputs in ops:
+
             def ref(dY, X, scales=None):
                 dX = np.zeros_like(X)
 
-                rheight = ((height - 1) / (output_height - 1)
-                        if output_height > 1
-                        else float(0))
-                rwidth = ((width - 1) / (output_width - 1)
-                        if output_width > 1
-                        else float(0))
+                rheight = (
+                    (height - 1) / (output_height - 1)
+                    if output_height > 1
+                    else float(0)
+                )
+                rwidth = (
+                    (width - 1) / (output_width - 1) if output_width > 1 else float(0)
+                )
 
                 for i in range(output_height):
                     h1r = rheight * i
@@ -176,16 +198,14 @@ class TestUpSample(serial.SerializedTestCase):
                         w1p = 1 if w1 < width - 1 else 0
                         w1lambda = w1r - w1
                         w0lambda = float(1) - w1lambda
-                        dX[:, :, h1, w1] += (
-                            h0lambda * w0lambda * dY[:, :, i, j])
-                        dX[:, :, h1, w1 + w1p] += (
-                            h0lambda * w1lambda * dY[:, :, i, j])
-                        dX[:, :, h1 + h1p, w1] += (
-                            h1lambda * w0lambda * dY[:, :, i, j])
+                        dX[:, :, h1, w1] += h0lambda * w0lambda * dY[:, :, i, j]
+                        dX[:, :, h1, w1 + w1p] += h0lambda * w1lambda * dY[:, :, i, j]
+                        dX[:, :, h1 + h1p, w1] += h1lambda * w0lambda * dY[:, :, i, j]
                         dX[:, :, h1 + h1p, w1 + w1p] += (
-                            h1lambda * w1lambda * dY[:, :, i, j])
+                            h1lambda * w1lambda * dY[:, :, i, j]
+                        )
 
-                return dX,
+                return (dX,)
 
             self.assertDeviceChecks(dc, op, inputs, [0])
             self.assertReferenceChecks(gc, op, inputs, ref)

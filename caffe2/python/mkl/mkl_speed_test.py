@@ -28,7 +28,8 @@ class TestMKLBasic(test_util.TestCase):
             workspace.FetchBlob("Y"),
             workspace.FetchBlob("Y_mkl"),
             atol=1e-10,
-            rtol=1e-10)
+            rtol=1e-10,
+        )
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
         # The returned runtime is the time of
@@ -38,10 +39,9 @@ class TestMKLBasic(test_util.TestCase):
         # Note(Yangqing): in fact, it seems that in optimized mode, this is
         # not always guaranteed - MKL runs slower than the Eigen vectorized
         # version, so I am turning this assertion off.
-        #self.assertTrue(runtime[1] >= runtime[2])
+        # self.assertTrue(runtime[1] >= runtime[2])
 
         print("Relu CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
-
 
     def testConvSpeed(self):
         # We randomly select a shape to test the speed. Intentionally we
@@ -61,20 +61,24 @@ class TestMKLBasic(test_util.TestCase):
         net = core.Net("test")
         # Makes sure that we can run relu.
         net.Conv(["X", "W", "b"], "Y", pad=1, stride=1, kernel=3)
-        net.Conv(["X_mkl", "W_mkl", "b_mkl"], "Y_mkl",
-                 pad=1, stride=1, kernel=3, device_option=mkl_do)
+        net.Conv(
+            ["X_mkl", "W_mkl", "b_mkl"],
+            "Y_mkl",
+            pad=1,
+            stride=1,
+            kernel=3,
+            device_option=mkl_do,
+        )
         workspace.CreateNet(net)
         workspace.RunNet(net)
         # makes sure that the results are good.
         np.testing.assert_allclose(
-            workspace.FetchBlob("Y"),
-            workspace.FetchBlob("Y_mkl"),
-            atol=1e-2,
-            rtol=1e-2)
+            workspace.FetchBlob("Y"), workspace.FetchBlob("Y_mkl"), atol=1e-2, rtol=1e-2
+        )
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
         print("Conv CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

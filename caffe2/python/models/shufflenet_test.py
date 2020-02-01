@@ -19,8 +19,8 @@ class ShufflenetMemongerTest(hu.HypothesisTestCase):
         results = utils.test_shared_grads(
             with_shapes,
             shufflenet.create_shufflenet,
-            'gpu_0/stage1_conv_w',
-            'gpu_0/last_out_L1000'
+            "gpu_0/stage1_conv_w",
+            "gpu_0/last_out_L1000",
         )
         self.assertTrue(results[0][0] < results[0][1])
         np.testing.assert_almost_equal(results[1][0], results[1][1])
@@ -28,33 +28,36 @@ class ShufflenetMemongerTest(hu.HypothesisTestCase):
 
     def test_shufflenet_forward_only(self):
         results = utils.test_forward_only(
-            shufflenet.create_shufflenet,
-            'gpu_0/last_out_L1000'
+            shufflenet.create_shufflenet, "gpu_0/last_out_L1000"
         )
         self.assertTrue(results[0][0] < results[0][1])
         self.assertTrue(results[1] < 10 and results[1] > 0)
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
     def test_shufflenet_forward_only_fast_simplenet(self):
-        '''
+        """
         Test C++ memonger that is only for simple nets
-        '''
+        """
         results = utils.test_forward_only_fast_simplenet(
-            shufflenet.create_shufflenet,
-            'gpu_0/last_out_L1000'
+            shufflenet.create_shufflenet, "gpu_0/last_out_L1000"
         )
 
         self.assertTrue(results[0][0] < results[0][1])
         self.assertTrue(results[1] < 4 and results[1] > 0)
         np.testing.assert_almost_equal(results[2][0], results[2][1])
 
+
 if __name__ == "__main__":
     import unittest
     import random
+
     random.seed(2006)
-    workspace.GlobalInit([
-        'caffe2',
-        '--caffe2_log_level=0',
-        '--caffe2_print_blob_sizes_at_exit=0',
-        '--caffe2_gpu_memory_tracking=1'])
+    workspace.GlobalInit(
+        [
+            "caffe2",
+            "--caffe2_log_level=0",
+            "--caffe2_print_blob_sizes_at_exit=0",
+            "--caffe2_gpu_memory_tracking=1",
+        ]
+    )
     unittest.main()

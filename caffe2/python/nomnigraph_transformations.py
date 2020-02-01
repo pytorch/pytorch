@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import range
 from collections import defaultdict
 
 import caffe2.python.nomnigraph as ng
@@ -51,8 +52,7 @@ def transpose_network(nn):
             # create a new Convolution with identical arguments as the original
             # one except for the order
             arg_dict["order"] = "NHWC"
-            new_node = nn.createNode(core.CreateOperator("Conv", [], [],
-                                                         **arg_dict))
+            new_node = nn.createNode(core.CreateOperator("Conv", [], [], **arg_dict))
             for inp in inputs:
                 nn.createEdge(inp, new_node)
             for outp in outputs:

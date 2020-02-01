@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
+from builtins import object
 from hypothesis import given
 import hypothesis.strategies as st
 from multiprocessing import Process
@@ -15,10 +17,10 @@ import shutil
 
 import caffe2.python.hypothesis_test_util as hu
 
-op_engine = 'GLOO'
+op_engine = "GLOO"
 
 
-class TemporaryDirectory:
+class TemporaryDirectory(object):
     def __enter__(self):
         self.tmpdir = tempfile.mkdtemp()
         return self.tmpdir
@@ -31,6 +33,7 @@ def allcompare_process(filestore_dir, process_id, data, num_procs):
     from caffe2.python import core, data_parallel_model, workspace, dyndep
     from caffe2.python.model_helper import ModelHelper
     from caffe2.proto import caffe2_pb2
+
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
     workspace.RunOperatorOnce(
@@ -43,7 +46,7 @@ def allcompare_process(filestore_dir, process_id, data, num_procs):
         shard_id=process_id,
         num_shards=num_procs,
         engine=op_engine,
-        exit_nets=None
+        exit_nets=None,
     )
 
     model = ModelHelper()
@@ -57,9 +60,7 @@ def allcompare_process(filestore_dir, process_id, data, num_procs):
 
 
 class TestAllCompare(hu.HypothesisTestCase):
-    @given(
-        d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8)
-    )
+    @given(d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8))
     def test_allcompare(self, d, n, num_procs):
         dims = []
         for _ in range(d):
@@ -70,8 +71,7 @@ class TestAllCompare(hu.HypothesisTestCase):
             processes = []
             for idx in range(num_procs):
                 process = Process(
-                    target=allcompare_process,
-                    args=(tempdir, idx, test_data, num_procs)
+                    target=allcompare_process, args=(tempdir, idx, test_data, num_procs)
                 )
                 processes.append(process)
                 process.start()
@@ -83,4 +83,5 @@ class TestAllCompare(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

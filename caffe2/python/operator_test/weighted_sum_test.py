@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 
@@ -13,20 +15,22 @@ import numpy as np
 
 
 class TestWeightedSumOp(serial.SerializedTestCase):
-
     @serial.given(
-        n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
-        in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
+        n=st.integers(1, 8),
+        m=st.integers(1, 10),
+        d=st.integers(1, 4),
+        in_place=st.booleans(),
+        engine=st.sampled_from(["", "CUDNN"]),
         seed=st.integers(min_value=0, max_value=65535),
-        **hu.gcs)
-    def test_weighted_sum(
-            self, n, m, d, in_place, engine, seed, gc, dc):
+        **hu.gcs
+    )
+    def test_weighted_sum(self, n, m, d, in_place, engine, seed, gc, dc):
         input_names = []
         input_vars = []
         np.random.seed(seed)
         for i in range(m):
-            X_name = 'X' + str(i)
-            w_name = 'w' + str(i)
+            X_name = "X" + str(i)
+            w_name = "w" + str(i)
             input_names.extend([X_name, w_name])
             var = np.random.rand(n, d).astype(np.float32)
             vars()[X_name] = var
@@ -40,34 +44,35 @@ class TestWeightedSumOp(serial.SerializedTestCase):
             for i in range(m):
                 res = res + args[2 * i + 1] * args[2 * i]
 
-            return (res, )
+            return (res,)
 
         op = core.CreateOperator(
             "WeightedSum",
             input_names,
-            [input_names[0]] if in_place else ['Y'],
+            [input_names[0]] if in_place else ["Y"],
             engine=engine,
         )
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=input_vars,
-            reference=weighted_sum_op_ref,
+            device_option=gc, op=op, inputs=input_vars, reference=weighted_sum_op_ref
         )
         self.assertDeviceChecks(dc, op, input_vars, [0])
 
-    @given(n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
-           grad_on_w=st.booleans(),
-           seed=st.integers(min_value=0, max_value=65535), **hu.gcs_cpu_only)
-    def test_weighted_sum_grad(
-            self, n, m, d, grad_on_w, seed, gc, dc):
+    @given(
+        n=st.integers(1, 8),
+        m=st.integers(1, 10),
+        d=st.integers(1, 4),
+        grad_on_w=st.booleans(),
+        seed=st.integers(min_value=0, max_value=65535),
+        **hu.gcs_cpu_only
+    )
+    def test_weighted_sum_grad(self, n, m, d, grad_on_w, seed, gc, dc):
         input_names = []
         input_vars = []
         np.random.seed(seed)
         for i in range(m):
-            X_name = 'X' + str(i)
-            w_name = 'w' + str(i)
+            X_name = "X" + str(i)
+            w_name = "w" + str(i)
             input_names.extend([X_name, w_name])
             var = np.random.rand(n, d).astype(np.float32)
             vars()[X_name] = var
@@ -76,15 +81,11 @@ class TestWeightedSumOp(serial.SerializedTestCase):
             vars()[w_name] = var
             input_vars.append(var)
 
-        op = core.CreateOperator(
-            "WeightedSum",
-            input_names,
-            ['Y'],
-            grad_on_w=grad_on_w,
-        )
+        op = core.CreateOperator("WeightedSum", input_names, ["Y"], grad_on_w=grad_on_w)
 
         output_to_check_grad = (
-            range(2 * m) if grad_on_w else range(0, 2 * m, 2))
+            list(range(2 * m)) if grad_on_w else list(range(0, 2 * m, 2))
+        )
         for i in output_to_check_grad:
             self.assertGradientChecks(
                 device_option=gc,

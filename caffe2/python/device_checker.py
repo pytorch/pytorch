@@ -1,5 +1,7 @@
 ## @package device_checker
 # Module caffe2.python.device_checker
+from builtins import range
+from builtins import object
 import numpy as np
 import copy
 from caffe2.python import workspace
@@ -18,8 +20,7 @@ class DeviceChecker(object):
         self._threshold = threshold
         self._device_options = device_options
 
-    def CheckSimple(self, op, inputs, outputs_to_check,
-                    input_device_options=None):
+    def CheckSimple(self, op, inputs, outputs_to_check, input_device_options=None):
         """Checks the operator with different device implementations.
 
         Inputs:
@@ -38,18 +39,20 @@ class DeviceChecker(object):
         workspace.SwitchWorkspace("_device_check_", True)
         for i, device_option in enumerate(self._device_options):
             op.device_option.CopyFrom(device_option)
-            _input_device_options = input_device_options or \
-                InferOpBlobDevicesAsDict(op)[0]
+            _input_device_options = (
+                input_device_options or InferOpBlobDevicesAsDict(op)[0]
+            )
             print(_input_device_options)
             for i, arr in enumerate(inputs):
                 workspace.FeedBlob(
-                    op.input[i], np.array(arr),
-                    _input_device_options.get(op.input[i], device_option)
+                    op.input[i],
+                    np.array(arr),
+                    _input_device_options.get(op.input[i], device_option),
                 )
             workspace.RunOperatorOnce(op)
             results.append(
-                [workspace.FetchBlob(op.output[idx])
-                 for idx in outputs_to_check])
+                [workspace.FetchBlob(op.output[idx]) for idx in outputs_to_check]
+            )
             # Everything is done, reset the workspace.
             workspace.ResetWorkspace()
         # After running on all devices, check correctness
@@ -58,11 +61,13 @@ class DeviceChecker(object):
             for j in range(len(outputs_to_check)):
                 x = results[i][j]
                 y = results[0][j]
-                if not np.allclose(x, y,
-                                   atol=self._threshold, rtol=self._threshold):
-                    print('Failure in checking device option {}'
-                          ' and output {}. The outputs are:'
-                          .format(i, op.output[outputs_to_check[j]]))
+                if not np.allclose(x, y, atol=self._threshold, rtol=self._threshold):
+                    print(
+                        "Failure in checking device option {}"
+                        " and output {}. The outputs are:".format(
+                            i, op.output[outputs_to_check[j]]
+                        )
+                    )
                     print(x.flatten())
                     print(y.flatten())
                     print(np.max(np.abs(x - y)))
@@ -94,20 +99,18 @@ class DeviceChecker(object):
             for op in net.op:
                 op.device_option.CopyFrom(device_option)
             workspace.RunNetOnce(net)
-            results.append(
-                [workspace.FetchBlob(name) for name in blobs_to_check]
-            )
+            results.append([workspace.FetchBlob(name) for name in blobs_to_check])
         # After running on all devices, check correctness
         success = True
         for i in range(1, len(results)):
             for j in range(len(blobs_to_check)):
                 x = results[i][j]
                 y = results[0][j]
-                if not np.allclose(x, y,
-                                   atol=self._threshold, rtol=self._threshold):
-                    print('Failure in checking device option {}'
-                          ' and output {}. The outputs are:'
-                          .format(i, blobs_to_check[j]))
+                if not np.allclose(x, y, atol=self._threshold, rtol=self._threshold):
+                    print(
+                        "Failure in checking device option {}"
+                        " and output {}. The outputs are:".format(i, blobs_to_check[j])
+                    )
                     print(x.flatten())
                     print(y.flatten())
                     print(np.max(np.abs(x - y)))

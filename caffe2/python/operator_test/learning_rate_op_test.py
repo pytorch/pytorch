@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -28,19 +29,19 @@ class TestLearningRate(serial.SerializedTestCase):
             iter = float(iter)
             reminder = iter % (active_period + inactive_period)
             if reminder < active_period:
-                return (np.array(base_lr), )
+                return (np.array(base_lr),)
             else:
-                return (np.array(0.), )
+                return (np.array(0.0),)
 
         op = core.CreateOperator(
-            'LearningRate',
-            'iter',
-            'lr',
+            "LearningRate",
+            "iter",
+            "lr",
             policy="alter",
             active_first=True,
             base_lr=base_lr,
             active_period=active_period,
-            inactive_period=inactive_period
+            inactive_period=inactive_period,
         )
 
         self.assertReferenceChecks(gc, op, [iter], ref)
@@ -59,19 +60,17 @@ class TestLearningRate(serial.SerializedTestCase):
         def ref(iter):
             iter = float(iter)
             if iter < num_iter:
-                lr = start_multiplier + (
-                    1.0 - start_multiplier
-                ) * iter / num_iter
+                lr = start_multiplier + (1.0 - start_multiplier) * iter / num_iter
             else:
                 iter -= num_iter
                 lr = math.pow(1.0 + gamma * iter, -power)
                 lr = max(lr, end_multiplier)
-            return (np.array(base_lr * lr), )
+            return (np.array(base_lr * lr),)
 
         op = core.CreateOperator(
-            'LearningRate',
-            'data',
-            'out',
+            "LearningRate",
+            "data",
+            "out",
             policy="hill",
             base_lr=base_lr,
             num_iter=num_iter,
@@ -82,9 +81,7 @@ class TestLearningRate(serial.SerializedTestCase):
         )
         self.assertReferenceChecks(gc, op, [iter], ref)
 
-    @given(
-        **hu.gcs_cpu_only
-    )
+    @given(**hu.gcs_cpu_only)
     def test_gate_learningrate(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
         num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
@@ -95,14 +92,14 @@ class TestLearningRate(serial.SerializedTestCase):
         def ref(iter):
             iter = float(iter)
             if iter < num_iter:
-                return (np.array(multiplier_1 * base_lr), )
+                return (np.array(multiplier_1 * base_lr),)
             else:
-                return (np.array(multiplier_2 * base_lr), )
+                return (np.array(multiplier_2 * base_lr),)
 
         op = core.CreateOperator(
-            'LearningRate',
-            'data',
-            'out',
+            "LearningRate",
+            "data",
+            "out",
             policy="gate",
             num_iter=num_iter,
             multiplier_1=multiplier_1,
@@ -113,7 +110,7 @@ class TestLearningRate(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [iter], ref)
 
     @given(
-        gc=hu.gcs['gc'],
+        gc=hu.gcs["gc"],
         min_num_iter=st.integers(min_value=10, max_value=20),
         max_num_iter=st.integers(min_value=50, max_value=100),
     )
@@ -124,7 +121,8 @@ class TestLearningRate(serial.SerializedTestCase):
         # 1. exp; 2. step; 3. fix; 4. exp
         num_lr_policy = 4
         iter_nums = np.random.randint(
-            low=min_num_iter, high=max_num_iter, size=num_lr_policy)
+            low=min_num_iter, high=max_num_iter, size=num_lr_policy
+        )
         accu_iter_num = copy.deepcopy(iter_nums)
         for i in range(1, num_lr_policy):
             accu_iter_num[i] += accu_iter_num[i - 1]
@@ -156,23 +154,26 @@ class TestLearningRate(serial.SerializedTestCase):
         def one_policy_check_ref(iter, lr_scale):
             iter = int(iter)
             exp_lr_val = exp_lr(iter, lr_scale=lr_scale)
-            return (np.array(base_lr * exp_lr_val), )
+            return (np.array(base_lr * exp_lr_val),)
 
         op = core.CreateOperator(
-            'LearningRate',
-            'data',
-            'out',
-            policy='composite',
+            "LearningRate",
+            "data",
+            "out",
+            policy="composite",
             sub_policy_num_iters=iter_nums[:1],
             sub_policy_0_lr_scale=policy_lr_scale[0],
-            sub_policy_0_policy='exp',
+            sub_policy_0_policy="exp",
             sub_policy_0_gamma=exp_gamma,
             base_lr=base_lr,
         )
         for iter_idx in range(1, total_iter_nums + 1):
             self.assertReferenceChecks(
-                gc, op, [np.asarray([iter_idx])],
-                partial(one_policy_check_ref, lr_scale=policy_lr_scale[0]))
+                gc,
+                op,
+                [np.asarray([iter_idx])],
+                partial(one_policy_check_ref, lr_scale=policy_lr_scale[0]),
+            )
 
         # all the case with all four sub policies
         def all_sub_policy_check_ref(iter, lr_scale):
@@ -185,24 +186,24 @@ class TestLearningRate(serial.SerializedTestCase):
                 lr = fixed_lr(iter, lr_scale=lr_scale)
             else:
                 lr = exp_lr(iter, lr_scale=lr_scale)
-            return (np.array(base_lr * lr), )
+            return (np.array(base_lr * lr),)
 
         op = core.CreateOperator(
-            'LearningRate',
-            'data',
-            'out',
-            policy='composite',
+            "LearningRate",
+            "data",
+            "out",
+            policy="composite",
             sub_policy_num_iters=iter_nums,
-            sub_policy_0_policy='exp',
+            sub_policy_0_policy="exp",
             sub_policy_0_lr_scale=policy_lr_scale[0],
             sub_policy_0_gamma=exp_gamma,
-            sub_policy_1_policy='step',
+            sub_policy_1_policy="step",
             sub_policy_1_lr_scale=policy_lr_scale[1],
             sub_policy_1_stepsize=step_size,
             sub_policy_1_gamma=step_gamma,
-            sub_policy_2_policy='fixed',
+            sub_policy_2_policy="fixed",
             sub_policy_2_lr_scale=policy_lr_scale[2],
-            sub_policy_3_policy='exp',
+            sub_policy_3_policy="exp",
             sub_policy_3_gamma=exp_gamma,
             sub_policy_3_lr_scale=policy_lr_scale[3],
             base_lr=base_lr,
@@ -213,12 +214,16 @@ class TestLearningRate(serial.SerializedTestCase):
             if iter_idx > accu_iter_num[iter_policy]:
                 iter_policy += 1
             self.assertReferenceChecks(
-                gc, op, [np.asarray([iter_idx])],
-                partial(all_sub_policy_check_ref,
-                        lr_scale=policy_lr_scale[iter_policy])
+                gc,
+                op,
+                [np.asarray([iter_idx])],
+                partial(
+                    all_sub_policy_check_ref, lr_scale=policy_lr_scale[iter_policy]
+                ),
             )
 
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier
 
@@ -23,14 +24,24 @@ class ComputeStatisticsForBlobs(NetModifier):
     def __init__(self, blobs, logging_frequency):
         self._blobs = blobs
         self._logging_frequency = logging_frequency
-        self._field_name_suffix = '_summary'
+        self._field_name_suffix = "_summary"
 
-    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
-                   modify_output_record=False):
+    def modify_net(
+        self,
+        net,
+        init_net=None,
+        grad_map=None,
+        blob_to_device=None,
+        modify_output_record=False,
+    ):
 
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
+            assert net.BlobIsDefined(
+                blob
+            ), "blob {} is not defined in net {} whose proto is {}".format(
+                blob, net.Name(), net.Proto()
+            )
 
             cast_blob = net.Cast(blob, to=core.DataType.FLOAT)
             stats_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
@@ -46,9 +57,7 @@ class ComputeStatisticsForBlobs(NetModifier):
                         schema.Struct((output_field_name, output_scalar))
                     )
                 else:
-                    net.AppendOutputRecordField(
-                        output_field_name,
-                        output_scalar)
+                    net.AppendOutputRecordField(output_field_name, output_scalar)
 
     def field_name_suffix(self):
         return self._field_name_suffix

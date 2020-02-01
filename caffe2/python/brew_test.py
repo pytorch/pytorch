@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
 from caffe2.python import brew, core, scope, workspace
 from caffe2.python.modeling.parameter_info import ParameterTags
 from caffe2.python.model_helper import ModelHelper
@@ -14,7 +15,6 @@ import numpy as np
 
 class BrewTest(unittest.TestCase):
     def setUp(self):
-
         def myhelper(model, val=-1):
             return val
 
@@ -115,16 +115,11 @@ class BrewTest(unittest.TestCase):
             brew.conv,
             stride=2,
             pad=2,
-            weight_init=('XavierFill', {}),
-            bias_init=('ConstantFill', {})
+            weight_init=("XavierFill", {}),
+            bias_init=("ConstantFill", {}),
         ):
             brew.conv(
-                model=model,
-                blob_in="x",
-                blob_out="out",
-                dim_in=3,
-                dim_out=64,
-                kernel=3,
+                model=model, blob_in="x", blob_out="out", dim_in=3, dim_out=64, kernel=3
             )
         model.Validate()
         workspace.RunNetOnce(model.param_init_net)
@@ -135,8 +130,7 @@ class BrewTest(unittest.TestCase):
     def test_arg_scope_nested(self):
         myhelper = self.myhelper
         n = 16
-        with brew.arg_scope([myhelper], val=-3), \
-                brew.arg_scope([myhelper], val=-2):
+        with brew.arg_scope([myhelper], val=-3), brew.arg_scope([myhelper], val=-2):
             with brew.arg_scope([myhelper], val=n):
                 res = brew.myhelper(self.model)
                 self.assertEqual(n, res)
@@ -165,14 +159,14 @@ class BrewTest(unittest.TestCase):
         X = np.random.rand(64, 32, 32, 3).astype(np.float32) - 0.5
 
         workspace.FeedBlob("x", X)
-        my_arg_scope = {'order': 'NHWC'}
+        my_arg_scope = {"order": "NHWC"}
         model = ModelHelper(name="test_model", arg_scope=my_arg_scope)
         with brew.arg_scope(
             brew.conv,
             stride=2,
             pad=2,
-            weight_init=('XavierFill', {}),
-            bias_init=('ConstantFill', {})
+            weight_init=("XavierFill", {}),
+            bias_init=("ConstantFill", {}),
         ):
             brew.conv(
                 model=model,
@@ -180,7 +174,7 @@ class BrewTest(unittest.TestCase):
                 blob_out="out",
                 dim_in=3,
                 dim_out=64,
-                kernel=[8, 3]
+                kernel=[8, 3],
             )
         model.Validate()
         workspace.RunNetOnce(model.param_init_net)
@@ -194,8 +188,8 @@ class BrewTest(unittest.TestCase):
         workspace.FeedBlob("x", X)
         # CNNModelHelper is going to be deprecated soon. This test is only
         # covering some CNNModelHelper logic
-        model = CNNModelHelper(name="test_model", order='NHWC')
-        self.assertEqual(model.arg_scope['order'], 'NHWC')
+        model = CNNModelHelper(name="test_model", order="NHWC")
+        self.assertEqual(model.arg_scope["order"], "NHWC")
 
     def test_get_params(self):
         def param(x):
@@ -210,28 +204,27 @@ class BrewTest(unittest.TestCase):
         with scope.NameScope("c"):
             model.AddParameter(param("a"))
             model.AddParameter(param("d"), tags=ParameterTags.COMPUTED_PARAM)
-            self.assertEqual(to_str_list(model.GetParams()), ['c/a'])
-            self.assertEqual(to_str_list(model.GetComputedParams()), ['c/d'])
-            self.assertEqual(to_str_list(model.GetAllParams()), ['c/a', 'c/d'])
+            self.assertEqual(to_str_list(model.GetParams()), ["c/a"])
+            self.assertEqual(to_str_list(model.GetComputedParams()), ["c/d"])
+            self.assertEqual(to_str_list(model.GetAllParams()), ["c/a", "c/d"])
             # Get AllParams from the global Scope
-            self.assertEqual(to_str_list(model.GetAllParams('')), [
-                             'a', 'b', 'c/a', 'c/d'])
-        self.assertEqual(to_str_list(model.GetParams()), ['a', 'c/a'])
-        self.assertEqual(to_str_list(model.GetComputedParams()), ['b', 'c/d'])
-        self.assertEqual(to_str_list(model.GetAllParams()),
-                         ['a', 'b', 'c/a', 'c/d'])
-        self.assertEqual(to_str_list(model.GetAllParams('')),
-                         ['a', 'b', 'c/a', 'c/d'])
+            self.assertEqual(
+                to_str_list(model.GetAllParams("")), ["a", "b", "c/a", "c/d"]
+            )
+        self.assertEqual(to_str_list(model.GetParams()), ["a", "c/a"])
+        self.assertEqual(to_str_list(model.GetComputedParams()), ["b", "c/d"])
+        self.assertEqual(to_str_list(model.GetAllParams()), ["a", "b", "c/a", "c/d"])
+        self.assertEqual(to_str_list(model.GetAllParams("")), ["a", "b", "c/a", "c/d"])
         # Get AllParams from the scope 'c'
-        self.assertEqual(to_str_list(model.GetAllParams('c')), ['c/a', 'c/d'])
-        self.assertEqual(to_str_list(model.GetAllParams('c/')), ['c/a', 'c/d'])
+        self.assertEqual(to_str_list(model.GetAllParams("c")), ["c/a", "c/d"])
+        self.assertEqual(to_str_list(model.GetAllParams("c/")), ["c/a", "c/d"])
 
     def test_param_consistence(self):
-        model = ModelHelper(name='test_mode')
-        cnv = brew.conv(model, 'data', 'cnv', 32, 32, 4)
-        step_model = ModelHelper(name='step_model', param_model=model)
-        a = brew.fc(step_model, cnv, 'a', 100, 200)
-        brew.fc(model, a, 'b', 200, 5)
+        model = ModelHelper(name="test_mode")
+        cnv = brew.conv(model, "data", "cnv", 32, 32, 4)
+        step_model = ModelHelper(name="step_model", param_model=model)
+        a = brew.fc(step_model, cnv, "a", 100, 200)
+        brew.fc(model, a, "b", 200, 5)
         # test the _parameters_info is shared between model and step_model
         self.assertEqual(model._parameters_info, step_model._parameters_info)
 
@@ -252,7 +245,8 @@ class BrewTest(unittest.TestCase):
             cond_blob="cond",
             external_blobs=["then_value", "else_value", "output_blob"],
             then_model=then_model,
-            else_model=else_model)
+            else_model=else_model,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
@@ -286,7 +280,8 @@ class BrewTest(unittest.TestCase):
             cond_blob="cond",
             external_blobs=["cond", "ONE", "TWO", "TEN", "counter", "output_blob"],
             loop_model=loop_model,
-            cond_model=cond_model)
+            cond_model=cond_model,
+        )
 
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)

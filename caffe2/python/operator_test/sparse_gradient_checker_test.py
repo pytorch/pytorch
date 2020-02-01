@@ -14,11 +14,13 @@ import caffe2.python.hypothesis_test_util as hu
 
 
 class TestSparseGradient(hu.HypothesisTestCase):
-    @given(M=st.integers(min_value=5, max_value=20),
-           N=st.integers(min_value=5, max_value=20),
-           K=st.integers(min_value=5, max_value=15),
-           sparsity=st.floats(min_value=0.1, max_value=1.0),
-           **hu.gcs_cpu_only)
+    @given(
+        M=st.integers(min_value=5, max_value=20),
+        N=st.integers(min_value=5, max_value=20),
+        K=st.integers(min_value=5, max_value=15),
+        sparsity=st.floats(min_value=0.1, max_value=1.0),
+        **hu.gcs_cpu_only
+    )
     def test_sparse_gradient(self, M, N, K, sparsity, gc, dc):
         X = np.random.randn(M, K).astype(np.float32)
         X[X > sparsity] = 0
@@ -32,15 +34,17 @@ class TestSparseGradient(hu.HypothesisTestCase):
         Y = np.random.randn(K, N).astype(np.float32)
 
         op = core.CreateOperator(
-            'SparseUnsortedSegmentWeightedSum',
-            ['Y', 'val', 'key', 'seg'],
-            ['out'],
-            num_segments=M)
+            "SparseUnsortedSegmentWeightedSum",
+            ["Y", "val", "key", "seg"],
+            ["out"],
+            num_segments=M,
+        )
 
         # Gradient check wrt Y
-        self.assertGradientChecks(
-            gc, op, [Y, val, key, seg], 0, [0])
+        self.assertGradientChecks(gc, op, [Y, val, key, seg], 0, [0])
+
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

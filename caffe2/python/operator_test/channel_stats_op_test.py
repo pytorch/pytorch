@@ -20,7 +20,7 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         C = dims[1]
         X = X.reshape(N, C, -1)
         sum1 = np.sum(X, axis=(0, 2), keepdims=False)
-        sum2 = np.sum(X**2, axis=(0, 2), keepdims=False)
+        sum2 = np.sum(X ** 2, axis=(0, 2), keepdims=False)
         return (sum1, sum2)
 
     def channel_stats_nhwc_ref(self, X):
@@ -29,19 +29,19 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         C = dims[-1]
         X = X.reshape(N, -1, C)
         sum1 = np.sum(X, axis=(0, 1), keepdims=False)
-        sum2 = np.sum(X**2, axis=(0, 1), keepdims=False)
+        sum2 = np.sum(X ** 2, axis=(0, 1), keepdims=False)
         return (sum1, sum2)
 
     @serial.given(
-        N=st.integers(1, 5), C=st.integers(1, 10), H=st.integers(1, 12),
-        W=st.integers(1, 12), order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+        N=st.integers(1, 5),
+        C=st.integers(1, 10),
+        H=st.integers(1, 12),
+        W=st.integers(1, 12),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs
+    )
     def test_channel_stats_2d(self, N, C, H, W, order, gc, dc):
-        op = core.CreateOperator(
-            "ChannelStats",
-            ["X"],
-            ["sum", "sumsq"],
-            order=order,
-        )
+        op = core.CreateOperator("ChannelStats", ["X"], ["sum", "sumsq"], order=order)
 
         def ref_op(X):
             if order == "NCHW":
@@ -57,16 +57,16 @@ class TestChannelStatsOp(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0, 1])
 
     @serial.given(
-        N=st.integers(1, 5), C=st.integers(1, 10), D=st.integers(1, 6),
-        H=st.integers(1, 6), W=st.integers(1, 6),
-        order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
+        N=st.integers(1, 5),
+        C=st.integers(1, 10),
+        D=st.integers(1, 6),
+        H=st.integers(1, 6),
+        W=st.integers(1, 6),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs
+    )
     def test_channel_stats_3d(self, N, C, D, H, W, order, gc, dc):
-        op = core.CreateOperator(
-            "ChannelStats",
-            ["X"],
-            ["sum", "sumsq"],
-            order=order,
-        )
+        op = core.CreateOperator("ChannelStats", ["X"], ["sum", "sumsq"], order=order)
 
         def ref_op(X):
             if order == "NCHW":
@@ -80,6 +80,7 @@ class TestChannelStatsOp(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [X], reference=ref_op)
         self.assertDeviceChecks(dc, op, [X], [0, 1])
+
 
 if __name__ == "__main__":
     unittest.main()

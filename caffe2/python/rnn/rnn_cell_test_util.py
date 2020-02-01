@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import workspace, scope
 from caffe2.python.model_helper import ModelHelper
 
@@ -18,10 +19,18 @@ def tanh(x):
 
 
 def _prepare_rnn(
-    t, n, dim_in, create_rnn, outputs_with_grads,
-    forget_bias, memory_optim=False,
-    forward_only=False, drop_states=False, T=None,
-    two_d_initial_states=None, dim_out=None,
+    t,
+    n,
+    dim_in,
+    create_rnn,
+    outputs_with_grads,
+    forget_bias,
+    memory_optim=False,
+    forward_only=False,
+    drop_states=False,
+    T=None,
+    two_d_initial_states=None,
+    dim_out=None,
     num_states=2,
     **kwargs
 ):
@@ -29,7 +38,7 @@ def _prepare_rnn(
         dim_out = [dim_in]
     print("Dims: ", t, n, dim_in, dim_out)
 
-    model = ModelHelper(name='external')
+    model = ModelHelper(name="external")
 
     if two_d_initial_states is None:
         two_d_initial_states = np.random.randint(2)
@@ -46,17 +55,24 @@ def _prepare_rnn(
             state_name = "state_{}/layer_{}".format(i, layer_id)
             states.append(model.net.AddExternalInput(state_name))
             workspace.FeedBlob(
-                states[-1], generate_input_state(n, d).astype(np.float32))
+                states[-1], generate_input_state(n, d).astype(np.float32)
+            )
 
     # Due to convoluted RNN scoping logic we make sure that things
     # work from a namescope
     with scope.NameScope("test_name_scope"):
         input_blob, seq_lengths = model.net.AddScopedExternalInputs(
-            'input_blob', 'seq_lengths')
+            "input_blob", "seq_lengths"
+        )
 
         outputs = create_rnn(
-            model, input_blob, seq_lengths, states,
-            dim_in=dim_in, dim_out=dim_out, scope="external/recurrent",
+            model,
+            input_blob,
+            seq_lengths,
+            states,
+            dim_in=dim_in,
+            dim_out=dim_out,
+            scope="external/recurrent",
             outputs_with_grads=outputs_with_grads,
             memory_optimization=memory_optim,
             forget_bias=forget_bias,
@@ -69,7 +85,6 @@ def _prepare_rnn(
     workspace.RunNetOnce(model.param_init_net)
 
     workspace.FeedBlob(
-        seq_lengths,
-        np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
+        seq_lengths, np.random.randint(1, t + 1, size=(n,)).astype(np.int32)
     )
     return outputs, model.net, states + [input_blob]

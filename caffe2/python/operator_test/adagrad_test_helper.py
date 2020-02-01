@@ -113,11 +113,7 @@ def adagrad_sparse_test_helper(
         )
         for i, index in enumerate(indices):
             param_out[index], momentum_out[index] = ref_adagrad_temp(
-                param[index],
-                momentum[index],
-                grad[i],
-                lr,
-                epsilon,
+                param[index], momentum[index], grad[i], lr, epsilon
             )
         return (param_out, momentum_out)
 

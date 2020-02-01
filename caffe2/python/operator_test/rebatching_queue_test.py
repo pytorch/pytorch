@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import range
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 
@@ -29,11 +30,10 @@ def primefac(n):
 
 class TestReBatchingQueue(TestCase):
     def test_rebatching_queue_single_enqueue_dequeue(self):
-        net = core.Net('net')
+        net = core.Net("net")
 
         tensors = [
-            net.ConstantFill([], 1, value=1.0, run_once=False)
-            for times in range(3)
+            net.ConstantFill([], 1, value=1.0, run_once=False) for times in range(3)
         ]
 
         queue = net.CreateRebatchingQueue([], 1, capacity=10, num_blobs=1)
@@ -54,10 +54,8 @@ class TestReBatchingQueue(TestCase):
             self.assertEquals(workspace.FetchBlob(results[idx]), [1.0])
 
     def test_rebatching_queue_multi_enqueue_dequeue(self):
-        net = core.Net('net')
-        workspace.FeedBlob(
-            "tensors", np.array([x for x in range(10)], np.int32)
-        )
+        net = core.Net("net")
+        workspace.FeedBlob("tensors", np.array([x for x in range(10)], np.int32))
 
         queue = net.CreateRebatchingQueue([], 1, capacity=10, num_blobs=1)
 
@@ -78,10 +76,8 @@ class TestReBatchingQueue(TestCase):
         )
 
     def test_rebatching_queue_closes_properly(self):
-        net = core.Net('net')
-        workspace.FeedBlob(
-            "tensors", np.array([x for x in range(10)], np.int32)
-        )
+        net = core.Net("net")
+        workspace.FeedBlob("tensors", np.array([x for x in range(10)], np.int32))
 
         queue = net.CreateRebatchingQueue([], 1, capacity=10, num_blobs=1)
 
@@ -110,9 +106,7 @@ class TestReBatchingQueue(TestCase):
             workspace.RunNetOnce(net)
 
         # Dequeuing more should fail now since the queue is closed
-        results = [
-            net.DequeueRebatchingQueue([queue], 1, num_elements=5),
-        ]
+        results = [net.DequeueRebatchingQueue([queue], 1, num_elements=5)]
 
         with self.assertRaises(RuntimeError):
             workspace.RunNetOnce(net)
@@ -121,37 +115,32 @@ class TestReBatchingQueue(TestCase):
         NUM_BLOBS = 4
         NUM_ELEMENTS = 10
 
-        net = core.Net('net')
+        net = core.Net("net")
 
-        workspace.blobs['complex_tensor'] = np.array(
+        workspace.blobs["complex_tensor"] = np.array(
             [[x, x + 1] for x in range(NUM_ELEMENTS)], dtype=np.int32
         )
 
         tensors = [
             net.GivenTensorIntFill(
-                [],
-                1,
-                shape=[NUM_ELEMENTS],
-                values=[x for x in range(NUM_ELEMENTS)]
+                [], 1, shape=[NUM_ELEMENTS], values=[x for x in range(NUM_ELEMENTS)]
             ),
             net.GivenTensorFill(
                 [],
                 1,
                 shape=[NUM_ELEMENTS],
-                values=[x * 1.0 for x in range(NUM_ELEMENTS)]
+                values=[x * 1.0 for x in range(NUM_ELEMENTS)],
             ),
             net.GivenTensorBoolFill(
                 [],
                 1,
                 shape=[NUM_ELEMENTS],
-                values=[(x % 2 == 0) for x in range(NUM_ELEMENTS)]
+                values=[(x % 2 == 0) for x in range(NUM_ELEMENTS)],
             ),
-            'complex_tensor',
+            "complex_tensor",
         ]
 
-        queue = net.CreateRebatchingQueue(
-            [], 1, capacity=10, num_blobs=NUM_BLOBS
-        )
+        queue = net.CreateRebatchingQueue([], 1, capacity=10, num_blobs=NUM_BLOBS)
 
         net.EnqueueRebatchingQueue([queue] + tensors, [], enqueue_batch=True)
 
@@ -161,8 +150,7 @@ class TestReBatchingQueue(TestCase):
 
         for idx in range(NUM_BLOBS):
             npt.assert_array_equal(
-                workspace.FetchBlob(results[idx]),
-                workspace.FetchBlob(tensors[idx])[:5]
+                workspace.FetchBlob(results[idx]), workspace.FetchBlob(tensors[idx])[:5]
             )
 
     @given(
@@ -170,28 +158,28 @@ class TestReBatchingQueue(TestCase):
         num_consumers=st.integers(1, 5),
         producer_input_size=st.integers(1, 10),
         producer_num_iterations=st.integers(1, 10),
-        capacity=st.integers(1, 10)
+        capacity=st.integers(1, 10),
     )
     def test_rebatching_parallel_producer_consumer(
-        self, num_producers, num_consumers, producer_input_size,
-        producer_num_iterations, capacity
+        self,
+        num_producers,
+        num_consumers,
+        producer_input_size,
+        producer_num_iterations,
+        capacity,
     ):
         ### Init ###
         total_inputs = producer_num_iterations * producer_input_size * num_producers
         inputs = []
-        init_net = core.Net('init_net')
-        queue = init_net.CreateRebatchingQueue(
-            [], 1, capacity=capacity, num_blobs=1
-        )
+        init_net = core.Net("init_net")
+        queue = init_net.CreateRebatchingQueue([], 1, capacity=capacity, num_blobs=1)
 
         ### Producers ###
         producer_steps = []
         for i in range(num_producers):
-            name = 'producer_%d' % i
+            name = "producer_%d" % i
             net = core.Net(name)
-            values = [
-                producer_input_size * i + x for x in range(producer_input_size)
-            ]
+            values = [producer_input_size * i + x for x in range(producer_input_size)]
             for _ in range(producer_num_iterations):
                 inputs.extend(values)
             tensors = net.GivenTensorIntFill(
@@ -200,17 +188,16 @@ class TestReBatchingQueue(TestCase):
 
             net.EnqueueRebatchingQueue([queue, tensors], [], enqueue_batch=True)
 
-            step = core.execution_step(
-                name, net, num_iter=producer_num_iterations
-            )
+            step = core.execution_step(name, net, num_iter=producer_num_iterations)
             producer_steps.append(step)
 
         producer_step = core.execution_step(
-            'producer', [
+            "producer",
+            [
                 core.execution_step(
-                    'producers', producer_steps, concurrent_substeps=True
+                    "producers", producer_steps, concurrent_substeps=True
                 )
-            ]
+            ],
         )
 
         ### Consumers ###
@@ -227,11 +214,12 @@ class TestReBatchingQueue(TestCase):
             # (the reminder goes to the last consumer).
             num_elements_to_read = total_inputs // num_consumers
             if i == num_consumers - 1:
-                num_elements_to_read = num_elements_to_read \
-                    + total_inputs % num_consumers
+                num_elements_to_read = (
+                    num_elements_to_read + total_inputs % num_consumers
+                )
 
             # If we have nothing to read this consumer will be idle
-            if (num_elements_to_read == 0):
+            if num_elements_to_read == 0:
                 continue
 
             # Now we have to make a split on number of iterations and the read
@@ -242,14 +230,14 @@ class TestReBatchingQueue(TestCase):
             factors = list(primefac(num_elements_to_read))
 
             num_elements_per_iteration = functools.reduce(
-                lambda x, y: x * y, factors[len(factors) // 2:], 1
+                lambda x, y: x * y, factors[len(factors) // 2 :], 1
             )
 
             num_iterations = functools.reduce(
-                lambda x, y: x * y, factors[:len(factors) // 2], 1
+                lambda x, y: x * y, factors[: len(factors) // 2], 1
             )
 
-            name = 'consumer_%d' % i
+            name = "consumer_%d" % i
             net = core.Net(name)
             blobs = net.DequeueRebatchingQueue(
                 [queue], 1, num_elements=num_elements_per_iteration
@@ -260,16 +248,16 @@ class TestReBatchingQueue(TestCase):
             )
 
         consumer_step = core.execution_step(
-            'consumer', consumer_steps, concurrent_substeps=True
+            "consumer", consumer_steps, concurrent_substeps=True
         )
 
-        init_step = core.execution_step('init', init_net)
+        init_step = core.execution_step("init", init_net)
         worker_step = core.execution_step(
-            'worker', [consumer_step, producer_step], concurrent_substeps=True
+            "worker", [consumer_step, producer_step], concurrent_substeps=True
         )
 
         ### Execute Plan ###
-        plan = core.Plan('test')
+        plan = core.Plan("test")
         plan.AddStep(init_step)
         plan.AddStep(worker_step)
 
@@ -284,4 +272,5 @@ class TestReBatchingQueue(TestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

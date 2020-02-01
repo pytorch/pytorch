@@ -12,7 +12,6 @@ import numpy as np
 
 
 class TestElementwiseLinearOp(serial.SerializedTestCase):
-
     @serial.given(n=st.integers(2, 100), d=st.integers(2, 10), **hu.gcs)
     # @given(n=st.integers(2, 50), d=st.integers(2, 50), **hu.gcs_cpu_only)
     def test(self, n, d, gc, dc):
@@ -24,17 +23,10 @@ class TestElementwiseLinearOp(serial.SerializedTestCase):
             d = a.shape[0]
             return [np.multiply(X, a.reshape(1, d)) + b.reshape(1, d)]
 
-        op = core.CreateOperator(
-            "ElementwiseLinear",
-            ["X", "a", "b"],
-            ["Y"]
-        )
+        op = core.CreateOperator("ElementwiseLinear", ["X", "a", "b"], ["Y"])
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X, a, b],
-            reference=ref_op,
+            device_option=gc, op=op, inputs=[X, a, b], reference=ref_op
         )
 
         # Check over multiple devices

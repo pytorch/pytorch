@@ -16,7 +16,8 @@ def create_predict_net(predictor_export_meta):
     net = core.Net(predictor_export_meta.predict_net.name or "predict")
     net.Proto().op.extend(predictor_export_meta.predict_net.op)
     net.Proto().external_input.extend(
-        predictor_export_meta.inputs + predictor_export_meta.parameters)
+        predictor_export_meta.inputs + predictor_export_meta.parameters
+    )
     net.Proto().external_output.extend(predictor_export_meta.outputs)
     net.Proto().arg.extend(predictor_export_meta.predict_net.arg)
     if predictor_export_meta.net_type is not None:
@@ -40,7 +41,9 @@ def create_predict_init_net(ws, predictor_export_meta):
             if blob not in ws.blobs:
                 raise Exception(
                     "{} not in workspace but needed for shape: {}".format(
-                        blob, ws.blobs))
+                        blob, ws.blobs
+                    )
+                )
 
             shape = ws.blobs[blob].fetch().shape
 
@@ -50,8 +53,7 @@ def create_predict_init_net(ws, predictor_export_meta):
         with scope.EmptyDeviceScope():
             net.ConstantFill([], blob, shape=shape, value=0.0)
 
-    external_blobs = predictor_export_meta.inputs + \
-        predictor_export_meta.outputs
+    external_blobs = predictor_export_meta.inputs + predictor_export_meta.outputs
     for blob in external_blobs:
         zero_fill(blob)
 
@@ -67,17 +69,17 @@ def create_predict_init_net(ws, predictor_export_meta):
 
 def get_comp_name(string, name):
     if name:
-        return string + '_' + name
+        return string + "_" + name
     return string
 
 
 def _ProtoMapGet(field, key):
-    '''
+    """
     Given the key, get the value of the repeated field.
     Helper function used by protobuf since it doesn't have map construct
-    '''
+    """
     for v in field:
-        if (v.key == key):
+        if v.key == key:
             return v.value
     return None
 
@@ -128,12 +130,14 @@ def AddBlobs(meta_net_def, blob_name, blob_def):
     for blob in blob_def:
         blobs.append(blob)
 
+
 def ReplaceBlobs(meta_net_def, blob_name, blob_def):
     blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
     assert blobs is not None, "The blob_name:{} does not exist".format(blob_name)
     del blobs[:]
     for blob in blob_def:
         blobs.append(blob)
+
 
 def AddPlan(meta_net_def, plan_name, plan_def):
     meta_net_def.plans.add(key=plan_name, value=plan_def)

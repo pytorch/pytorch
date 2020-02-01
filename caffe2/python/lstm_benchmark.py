@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace, core, utils, rnn_cell, model_helper
 from caffe2.python import recurrent
@@ -21,21 +22,21 @@ log.setLevel(logging.DEBUG)
 
 
 def generate_data(T, shape, num_labels, fixed_shape):
-    '''
+    """
     Fill a queue with input data
-    '''
+    """
     log.info("Generating T={} sequence batches".format(T))
 
-    generate_input_init_net = core.Net('generate_input_init')
+    generate_input_init_net = core.Net("generate_input_init")
     queue = generate_input_init_net.CreateBlobsQueue(
-        [], "inputqueue", num_blobs=1, capacity=T,
+        [], "inputqueue", num_blobs=1, capacity=T
     )
     label_queue = generate_input_init_net.CreateBlobsQueue(
-        [], "labelqueue", num_blobs=1, capacity=T,
+        [], "labelqueue", num_blobs=1, capacity=T
     )
 
     workspace.RunNetOnce(generate_input_init_net)
-    generate_input_net = core.Net('generate_input')
+    generate_input_net = core.Net("generate_input")
 
     generate_input_net.EnqueueBlobs([queue, "scratch"], ["scratch"])
     generate_input_net.EnqueueBlobs([label_queue, "label_scr"], ["label_scr"])
@@ -43,12 +44,13 @@ def generate_data(T, shape, num_labels, fixed_shape):
 
     entry_counts = []
     for t in range(T):
-        if (t % (max(10, T // 10)) == 0):
+        if t % (max(10, T // 10)) == 0:
             print("Generating data {}/{}".format(t, T))
         # Randomize the seqlength
         random_shape = (
             [np.random.randint(1, shape[0])] + shape[1:]
-            if t > 0 and not fixed_shape else shape
+            if t > 0 and not fixed_shape
+            else shape
         )
         X = np.random.rand(*random_shape).astype(np.float32)
         batch_size = random_shape[1]
@@ -66,11 +68,7 @@ def generate_data(T, shape, num_labels, fixed_shape):
 
 def create_model(args, queue, label_queue, input_shape):
     model = model_helper.ModelHelper(name="LSTM_bench")
-    seq_lengths, target = \
-        model.net.AddExternalInputs(
-            'seq_lengths',
-            'target',
-        )
+    seq_lengths, target = model.net.AddExternalInputs("seq_lengths", "target")
 
     input_blob = model.net.DequeueBlobs(queue, "input_data")
     labels = model.net.DequeueBlobs(label_queue, "label")
@@ -79,15 +77,13 @@ def create_model(args, queue, label_queue, input_shape):
     if args.implementation in ["own", "static", "static_dag"]:
         T = None
         if "static" in args.implementation:
-            assert args.fixed_shape, \
-                "Random input length is not static RNN compatible"
+            assert args.fixed_shape, "Random input length is not static RNN compatible"
             T = args.seq_length
             print("Using static RNN of size {}".format(T))
 
         for i in range(args.num_layers):
             hidden_init, cell_init = model.net.AddExternalInputs(
-                "hidden_init_{}".format(i),
-                "cell_init_{}".format(i)
+                "hidden_init_{}".format(i), "cell_init_{}".format(i)
             )
             init_blobs.extend([hidden_init, cell_init])
 
@@ -108,7 +104,7 @@ def create_model(args, queue, label_queue, input_shape):
 
         if "dag" in args.implementation:
             print("Using DAG net type")
-            model.net.Proto().type = 'dag'
+            model.net.Proto().type = "dag"
             model.net.Proto().num_workers = 4
 
     elif args.implementation == "cudnn":
@@ -131,8 +127,7 @@ def create_model(args, queue, label_queue, input_shape):
 
     weights = model.net.UniformFill(labels, "weights")
     softmax, loss = model.net.SoftmaxWithLoss(
-        [model.Flatten(output), labels, weights],
-        ['softmax', 'loss'],
+        [model.Flatten(output), labels, weights], ["softmax", "loss"]
     )
 
     if not args.forward_only:
@@ -145,13 +140,13 @@ def create_model(args, queue, label_queue, input_shape):
         sz = args.hidden_dim
         if args.implementation == "cudnn":
             sz *= args.num_layers
-        workspace.FeedBlob(init_blob, np.zeros(
-            [1, args.batch_size, sz], dtype=np.float32
-        ))
+        workspace.FeedBlob(
+            init_blob, np.zeros([1, args.batch_size, sz], dtype=np.float32)
+        )
 
     if args.rnn_executor:
         for op in model.net.Proto().op:
-            if op.type.startswith('RecurrentNetwork'):
+            if op.type.startswith("RecurrentNetwork"):
                 recurrent.set_rnn_executor_config(
                     op,
                     num_threads=args.rnn_executor_num_threads,
@@ -164,14 +159,12 @@ def Caffe2LSTM(args):
     T = args.data_size // args.batch_size
 
     input_blob_shape = [args.seq_length, args.batch_size, args.input_dim]
-    queue, label_queue, entry_counts = generate_data(T // args.seq_length,
-                                       input_blob_shape,
-                                       args.hidden_dim,
-                                       args.fixed_shape)
+    queue, label_queue, entry_counts = generate_data(
+        T // args.seq_length, input_blob_shape, args.hidden_dim, args.fixed_shape
+    )
 
     workspace.FeedBlob(
-        "seq_lengths",
-        np.array([args.seq_length] * args.batch_size, dtype=np.int32)
+        "seq_lengths", np.array([args.seq_length] * args.batch_size, dtype=np.int32)
     )
 
     model, output = create_model(args, queue, label_queue, input_blob_shape)
@@ -187,10 +180,10 @@ def Caffe2LSTM(args):
     log.info("------ Warming up ------")
     workspace.RunNet(model.net.Proto().name)
 
-    if (args.gpu):
+    if args.gpu:
         log.info("Memory stats:")
         stats = utils.GetGPUMemoryUsageStats()
-        log.info("GPU memory:\t{} MB".format(stats['max_total'] / 1024 / 1024))
+        log.info("GPU memory:\t{} MB".format(stats["max_total"] / 1024 / 1024))
 
     log.info("------ Starting benchmark ------")
     start_time = time.time()
@@ -205,25 +198,30 @@ def Caffe2LSTM(args):
             "Iter: {} / {}. Entries Per Second: {}k.".format(
                 iteration,
                 num_iters,
-                np.sum(entry_counts[iteration:iteration + iters_once]) /
-                (new_time - last_time) // 100 / 10,
+                np.sum(entry_counts[iteration : iteration + iters_once])
+                / (new_time - last_time)
+                // 100
+                / 10,
             )
         )
         last_time = new_time
 
-    log.info("Done. Total EPS excluding 1st iteration: {}k {}".format(
-         np.sum(entry_counts[1:]) / (time.time() - start_time) // 100 / 10,
-         " (with RNN executor)" if args.rnn_executor else "",
-    ))
+    log.info(
+        "Done. Total EPS excluding 1st iteration: {}k {}".format(
+            np.sum(entry_counts[1:]) / (time.time() - start_time) // 100 / 10,
+            " (with RNN executor)" if args.rnn_executor else "",
+        )
+    )
 
-    if (args.gpu):
+    if args.gpu:
         log.info("Memory stats:")
         stats = utils.GetGPUMemoryUsageStats()
-        log.info("GPU memory:\t{} MB".format(stats['max_total'] / 1024 / 1024))
-        if (stats['max_total'] != stats['total']):
+        log.info("GPU memory:\t{} MB".format(stats["max_total"] / 1024 / 1024))
+        if stats["max_total"] != stats["total"]:
             log.warning(
-                "Max usage differs from current total usage: {} > {}".
-                format(stats['max_total'], stats['total'])
+                "Max usage differs from current total usage: {} > {}".format(
+                    stats["max_total"], stats["total"]
+                )
             )
             log.warning("This means that costly deallocations occurred.")
 
@@ -238,47 +236,25 @@ def Benchmark(args):
 def GetArgumentParser():
     parser = argparse.ArgumentParser(description="LSTM benchmark.")
 
+    parser.add_argument("--hidden_dim", type=int, default=800, help="Hidden dimension")
+    parser.add_argument("--input_dim", type=int, default=40, help="Input dimension")
+    parser.add_argument("--batch_size", type=int, default=128, help="The batch size.")
     parser.add_argument(
-        "--hidden_dim",
-        type=int,
-        default=800,
-        help="Hidden dimension",
-    )
-    parser.add_argument(
-        "--input_dim",
-        type=int,
-        default=40,
-        help="Input dimension",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=128,
-        help="The batch size."
-    )
-    parser.add_argument(
-        "--seq_length",
-        type=int,
-        default=20,
-        help="Max sequence length"
+        "--seq_length", type=int, default=20, help="Max sequence length"
     )
     parser.add_argument(
         "--data_size",
         type=int,
         default=1000000,
-        help="Number of data points to generate"
+        help="Number of data points to generate",
     )
     parser.add_argument(
         "--iters_to_report",
         type=int,
         default=20,
-        help="Number of iteration to report progress"
+        help="Number of iteration to report progress",
     )
-    parser.add_argument(
-        "--gpu",
-        action="store_true",
-        help="Run all on GPU",
-    )
+    parser.add_argument("--gpu", action="store_true", help="Run all on GPU")
     parser.add_argument(
         "--implementation",
         type=str,
@@ -288,8 +264,10 @@ def GetArgumentParser():
     parser.add_argument(
         "--fixed_shape",
         action="store_true",
-        help=("Whether to randomize shape of input batches. "
-              "Static RNN requires fixed shape"),
+        help=(
+            "Whether to randomize shape of input batches. "
+            "Static RNN requires fixed shape"
+        ),
     )
     parser.add_argument(
         "--memory_optimization",
@@ -297,51 +275,52 @@ def GetArgumentParser():
         help="Whether to use memory optimized LSTM or not",
     )
     parser.add_argument(
-        "--forward_only",
-        action="store_true",
-        help="Whether to run only forward pass"
+        "--forward_only", action="store_true", help="Whether to run only forward pass"
     )
     parser.add_argument(
         "--num_layers",
         type=int,
         default=1,
         help="Number of LSTM layers. All output dimensions are going to be"
-             "of hidden_dim size",
+        "of hidden_dim size",
     )
     parser.add_argument(
-        "--rnn_executor",
-        action="store_true",
-        help="Whether to use RNN executor"
+        "--rnn_executor", action="store_true", help="Whether to use RNN executor"
     )
     parser.add_argument(
         "--rnn_executor_num_threads",
         type=int,
         default=None,
-        help="Number of threads used by CPU RNN Executor"
+        help="Number of threads used by CPU RNN Executor",
     )
     parser.add_argument(
         "--rnn_executor_max_cuda_streams",
         type=int,
         default=None,
-        help="Maximum number of CUDA streams used by RNN executor on GPU"
+        help="Maximum number of CUDA streams used by RNN executor on GPU",
     )
     return parser
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args, extra_args = GetArgumentParser().parse_known_args()
 
     rnn_executor_opt = 1 if args.rnn_executor else 0
 
-    workspace.GlobalInit([
-        'caffe2',
-        '--caffe2_log_level=0',
-        '--caffe2_print_blob_sizes_at_exit=0',
-        '--caffe2_rnn_executor={}'.format(rnn_executor_opt),
-        '--caffe2_gpu_memory_tracking=1'] + extra_args)
+    workspace.GlobalInit(
+        [
+            "caffe2",
+            "--caffe2_log_level=0",
+            "--caffe2_print_blob_sizes_at_exit=0",
+            "--caffe2_rnn_executor={}".format(rnn_executor_opt),
+            "--caffe2_gpu_memory_tracking=1",
+        ]
+        + extra_args
+    )
 
     device = core.DeviceOption(
-        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 4)
+        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 4
+    )
 
     with core.DeviceScope(device):
         Benchmark(args)

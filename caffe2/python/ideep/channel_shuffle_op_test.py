@@ -14,15 +14,19 @@ import caffe2.python.ideep_test_util as mu
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class ChannelShuffleTest(hu.HypothesisTestCase):
-    @given(size=st.integers(8, 10),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 32),
-           group=st.integers(2, 4),
-           stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(3, 5),
-           **mu.gcs)
-    def test_channel_shuffle(self, size, input_channels, batch_size, group, stride, pad, kernel, gc, dc):
+    @given(
+        size=st.integers(8, 10),
+        input_channels=st.integers(1, 3),
+        batch_size=st.integers(1, 32),
+        group=st.integers(2, 4),
+        stride=st.integers(1, 3),
+        pad=st.integers(0, 3),
+        kernel=st.integers(3, 5),
+        **mu.gcs
+    )
+    def test_channel_shuffle(
+        self, size, input_channels, batch_size, group, stride, pad, kernel, gc, dc
+    ):
         op = core.CreateOperator(
             "ChannelShuffle",
             ["X"],
@@ -32,8 +36,12 @@ class ChannelShuffleTest(hu.HypothesisTestCase):
             pad=pad,
             kernel=kernel,
         )
-        X = np.random.rand(
-            batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
+        X = (
+            np.random.rand(batch_size, input_channels * group, size, size).astype(
+                np.float32
+            )
+            - 0.5
+        )
 
         self.assertDeviceChecks(dc, op, [X], [0])
 

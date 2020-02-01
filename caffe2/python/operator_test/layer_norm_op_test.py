@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from functools import partial
@@ -23,8 +24,11 @@ def _layer_norm_ref(axis, epsilon, X):
     left = int(np.prod(X.shape[:axis]))
     reshaped = np.reshape(X, [left, -1])
     mean = np.mean(reshaped, axis=1).reshape([left, 1])
-    std = np.sqrt(np.mean(np.square(reshaped), axis=1).reshape(
-        [left, 1]) - np.square(mean) + epsilon)
+    std = np.sqrt(
+        np.mean(np.square(reshaped), axis=1).reshape([left, 1])
+        - np.square(mean)
+        + epsilon
+    )
     Y = (reshaped - mean) / (std)
     Y = np.reshape(Y, X.shape)
     mean = np.reshape(mean, X.shape[:axis] + (1,))
@@ -45,8 +49,11 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
     stdev = np.reshape(stdev_full, [left, 1])
     mean = np.reshape(mean_full, [left, 1])
     gout = np.reshape(gout_full, [left, right])
-    dstdev_end = (-1.0) / np.power(stdev, 2.0) \
+    dstdev_end = (
+        (-1.0)
+        / np.power(stdev, 2.0)
         * np.sum((X - mean) * gout, axis=1).reshape([left, 1])
+    )
     dmean_end = np.sum(-1.0 / stdev * gout, axis=1).reshape([left, 1])
     dx_end = 1.0 / stdev * gout
 
@@ -85,7 +92,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
             device_option=gc,
             op=op,
             inputs=[gout, norm, mean, stdev, X],
-            reference=partial(_layer_norm_grad_ref, axis)
+            reference=partial(_layer_norm_grad_ref, axis),
         )
         self.assertDeviceChecks(
             device_options=dc,
@@ -94,10 +101,12 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0],
         )
 
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
     def test_layer_norm_op(self, X, eps, elementwise_affine, gc, dc):
         axis = np.random.randint(0, len(X.shape))
 
@@ -123,26 +132,21 @@ class TestLayerNormOp(serial.SerializedTestCase):
             inputs = [X]
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref,
+            device_option=gc, op=op, inputs=inputs, reference=ref
         )
         self.assertDeviceChecks(
-            device_options=dc,
-            op=op,
-            inputs=inputs,
-            outputs_to_check=[0, 1, 2],
+            device_options=dc, op=op, inputs=inputs, outputs_to_check=[0, 1, 2]
         )
 
-    @given(M=st.integers(1, 10),
-           N=st.integers(10, 20),
-           axis=st.integers(0, 1),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
-    def test_layer_norm_grad(
-            self, M, N, axis, eps, elementwise_affine, gc, dc):
+    @given(
+        M=st.integers(1, 10),
+        N=st.integers(10, 20),
+        axis=st.integers(0, 1),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
+    def test_layer_norm_grad(self, M, N, axis, eps, elementwise_affine, gc, dc):
         op = core.CreateOperator(
             "LayerNorm",
             ["X", "gamma", "beta"] if elementwise_affine else ["X"],
@@ -165,12 +169,15 @@ class TestLayerNormOp(serial.SerializedTestCase):
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    @unittest.skipIf(workspace.has_hip_support,
-                     "Operator cross-calling doesn't work with hip yet")
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
+    @unittest.skipIf(
+        workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet"
+    )
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
     def test_layer_norm_op_c10(self, X, eps, elementwise_affine, gc, dc):
         axis = np.random.randint(0, len(X.shape))
 
@@ -196,26 +203,24 @@ class TestLayerNormOp(serial.SerializedTestCase):
             inputs = [X]
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref,
+            device_option=gc, op=op, inputs=inputs, reference=ref
         )
         self.assertDeviceChecks(
-            device_options=dc,
-            op=op,
-            inputs=inputs,
-            outputs_to_check=[0, 1, 2],
+            device_options=dc, op=op, inputs=inputs, outputs_to_check=[0, 1, 2]
         )
 
-    @unittest.skipIf(workspace.has_hip_support,
-                     "Operator cross-calling doesn't work with hip yet")
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
+    @unittest.skipIf(
+        workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet"
+    )
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
     def test_layer_norm_op_c10_preallocated_outputs(
-            self, X, eps, elementwise_affine, gc, dc):
+        self, X, eps, elementwise_affine, gc, dc
+    ):
         # This test case ensures that it works correctly when output tensors are
         # preallocated.
         axis = np.random.randint(0, len(X.shape))
@@ -242,43 +247,49 @@ class TestLayerNormOp(serial.SerializedTestCase):
         net.run()
 
         if elementwise_affine:
-            expected_norm, expected_mean, expected_std = \
-                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
+            expected_norm, expected_mean, expected_std = _layer_norm_with_affine_ref(
+                axis, eps, X, gamma, beta
+            )
         else:
-            expected_norm, expected_mean, expected_std = _layer_norm_ref(
-                axis, eps, X)
-        actual_norm = self.ws.fetch_blob('Y')
-        actual_mean = self.ws.fetch_blob('mean')
-        actual_std = self.ws.fetch_blob('std')
+            expected_norm, expected_mean, expected_std = _layer_norm_ref(axis, eps, X)
+        actual_norm = self.ws.fetch_blob("Y")
+        actual_mean = self.ws.fetch_blob("mean")
+        actual_std = self.ws.fetch_blob("std")
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_std, actual_std)
 
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
     def test_layer_norm_op_pytorch(self, X, eps, elementwise_affine, gc, dc):
         axis = np.random.randint(0, len(X.shape))
 
         if elementwise_affine:
             gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
             beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
-            expected_norm, expected_mean, expected_std = \
-                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
+            expected_norm, expected_mean, expected_std = _layer_norm_with_affine_ref(
+                axis, eps, X, gamma, beta
+            )
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
-                torch.tensor(X), torch.tensor(gamma), torch.tensor(beta),
-                axis, eps, True)
+                torch.tensor(X),
+                torch.tensor(gamma),
+                torch.tensor(beta),
+                axis,
+                eps,
+                True,
+            )
         else:
-            expected_norm, expected_mean, expected_std = _layer_norm_ref(
-                axis, eps, X)
+            expected_norm, expected_mean, expected_std = _layer_norm_ref(axis, eps, X)
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
-                torch.tensor(X), None, None, axis, eps)
+                torch.tensor(X), None, None, axis, eps
+            )
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_std, actual_std)
 
@@ -286,65 +297,79 @@ class TestLayerNormOp(serial.SerializedTestCase):
     # workspace.has_gpu_support to exclude it from HIP because tensor interop
     # doesn't work for HIP tensors yet
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans())
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+    )
     def test_layer_norm_op_pytorch_cuda(self, X, eps, elementwise_affine):
         axis = np.random.randint(0, len(X.shape))
 
         if elementwise_affine:
             gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
             beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
-            expected_norm, expected_mean, expected_std = \
-                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
+            expected_norm, expected_mean, expected_std = _layer_norm_with_affine_ref(
+                axis, eps, X, gamma, beta
+            )
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
                 torch.tensor(X).cuda(),
                 torch.tensor(gamma).cuda(),
                 torch.tensor(beta).cuda(),
                 axis,
                 eps,
-                True)
+                True,
+            )
         else:
-            expected_norm, expected_mean, expected_std = _layer_norm_ref(
-                axis, eps, X)
+            expected_norm, expected_mean, expected_std = _layer_norm_ref(axis, eps, X)
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
-                torch.tensor(X).cuda(), None, None, axis, eps)
+                torch.tensor(X).cuda(), None, None, axis, eps
+            )
 
         torch.testing.assert_allclose(
-            expected_norm, actual_norm.cpu(), rtol=1e-4, atol=1e-4)
+            expected_norm, actual_norm.cpu(), rtol=1e-4, atol=1e-4
+        )
         torch.testing.assert_allclose(expected_mean, actual_mean.cpu())
         torch.testing.assert_allclose(expected_std, actual_std.cpu())
 
-    @given(X=hu.tensor(min_dim=2),
-           eps=st.floats(1e-5, 1e-3),
-           elementwise_affine=st.booleans(),
-           **hu.gcs)
+    @given(
+        X=hu.tensor(min_dim=2),
+        eps=st.floats(1e-5, 1e-3),
+        elementwise_affine=st.booleans(),
+        **hu.gcs
+    )
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
-        def jit_layer_norm(X, gamma=None, beta=None, axis=1, eps=1e-5,
-                           elementwise_affine=False):
+        def jit_layer_norm(
+            X, gamma=None, beta=None, axis=1, eps=1e-5, elementwise_affine=False
+        ):
             # type: (Tensor, Optional[Tensor], Optional[Tensor], int, float, bool) -> Tuple[Tensor, Tensor, Tensor]
             return torch.ops._caffe2.LayerNorm(
-                X, gamma, beta, axis, eps, elementwise_affine)
+                X, gamma, beta, axis, eps, elementwise_affine
+            )
 
         axis = np.random.randint(0, len(X.shape))
 
         if elementwise_affine:
             gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
             beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
-            expected_norm, expected_mean, expected_std = \
-                _layer_norm_with_affine_ref(axis, eps, X, gamma, beta)
+            expected_norm, expected_mean, expected_std = _layer_norm_with_affine_ref(
+                axis, eps, X, gamma, beta
+            )
             actual_norm, actual_mean, actual_std = jit_layer_norm(
-                torch.Tensor(X), torch.tensor(gamma), torch.tensor(beta),
-                axis, eps, elementwise_affine)
+                torch.Tensor(X),
+                torch.tensor(gamma),
+                torch.tensor(beta),
+                axis,
+                eps,
+                elementwise_affine,
+            )
         else:
-            expected_norm, expected_mean, expected_std = _layer_norm_ref(
-                axis, eps, X)
+            expected_norm, expected_mean, expected_std = _layer_norm_ref(axis, eps, X)
             actual_norm, actual_mean, actual_std = jit_layer_norm(
-                torch.tensor(X), None, None, axis, eps, elementwise_affine)
+                torch.tensor(X), None, None, axis, eps, elementwise_affine
+            )
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_std, actual_std)
 
@@ -354,16 +379,11 @@ class TestLayerNormOp(serial.SerializedTestCase):
         scale_dim = [1] * np.ndim(X)
         scale_dim[axis] = X.shape[axis]
 
-        self.ws.create_blob('input').feed(X)
+        self.ws.create_blob("input").feed(X)
 
-        model = ModelHelper(name='test_layer_norm_brew_wrapper')
+        model = ModelHelper(name="test_layer_norm_brew_wrapper")
         brew.layer_norm(
-            model,
-            'input',
-            'output',
-            dim_in=X.shape[axis:],
-            axis=axis,
-            epsilon=1e-4,
+            model, "input", "output", dim_in=X.shape[axis:], axis=axis, epsilon=1e-4
         )
 
         self.ws.create_net(model.param_init_net).run()

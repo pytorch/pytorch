@@ -168,8 +168,8 @@ class FeatureSparseToDense(ModelLayer):
             if feature_specs.feature_type == "FLOAT":
                 net.SparseToDenseMask(
                     [
-                        record[field].keys(),
-                        record[field].values(),
+                        list(record[field].keys()),
+                        list(record[field].values()),
                         self.zero,
                         record[field].lengths(),
                     ],
@@ -182,7 +182,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
                 net.SparseToDenseMask(
                     [
-                        record[field].keys(),
+                        list(record[field].keys()),
                         id_list_ranges,
                         self.zero_range,
                         record[field].lengths(),
@@ -196,7 +196,8 @@ class FeatureSparseToDense(ModelLayer):
                 # during the delivery time, when content of the blobs is
                 # generated based on the inputSpecs.
                 net.Alias(
-                    record[field].values.items(), self.output_schema[field].values()
+                    list(record[field].values.items()),
+                    list(self.output_schema[field].values()),
                 )
             elif feature_specs.feature_type == "ID_SCORE_LIST":
                 # TODO: merge this to the case above?
@@ -206,7 +207,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
                 net.SparseToDenseMask(
                     [
-                        record[field].keys(),
+                        list(record[field].keys()),
                         id_list_ranges,
                         self.zero_range,
                         record[field].lengths(),
@@ -219,9 +220,12 @@ class FeatureSparseToDense(ModelLayer):
                 # Reusing blob names might result in some weird consequences
                 # during the delivery time, when content of the blobs is
                 # generated based on the inputSpecs.
-                net.Alias(record[field].values.keys(), self.output_schema[field].ids())
                 net.Alias(
-                    record[field].values.values(), self.output_schema[field].scores()
+                    list(record[field].values.keys()), self.output_schema[field].ids()
+                )
+                net.Alias(
+                    list(record[field].values.values()),
+                    self.output_schema[field].scores(),
                 )
             elif feature_specs.feature_type == "EMBEDDING":
                 ranges = net.LengthsToRanges(
@@ -230,7 +234,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
                 net.SparseToDenseMask(
                     [
-                        record[field].keys(),
+                        list(record[field].keys()),
                         ranges,
                         self.zero_range,
                         record[field].lengths(),
@@ -244,7 +248,8 @@ class FeatureSparseToDense(ModelLayer):
                 # during the delivery time, when content of the blobs is
                 # generated based on the inputSpecs.
                 net.Alias(
-                    record[field].values.items(), self.output_schema[field].values()
+                    list(record[field].values.items()),
+                    list(self.output_schema[field].values()),
                 )
             elif feature_specs.feature_type == "GENERIC_FEATURE":
                 (
@@ -276,7 +281,7 @@ class FeatureSparseToDense(ModelLayer):
                 # Reusing blob names might result in some weird consequences
                 # during the delivery time, when content of the blobs is
                 # generated based on the inputSpecs.
-                net.Alias(value_values_blob, self.output_schema[field].values())
+                net.Alias(value_values_blob, list(self.output_schema[field].values()))
 
     def get_metadata(self):
         metadata = []
@@ -304,8 +309,7 @@ class FeatureSparseToDense(ModelLayer):
         for field, feature_specs in self.input_specs:
             accessed_features[field].append(
                 AccessedFeatures(
-                    feature_specs.feature_type,
-                    set(feature_specs.feature_ids)
+                    feature_specs.feature_type, set(feature_specs.feature_ids)
                 )
             )
 

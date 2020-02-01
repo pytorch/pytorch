@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import range
 import argparse
 import os
 from caffe2.python.docs.formatter import Markdown
@@ -21,7 +22,7 @@ class GHOpDocUploader(DocUploader):
 
 class GHMarkdown(Markdown):
     def addHeader(self, text, h=1):
-        self.addLine("\n{header} {text}\n".format(header=h * '#', text=text), True)
+        self.addLine("\n{header} {text}\n".format(header=h * "#", text=text), True)
 
     def addDocHeader(self):
         self.addLine("---")
@@ -35,11 +36,11 @@ class GHMarkdown(Markdown):
 
     def addTable(self, table, noTitle=False):
         self.addLinebreak()
-        assert(len(table) > 1)
-        self.addLine(' | '.join(['----------' for i in range(len(table[0]))]))
-        self.addLine(' | '.join(table[0]))
+        assert len(table) > 1
+        self.addLine(" | ".join(["----------" for i in range(len(table[0]))]))
+        self.addLine(" | ".join(table[0]))
         for row in table[1:]:
-            self.addLine(' | '.join(row))
+            self.addLine(" | ".join(row))
 
     def addTableHTML(self, table, noTitle=False):
         self.addRaw("<table>")
@@ -52,21 +53,23 @@ class GHMarkdown(Markdown):
             self.addRaw("</tr>")
         self.addRaw("</table>")
 
+
 def getCodeLink(formatter, schema):
     formatter = formatter.clone()
     path = os.path.relpath(schema.file, "caffe2")
-    schemaLink = ('https://github.com/pytorch/pytorch/blob/master/{path}'
-                  .format(path=path))
-    formatter.addLink('{path}'.format(path=path), schemaLink)
+    schemaLink = "https://github.com/pytorch/pytorch/blob/master/{path}".format(
+        path=path
+    )
+    formatter.addLink("{path}".format(path=path), schemaLink)
     return formatter.dump()
 
 
 class GHOperatorEngine(OperatorEngine):
     def generateDoc(self, formatter):
         for device, _ in self.getDeviceImpl():
-            formatter.addCode('{engine}'.format(engine=self.engine), True)
+            formatter.addCode("{engine}".format(engine=self.engine), True)
             if device:
-                formatter.addRaw(' on ')
+                formatter.addRaw(" on ")
                 formatter.addEmphasis("{device}".format(device=device), 1)
 
 
@@ -79,9 +82,9 @@ class GHOperatorDoc(OperatorDoc):
     def getInfo(self, formatter, name, impl):
         formatter = formatter.clone()
         if impl:
-            formatter.addEmphasis('{name}'.format(name=name), 1)
-            formatter.addRaw(' ')
-            formatter.addCode('{impl}'.format(impl=impl), True)
+            formatter.addEmphasis("{name}".format(name=name), 1)
+            formatter.addRaw(" ")
+            formatter.addCode("{impl}".format(impl=impl), True)
         return formatter.dump()
 
     def generateSchema(self, formatter):
@@ -114,11 +117,12 @@ class GHOpDocGenerator(OpDocGenerator):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Operators catalog generator.")
-    parser.add_argument('catalog_path', type=str,
-                        help='operators-catalogue.md to write out to')
+    parser.add_argument(
+        "catalog_path", type=str, help="operators-catalogue.md to write out to"
+    )
     args = parser.parse_args()
 
-    with open(args.catalog_path, 'w') as fp:
+    with open(args.catalog_path, "w") as fp:
         ops = GHOpDocGenerator(GHMarkdown(), GHOpDocUploader)
         ops.createBody()
         fp.write(ops.content_body)

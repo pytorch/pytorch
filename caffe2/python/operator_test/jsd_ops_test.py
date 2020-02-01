@@ -12,18 +12,18 @@ import numpy as np
 
 
 def entropy(p):
-    q = 1. - p
+    q = 1.0 - p
     return -p * np.log(p) - q * np.log(q)
 
 
 def jsd(p, q):
-    return [entropy(p / 2. + q / 2.) - entropy(p) / 2. - entropy(q) / 2.]
+    return [entropy(p / 2.0 + q / 2.0) - entropy(p) / 2.0 - entropy(q) / 2.0]
 
 
 def jsd_grad(go, o, pq_list):
     p, q = pq_list
-    m = (p + q) / 2.
-    return [np.log(p * (1 - m) / (1 - p) / m) / 2. * go, None]
+    m = (p + q) / 2.0
+    return [np.log(p * (1 - m) / (1 - p) / m) / 2.0 * go, None]
 
 
 class TestJSDOps(serial.SerializedTestCase):
@@ -37,6 +37,6 @@ class TestJSDOps(serial.SerializedTestCase):
             op=op,
             inputs=[p, q],
             reference=jsd,
-            output_to_grad='l',
+            output_to_grad="l",
             grad_reference=jsd_grad,
         )

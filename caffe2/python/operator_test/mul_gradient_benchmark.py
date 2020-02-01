@@ -22,17 +22,12 @@ def benchmark_mul_gradient(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="benchmark for MulGradient.")
+    parser = argparse.ArgumentParser(description="benchmark for MulGradient.")
+    parser.add_argument("-m", type=int, default=9508, help="The number of rows of A")
+    parser.add_argument("-n", type=int, default=80, help="The number of columns of A")
     parser.add_argument(
-        '-m', type=int, default=9508,
-        help="The number of rows of A")
-    parser.add_argument(
-        "-n", type=int, default=80,
-        help="The number of columns of A")
-    parser.add_argument(
-        '-i', "--iteration", type=int, default=100,
-        help="The number of iterations.")
+        "-i", "--iteration", type=int, default=100, help="The number of iterations."
+    )
     args, extra_args = parser.parse_known_args()
-    core.GlobalInit(['python'] + extra_args)
+    core.GlobalInit(["python"] + extra_args)
     benchmark_mul_gradient(args)

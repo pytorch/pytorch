@@ -11,7 +11,12 @@ import unittest
 
 
 def setThrowIfFpExceptions(enabled):
-    core.GlobalInit(["caffe2", "--caffe2_operator_throw_if_fp_exceptions=%d" % (1 if enabled else 0)])
+    core.GlobalInit(
+        [
+            "caffe2",
+            "--caffe2_operator_throw_if_fp_exceptions=%d" % (1 if enabled else 0),
+        ]
+    )
 
 
 class OperatorFPExceptionsTest(TestCase):
@@ -37,5 +42,5 @@ class OperatorFPExceptionsTest(TestCase):
             self.assertEquals(exception_raised, throw_if_fp_exceptions)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

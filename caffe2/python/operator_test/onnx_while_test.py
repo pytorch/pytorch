@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -19,9 +20,11 @@ class TestONNXWhile(serial.SerializedTestCase):
         save_scopes=st.booleans(),
         disable_scopes=st.booleans(),
         seed=st.integers(0, 65535),
-        **hu.gcs_cpu_only)
+        **hu.gcs_cpu_only
+    )
     def test_onnx_while_fibb(
-            self, condition, max_trip_count, save_scopes, disable_scopes, seed, gc, dc):
+        self, condition, max_trip_count, save_scopes, disable_scopes, seed, gc, dc
+    ):
         np.random.seed(seed)
         if disable_scopes:
             save_scopes = False
@@ -29,37 +32,25 @@ class TestONNXWhile(serial.SerializedTestCase):
         # Create body net
         body_net = caffe2_pb2.NetDef()
         # Two loop carried dependencies: first and second
-        body_net.external_input.extend(['i', 'cond', 'first', 'second'])
-        body_net.external_output.extend(['cond_new', 'second', 'third', 'third'])
-        add_op = core.CreateOperator(
-            'Add',
-            ['first', 'second'],
-            ['third'],
-        )
-        print3 = core.CreateOperator(
-            'Print',
-            ['third'],
-            [],
-        )
+        body_net.external_input.extend(["i", "cond", "first", "second"])
+        body_net.external_output.extend(["cond_new", "second", "third", "third"])
+        add_op = core.CreateOperator("Add", ["first", "second"], ["third"])
+        print3 = core.CreateOperator("Print", ["third"], [])
         limit_const = core.CreateOperator(
-            'ConstantFill',
+            "ConstantFill",
             [],
-            ['limit_const'],
+            ["limit_const"],
             shape=[1],
             dtype=caffe2_pb2.TensorProto.FLOAT,
             value=100.0,
         )
-        cond = core.CreateOperator(
-            'LT',
-            ['third', 'limit_const'],
-            ['cond_new'],
-        )
+        cond = core.CreateOperator("LT", ["third", "limit_const"], ["cond_new"])
         body_net.op.extend([add_op, print3, limit_const, cond])
 
         while_op = core.CreateOperator(
-            'ONNXWhile',
-            ['max_trip_count', 'condition', 'first_init', 'second_init'],
-            ['first_a', 'second_a', 'third_a'],
+            "ONNXWhile",
+            ["max_trip_count", "condition", "first_init", "second_init"],
+            ["first_a", "second_a", "third_a"],
             body=body_net,
             has_cond=True,
             has_trip_count=True,
@@ -92,6 +83,7 @@ class TestONNXWhile(serial.SerializedTestCase):
             [max_trip_count_arr, condition_arr, first_init, second_init],
             ref,
         )
+
 
 if __name__ == "__main__":
     unittest.main()

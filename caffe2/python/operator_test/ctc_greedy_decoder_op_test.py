@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -13,7 +14,6 @@ import unittest
 
 
 class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
-
     @serial.given(
         batch=st.sampled_from([2, 4, 128, 256]),
         max_time=st.sampled_from([2, 10, 30, 50]),
@@ -22,15 +22,11 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     def test_ctc_greedy_decoder(
-        self, batch, max_time,
-        num_classes, merge_repeated, gc, dc
+        self, batch, max_time, num_classes, merge_repeated, gc, dc
     ):
-
         def input_generater():
-            inputs = np.random.rand(max_time, batch, num_classes)\
-                .astype(np.float32)
-            seq_len = np.random.randint(1, max_time + 1, size=batch)\
-                .astype(np.int32)
+            inputs = np.random.rand(max_time, batch, num_classes).astype(np.float32)
+            seq_len = np.random.randint(1, max_time + 1, size=batch).astype(np.int32)
             return inputs, seq_len
 
         def ref_ctc_decoder(inputs, seq_len):
@@ -60,22 +56,23 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
             return ref_ctc_decoder(inputs, None)
 
         inputs, seq_len = input_generater()
-        op = core.CreateOperator('CTCGreedyDecoder',
-            ['INPUTS', 'SEQ_LEN'],
-            ['OUTPUT_LEN', 'VALUES'],
-            merge_repeated=merge_repeated)
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[inputs, seq_len],
-            reference=ref_ctc_decoder,
+        op = core.CreateOperator(
+            "CTCGreedyDecoder",
+            ["INPUTS", "SEQ_LEN"],
+            ["OUTPUT_LEN", "VALUES"],
+            merge_repeated=merge_repeated,
         )
 
-        op_1 = core.CreateOperator('CTCGreedyDecoder',
-            ['INPUTS'],
-            ['OUTPUT_LEN', 'VALUES'],
-            merge_repeated=merge_repeated)
+        self.assertReferenceChecks(
+            device_option=gc, op=op, inputs=[inputs, seq_len], reference=ref_ctc_decoder
+        )
+
+        op_1 = core.CreateOperator(
+            "CTCGreedyDecoder",
+            ["INPUTS"],
+            ["OUTPUT_LEN", "VALUES"],
+            merge_repeated=merge_repeated,
+        )
 
         self.assertReferenceChecks(
             device_option=gc,
@@ -91,15 +88,11 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     def test_ctc_greedy_decoder_no_merge_arg(
-        self, batch, max_time,
-        num_classes, gc, dc
+        self, batch, max_time, num_classes, gc, dc
     ):
-
         def input_generater():
-            inputs = np.random.rand(max_time, batch, num_classes)\
-                .astype(np.float32)
-            seq_len = np.random.randint(1, max_time + 1, size=batch)\
-                .astype(np.int32)
+            inputs = np.random.rand(max_time, batch, num_classes).astype(np.float32)
+            seq_len = np.random.randint(1, max_time + 1, size=batch).astype(np.int32)
             return inputs, seq_len
 
         def ref_ctc_decoder_no_merge_arg(inputs, seq_len):
@@ -131,19 +124,17 @@ class TestCTCGreedyDecoderOp(serial.SerializedTestCase):
 
         inputs, seq_len = input_generater()
 
-        op = core.CreateOperator('CTCGreedyDecoder',
-            ['INPUTS'],
-            ['OUTPUT_LEN', 'VALUES'])
+        op = core.CreateOperator(
+            "CTCGreedyDecoder", ["INPUTS"], ["OUTPUT_LEN", "VALUES"]
+        )
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[inputs],
-            reference=ref_ctc_decoder_max_time,
+            device_option=gc, op=op, inputs=[inputs], reference=ref_ctc_decoder_max_time
         )
 
 
 if __name__ == "__main__":
     import random
+
     random.seed(2603)
     unittest.main()

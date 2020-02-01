@@ -12,47 +12,46 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
+
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class PoolTest(hu.HypothesisTestCase):
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(3, 5),
-           size=st.integers(7, 9),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
-           method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **mu.gcs)
-    def test_pooling(self, stride, pad, kernel, size,
-                         input_channels, batch_size,
-                         method, gc, dc):
+    @given(
+        stride=st.integers(1, 3),
+        pad=st.integers(0, 3),
+        kernel=st.integers(3, 5),
+        size=st.integers(7, 9),
+        input_channels=st.integers(1, 3),
+        batch_size=st.integers(1, 3),
+        method=st.sampled_from(["MaxPool", "AveragePool"]),
+        **mu.gcs
+    )
+    def test_pooling(
+        self, stride, pad, kernel, size, input_channels, batch_size, method, gc, dc
+    ):
         assume(pad < kernel)
         op = core.CreateOperator(
-            method,
-            ["X"],
-            ["Y"],
-            stride=stride,
-            pad=pad,
-            kernel=kernel,
+            method, ["X"], ["Y"], stride=stride, pad=pad, kernel=kernel
         )
-        X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32)
+        X = np.random.rand(batch_size, input_channels, size, size).astype(np.float32)
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
-        if 'MaxPool' not in method:
+        if "MaxPool" not in method:
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(3, 5),
-           size=st.integers(7, 9),
-           input_channels=st.integers(1, 3),
-           batch_size=st.integers(1, 3),
-           method=st.sampled_from(["MaxPool", "AveragePool"]),
-           **mu.gcs)
-    def test_int8_pooling(self, stride, pad, kernel, size,
-                         input_channels, batch_size,
-                         method, gc, dc):
+    @given(
+        stride=st.integers(1, 3),
+        pad=st.integers(0, 3),
+        kernel=st.integers(3, 5),
+        size=st.integers(7, 9),
+        input_channels=st.integers(1, 3),
+        batch_size=st.integers(1, 3),
+        method=st.sampled_from(["MaxPool", "AveragePool"]),
+        **mu.gcs
+    )
+    def test_int8_pooling(
+        self, stride, pad, kernel, size, input_channels, batch_size, method, gc, dc
+    ):
         assume(pad < kernel)
         pool_fp32 = core.CreateOperator(
             method,
@@ -61,12 +60,11 @@ class PoolTest(hu.HypothesisTestCase):
             stride=stride,
             pad=pad,
             kernel=kernel,
-            device_option=dc[0]
+            device_option=dc[0],
         )
-        X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32)
+        X = np.random.rand(batch_size, input_channels, size, size).astype(np.float32)
 
-        if X.min() >=0:
+        if X.min() >= 0:
             scale = np.absolute(X).max() / 0xFF
             zero_point = 0
         else:
@@ -83,10 +81,7 @@ class PoolTest(hu.HypothesisTestCase):
         workspace.ResetWorkspace()
 
         sw2nhwc = core.CreateOperator(
-            "NCHW2NHWC",
-            ["Xi"],
-            ["Xi_nhwc"],
-            device_option=dc[1]
+            "NCHW2NHWC", ["Xi"], ["Xi_nhwc"], device_option=dc[1]
         )
 
         quantize = core.CreateOperator(
@@ -119,10 +114,7 @@ class PoolTest(hu.HypothesisTestCase):
         )
 
         sw2nchw = core.CreateOperator(
-            "NHWC2NCHW",
-            ["Y_nhwc"],
-            ["Y_out"],
-            device_option=dc[1]
+            "NHWC2NCHW", ["Y_nhwc"], ["Y_out"], device_option=dc[1]
         )
 
         net = caffe2_pb2.NetDef()
@@ -141,7 +133,6 @@ class PoolTest(hu.HypothesisTestCase):
             self.assertTrue(False)
 
         workspace.SwitchWorkspace(old_ws_name)
-
 
 
 if __name__ == "__main__":

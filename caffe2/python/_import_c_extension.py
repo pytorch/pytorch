@@ -1,5 +1,6 @@
 ## @package _import_c_extension
 # Module caffe2.python._import_c_extension
+from builtins import str
 import atexit
 import logging
 import sys
@@ -25,26 +26,30 @@ with extension_loader.DlopenGuard():
 
     try:
         from caffe2.python.caffe2_pybind11_state_gpu import *  # noqa
+
         if num_cuda_devices():  # noqa
             has_gpu_support = has_cuda_support = True
     except ImportError as gpu_e:
-        logging.info('Failed to import cuda module: {}'.format(gpu_e))
+        logging.info("Failed to import cuda module: {}".format(gpu_e))
         try:
             from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
+
             if num_hip_devices():
                 has_gpu_support = has_hip_support = True
-                logging.info('This caffe2 python run has AMD GPU support!')
+                logging.info("This caffe2 python run has AMD GPU support!")
         except ImportError as hip_e:
-            logging.info('Failed to import AMD hip module: {}'.format(hip_e))
+            logging.info("Failed to import AMD hip module: {}".format(hip_e))
 
             logging.warning(
-                'This caffe2 python run does not have GPU support. '
-                'Will run in CPU only mode.')
+                "This caffe2 python run does not have GPU support. "
+                "Will run in CPU only mode."
+            )
             try:
                 from caffe2.python.caffe2_pybind11_state import *  # noqa
             except ImportError as cpu_e:
                 logging.critical(
-                    'Cannot load caffe2.python. Error: {0}'.format(str(cpu_e)))
+                    "Cannot load caffe2.python. Error: {0}".format(str(cpu_e))
+                )
                 sys.exit(1)
 
 # libcaffe2_python contains a global Workspace that we need to properly delete
@@ -59,6 +64,7 @@ def _TensorCPU_shape(self):
 
 def _TensorCPU_reshape(self, shape):
     return self._reshape(list(shape))
+
 
 TensorCPU.shape = property(_TensorCPU_shape)  # noqa
 TensorCPU.reshape = _TensorCPU_reshape  # noqa

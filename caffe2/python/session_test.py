@@ -3,8 +3,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
 from caffe2.python.schema import (
-    Struct, FetchRecord, NewRecord, FeedRecord, InitEmptyRecord)
+    Struct,
+    FetchRecord,
+    NewRecord,
+    FeedRecord,
+    InitEmptyRecord,
+)
 from caffe2.python import core, workspace
 from caffe2.python.session import LocalSession
 from caffe2.python.dataset import Dataset
@@ -16,29 +22,29 @@ import numpy as np
 
 class TestLocalSession(TestCase):
     def test_local_session(self):
-        init_net = core.Net('init')
+        init_net = core.Net("init")
         src_values = Struct(
-            ('uid', np.array([1, 2, 6])),
-            ('value', np.array([1.4, 1.6, 1.7])))
+            ("uid", np.array([1, 2, 6])), ("value", np.array([1.4, 1.6, 1.7]))
+        )
         expected_dst = Struct(
-            ('uid', np.array([2, 4, 12])),
-            ('value', np.array([0.0, 0.0, 0.0])))
+            ("uid", np.array([2, 4, 12])), ("value", np.array([0.0, 0.0, 0.0]))
+        )
 
-        with core.NameScope('init'):
+        with core.NameScope("init"):
             src_blobs = NewRecord(init_net, src_values)
             dst_blobs = InitEmptyRecord(init_net, src_values.clone_schema())
 
         def proc1(rec):
-            net = core.Net('proc1')
-            with core.NameScope('proc1'):
+            net = core.Net("proc1")
+            with core.NameScope("proc1"):
                 out = NewRecord(net, rec)
             net.Add([rec.uid(), rec.uid()], [out.uid()])
             out.value.set(blob=rec.value(), unsafe=True)
             return [net], out
 
         def proc2(rec):
-            net = core.Net('proc2')
-            with core.NameScope('proc2'):
+            net = core.Net("proc2")
+            with core.NameScope("proc2"):
                 out = NewRecord(net, rec)
             out.uid.set(blob=rec.uid(), unsafe=True)
             net.Sub([rec.value(), rec.value()], [out.value()])

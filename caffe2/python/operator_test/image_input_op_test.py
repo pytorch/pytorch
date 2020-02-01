@@ -3,7 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import zip
+from builtins import range
 import unittest
+
 try:
     import cv2
     import lmdb
@@ -35,8 +39,10 @@ from caffe2.python import workspace, core
 # verify if the operator produces same result)
 def verify_apply_bounding_box(img, box):
     import skimage.util
-    if any(type(box[f]) is not int or np.isnan(box[f] or box[f] < 0)
-           for f in range(0, 4)):
+
+    if any(
+        type(box[f]) is not int or np.isnan(box[f] or box[f] < 0) for f in range(0, 4)
+    ):
         return img
     # Box is ymin, xmin, bound_height, bound_width
     y_bounds = (box[0], img.shape[0] - box[0] - box[2])
@@ -58,15 +64,17 @@ def verify_rescale(img, minsize):
     if scale_amount <= 1.0:
         return img
 
-    print("Scale amount is %f -- should be < 1.0; got shape %s" %
-          (scale_amount, str(img.shape)))
+    print(
+        "Scale amount is %f -- should be < 1.0; got shape %s"
+        % (scale_amount, str(img.shape))
+    )
     assert False
     img_cv = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    output_shape = (int(np.ceil(scale_amount * img_cv.shape[0])),
-                    int(np.ceil(scale_amount * img_cv.shape[1])))
-    resized = cv2.resize(img_cv,
-                         dsize=output_shape,
-                         interpolation=cv2.INTER_AREA)
+    output_shape = (
+        int(np.ceil(scale_amount * img_cv.shape[0])),
+        int(np.ceil(scale_amount * img_cv.shape[1])),
+    )
+    resized = cv2.resize(img_cv, dsize=output_shape, interpolation=cv2.INTER_AREA)
 
     resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     assert resized.shape[0] >= minsize
@@ -76,6 +84,7 @@ def verify_rescale(img, minsize):
 
 def verify_crop(img, crop):
     import skimage.util
+
     assert img.shape[0] >= crop
     assert img.shape[1] >= crop
     y_offset = 0
@@ -116,9 +125,21 @@ def caffe2_img(img):
 
 
 # Bounding box is ymin, xmin, height, width
-def create_test(output_dir, width, height, default_bound, minsize, crop, means,
-                stds, count, label_type, num_labels, output1=None,
-                output2_size=None):
+def create_test(
+    output_dir,
+    width,
+    height,
+    default_bound,
+    minsize,
+    crop,
+    means,
+    stds,
+    count,
+    label_type,
+    num_labels,
+    output1=None,
+    output2_size=None,
+):
     print("Creating a temporary lmdb database of %d pictures..." % (count))
 
     if default_bound is None:
@@ -131,11 +152,12 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
     expected_results = []
     with env.begin(write=True) as txn:
         while index < count:
-            img_array = np.random.random_integers(
-                0, 255, [height, width, 3]).astype(np.uint8)
+            img_array = np.random.random_integers(0, 255, [height, width, 3]).astype(
+                np.uint8
+            )
             img_obj = Image.fromarray(img_array)
             img_str = six.BytesIO()
-            img_obj.save(img_str, 'PNG')
+            img_obj.save(img_str, "PNG")
 
             # Create a random bounding box for every other image
             # ymin, xmin, bound_height, bound_width
@@ -147,18 +169,22 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
             if index % 2 == 0:
                 if height > minsize and width > minsize:
                     do_default_bound = False
-                    bounding_box[0:2] = [np.random.randint(a) for a in
-                                         (height - minsize, width - minsize)]
-                    bounding_box[2:4] = [np.random.randint(a) + minsize for a in
-                                         (height - bounding_box[0] - minsize + 1,
-                                          width - bounding_box[1] - minsize + 1)]
+                    bounding_box[0:2] = [
+                        np.random.randint(a)
+                        for a in (height - minsize, width - minsize)
+                    ]
+                    bounding_box[2:4] = [
+                        np.random.randint(a) + minsize
+                        for a in (
+                            height - bounding_box[0] - minsize + 1,
+                            width - bounding_box[1] - minsize + 1,
+                        )
+                    ]
                     # print("Bounding box is %s" % (str(bounding_box)))
             # Create expected result
             img_expected = img_array.astype(np.float32) * (1.0 / 255.0)
             # print("Orig image: %s" % (str(caffe2_img(img_expected))))
-            img_expected = verify_apply_bounding_box(
-                img_expected,
-                bounding_box)
+            img_expected = verify_apply_bounding_box(img_expected, bounding_box)
             # print("Bounded image: %s" % (str(caffe2_img(img_expected))))
 
             img_expected = verify_rescale(img_expected, minsize)
@@ -177,7 +203,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
 
             label_tensor = tensor_protos.protos.add()
             label_tensor.data_type = 2  # int32 data
-            assert (label_type >= 0 and label_type <= 3)
+            assert label_type >= 0 and label_type <= 3
             if label_type == 0:
                 label_tensor.int32_data.append(index)
                 expected_label = index
@@ -218,7 +244,8 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
                     output2_tensor.int32_data.append(val)
 
             expected_results.append(
-                [caffe2_img(img_expected), expected_label, output1, output2])
+                [caffe2_img(img_expected), expected_label, output1, output2]
+            )
 
             if not do_default_bound:
                 bounding_tensor = tensor_protos.protos.add()
@@ -226,8 +253,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
                 bounding_tensor.int32_data.extend(bounding_box)
 
             txn.put(
-                '{}'.format(index).encode('ascii'),
-                tensor_protos.SerializeToString()
+                "{}".format(index).encode("ascii"), tensor_protos.SerializeToString()
             )
             index = index + 1
         # End while
@@ -236,8 +262,20 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
 
 
 def run_test(
-        size_tuple, means, stds, label_type, num_labels, is_test, scale_jitter_type,
-        color_jitter, color_lighting, dc, validator, output1=None, output2_size=None):
+    size_tuple,
+    means,
+    stds,
+    label_type,
+    num_labels,
+    is_test,
+    scale_jitter_type,
+    color_jitter,
+    color_lighting,
+    dc,
+    validator,
+    output1=None,
+    output2_size=None,
+):
     # TODO: Does not test on GPU and does not test use_gpu_transform
     # WARNING: Using ModelHelper automatically does NHWC to NCHW
     # transformation if needed.
@@ -259,29 +297,24 @@ def run_test(
         label_type=label_type,
         num_labels=num_labels,
         output1=output1,
-        output2_size=output2_size
+        output2_size=output2_size,
     )
     for device_option in dc:
         with hu.temp_workspace():
-            reader_net = core.Net('reader')
-            reader_net.CreateDB(
-                [],
-                'DB',
-                db=out_dir,
-                db_type="lmdb"
-            )
+            reader_net = core.Net("reader")
+            reader_net.CreateDB([], "DB", db=out_dir, db_type="lmdb")
             workspace.RunNetOnce(reader_net)
-            outputs = ['data', 'label']
+            outputs = ["data", "label"]
             output_sizes = []
             if output1:
-                outputs.append('output1')
+                outputs.append("output1")
                 output_sizes.append(1)
             if output2_size:
-                outputs.append('output2')
+                outputs.append("output2")
                 output_sizes.append(output2_size)
             imageop = core.CreateOperator(
-                'ImageInput',
-                ['DB'],
+                "ImageInput",
+                ["DB"],
                 outputs,
                 batch_size=count_images,
                 color=3,
@@ -300,11 +333,11 @@ def run_test(
                 output_sizes=output_sizes,
                 scale_jitter_type=scale_jitter_type,
                 color_jitter=color_jitter,
-                color_lighting=color_lighting
+                color_lighting=color_lighting,
             )
 
             imageop.device_option.CopyFrom(device_option)
-            main_net = core.Net('main')
+            main_net = core.Net("main")
             main_net.Proto().op.extend([imageop])
             workspace.RunNetOnce(main_net)
             validator(expected_images, device_option, count_images)
@@ -312,30 +345,40 @@ def run_test(
         # End with
     # End for
     shutil.rmtree(out_dir)
+
+
 # end run_test
 
 
-@unittest.skipIf('cv2' not in sys.modules, 'python-opencv is not installed')
-@unittest.skipIf('lmdb' not in sys.modules, 'python-lmdb is not installed')
+@unittest.skipIf("cv2" not in sys.modules, "python-opencv is not installed")
+@unittest.skipIf("lmdb" not in sys.modules, "python-lmdb is not installed")
 class TestImport(hu.HypothesisTestCase):
     def validate_image_and_label(
-            self, expected_images, device_option, count_images, label_type,
-            is_test, scale_jitter_type, color_jitter, color_lighting):
-        l = workspace.FetchBlob('label')
-        result = workspace.FetchBlob('data').astype(np.int32)
+        self,
+        expected_images,
+        device_option,
+        count_images,
+        label_type,
+        is_test,
+        scale_jitter_type,
+        color_jitter,
+        color_lighting,
+    ):
+        l = workspace.FetchBlob("label")
+        result = workspace.FetchBlob("data").astype(np.int32)
         # If we don't use_gpu_transform, the output is in NHWC
         # Our reference output is CHW so we swap
         if device_option.device_type != 1:
-            expected = [img.swapaxes(0, 1).swapaxes(1, 2) for
-                        (img, _, _, _) in expected_images]
+            expected = [
+                img.swapaxes(0, 1).swapaxes(1, 2) for (img, _, _, _) in expected_images
+            ]
         else:
             expected = [img for (img, _, _, _) in expected_images]
         for i in range(count_images):
             if label_type == 0:
                 self.assertEqual(l[i], expected_images[i][1])
             else:
-                self.assertEqual(
-                    (l[i] - expected_images[i][1] > 0).sum(), 0)
+                self.assertEqual((l[i] - expected_images[i][1] > 0).sum(), 0)
             if is_test == 0:
                 # when traing data preparation is randomized (e.g. random cropping,
                 # Inception-style random sized cropping, color jittering,
@@ -345,54 +388,105 @@ class TestImport(hu.HypothesisTestCase):
             else:
                 self.assertEqual((expected[i] - result[i] > 1).sum(), 0)
         # End for
+
     # end validate_image_and_label
 
-    @given(size_tuple=st.tuples(
-        st.integers(min_value=8, max_value=4096),
-        st.integers(min_value=8, max_value=4096)).flatmap(lambda t: st.tuples(
-            st.just(t[0]), st.just(t[1]),
-            st.just(min(t[0] - 6, t[1] - 4)),
-            st.integers(min_value=1, max_value=min(t[0] - 6, t[1] - 4)))),
-        means=st.tuples(st.integers(min_value=0, max_value=255),
-                        st.integers(min_value=0, max_value=255),
-                        st.integers(min_value=0, max_value=255)),
-        stds=st.tuples(st.floats(min_value=1, max_value=10),
-                       st.floats(min_value=1, max_value=10),
-                       st.floats(min_value=1, max_value=10)),
+    @given(
+        size_tuple=st.tuples(
+            st.integers(min_value=8, max_value=4096),
+            st.integers(min_value=8, max_value=4096),
+        ).flatmap(
+            lambda t: st.tuples(
+                st.just(t[0]),
+                st.just(t[1]),
+                st.just(min(t[0] - 6, t[1] - 4)),
+                st.integers(min_value=1, max_value=min(t[0] - 6, t[1] - 4)),
+            )
+        ),
+        means=st.tuples(
+            st.integers(min_value=0, max_value=255),
+            st.integers(min_value=0, max_value=255),
+            st.integers(min_value=0, max_value=255),
+        ),
+        stds=st.tuples(
+            st.floats(min_value=1, max_value=10),
+            st.floats(min_value=1, max_value=10),
+            st.floats(min_value=1, max_value=10),
+        ),
         label_type=st.integers(0, 3),
         num_labels=st.integers(min_value=8, max_value=4096),
         is_test=st.integers(min_value=0, max_value=1),
         scale_jitter_type=st.integers(min_value=0, max_value=1),
         color_jitter=st.integers(min_value=0, max_value=1),
         color_lighting=st.integers(min_value=0, max_value=1),
-        **hu.gcs)
+        **hu.gcs
+    )
     @settings(verbosity=Verbosity.verbose)
     def test_imageinput(
-            self, size_tuple, means, stds, label_type,
-            num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
-            gc, dc):
+        self,
+        size_tuple,
+        means,
+        stds,
+        label_type,
+        num_labels,
+        is_test,
+        scale_jitter_type,
+        color_jitter,
+        color_lighting,
+        gc,
+        dc,
+    ):
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
-                expected_images, device_option, count_images, label_type,
-                is_test, scale_jitter_type, color_jitter, color_lighting)
+                expected_images,
+                device_option,
+                count_images,
+                label_type,
+                is_test,
+                scale_jitter_type,
+                color_jitter,
+                color_lighting,
+            )
+
         # End validator
         run_test(
-            size_tuple, means, stds, label_type, num_labels, is_test,
-            scale_jitter_type, color_jitter, color_lighting, dc, validator)
+            size_tuple,
+            means,
+            stds,
+            label_type,
+            num_labels,
+            is_test,
+            scale_jitter_type,
+            color_jitter,
+            color_lighting,
+            dc,
+            validator,
+        )
+
     # End test_imageinput
 
-    @given(size_tuple=st.tuples(
-        st.integers(min_value=8, max_value=4096),
-        st.integers(min_value=8, max_value=4096)).flatmap(lambda t: st.tuples(
-            st.just(t[0]), st.just(t[1]),
-            st.just(min(t[0] - 6, t[1] - 4)),
-            st.integers(min_value=1, max_value=min(t[0] - 6, t[1] - 4)))),
-        means=st.tuples(st.integers(min_value=0, max_value=255),
-                        st.integers(min_value=0, max_value=255),
-                        st.integers(min_value=0, max_value=255)),
-        stds=st.tuples(st.floats(min_value=1, max_value=10),
-                       st.floats(min_value=1, max_value=10),
-                       st.floats(min_value=1, max_value=10)),
+    @given(
+        size_tuple=st.tuples(
+            st.integers(min_value=8, max_value=4096),
+            st.integers(min_value=8, max_value=4096),
+        ).flatmap(
+            lambda t: st.tuples(
+                st.just(t[0]),
+                st.just(t[1]),
+                st.just(min(t[0] - 6, t[1] - 4)),
+                st.integers(min_value=1, max_value=min(t[0] - 6, t[1] - 4)),
+            )
+        ),
+        means=st.tuples(
+            st.integers(min_value=0, max_value=255),
+            st.integers(min_value=0, max_value=255),
+            st.integers(min_value=0, max_value=255),
+        ),
+        stds=st.tuples(
+            st.floats(min_value=1, max_value=10),
+            st.floats(min_value=1, max_value=10),
+            st.floats(min_value=1, max_value=10),
+        ),
         label_type=st.integers(0, 3),
         num_labels=st.integers(min_value=8, max_value=4096),
         is_test=st.integers(min_value=0, max_value=1),
@@ -401,33 +495,68 @@ class TestImport(hu.HypothesisTestCase):
         color_lighting=st.integers(min_value=0, max_value=1),
         output1=st.floats(min_value=1, max_value=10),
         output2_size=st.integers(min_value=2, max_value=10),
-        **hu.gcs)
+        **hu.gcs
+    )
     @settings(verbosity=Verbosity.verbose)
     def test_imageinput_with_additional_outputs(
-            self, size_tuple, means, stds, label_type,
-            num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
-            output1, output2_size, gc, dc):
+        self,
+        size_tuple,
+        means,
+        stds,
+        label_type,
+        num_labels,
+        is_test,
+        scale_jitter_type,
+        color_jitter,
+        color_lighting,
+        output1,
+        output2_size,
+        gc,
+        dc,
+    ):
         def validator(expected_images, device_option, count_images):
             self.validate_image_and_label(
-                expected_images, device_option, count_images, label_type,
-                is_test, scale_jitter_type, color_jitter, color_lighting)
+                expected_images,
+                device_option,
+                count_images,
+                label_type,
+                is_test,
+                scale_jitter_type,
+                color_jitter,
+                color_lighting,
+            )
 
-            output1_result = workspace.FetchBlob('output1')
-            output2_result = workspace.FetchBlob('output2')
+            output1_result = workspace.FetchBlob("output1")
+            output2_result = workspace.FetchBlob("output2")
 
             for i in range(count_images):
                 self.assertEqual(output1_result[i], expected_images[i][2])
                 self.assertEqual(
-                    (output2_result[i] - expected_images[i][3] > 0).sum(), 0)
+                    (output2_result[i] - expected_images[i][3] > 0).sum(), 0
+                )
             # End for
+
         # End validator
         run_test(
-            size_tuple, means, stds, label_type, num_labels, is_test,
-            scale_jitter_type, color_jitter, color_lighting, dc,
-            validator, output1, output2_size)
+            size_tuple,
+            means,
+            stds,
+            label_type,
+            num_labels,
+            is_test,
+            scale_jitter_type,
+            color_jitter,
+            color_lighting,
+            dc,
+            validator,
+            output1,
+            output2_size,
+        )
+
     # End test_imageinput
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import unittest
+
     unittest.main()

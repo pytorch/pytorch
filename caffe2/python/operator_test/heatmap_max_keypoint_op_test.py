@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import numpy as np
 import torch
 import sys
@@ -30,9 +31,7 @@ def heatmap_approx_keypoint_ref(maps, rois):
 
 def c10_op_ref(maps, rois):
     keypoints = torch.ops._caffe2.HeatmapMaxKeypoint(
-        torch.Tensor(maps),
-        torch.Tensor(rois),
-        should_output_softmax=True,
+        torch.Tensor(maps), torch.Tensor(rois), should_output_softmax=True
     )
     return [keypoints.numpy()]
 
@@ -58,10 +57,8 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
 
         # initial randomized coordinates for heatmaps and expand it with interpolation
         init = np.random.rand(
-            NUM_TEST_ROI,
-            NUM_KEYPOINTS,
-            HEATMAP_SMALL_SIZE,
-            HEATMAP_SMALL_SIZE).astype(np.float32)
+            NUM_TEST_ROI, NUM_KEYPOINTS, HEATMAP_SMALL_SIZE, HEATMAP_SMALL_SIZE
+        ).astype(np.float32)
         heatmaps_in = np.zeros(
             (NUM_TEST_ROI, NUM_KEYPOINTS, HEATMAP_SIZE, HEATMAP_SIZE)
         ).astype(np.float32)
@@ -71,24 +68,25 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
                     np.arange(0, 1, 1.0 / HEATMAP_SMALL_SIZE),
                     np.arange(0, 1, 1.0 / HEATMAP_SMALL_SIZE),
                     init[roi][keyp],
-                    kind='cubic')
+                    kind="cubic",
+                )
                 heatmaps_in[roi][keyp] = f(
                     np.arange(0, 1, 1.0 / HEATMAP_SIZE),
-                    np.arange(0, 1, 1.0 / HEATMAP_SIZE))
+                    np.arange(0, 1, 1.0 / HEATMAP_SIZE),
+                )
 
         self.heatmaps_in = heatmaps_in
         self.bboxes_in = bboxes_in
 
         self.op = core.CreateOperator(
-            'HeatmapMaxKeypoint',
-            ['heatmaps_in', 'bboxes_in'],
-            ['keypoints_out'],
-            arg=[
-                utils.MakeArgument("should_output_softmax", True),
-            ],
-            device_option=caffe2_pb2.DeviceOption())
+            "HeatmapMaxKeypoint",
+            ["heatmaps_in", "bboxes_in"],
+            ["keypoints_out"],
+            arg=[utils.MakeArgument("should_output_softmax", True)],
+            device_option=caffe2_pb2.DeviceOption(),
+        )
 
-    @unittest.skipIf('cv2' not in sys.modules, 'python-opencv is not installed')
+    @unittest.skipIf("cv2" not in sys.modules, "python-opencv is not installed")
     def test_close_to_FAIR(self):
         # 10 pixel error in scale of 500px bbox
         self.assertReferenceChecks(
@@ -112,17 +110,29 @@ class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
         example_bboxes = np.array([[0, 0, 100, 100]]).astype(np.float32)
         heatmap_tests = []
         # special case #1
-        heatmap_tests.append(np.array([
-            [0.14722, 0.807823, 0.447052],
-            [0.652919, 0.850923, -0.225462],
-            [0.805912, 0.75778, -0.563371],
-        ]).astype(np.float32).reshape((1, 1, 3, 3)))
+        heatmap_tests.append(
+            np.array(
+                [
+                    [0.14722, 0.807823, 0.447052],
+                    [0.652919, 0.850923, -0.225462],
+                    [0.805912, 0.75778, -0.563371],
+                ]
+            )
+            .astype(np.float32)
+            .reshape((1, 1, 3, 3))
+        )
         # special case #2
-        heatmap_tests.append(np.array([
-            [3.19541, 3.69551, 3.87579],
-            [3.63094, 3.89978, 3.67606],
-            [3.78555, 3.87291, 3.28083],
-        ]).astype(np.float32).reshape((1, 1, 3, 3)))
+        heatmap_tests.append(
+            np.array(
+                [
+                    [3.19541, 3.69551, 3.87579],
+                    [3.63094, 3.89978, 3.67606],
+                    [3.78555, 3.87291, 3.28083],
+                ]
+            )
+            .astype(np.float32)
+            .reshape((1, 1, 3, 3))
+        )
 
         for heatmap_test in heatmap_tests:
             self.assertReferenceChecks(

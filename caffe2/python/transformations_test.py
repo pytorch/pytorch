@@ -39,8 +39,9 @@ class TestTransformations(tu.TestCase):
         transformer.AddNNPACK(net)
         assert tu.str_compare(net.Proto().op[0].engine, "NNPACK")
 
-    def _fuse_nnpack_convrelu(self, net, expected_result_num_ops,
-    expected_activation_arg=True):
+    def _fuse_nnpack_convrelu(
+        self, net, expected_result_num_ops, expected_activation_arg=True
+    ):
         self._add_nnpack(net)
         transformer.FuseNNPACKConvRelu(net)
         self.assertEquals(tu.numOps(net), expected_result_num_ops)
@@ -154,10 +155,7 @@ class TestTransformations(tu.TestCase):
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference
         assert np.allclose(
-            preTransformOutput,
-            postTransformOutput,
-            rtol=5e-02,
-            atol=1e-03
+            preTransformOutput, postTransformOutput, rtol=5e-02, atol=1e-03
         )
 
     @given(
@@ -167,7 +165,9 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
-    def test_transformer_FuseConvBNNoConvBias(self, size, input_channels, seed, order, epsilon):
+    def test_transformer_FuseConvBNNoConvBias(
+        self, size, input_channels, seed, order, epsilon
+    ):
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -205,10 +205,7 @@ class TestTransformations(tu.TestCase):
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference
         assert np.allclose(
-            preTransformOutput,
-            postTransformOutput,
-            rtol=5e-02,
-            atol=1e-03
+            preTransformOutput, postTransformOutput, rtol=5e-02, atol=1e-03
         )
 
     @given(
@@ -218,7 +215,9 @@ class TestTransformations(tu.TestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         epsilon=st.floats(min_value=1e-5, max_value=1e-2),
     )
-    def test_transformer_FuseConvBNNoConvBiasDuplicatedName(self, size, input_channels, seed, order, epsilon):
+    def test_transformer_FuseConvBNNoConvBiasDuplicatedName(
+        self, size, input_channels, seed, order, epsilon
+    ):
         workspace.ResetWorkspace()
         net = core.Net("net")
         c = input_channels
@@ -260,10 +259,7 @@ class TestTransformations(tu.TestCase):
         print(postTransformOutput)
         # Check that there is no numerical difference
         assert np.allclose(
-            preTransformOutput,
-            postTransformOutput,
-            rtol=5e-02,
-            atol=1e-03
+            preTransformOutput, postTransformOutput, rtol=5e-02, atol=1e-03
         )
 
     @given(
@@ -284,16 +280,9 @@ class TestTransformations(tu.TestCase):
         t = size
         h = size
         w = size
-        net.Conv(
-            ["X", "w", "b"],
-            ["Y"],
-            kernels=[kt, kh, kw],
-        )
+        net.Conv(["X", "w", "b"], ["Y"], kernels=[kt, kh, kw])
         net.SpatialBN(
-            ["Y", "scale", "bias", "mean", "var"],
-            ["Y2"],
-            is_test=True,
-            epsilon=epsilon,
+            ["Y", "scale", "bias", "mean", "var"], ["Y2"], is_test=True, epsilon=epsilon
         )
 
         np.random.seed(seed)
@@ -314,10 +303,7 @@ class TestTransformations(tu.TestCase):
         postTransformOutput = workspace.FetchBlob("Y2").flatten()
         # Check that there is no numerical difference
         assert np.allclose(
-            preTransformOutput,
-            postTransformOutput,
-            rtol=1e-02,
-            atol=1e-04
+            preTransformOutput, postTransformOutput, rtol=1e-02, atol=1e-04
         )
 
     def test_converterDontEnforceUnusedInputs(self):

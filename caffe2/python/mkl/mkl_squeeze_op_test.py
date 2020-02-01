@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -12,9 +13,7 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.mkl_test_util as mu
 
 
-@unittest.skipIf(
-    not workspace.C.has_mkldnn, "Skipping as we do not have mkldnn."
-)
+@unittest.skipIf(not workspace.C.has_mkldnn, "Skipping as we do not have mkldnn.")
 class MKLSqueezeTest(hu.HypothesisTestCase):
     @given(
         squeeze_dims=st.lists(st.integers(0, 3), min_size=1, max_size=3),
@@ -23,8 +22,7 @@ class MKLSqueezeTest(hu.HypothesisTestCase):
     )
     def test_mkl_squeeze(self, squeeze_dims, inplace, gc, dc):
         shape = [
-            1 if dim in squeeze_dims else np.random.randint(1, 5)
-            for dim in range(4)
+            1 if dim in squeeze_dims else np.random.randint(1, 5) for dim in range(4)
         ]
         X = np.random.rand(*shape).astype(np.float32)
         op = core.CreateOperator(

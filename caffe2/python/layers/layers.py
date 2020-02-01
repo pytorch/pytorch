@@ -2,6 +2,8 @@
 # Module caffe2.python.layers.layers
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import str
+from builtins import object
 import logging
 from collections import namedtuple
 
@@ -63,9 +65,7 @@ def almost_equal_schemas(
 def get_key(record):
     if almost_equal_schemas(record, IdList):
         key = "values"
-    elif almost_equal_schemas(
-        record, IdScoreList, check_field_types=False
-    ):
+    elif almost_equal_schemas(record, IdScoreList, check_field_types=False):
         key = "values:keys"
     else:
         raise NotImplementedError("Not implemented for {}".format(record))
@@ -243,10 +243,12 @@ def is_request_only_scalar(scalar):
             return False
     return True
 
+
 # Contains features accessed in a model layer of a given type
 # type: A string representing the kind of feature, consistent with FeatureSpec
 # ids: A set of feature IDs that are accessed in the model layer
 AccessedFeatures = namedtuple("AccessedFeatures", ["type", "ids"])
+
 
 class ModelLayer(object):
     def __init__(

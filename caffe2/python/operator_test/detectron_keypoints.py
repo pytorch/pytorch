@@ -3,6 +3,8 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
+
 try:
     import cv2
 except ImportError:
@@ -41,8 +43,7 @@ def heatmaps_to_keypoints(maps, rois):
     maps = np.transpose(maps, [0, 2, 3, 1])
     min_size = _INFERENCE_MIN_SIZE
 
-    xy_preds = np.zeros(
-        (len(rois), 4, num_keypoints), dtype=np.float32)
+    xy_preds = np.zeros((len(rois), 4, num_keypoints), dtype=np.float32)
     for i in range(len(rois)):
         if min_size > 0:
             roi_map_width = int(np.maximum(widths_ceil[i], min_size))
@@ -53,8 +54,8 @@ def heatmaps_to_keypoints(maps, rois):
         width_correction = widths[i] / roi_map_width
         height_correction = heights[i] / roi_map_height
         roi_map = cv2.resize(
-            maps[i], (roi_map_width, roi_map_height),
-            interpolation=cv2.INTER_CUBIC)
+            maps[i], (roi_map_width, roi_map_height), interpolation=cv2.INTER_CUBIC
+        )
 
         # Bring back to CHW
         roi_map = np.transpose(roi_map, [2, 0, 1])
@@ -64,8 +65,7 @@ def heatmaps_to_keypoints(maps, rois):
             pos = roi_map[k, :, :].argmax()
             x_int = pos % w
             y_int = (pos - x_int) // w
-            assert (roi_map_probs[k, y_int, x_int] ==
-                    roi_map_probs[k, :, :].max())
+            assert roi_map_probs[k, y_int, x_int] == roi_map_probs[k, :, :].max()
             x = (x_int + 0.5) * width_correction
             y = (y_int + 0.5) * height_correction
             xy_preds[i, 0, k] = x + offset_x[i]
@@ -88,7 +88,7 @@ def scores_to_probs(scores):
 
 
 def approx_heatmap_keypoint(heatmaps_in, bboxes_in):
-    '''
+    """
 Mask R-CNN uses bicubic upscaling before taking the maximum of the heat map
 for keypoints. We are using bilinear upscaling, which means we can approximate
 the maximum coordinate with the low dimension maximum coordinates. We would like
@@ -105,7 +105,7 @@ like SIFT, SURF etc...
 The implementation of Newton methods with numerical analysis is straight forward
 and super simple, though we need a linear solver.
 
-    '''
+    """
     assert len(bboxes_in.shape) == 2
     N = bboxes_in.shape[0]
     assert bboxes_in.shape[1] == 4
@@ -150,18 +150,23 @@ and super simple, though we need a linear solver.
                     hm_y = y + maxY - 1
                     hm_x = hm_x - 2 * (hm_x >= heatmap_size) + 2 * (hm_x < 0)
                     hm_y = hm_y - 2 * (hm_y >= heatmap_size) + 2 * (hm_y < 0)
-                    assert((hm_x < heatmap_size) and (hm_x >= 0))
-                    assert((hm_y < heatmap_size) and (hm_y >= 0))
+                    assert (hm_x < heatmap_size) and (hm_x >= 0)
+                    assert (hm_y < heatmap_size) and (hm_y >= 0)
                     fmax[y][x] = f[hm_y][hm_x]
 
             # print("python fmax ", fmax)
             # b = -f'(0), A = f''(0) Hessian matrix
-            b = [-(fmax[1][2] - fmax[1][0]) / 2, -
-                 (fmax[2][1] - fmax[0][1]) / 2]
-            A = [[fmax[1][0] - 2 * fmax[1][1] + fmax[1][2],
-                  (fmax[2][2] - fmax[2][0] - fmax[0][2] + fmax[0][0]) / 4],
-                 [(fmax[2][2] - fmax[2][0] - fmax[0][2] + fmax[0][0]) / 4,
-                  fmax[0][1] - 2 * fmax[1][1] + fmax[2][1]]]
+            b = [-(fmax[1][2] - fmax[1][0]) / 2, -(fmax[2][1] - fmax[0][1]) / 2]
+            A = [
+                [
+                    fmax[1][0] - 2 * fmax[1][1] + fmax[1][2],
+                    (fmax[2][2] - fmax[2][0] - fmax[0][2] + fmax[0][0]) / 4,
+                ],
+                [
+                    (fmax[2][2] - fmax[2][0] - fmax[0][2] + fmax[0][0]) / 4,
+                    fmax[0][1] - 2 * fmax[1][1] + fmax[2][1],
+                ],
+            ]
             # print("python A")
             # print(A)
             # solve Ax=b
@@ -181,19 +186,24 @@ and super simple, though we need a linear solver.
                 # score = f(0) + f'(0)*x + 1/2 * f''(0) * x^2
                 #    = f(0) - b*x + 1/2*x*A*x
                 deltaScore = (
-                    fmax[1][1] - (b[0] * deltaX + b[1] * deltaY) +
-                    0.5 * (deltaX * deltaX * A[0][0] +
-                           deltaX * deltaY * A[1][0] +
-                           deltaY * deltaX * A[0][1] +
-                           deltaY * deltaY * A[1][1]))
+                    fmax[1][1]
+                    - (b[0] * deltaX + b[1] * deltaY)
+                    + 0.5
+                    * (
+                        deltaX * deltaX * A[0][0]
+                        + deltaX * deltaY * A[1][0]
+                        + deltaY * deltaX * A[0][1]
+                        + deltaY * deltaY * A[1][1]
+                    )
+                )
 
             assert abs(deltaX) <= 1.5
             assert abs(deltaY) <= 1.5
 
             # final coordinates
             keypoints_out[k, j, :] = (
-                x0 + (maxX + deltaX + .5) * xLen / heatmap_size,
-                y0 + (maxY + deltaY + .5) * yLen / heatmap_size,
+                x0 + (maxX + deltaX + 0.5) * xLen / heatmap_size,
+                y0 + (maxY + deltaY + 0.5) * yLen / heatmap_size,
                 deltaScore,
                 maxProb,
             )

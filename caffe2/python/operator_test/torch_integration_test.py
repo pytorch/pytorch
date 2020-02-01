@@ -1,5 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import zip
+from builtins import map
+from builtins import range
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
@@ -77,7 +80,7 @@ round_to_nearest = np.vectorize(round)
 def bytes_to_floats(byte_matrix):
     floats = np.empty([np.shape(byte_matrix)[0], 1], dtype=np.float32)
     for i, byte_values in enumerate(byte_matrix):
-        floats[i], = struct.unpack('f', bytearray(byte_values))
+        floats[i], = struct.unpack("f", bytearray(byte_values))
     return floats
 
 
@@ -85,7 +88,7 @@ def floats_to_bytes(floats):
     byte_matrix = np.empty([np.shape(floats)[0], 4], dtype=np.uint8)
     for i, value in enumerate(floats):
         assert isinstance(value, np.float32), (value, floats)
-        as_bytes = struct.pack('f', value)
+        as_bytes = struct.pack("f", value)
         # In Python3 bytes will be a list of int, in Python2 a list of string
         if isinstance(as_bytes[0], int):
             byte_matrix[i] = list(as_bytes)
@@ -380,7 +383,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             return (
                 workspace.FetchBlob("output"),
                 workspace.FetchBlob("hidden"),
-                workspace.FetchBlob("cell")
+                workspace.FetchBlob("cell"),
             )
 
         output, hidden, cell = inference_lstm_ref()
@@ -526,7 +529,7 @@ class TorchIntegration(hu.HypothesisTestCase):
                     np.random.rand() * H,
                     np.random.rand() * W,
                     np.random.rand() * H,
-                    np.random.rand() * 360 - 180
+                    np.random.rand() * 360 - 180,
                 ]
             ).astype(np.float32)
 
@@ -613,18 +616,19 @@ class TorchIntegration(hu.HypothesisTestCase):
         for x, y in zip(fpn_outputs, all_outputs[1:]):
             torch.testing.assert_allclose(x, y)
 
-    @given(X=hu.tensor(),
-           fast_gelu=st.booleans())
+    @given(X=hu.tensor(), fast_gelu=st.booleans())
     def _test_gelu_op(self, X, fast_gelu, device):
         def _gelu_ref(_X):
-            return (_X * norm.cdf(_X).astype(np.float32), )
+            return (_X * norm.cdf(_X).astype(np.float32),)
+
         expected_output, = _gelu_ref(X)
         actual_output = torch.ops._caffe2.Gelu(torch.tensor(X), fast_gelu)
 
         rtol = 1e-3 if fast_gelu else 1e-4
         atol = 1e-5
         torch.testing.assert_allclose(
-            expected_output, actual_output.cpu(), rtol=rtol, atol=atol)
+            expected_output, actual_output.cpu(), rtol=rtol, atol=atol
+        )
 
     def test_gelu_op(self):
         self._test_gelu_op(device="cpu")
@@ -633,13 +637,11 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_gelu_op_cuda(self):
         self._test_gelu_op(device="cuda")
 
-
-    @given(inputs=hu.lengths_tensor(
-        dtype=np.float32,
-        min_value=1,
-        max_value=5,
-        allow_empty=True,
-    ))
+    @given(
+        inputs=hu.lengths_tensor(
+            dtype=np.float32, min_value=1, max_value=5, allow_empty=True
+        )
+    )
     def _test_lengths_op(self, inputs, ref_op_name, torch_op, device):
         data, lengths = inputs
 
@@ -652,7 +654,8 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         expected_output = _lengths_ref(data, lengths)
         actual_output = torch_op(
-            torch.tensor(data), torch.tensor(lengths, dtype=torch.int32))
+            torch.tensor(data), torch.tensor(lengths, dtype=torch.int32)
+        )
 
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
@@ -691,8 +694,12 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         def _resize_nearest_ref(X):
             ref_op = core.CreateOperator(
-                "ResizeNearest", ["X"], ["Y"],
-                width_scale=2.0, height_scale=1.5, order="NCHW",
+                "ResizeNearest",
+                ["X"],
+                ["Y"],
+                width_scale=2.0,
+                height_scale=1.5,
+                order="NCHW",
             )
             workspace.FeedBlob("X", X)
             workspace.RunOperatorOnce(ref_op)
@@ -701,7 +708,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         expected_output = _resize_nearest_ref(data)
         actual_output = torch.ops._caffe2.ResizeNearest(
             torch.tensor(data).to(device),
-            order="NCHW", width_scale=2.0, height_scale=1.5,
+            order="NCHW",
+            width_scale=2.0,
+            height_scale=1.5,
         )
 
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
@@ -716,9 +725,7 @@ class TorchIntegration(hu.HypothesisTestCase):
     @given(input_data=hu.tensor(min_dim=2, max_dim=2))
     def test_Fused8BitRowwiseQuantizedToFloat(self, input_data):
         QuantizeOp = core.CreateOperator(
-            "FloatToFused8BitRowwiseQuantized",
-            ["input_data"],
-            ["quantized_data"],
+            "FloatToFused8BitRowwiseQuantized", ["input_data"], ["quantized_data"]
         )
 
         workspace.FeedBlob("input_data", input_data)
@@ -741,16 +748,15 @@ class TorchIntegration(hu.HypothesisTestCase):
             num_dims = 3
         data = np.random.rand(1024, num_dims).astype(np.float32)
         slopes = np.zeros(4 * num_dims).astype(np.float32)
-        bounds = np.sort(np.random.rand(5, num_dims).astype(np.float32), axis=0).flatten('F')
+        bounds = np.sort(
+            np.random.rand(5, num_dims).astype(np.float32), axis=0
+        ).flatten("F")
         intercepts = np.random.rand(4 * num_dims).astype(np.float32)
 
         def _piecewise_linear_ref(X):
             ref_op = core.CreateOperator(
                 "PiecewiseLinearTransform",
-                ["data",
-                    "bounds",
-                    "slopes",
-                    "intercepts"],
+                ["data", "bounds", "slopes", "intercepts"],
                 ["calibrated"],
                 binary=binary_input,
             )
@@ -763,7 +769,12 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         expected_output = _piecewise_linear_ref(data)
         actual_output = torch.ops._caffe2.PiecewiseLinearTransform(
-            torch.tensor(data), bounds.tolist(), slopes.tolist(), intercepts.tolist(), binary_input)
+            torch.tensor(data),
+            bounds.tolist(),
+            slopes.tolist(),
+            intercepts.tolist(),
+            binary_input,
+        )
 
         torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
 
@@ -787,5 +798,5 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(x_cpu, x_cpu_ref)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

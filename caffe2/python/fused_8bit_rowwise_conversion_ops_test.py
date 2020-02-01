@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import map
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
@@ -17,7 +18,7 @@ round_to_nearest = np.vectorize(round)
 def bytes_to_floats(byte_matrix):
     floats = np.empty([np.shape(byte_matrix)[0], 1], dtype=np.float32)
     for i, byte_values in enumerate(byte_matrix):
-        floats[i], = struct.unpack('f', bytearray(byte_values))
+        floats[i], = struct.unpack("f", bytearray(byte_values))
     return floats
 
 
@@ -25,7 +26,7 @@ def floats_to_bytes(floats):
     byte_matrix = np.empty([np.shape(floats)[0], 4], dtype=np.uint8)
     for i, value in enumerate(floats):
         assert isinstance(value, np.float32), (value, floats)
-        as_bytes = struct.pack('f', value)
+        as_bytes = struct.pack("f", value)
         # In Python3 bytes will be a list of int, in Python2 a list of string
         if isinstance(as_bytes[0], int):
             byte_matrix[i] = list(as_bytes)
@@ -59,41 +60,33 @@ class TestFused8BitRowwiseQuantizationConversion(hu.HypothesisTestCase):
     @given(input_data=hu.tensor(min_dim=2, max_dim=2, max_value=33))
     def test_quantize_op(self, input_data):
         quantize = core.CreateOperator(
-            'FloatToFused8BitRowwiseQuantized',
-            ['input_data'],
-            ['quantized_data'],
+            "FloatToFused8BitRowwiseQuantized", ["input_data"], ["quantized_data"]
         )
-        workspace.FeedBlob('input_data', input_data)
+        workspace.FeedBlob("input_data", input_data)
         workspace.RunOperatorOnce(quantize)
 
-        quantized_data = workspace.FetchBlob('quantized_data')
+        quantized_data = workspace.FetchBlob("quantized_data")
 
-        reference = fused_rowwise_8bit_quantize_reference(
-            input_data.astype(np.float32)
-        )
+        reference = fused_rowwise_8bit_quantize_reference(input_data.astype(np.float32))
         np.testing.assert_array_almost_equal(quantized_data, reference)
 
     @given(input_data=hu.tensor(min_dim=2, max_dim=2, max_value=33))
     def test_quantize_and_dequantize_op(self, input_data):
         quantize = core.CreateOperator(
-            'FloatToFused8BitRowwiseQuantized',
-            ['input_data'],
-            ['quantized_data'],
+            "FloatToFused8BitRowwiseQuantized", ["input_data"], ["quantized_data"]
         )
-        workspace.FeedBlob('input_data', input_data)
+        workspace.FeedBlob("input_data", input_data)
         workspace.RunOperatorOnce(quantize)
 
-        quantized_data = workspace.FetchBlob('quantized_data')
+        quantized_data = workspace.FetchBlob("quantized_data")
 
         dequantize = core.CreateOperator(
-            'Fused8BitRowwiseQuantizedToFloat',
-            ['quantized_data'],
-            ['dequantized_data'],
+            "Fused8BitRowwiseQuantizedToFloat", ["quantized_data"], ["dequantized_data"]
         )
-        workspace.FeedBlob('quantized_data', quantized_data)
+        workspace.FeedBlob("quantized_data", quantized_data)
         workspace.RunOperatorOnce(dequantize)
 
-        dequantized_data = workspace.FetchBlob('dequantized_data')
+        dequantized_data = workspace.FetchBlob("dequantized_data")
 
         reference = fused_rowwise_8bit_quantize_dequantize_reference(input_data)
         np.testing.assert_array_almost_equal(dequantized_data, reference)

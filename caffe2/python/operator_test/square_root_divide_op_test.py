@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from functools import partial
 from hypothesis import given
@@ -15,23 +16,29 @@ import numpy as np
 
 
 def _data_and_scale(
-        data_min_size=4, data_max_size=10,
-        examples_min_number=1, examples_max_number=4,
-        dtype=np.float32, elements=None):
+    data_min_size=4,
+    data_max_size=10,
+    examples_min_number=1,
+    examples_max_number=4,
+    dtype=np.float32,
+    elements=None,
+):
     params_ = st.tuples(
-        st.integers(min_value=examples_min_number,
-                    max_value=examples_max_number),
-        st.integers(min_value=data_min_size,
-                    max_value=data_max_size),
-        st.sampled_from([np.float32, np.int32, np.int64])
+        st.integers(min_value=examples_min_number, max_value=examples_max_number),
+        st.integers(min_value=data_min_size, max_value=data_max_size),
+        st.sampled_from([np.float32, np.int32, np.int64]),
     )
     return params_.flatmap(
         lambda param_: st.tuples(
             hu.arrays([param_[0], param_[1]], dtype=dtype),
             hu.arrays(
-                [param_[0]], dtype=param_[2],
-                elements=(st.floats(0.0, 10000.0) if param_[2] in [np.float32]
-                          else st.integers(0, 10000)),
+                [param_[0]],
+                dtype=param_[2],
+                elements=(
+                    st.floats(0.0, 10000.0)
+                    if param_[2] in [np.float32]
+                    else st.integers(0, 10000)
+                ),
             ),
         )
     )
@@ -48,23 +55,19 @@ def divide_by_square_root(data, scale):
         if scale[i] > 0:
             output[i] = np.multiply(data[i], 1 / math.sqrt(scale[i]))
 
-    return (output, )
+    return (output,)
 
 
 def grad(output_grad, ref_outputs, inputs):
-    return (divide_by_square_root(output_grad, inputs[1])[0],
-            None)
+    return (divide_by_square_root(output_grad, inputs[1])[0], None)
 
 
 class TestSquareRootDivide(serial.SerializedTestCase):
-    @serial.given(data_and_scale=_data_and_scale(),
-           **hu.gcs_cpu_only)
+    @serial.given(data_and_scale=_data_and_scale(), **hu.gcs_cpu_only)
     def test_square_root_divide(self, data_and_scale, gc, dc):
         self.assertReferenceChecks(
             device_option=gc,
-            op=core.CreateOperator("SquareRootDivide",
-                                   ["data", "scale"],
-                                   ["output"]),
+            op=core.CreateOperator("SquareRootDivide", ["data", "scale"], ["output"]),
             inputs=list(data_and_scale),
             reference=partial(divide_by_square_root),
             output_to_grad="output",
@@ -74,4 +77,5 @@ class TestSquareRootDivide(serial.SerializedTestCase):
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()

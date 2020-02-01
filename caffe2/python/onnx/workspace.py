@@ -6,6 +6,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import object
 import uuid
 
 from caffe2.python import workspace
@@ -50,6 +52,7 @@ class Workspace(object):
     makes it possible to work with workspaces more locally, and without
     forgetting to deallocate everything in the end.
     """
+
     def __init__(self):
         # Caffe2 (apparently) doesn't provide any native method of generating
         # a fresh, unused workspace, so we have to fake it by generating
@@ -61,6 +64,7 @@ class Workspace(object):
         def f(*args, **kwargs):
             with self._ctx:
                 return getattr(workspace, attr)(*args, **kwargs)
+
         return f
 
     def __del__(self):

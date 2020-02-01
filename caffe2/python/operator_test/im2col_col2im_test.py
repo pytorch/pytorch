@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import assume, given
 
@@ -15,18 +16,21 @@ import os
 
 
 class TestReduceFrontSum(hu.HypothesisTestCase):
-    @given(batch_size=st.integers(1, 3),
-           stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           dilation=st.integers(1, 3),
-           size=st.integers(7, 10),
-           channels=st.integers(1, 8),
-           **hu.gcs)
-    def test_im2col_layout(self, batch_size, stride, pad, kernel, dilation,
-                           size, channels, gc, dc):
+    @given(
+        batch_size=st.integers(1, 3),
+        stride=st.integers(1, 3),
+        pad=st.integers(0, 3),
+        kernel=st.integers(1, 5),
+        dilation=st.integers(1, 3),
+        size=st.integers(7, 10),
+        channels=st.integers(1, 8),
+        **hu.gcs
+    )
+    def test_im2col_layout(
+        self, batch_size, stride, pad, kernel, dilation, size, channels, gc, dc
+    ):
 
-        dkernel = (dilation * (kernel - 1) + 1)
+        dkernel = dilation * (kernel - 1) + 1
         assume(size >= dkernel)
 
         NCHW_TO_NHWC = (0, 2, 3, 1)
@@ -46,23 +50,27 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
 
         op_im2col_nchw = core.CreateOperator(
             "Im2Col",
-            ["im_nchw"], ["col_nchw"],
+            ["im_nchw"],
+            ["col_nchw"],
             stride=stride,
             kernel=kernel,
             dilation=dilation,
             pad=pad,
             order="NCHW",
-            device_option=gc)
+            device_option=gc,
+        )
 
         op_im2col_nhwc = core.CreateOperator(
             "Im2Col",
-            ["im_nhwc"], ["col_nhwc"],
+            ["im_nhwc"],
+            ["col_nhwc"],
             stride=stride,
             kernel=kernel,
             dilation=dilation,
             pad=pad,
             order="NHWC",
-            device_option=gc)
+            device_option=gc,
+        )
 
         self.ws.create_blob("im_nchw").feed(im_nchw, device_option=gc)
         self.ws.create_blob("im_nhwc").feed(im_nhwc, device_option=gc)
@@ -79,7 +87,8 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
                 col_nchw_[i],
                 col_nhwc_[i].transpose(COL_NHWC_TO_NCHW),
                 atol=1e-4,
-                rtol=1e-4)
+                rtol=1e-4,
+            )
 
         op_col2im_nchw = core.CreateOperator(
             "Col2Im",
@@ -90,7 +99,8 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             dilation=dilation,
             pad=pad,
             order="NCHW",
-            device_option=gc)
+            device_option=gc,
+        )
 
         op_col2im_nhwc = core.CreateOperator(
             "Col2Im",
@@ -101,7 +111,8 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             dilation=dilation,
             pad=pad,
             order="NHWC",
-            device_option=gc)
+            device_option=gc,
+        )
 
         self.ws.run(op_col2im_nchw)
         self.ws.run(op_col2im_nhwc)
@@ -109,32 +120,35 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
         out_nchw = self.ws.blobs["out_nchw"].fetch()
         out_nhwc = self.ws.blobs["out_nhwc"].fetch()
         np.testing.assert_allclose(
-            out_nchw,
-            out_nhwc.transpose(NHWC_TO_NCHW),
-            atol=1e-4,
-            rtol=1e-4)
+            out_nchw, out_nhwc.transpose(NHWC_TO_NCHW), atol=1e-4, rtol=1e-4
+        )
 
-    @given(batch_size=st.integers(1, 3),
-           stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
-           dilation=st.integers(1, 3),
-           size=st.integers(7, 10),
-           channels=st.integers(1, 8),
-           order=st.sampled_from(["NCHW"]),
-           **hu.gcs)
-    def test_col2im_gradients(self, batch_size, stride, pad, kernel,
-                              dilation, size, channels, order, gc, dc):
+    @given(
+        batch_size=st.integers(1, 3),
+        stride=st.integers(1, 3),
+        pad=st.integers(0, 3),
+        kernel=st.integers(1, 5),
+        dilation=st.integers(1, 3),
+        size=st.integers(7, 10),
+        channels=st.integers(1, 8),
+        order=st.sampled_from(["NCHW"]),
+        **hu.gcs
+    )
+    def test_col2im_gradients(
+        self, batch_size, stride, pad, kernel, dilation, size, channels, order, gc, dc
+    ):
         assume(size >= dilation * (kernel - 1) + 1)
         op = core.CreateOperator(
             "Im2Col",
-            ["X"], ["Y"],
+            ["X"],
+            ["Y"],
             stride=stride,
             kernel=kernel,
             dilation=dilation,
             pad=pad,
             order=order,
-            device_option=gc)
+            device_option=gc,
+        )
         X = np.random.rand(batch_size, channels, size, size).astype(np.float32)
         self.assertGradientChecks(gc, op, [X], 0, [0])
         return

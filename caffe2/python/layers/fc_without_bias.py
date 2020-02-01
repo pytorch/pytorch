@@ -21,41 +21,45 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
         output_dims,
         weight_init=None,
         weight_optim=None,
-        name='fc_without_bias',
+        name="fc_without_bias",
         uniform_weight_init_scale_numerator=1.0,
         **kwargs
     ):
         super(FCWithoutBias, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
-        assert len(input_record.field_types()[0].shape) > 0, (
-            "FCWithoutBias expects limited dimensions of the input tensor"
-        )
+        assert (
+            len(input_record.field_types()[0].shape) > 0
+        ), "FCWithoutBias expects limited dimensions of the input tensor"
 
         input_dims = input_record.field_types()[0].shape[0]
-        assert input_dims > 0, (
-            "FCWithoutBias expects input dimensions > 0, got {}".format(input_dims)
-        )
+        assert (
+            input_dims > 0
+        ), "FCWithoutBias expects input dimensions > 0, got {}".format(input_dims)
 
         self.output_schema = schema.Scalar(
-            (np.float32, (output_dims, )),
-            self.get_next_blob_reference('output')
+            (np.float32, (output_dims,)), self.get_next_blob_reference("output")
         )
 
         scale = math.sqrt(uniform_weight_init_scale_numerator / input_dims)
-        weight_init = weight_init if weight_init else (
-            'UniformFill', {'min': -scale,
-                            'max': scale}
+        weight_init = (
+            weight_init
+            if weight_init
+            else ("UniformFill", {"min": -scale, "max": scale})
         )
 
-        self.w = self.create_param(param_name='w',
-                                   shape=[output_dims, input_dims],
-                                   initializer=weight_init,
-                                   optimizer=weight_optim)
+        self.w = self.create_param(
+            param_name="w",
+            shape=[output_dims, input_dims],
+            initializer=weight_init,
+            optimizer=weight_optim,
+        )
 
     def _add_ops(self, net, params):
         net.MatMul(
             self.input_record.field_blobs() + params,
-            self.output_schema.field_blobs(), trans_b=1, **self.kwargs
+            self.output_schema.field_blobs(),
+            trans_b=1,
+            **self.kwargs
         )
 
     @property

@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import range
 import time
 
 import caffe2.python.hypothesis_test_util as hu

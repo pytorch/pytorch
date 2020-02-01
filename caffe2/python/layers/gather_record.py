@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 
@@ -29,14 +30,15 @@ class GatherRecord(ModelLayer):
     This supports nested list.
     """
 
-    def __init__(self, model, input_record, name='gather_record', **kwargs):
+    def __init__(self, model, input_record, name="gather_record", **kwargs):
         super(GatherRecord, self).__init__(model, name, input_record, **kwargs)
 
-        assert 'indices' in input_record
-        assert 'record' in input_record
+        assert "indices" in input_record
+        assert "record" in input_record
 
         self.output_schema = schema.NewRecord(
-            model.net, input_record.record.clone_schema())
+            model.net, input_record.record.clone_schema()
+        )
 
         self._indices = self.input_record.indices()
 
@@ -44,16 +46,14 @@ class GatherRecord(ModelLayer):
         if lengths_blob is None:
             net.Gather([record(), self._indices], output_record())
         else:
-            net.LengthsGather([record(), lengths_blob, self._indices],
-                              output_record())
+            net.LengthsGather([record(), lengths_blob, self._indices], output_record())
 
     def _gather_struct(self, net, record, lengths_blob, output_record):
         for name, field in record.get_children():
             self._dispatch(net, field, lengths_blob, output_record[name])
 
     def _gather_list(self, net, record, lengths_blob, output_record):
-        self._gather_scalar(
-            net, record.lengths, lengths_blob, output_record.lengths)
+        self._gather_scalar(net, record.lengths, lengths_blob, output_record.lengths)
         if lengths_blob is None:
             lengths_blob = record.lengths()
         else:
@@ -61,12 +61,12 @@ class GatherRecord(ModelLayer):
             # is implemented
             lengths_float = net.Cast(
                 record.lengths(),
-                net.NextScopedBlob(str(record.lengths()) + '_float'),
+                net.NextScopedBlob(str(record.lengths()) + "_float"),
                 to=core.DataType.FLOAT,
             )
             lengths_blob_float = net.LengthsSum(
                 [lengths_float, lengths_blob],
-                net.NextScopedBlob(str(record.lengths()) + "_nested_float")
+                net.NextScopedBlob(str(record.lengths()) + "_nested_float"),
             )
             lengths_blob = net.Cast(
                 lengths_blob_float,

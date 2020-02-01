@@ -14,10 +14,7 @@ import unittest
 
 
 class TestCeil(serial.SerializedTestCase):
-
-    @serial.given(X=hu.tensor(),
-           engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+    @serial.given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     def test_ceil(self, X, gc, dc, engine):
         op = core.CreateOperator("Ceil", ["X"], ["Y"], engine=engine)
 
@@ -25,10 +22,8 @@ class TestCeil(serial.SerializedTestCase):
             return (np.ceil(X),)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=ceil_ref)
+            device_option=gc, op=op, inputs=[X], reference=ceil_ref
+        )
 
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])

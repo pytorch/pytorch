@@ -9,7 +9,6 @@ import numpy as np
 
 
 class TestDataCoupleOp(TestCase):
-
     def test_data_couple_op(self):
         param_array = np.random.rand(10, 10)
         gradient_array = np.random.rand(10, 10)
@@ -18,13 +17,14 @@ class TestDataCoupleOp(TestCase):
         workspace.FeedBlob("gradient", gradient_array)
         workspace.FeedBlob("extraBlob", extra_array)
 
-        workspace.RunOperatorOnce(core.CreateOperator(
-            "DataCouple",
-            ["param", "gradient", "extraBlob"],
-            ["param", "gradient"]))
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "DataCouple", ["param", "gradient", "extraBlob"], ["param", "gradient"]
+            )
+        )
 
-        result1 = workspace.FetchBlob('param')
-        result2 = workspace.FetchBlob('gradient')
+        result1 = workspace.FetchBlob("param")
+        result2 = workspace.FetchBlob("gradient")
 
         self.assertFalse((result1 - param_array).any())
         self.assertFalse((result2 - gradient_array).any())

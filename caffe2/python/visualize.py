@@ -9,6 +9,8 @@ bears are vegetarian, and iceberg lettuce has layers of leaves.
 (This joke is so lame.)
 """
 
+from builtins import range
+from builtins import object
 import numpy as np
 from matplotlib import cm, pyplot
 
@@ -63,7 +65,7 @@ class PatchVisualizer(object):
         nrows = int(np.ceil(num_patches / float(ncols)))
         if len(patches.shape) == 2:
             patches = patches.reshape(
-                (patches.shape[0], ) + self.get_patch_shape(patches[0])
+                (patches.shape[0],) + self.get_patch_shape(patches[0])
             )
         patch_size_expand = np.array(patches.shape[1:3]) + self.gap
         image_size = patch_size_expand * np.array([nrows, ncols]) - self.gap
@@ -76,7 +78,7 @@ class PatchVisualizer(object):
                     cmap = cm.gray
             elif patches.shape[3] == 3:
                 # color patches
-                image_shape = tuple(image_size) + (3, )
+                image_shape = tuple(image_size) + (3,)
             else:
                 raise ValueError("The input patch shape isn't expected.")
         else:
@@ -87,10 +89,11 @@ class PatchVisualizer(object):
         for pid in range(num_patches):
             row = pid // ncols * patch_size_expand[0]
             col = pid % ncols * patch_size_expand[1]
-            image[row:row+patches.shape[1], col:col+patches.shape[2]] = \
-                patches[pid]
-        pyplot.imshow(image, cmap=cmap, interpolation='nearest')
-        pyplot.axis('off')
+            image[row : row + patches.shape[1], col : col + patches.shape[2]] = patches[
+                pid
+            ]
+        pyplot.imshow(image, cmap=cmap, interpolation="nearest")
+        pyplot.axis("off")
         return image
 
     def ShowImages(self, patches, *args, **kwargs):
@@ -121,7 +124,7 @@ class PatchVisualizer(object):
         edgeLen = np.sqrt(patch.size)
         if edgeLen != np.floor(edgeLen):
             # we are given color patches
-            edgeLen = np.sqrt(patch.size / 3.)
+            edgeLen = np.sqrt(patch.size / 3.0)
             if edgeLen != np.floor(edgeLen):
                 raise ValueError("I can't figure out the patch shape.")
             return (edgeLen, edgeLen, 3)

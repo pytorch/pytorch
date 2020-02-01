@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
+from builtins import zip
+from builtins import range
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
@@ -92,7 +94,7 @@ class TestRegularizer(LayersTestCase):
         **hu.gcs_cpu_only
     )
     def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc):
-        if ub - (eps if right_open else 0.) < lb + (eps if left_open else 0.):
+        if ub - (eps if right_open else 0.0) < lb + (eps if left_open else 0.0):
             return
         param = core.BlobReference("X")
         workspace.FeedBlob(param, X)
@@ -113,7 +115,7 @@ class TestRegularizer(LayersTestCase):
 
         def ref(X):
             return np.clip(
-                X, lb + (eps if left_open else 0.), ub - (eps if right_open else 0.)
+                X, lb + (eps if left_open else 0.0), ub - (eps if right_open else 0.0)
             )
 
         assert output is None
@@ -122,7 +124,7 @@ class TestRegularizer(LayersTestCase):
     @given(
         output_dim=st.integers(1, 10),
         input_num=st.integers(3, 30),
-        reg_weight=st.integers(0, 10)
+        reg_weight=st.integers(0, 10),
     )
     def test_group_l1_norm(self, output_dim, input_num, reg_weight):
         """
@@ -132,11 +134,13 @@ class TestRegularizer(LayersTestCase):
         4. run equivalent np operations to calculate group l1 norm
         5. compare if the results from 3 and 4 are equal
         """
+
         def compare_reference(weight, group_boundaries, reg_lambda, output):
             group_splits = np.hsplit(weight, group_boundaries[1:-1])
             l2_reg = np.sqrt([np.sum(np.square(g)) for g in group_splits])
-            l2_normalized = np.multiply(l2_reg,
-                np.array([np.sqrt(g.shape[1]) for g in group_splits]))
+            l2_normalized = np.multiply(
+                l2_reg, np.array([np.sqrt(g.shape[1]) for g in group_splits])
+            )
             result = np.multiply(np.sum(l2_normalized), reg_lambda)
             npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)
 
@@ -147,7 +151,9 @@ class TestRegularizer(LayersTestCase):
         group_boundaries = np.append(
             group_boundaries,
             np.sort(
-                np.random.choice(range(1, input_num - 1), feature_num, replace=False)
+                np.random.choice(
+                    list(range(1, input_num - 1)), feature_num, replace=False
+                )
             ),
         )
         group_boundaries = np.append(group_boundaries, [input_num])
@@ -169,7 +175,7 @@ class TestRegularizer(LayersTestCase):
     @given(
         param_dim=st.integers(10, 30),
         k=st.integers(5, 9),
-        reg_weight=st.integers(0, 10)
+        reg_weight=st.integers(0, 10),
     )
     def test_l1_norm_trimmed(self, param_dim, k, reg_weight):
         weight = np.random.rand(param_dim).astype(np.float32)
@@ -184,14 +190,16 @@ class TestRegularizer(LayersTestCase):
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
-        result = np.sum(np.sort(np.absolute(weight))[:(param_dim - k)]) * reg_weight * 0.1
+        result = (
+            np.sum(np.sort(np.absolute(weight))[: (param_dim - k)]) * reg_weight * 0.1
+        )
         npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)
 
     @given(
         param_dim=st.integers(10, 30),
         k=st.integers(5, 9),
         l1=st.integers(0, 10),
-        l2=st.integers(0, 10)
+        l2=st.integers(0, 10),
     )
     def test_elastic_l1_norm_trimmed(self, param_dim, k, l1, l2):
         weight = np.random.rand(param_dim).astype(np.float32)
@@ -206,7 +214,7 @@ class TestRegularizer(LayersTestCase):
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
-        l1_norm = np.sum(np.sort(np.absolute(weight))[:(param_dim - k)])
+        l1_norm = np.sum(np.sort(np.absolute(weight))[: (param_dim - k)])
         l2_norm = np.sum(np.square(weight))
         result = l1_norm * l1 * 0.1 + l2_norm * l2 * 0.1
         npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)

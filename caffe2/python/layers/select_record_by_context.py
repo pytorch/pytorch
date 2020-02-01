@@ -3,13 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
 import logging
 
 from caffe2.python import schema
-from caffe2.python.layers.layers import (
-    InstantiationContext,
-    ModelLayer,
-)
+from caffe2.python.layers.layers import InstantiationContext, ModelLayer
 
 
 logger = logging.getLogger(__name__)
@@ -26,14 +24,13 @@ class SelectRecordByContext(ModelLayer):
         self,
         model,
         input_record,
-        name='select_record_by_context',
+        name="select_record_by_context",
         check_field_metas=True,
         use_copy=False,
         default_output_record_field=None,
         **kwargs
     ):
-        super(SelectRecordByContext, self).__init__(model, name, input_record,
-                                                    **kwargs)
+        super(SelectRecordByContext, self).__init__(model, name, input_record, **kwargs)
 
         assert isinstance(input_record, schema.Struct)
         assert len(input_record) > 1
@@ -41,12 +38,14 @@ class SelectRecordByContext(ModelLayer):
         self.use_copy = use_copy
         self.default_output_record = (
             input_record[default_output_record_field]
-            if (default_output_record_field is not None) else None
+            if (default_output_record_field is not None)
+            else None
         )
         ref_record = input_record[0]
         for record in input_record:
-            assert schema.equal_schemas(record, ref_record,
-                                        check_field_metas=check_field_metas)
+            assert schema.equal_schemas(
+                record, ref_record, check_field_metas=check_field_metas
+            )
 
         self.output_schema = schema.NewRecord(model.net, ref_record)
 
@@ -57,7 +56,7 @@ class SelectRecordByContext(ModelLayer):
             " output".format(context)
         )
         for in_blob, out_blob in zip(
-                record.field_blobs(), self.output_schema.field_blobs()
+            record.field_blobs(), self.output_schema.field_blobs()
         ):
             if self.use_copy:
                 net.Copy(in_blob, out_blob)

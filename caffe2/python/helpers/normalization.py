@@ -13,20 +13,18 @@ from caffe2.python.modeling import initializers
 
 def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
     """LRN"""
-    dev = kwargs['device_option'] if 'device_option' in kwargs \
+    dev = (
+        kwargs["device_option"]
+        if "device_option" in kwargs
         else scope.CurrentDeviceScope()
+    )
     is_cpu = dev is None or dev.device_type == caffe2_pb2.CPU
     if use_cudnn and (not is_cpu):
-        kwargs['engine'] = 'CUDNN'
+        kwargs["engine"] = "CUDNN"
         blobs_out = blob_out
     else:
         blobs_out = [blob_out, "_" + blob_out + "_scale"]
-    lrn = model.net.LRN(
-        blob_in,
-        blobs_out,
-        order=order,
-        **kwargs
-    )
+    lrn = model.net.LRN(blob_in, blobs_out, order=order, **kwargs)
 
     if use_cudnn and (not is_cpu):
         return lrn
@@ -37,7 +35,7 @@ def lrn(model, blob_in, blob_out, order="NCHW", use_cudnn=False, **kwargs):
 def softmax(model, blob_in, blob_out=None, use_cudnn=False, **kwargs):
     """Softmax."""
     if use_cudnn:
-        kwargs['engine'] = 'CUDNN'
+        kwargs["engine"] = "CUDNN"
     if blob_out is not None:
         return model.net.Softmax(blob_in, blob_out, **kwargs)
     else:
@@ -53,30 +51,41 @@ def instance_norm(model, blob_in, blob_out, dim_in, order="NCHW", **kwargs):
 
     def init_blob(value, suffix):
         return model.param_init_net.ConstantFill(
-            [], blob_out + "_" + suffix, shape=[dim_in], value=value)
+            [], blob_out + "_" + suffix, shape=[dim_in], value=value
+        )
+
     scale, bias = init_blob(1.0, "s"), init_blob(0.0, "b")
 
     model.AddParameter(scale, ParameterTags.WEIGHT)
     model.AddParameter(bias, ParameterTags.BIAS)
     blob_outs = [blob_out, blob_out + "_sm", blob_out + "_siv"]
-    if 'is_test' in kwargs and kwargs['is_test']:
+    if "is_test" in kwargs and kwargs["is_test"]:
         blob_outputs = model.net.InstanceNorm(
-            [blob_in, scale, bias], [blob_out],
-            order=order, **kwargs)
+            [blob_in, scale, bias], [blob_out], order=order, **kwargs
+        )
         return blob_outputs
     else:
         blob_outputs = model.net.InstanceNorm(
-            [blob_in, scale, bias], blob_outs,
-            order=order, **kwargs)
+            [blob_in, scale, bias], blob_outs, order=order, **kwargs
+        )
         # Return the output
         return blob_outputs[0]
 
 
-def spatial_bn(model, blob_in, blob_out, dim_in,
-               init_scale=1., init_bias=0.,
-               ScaleInitializer=None, BiasInitializer=None,
-               RunningMeanInitializer=None, RunningVarianceInitializer=None,
-               order="NCHW", **kwargs):
+def spatial_bn(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    init_scale=1.0,
+    init_bias=0.0,
+    ScaleInitializer=None,
+    BiasInitializer=None,
+    RunningMeanInitializer=None,
+    RunningVarianceInitializer=None,
+    order="NCHW",
+    **kwargs
+):
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias, est_mean, est_inv_var
     # Output: output, running_mean, running_inv_var, saved_mean,
@@ -87,10 +96,10 @@ def spatial_bn(model, blob_in, blob_out, dim_in,
     # est var: ones
 
     if model.init_params:
-        scale_init = ("ConstantFill", {'value': init_scale})
-        bias_init = ("ConstantFill", {'value': init_bias})
-        rm_init = ("ConstantFill", {'value': 0.0})
-        riv_init = ("ConstantFill", {'value': 1.0})
+        scale_init = ("ConstantFill", {"value": init_scale})
+        bias_init = ("ConstantFill", {"value": init_bias})
+        rm_init = ("ConstantFill", {"value": 0.0})
+        riv_init = ("ConstantFill", {"value": 1.0})
 
         ScaleInitializer = initializers.update_initializer(
             ScaleInitializer, scale_init, ("ConstantFill", {})
@@ -111,56 +120,76 @@ def spatial_bn(model, blob_in, blob_out, dim_in,
         RunningVarianceInitializer = initializers.ExternalInitializer()
 
     scale = model.create_param(
-        param_name=blob_out + '_s',
+        param_name=blob_out + "_s",
         shape=[dim_in],
         initializer=ScaleInitializer,
-        tags=ParameterTags.WEIGHT
+        tags=ParameterTags.WEIGHT,
     )
 
     bias = model.create_param(
-        param_name=blob_out + '_b',
+        param_name=blob_out + "_b",
         shape=[dim_in],
         initializer=BiasInitializer,
-        tags=ParameterTags.BIAS
+        tags=ParameterTags.BIAS,
     )
 
     running_mean = model.create_param(
-        param_name=blob_out + '_rm',
+        param_name=blob_out + "_rm",
         shape=[dim_in],
         initializer=RunningMeanInitializer,
-        tags=ParameterTags.COMPUTED_PARAM
+        tags=ParameterTags.COMPUTED_PARAM,
     )
 
     running_inv_var = model.create_param(
-        param_name=blob_out + '_riv',
+        param_name=blob_out + "_riv",
         shape=[dim_in],
         initializer=RunningVarianceInitializer,
-        tags=ParameterTags.COMPUTED_PARAM
+        tags=ParameterTags.COMPUTED_PARAM,
     )
 
-    blob_outs = [blob_out, running_mean, running_inv_var,
-                 blob_out + "_sm", blob_out + "_siv"]
-    if 'is_test' in kwargs and kwargs['is_test']:
+    blob_outs = [
+        blob_out,
+        running_mean,
+        running_inv_var,
+        blob_out + "_sm",
+        blob_out + "_siv",
+    ]
+    if "is_test" in kwargs and kwargs["is_test"]:
         blob_outputs = model.net.SpatialBN(
-            [blob_in, scale, bias, blob_outs[1], blob_outs[2]], [blob_out],
-            order=order, **kwargs)
+            [blob_in, scale, bias, blob_outs[1], blob_outs[2]],
+            [blob_out],
+            order=order,
+            **kwargs
+        )
         return blob_outputs
     else:
         blob_outputs = model.net.SpatialBN(
-            [blob_in, scale, bias, blob_outs[1], blob_outs[2]], blob_outs,
-            order=order, **kwargs)
+            [blob_in, scale, bias, blob_outs[1], blob_outs[2]],
+            blob_outs,
+            order=order,
+            **kwargs
+        )
         # Return the output
         return blob_outputs[0]
 
 
-def spatial_gn(model, blob_in, blob_out, dim_in,
-               init_scale=1., init_bias=0.,
-               ScaleInitializer=None, BiasInitializer=None,
-               RunningMeanInitializer=None, RunningVarianceInitializer=None,
-               order="NCHW", **kwargs):
-    '''
+def spatial_gn(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    init_scale=1.0,
+    init_bias=0.0,
+    ScaleInitializer=None,
+    BiasInitializer=None,
+    RunningMeanInitializer=None,
+    RunningVarianceInitializer=None,
+    order="NCHW",
+    **kwargs
+):
+    """
     Group normalizes the input, cf. https://arxiv.org/abs/1803.08494.
-    '''
+    """
 
     blob_out = blob_out or model.net.NextName()
     # Input: input, scale, bias
@@ -170,8 +199,8 @@ def spatial_gn(model, blob_in, blob_out, dim_in,
     # bias: initialize with init_bias (default 0.)
 
     if model.init_params:
-        scale_init = ("ConstantFill", {'value': init_scale})
-        bias_init = ("ConstantFill", {'value': init_bias})
+        scale_init = ("ConstantFill", {"value": init_scale})
+        bias_init = ("ConstantFill", {"value": init_bias})
 
         ScaleInitializer = initializers.update_initializer(
             ScaleInitializer, scale_init, ("ConstantFill", {})
@@ -184,26 +213,22 @@ def spatial_gn(model, blob_in, blob_out, dim_in,
         BiasInitializer = initializers.ExternalInitializer()
 
     scale = model.create_param(
-        param_name=blob_out + '_s',
+        param_name=blob_out + "_s",
         shape=[dim_in],
         initializer=ScaleInitializer,
-        tags=ParameterTags.WEIGHT
+        tags=ParameterTags.WEIGHT,
     )
 
     bias = model.create_param(
-        param_name=blob_out + '_b',
+        param_name=blob_out + "_b",
         shape=[dim_in],
         initializer=BiasInitializer,
-        tags=ParameterTags.BIAS
+        tags=ParameterTags.BIAS,
     )
 
-    blob_outs = [blob_out,
-                 blob_out + "_mean", blob_out + "_std"]
+    blob_outs = [blob_out, blob_out + "_mean", blob_out + "_std"]
 
-    blob_outputs = model.net.GroupNorm(
-        [blob_in, scale, bias],
-        blob_outs,
-        **kwargs)
+    blob_outputs = model.net.GroupNorm([blob_in, scale, bias], blob_outs, **kwargs)
     # Return the output
     return blob_outputs[0]
 
@@ -218,7 +243,7 @@ def layer_norm(
     initial_scale=1.0,
     initial_bias=0.0,
 ):
-    '''
+    """
     Layer normalizes the input, cf. https://arxiv.org/pdf/1607.06450.pdf.
 
     Args:
@@ -241,27 +266,21 @@ def layer_norm(
             - The layer normalized input blob.
             - The mean of the input blob across the given axis.
             - The standard deviation of the input blob acress the given axis.
-    '''
+    """
 
     # The learned multiplicative scale or "gain".
     scale = model.create_param(
-        param_name='{}_scale'.format(blob_out),
+        param_name="{}_scale".format(blob_out),
         shape=[dim_in] if isinstance(dim_in, int) else dim_in,
-        initializer=initializers.Initializer(
-            'ConstantFill',
-            value=initial_scale,
-        ),
+        initializer=initializers.Initializer("ConstantFill", value=initial_scale),
         tags=ParameterTags.WEIGHT,
     )
 
     # The learned additive bias or "shift".
     bias = model.create_param(
-        param_name='{}_bias'.format(blob_out),
+        param_name="{}_bias".format(blob_out),
         shape=[dim_in] if isinstance(dim_in, int) else dim_in,
-        initializer=initializers.Initializer(
-            'ConstantFill',
-            value=initial_bias,
-        ),
+        initializer=initializers.Initializer("ConstantFill", value=initial_bias),
         tags=ParameterTags.BIAS,
     )
 
@@ -275,13 +294,21 @@ def layer_norm(
 
     return normalized, mean, std
 
-def moments_with_running_stats(model, blob_in, blob_out, dim_in,
-                                     RunningMeanInitializer=None, RunningVarianceInitializer=None,
-                                     order="NCHW", **kwargs):
+
+def moments_with_running_stats(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    RunningMeanInitializer=None,
+    RunningVarianceInitializer=None,
+    order="NCHW",
+    **kwargs
+):
 
     if model.init_params:
-        rm_init = ("ConstantFill", {'value': 0.0})
-        riv_init = ("ConstantFill", {'value': 1.0})
+        rm_init = ("ConstantFill", {"value": 0.0})
+        riv_init = ("ConstantFill", {"value": 1.0})
 
         RunningMeanInitializer = initializers.update_initializer(
             RunningMeanInitializer, rm_init, ("ConstantFill", {})
@@ -294,29 +321,27 @@ def moments_with_running_stats(model, blob_in, blob_out, dim_in,
         RunningVarianceInitializer = initializers.ExternalInitializer()
 
     running_mean = model.create_param(
-        param_name=blob_out + '_rm',
+        param_name=blob_out + "_rm",
         shape=[dim_in],
         initializer=RunningMeanInitializer,
-        tags=ParameterTags.COMPUTED_PARAM
+        tags=ParameterTags.COMPUTED_PARAM,
     )
 
     # this is just running variance
     running_inv_var = model.create_param(
-        param_name=blob_out + '_riv',
+        param_name=blob_out + "_riv",
         shape=[dim_in],
         initializer=RunningVarianceInitializer,
-        tags=ParameterTags.COMPUTED_PARAM
+        tags=ParameterTags.COMPUTED_PARAM,
     )
 
     blob_outs = [blob_out + "_sm", blob_out + "_sv"]
-    if order == 'NCHW':
+    if order == "NCHW":
         blob_outputs = model.net.Moments(
-            [blob_in], blob_outs,
-            axes=[0, 2, 3],
-            order=order, keepdims=False, **kwargs)
-    elif order == 'NHWC':
+            [blob_in], blob_outs, axes=[0, 2, 3], order=order, keepdims=False, **kwargs
+        )
+    elif order == "NHWC":
         blob_outputs = model.net.Moments(
-            [blob_in], blob_outs,
-            axes=[0, 1, 2],
-            order=order, keepdims=False, **kwargs)
+            [blob_in], blob_outs, axes=[0, 1, 2], order=order, keepdims=False, **kwargs
+        )
     return blob_outputs

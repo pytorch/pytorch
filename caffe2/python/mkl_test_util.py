@@ -20,8 +20,7 @@ from caffe2.python import hypothesis_test_util as hu
 cpu_do = hu.cpu_do
 gpu_do = hu.gpu_do
 mkl_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.MKLDNN)
-device_options = hu.device_options + (
-    [mkl_do] if workspace.C.has_mkldnn else [])
+device_options = hu.device_options + ([mkl_do] if workspace.C.has_mkldnn else [])
 
 
 def device_checker_device_options():
@@ -32,10 +31,7 @@ def gradient_checker_device_option():
     return st.sampled_from(device_options)
 
 
-gcs = dict(
-    gc=gradient_checker_device_option(),
-    dc=device_checker_device_options()
-)
+gcs = dict(gc=gradient_checker_device_option(), dc=device_checker_device_options())
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))

@@ -2,6 +2,8 @@
 # Module caffe2.fb.python.layers.adaptive_weight
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from builtins import str
+from builtins import range
 import numpy as np
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
@@ -37,7 +39,7 @@ class AdaptiveWeight(ModelLayer):
         if weights is not None:
             assert len(weights) == self.num
         else:
-            weights = [1. / self.num for _ in range(self.num)]
+            weights = [1.0 / self.num for _ in range(self.num)]
         assert min(weights) > 0, "initial weights must be positive"
         self.weights = np.array(weights).astype(np.float32)
         self.estimation_method = str(estimation_method).lower()
@@ -79,7 +81,7 @@ class AdaptiveWeight(ModelLayer):
         per task objective:
         min 1 / 2 / e^mu X + mu / 2
         """
-        values = np.log(1. / 2. / self.weights)
+        values = np.log(1.0 / 2.0 / self.weights)
         initializer = (
             "GivenTensorFill",
             {"values": values, "dtype": core.DataType.FLOAT},
@@ -110,7 +112,7 @@ class AdaptiveWeight(ModelLayer):
         per task objective:
         min 1 / 2 * k  X - 1 / 2 * log k
         """
-        values = 2. * self.weights
+        values = 2.0 * self.weights
         initializer = (
             "GivenTensorFill",
             {"values": values, "dtype": core.DataType.FLOAT},

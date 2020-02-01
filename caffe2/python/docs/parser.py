@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from builtins import object
 import re
 
 
@@ -13,32 +14,19 @@ class Parser(object):
     # otherwise it will only be called on text that hasn't been parsed yet.
     regexes = [
         # Code blocks of various formats
-        ('````(.+?)````',
-         lambda m, f: f.addCode(m.group(1))
-         ),
-        ('```(.+?)```',
-         lambda m, f: f.addCode(m.group(1))
-         ),
-        (r'((( {2})+)(\S.*)(\n\s*\n|\n))+',
-         lambda m, f: f.addCode(m.group(0))
-         ),
-        (r'([^\.])\n',
-         lambda m, f: f.addRaw('{c} '.format(c=m.group(1))) or True
-         ),
-        ('`(.+?)`',
-         lambda m, f: f.addCode(m.group(1), True)
-         ),
+        ("````(.+?)````", lambda m, f: f.addCode(m.group(1))),
+        ("```(.+?)```", lambda m, f: f.addCode(m.group(1))),
+        (r"((( {2})+)(\S.*)(\n\s*\n|\n))+", lambda m, f: f.addCode(m.group(0))),
+        (r"([^\.])\n", lambda m, f: f.addRaw("{c} ".format(c=m.group(1))) or True),
+        ("`(.+?)`", lambda m, f: f.addCode(m.group(1), True)),
         # Make links clickable
-        ('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]'
-         r'|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
-         lambda m, f: f.addLink(m.group(0), m.group(0))
-         ),
-        (r'\*\*(.+?)\*\*',
-         lambda m, f: f.addEmphasis(m.group(1), 2)
-         ),
-        (r'\*(.+?)\*',
-         lambda m, f: f.addEmphasis(m.group(1), 1)
-         ),
+        (
+            "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]"
+            r"|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+",
+            lambda m, f: f.addLink(m.group(0), m.group(0)),
+        ),
+        (r"\*\*(.+?)\*\*", lambda m, f: f.addEmphasis(m.group(1), 2)),
+        (r"\*(.+?)\*", lambda m, f: f.addEmphasis(m.group(1), 1)),
     ]
 
     def __init__(self, text, formatter):
@@ -56,7 +44,7 @@ class Parser(object):
                 label, text = parsed_block[index]
 
                 # Already been parsed
-                if (label == PARSED):
+                if label == PARSED:
                     index += 1
                     continue
 
@@ -74,22 +62,20 @@ class Parser(object):
                         parsed_block.insert(index, (UNPARSED, merged))
                     else:
                         if text[:start]:
-                            parsed_block.insert(index,
-                                                (UNPARSED, text[:start]))
+                            parsed_block.insert(index, (UNPARSED, text[:start]))
 
                         index += 1
                         parsed_block.insert(index, (PARSED, f.dump()))
 
                         index += 1
                         if text[end:]:
-                            parsed_block.insert(index,
-                                                (UNPARSED, text[end:]))
+                            parsed_block.insert(index, (UNPARSED, text[end:]))
 
                 else:
                     index += 1
 
         self.lines += [i for _, i in parsed_block]
-        self.text = ' '.join(self.lines)
+        self.text = " ".join(self.lines)
 
     def parse(self):
         self.parseText()

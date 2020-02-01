@@ -5,6 +5,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import map
+from builtins import str
+from builtins import range
+from builtins import object
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
@@ -13,8 +18,12 @@ from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
-from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
+from caffe2.python.control_ops_grad import (
+    gen_do_gradient,
+    gen_if_gradient,
+    gen_while_gradient,
+    disambiguate_grad_if_op_output,
+)
 
 import caffe2.python._import_c_extension as C
 
@@ -26,11 +35,13 @@ import traceback
 import os
 
 # Mac os specific message
-if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
-    print('If you are using homebrew leveldb on a Mac OS, you might see an '
-          'error warning you that malloc_zone_unregister() failed. This is '
-          'not a caffe2 issue but is due to the homebrew leveldb having an '
-          'incompatible memory allocator. It does not affect usage.')
+if sys.platform == "darwin" and "leveldb" in C.registered_dbs():
+    print(
+        "If you are using homebrew leveldb on a Mac OS, you might see an "
+        "error warning you that malloc_zone_unregister() failed. This is "
+        "not a caffe2 issue but is due to the homebrew leveldb having an "
+        "incompatible memory allocator. It does not affect usage."
+    )
 
 # Convenience redirections to functions inside scope.
 DeviceScope = scope.DeviceScope
@@ -38,12 +49,12 @@ NameScope = scope.NameScope
 
 
 # Bring datatype enums to the main namespace
-class DataType:
+class DataType(object):
     pass
 
 
 def _InitDataType():
-    for name, value in caffe2_pb2.TensorProto.DataType.items():
+    for name, value in list(caffe2_pb2.TensorProto.DataType.items()):
         setattr(DataType, name, value)
 
 
@@ -75,7 +86,7 @@ def GetGlobalInitArgs():
 
 
 def IsOperator(op_type):
-    return IsOperatorWithEngine(op_type, engine='DEFAULT')
+    return IsOperatorWithEngine(op_type, engine="DEFAULT")
 
 
 def IsOperatorWithEngine(op_type, engine):
@@ -123,10 +134,10 @@ def device_option_equal(opt1, opt2, ignore_node_name=True, ignore_random_seed=Tr
 
 
 def InferBlobDevices(net):
-    '''
+    """
     Compute mapping from parameters to devices by looking at the
     device option of the op that creates the blob has
-    '''
+    """
     mapping = {}
     for op in net.Proto().op:
         op_device = op.device_option
@@ -140,14 +151,8 @@ def InferBlobDevices(net):
 
 def InferOpBlobDevicesAsDict(op):
     input_dev_list, output_dev_list = InferOpBlobDevices(op)
-    input_dict = {
-        op.input[i]: input_dev_list[i]
-        for i in range(len(op.input))
-    }
-    output_dict = {
-        op.output[i]: output_dev_list[i]
-        for i in range(len(op.output))
-    }
+    input_dict = {op.input[i]: input_dev_list[i] for i in range(len(op.input))}
+    output_dict = {op.output[i]: output_dev_list[i] for i in range(len(op.output))}
     return input_dict, output_dict
 
 
@@ -173,7 +178,7 @@ def InferOpDeviceAsBlobDevices(op):
     return input_dev, output_dev
 
 
-GradientSlice = namedtuple('GradientSlice', ['indices', 'values'])
+GradientSlice = namedtuple("GradientSlice", ["indices", "values"])
 
 
 class BlobReference(object):
@@ -193,7 +198,7 @@ class BlobReference(object):
         if isinstance(name, string_types):
             self._name = name
         elif isinstance(name, binary_type):
-            self._name = name.decode('utf-8')
+            self._name = name.decode("utf-8")
         else:
             self._name = str(name)
         self._from_net = net
@@ -208,14 +213,14 @@ class BlobReference(object):
         if isinstance(other, string_types):
             return self._name == other
         elif isinstance(other, binary_type):
-            return self._name == other.decode('utf-8')
+            return self._name == other.decode("utf-8")
         elif isinstance(other, BlobReference):
             return self._name == other._name
         else:
             return False
 
     def __ne__(self, other):
-        return not(self == other)
+        return not (self == other)
 
     def __str__(self):
         return self._name
@@ -225,22 +230,22 @@ class BlobReference(object):
 
     def __add__(self, other):
         if not isinstance(other, string_types):
-            raise RuntimeError('Cannot add BlobReference to a non-string.')
+            raise RuntimeError("Cannot add BlobReference to a non-string.")
         return BlobReference(self._name + other, self._from_net)
 
     def __radd__(self, other):
         if not isinstance(other, string_types):
-            raise RuntimeError('Cannot add a non-string to BlobReference.')
+            raise RuntimeError("Cannot add a non-string to BlobReference.")
         return BlobReference(other + self._name, self._from_net)
 
     def Net(self):
         return self._from_net
 
     def GetNameScope(self):
-        return self._name[:self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
+        return self._name[: self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1]
 
     def GetUnscopedName(self):
-        return self._name[self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1:]
+        return self._name[self._name.rfind(scope._NAMESCOPE_SEPARATOR) + 1 :]
 
     def _CreateAndAddToNet(self, op_type, inputs=None, *args, **kwargs):
         """Internal function that routes the operator generation to the
@@ -261,38 +266,40 @@ class BlobReference(object):
         is equivalent to doing
             net.Relu([b], ...)
         """
-        if op_type.startswith('__'):
-            raise AttributeError('Attribute {} not found.'.format(op_type))
+        if op_type.startswith("__"):
+            raise AttributeError("Attribute {} not found.".format(op_type))
         if self._from_net is None:
             raise AttributeError(
-                'You cannot use a blob reference that does not have a net '
-                'source to create operators. Create the operator from an '
-                'explicit net object.')
+                "You cannot use a blob reference that does not have a net "
+                "source to create operators. Create the operator from an "
+                "explicit net object."
+            )
         if not IsOperator(op_type):
             raise AttributeError(
-                'Method ' + op_type + ' is not a registered operator.' +
-                ' Did you mean: [' +
-                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
+                "Method "
+                + op_type
+                + " is not a registered operator."
+                + " Did you mean: ["
+                + ",".join(workspace.C.nearby_opnames(op_type))
+                + "]"
             )
-        return lambda *args, **kwargs: self._CreateAndAddToNet(
-            op_type, *args, **kwargs)
+        return lambda *args, **kwargs: self._CreateAndAddToNet(op_type, *args, **kwargs)
 
     def __dir__(self):
         additional_methods = [
             op
             for op in _REGISTERED_OPERATORS
-            if '_ENGINE_' not in op or '_ENGINE_CUDNN' in op]
-        return sorted(set(chain(
-            dir(type(self)),
-            viewkeys(self.__dict__),
-            additional_methods
-        )))
+            if "_ENGINE_" not in op or "_ENGINE_CUDNN" in op
+        ]
+        return sorted(
+            set(chain(dir(type(self)), viewkeys(self.__dict__), additional_methods))
+        )
 
 
 def ScopedName(name):
     """prefix the name with the current scope."""
     if isinstance(name, binary_type):
-        name = name.decode('ascii')
+        name = name.decode("ascii")
     return scope.CurrentNameScope() + name
 
 
@@ -323,13 +330,14 @@ def _RectifyInputOutput(blobs, net=None):
                 rectified.append(blob)
             else:
                 raise TypeError(
-                    "I/O blob #{} of unsupported type: {} of type {}"
-                    .format(len(rectified), str(blob), type(blob)))
+                    "I/O blob #{} of unsupported type: {} of type {}".format(
+                        len(rectified), str(blob), type(blob)
+                    )
+                )
         return rectified
     else:
         raise TypeError(
-            "Unknown input/output type: %s of type %s." %
-            (str(blobs), type(blobs))
+            "Unknown input/output type: %s of type %s." % (str(blobs), type(blobs))
         )
 
 
@@ -337,7 +345,7 @@ def CreateOperator(
     operator_type,
     inputs,
     outputs,
-    name='',
+    name="",
     control_input=None,
     device_option=None,
     arg=None,
@@ -350,7 +358,7 @@ def CreateOperator(
     registered with Caffe2.
     """
     operator = caffe2_pb2.OperatorDef()
-    if (os.environ.get('CAFFE2_DEBUG')):
+    if os.environ.get("CAFFE2_DEBUG"):
         stack = traceback.format_stack()
         operator.debug_info = "".join(stack[:-1])
 
@@ -380,9 +388,9 @@ def CreateOperator(
     # random seed is defined in the device option, so we need to do special
     # care.
 
-    if 'random_seed' in kwargs:
-        operator.device_option.random_seed = kwargs['random_seed']
-        del kwargs['random_seed']
+    if "random_seed" in kwargs:
+        operator.device_option.random_seed = kwargs["random_seed"]
+        del kwargs["random_seed"]
     # Add given arguments that do not need parsing
     if arg is not None:
         operator.arg.extend(arg)
@@ -396,9 +404,7 @@ def CreateOperator(
     return operator
 
 
-def _RegisterPythonImpl(
-    f, grad_f=None, python_func_type=None, pass_workspace=False
-):
+def _RegisterPythonImpl(f, grad_f=None, python_func_type=None, pass_workspace=False):
     if python_func_type:
         func = python_func_type(f)
         f = func.forward
@@ -409,14 +415,15 @@ def _RegisterPythonImpl(
         if isinstance(grad_f, tuple):
             grad_f = grad_f[0](*grad_f[1], **grad_f[2])
 
-    token = C.register_python_op(f, pass_workspace, '')
+    token = C.register_python_op(f, pass_workspace, "")
     if grad_f:
         C.register_python_gradient_op(token, grad_f)
     return token
 
 
 def CreatePythonOperator(
-    f, inputs,
+    f,
+    inputs,
     outputs,
     grad_f=None,
     pass_workspace=False,
@@ -445,19 +452,24 @@ def GetIndexFromGradientList(g_list, name):
         if g == name:
             return i
         elif type(g) is GradientSlice:
-            if (g.indices == name or g.values == name):
+            if g.indices == name or g.values == name:
                 return i
     return None
 
 
-OpSSA = namedtuple('OpSSA', ['op', 'in_versions', 'out_versions'])
-GradGenMeta = namedtuple('GradGenMeta',
-                         ['grad_op', 'idx', 'gradient', 'device_option'])
-SparseGradGenMeta = namedtuple('SparseGradGenMeta', [
-    'grad_op_indices', 'idx_indices',
-    'grad_op_values', 'idx_values',
-    'gradient', 'device_option',
-])
+OpSSA = namedtuple("OpSSA", ["op", "in_versions", "out_versions"])
+GradGenMeta = namedtuple("GradGenMeta", ["grad_op", "idx", "gradient", "device_option"])
+SparseGradGenMeta = namedtuple(
+    "SparseGradGenMeta",
+    [
+        "grad_op_indices",
+        "idx_indices",
+        "grad_op_values",
+        "idx_values",
+        "gradient",
+        "device_option",
+    ],
+)
 
 
 class IR(object):
@@ -500,11 +512,15 @@ class IR(object):
         # Validate StopGradient usage by checking that StopGradient's output
         # is actually passed forward
         for op in operators:
-            if op.type == 'StopGradient':
+            if op.type == "StopGradient":
                 if op.output[0] not in self.input_usages:
-                    raise ValueError("""StopGradient's output '{}' is orphan.
+                    raise ValueError(
+                        """StopGradient's output '{}' is orphan.
 You typically want to specify same input and output for
-StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
+StopGradient. Op:\n\n{}""".format(
+                            op.output[0], str(op)
+                        )
+                    )
 
     def Play(self, op):
         """"Adds an op to the current IR, and update the internal states to
@@ -528,7 +544,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         self.ssa.append(OpSSA(op, in_versions, out_versions))
 
     def CheckGradientOperatorInput(
-            self, grad_op_input, g_output, fwd_op_idx, locally_generated_blobs):
+        self, grad_op_input, g_output, fwd_op_idx, locally_generated_blobs
+    ):
         """Checks if the gradient operators can be correctly carried out."""
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         original_index = GetIndexFromGradientList(g_output, grad_op_input)
@@ -556,37 +573,46 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # version of the corresponding output.
         if original_index is not None:
             original_name = forward_op.output[original_index]
-            if (out_versions[original_name] !=
-                    self.gradient_frontier[original_name]):
+            if out_versions[original_name] != self.gradient_frontier[original_name]:
                 raise RuntimeError(
                     'Gradient name "%s" is expected to correspond '
                     'to version %d of "%s", but currently we have '
-                    'version %d.\n\n' % (
-                        grad_op_input, out_versions[original_name],
+                    "version %d.\n\n"
+                    % (
+                        grad_op_input,
+                        out_versions[original_name],
                         original_name,
-                        self.gradient_frontier[original_name]) +
-                    versionMismatchInfoOut(original_name))
+                        self.gradient_frontier[original_name],
+                    )
+                    + versionMismatchInfoOut(original_name)
+                )
         # If it is an output name, the current version should match the
         # version when the operator was run.
         elif grad_op_input in out_versions:
             if self.frontier[grad_op_input] != out_versions[grad_op_input]:
                 raise RuntimeError(
                     'Gradient operator needs output "%s" at version'
-                    ' %d, but currently we have version %d.\n\n' % (
-                        grad_op_input, out_versions[grad_op_input],
-                        self.frontier[grad_op_input]
-                    ) + versionMismatchInfoOut(grad_op_input)
+                    " %d, but currently we have version %d.\n\n"
+                    % (
+                        grad_op_input,
+                        out_versions[grad_op_input],
+                        self.frontier[grad_op_input],
+                    )
+                    + versionMismatchInfoOut(grad_op_input)
                 )
         # If it is an input name, the current version should match the
         # version when the operator was run.
         elif grad_op_input in in_versions:
-            if (self.frontier[grad_op_input] != in_versions[grad_op_input]):
+            if self.frontier[grad_op_input] != in_versions[grad_op_input]:
                 raise RuntimeError(
                     'Gradient operator needs input "%s" at version '
-                    '%d, but currently we have version %d.\n\n' % (
-                        grad_op_input, in_versions[grad_op_input],
-                        self.frontier[grad_op_input]
-                    ) + versionMismatchInfoIn(grad_op_input)
+                    "%d, but currently we have version %d.\n\n"
+                    % (
+                        grad_op_input,
+                        in_versions[grad_op_input],
+                        self.frontier[grad_op_input],
+                    )
+                    + versionMismatchInfoIn(grad_op_input)
                 )
         # If it is none of the above, it should be a blob that is
         # generated locally by one of the previous gradient operators.
@@ -594,8 +620,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             if grad_op_input not in locally_generated_blobs:
                 raise RuntimeError(
                     'Blob name "%s" not in the scope of operator: '
-                    '%s\nand is not generated by any of the local '
-                    'gradient operators.' % (grad_op_input, str(forward_op))
+                    "%s\nand is not generated by any of the local "
+                    "gradient operators." % (grad_op_input, str(forward_op))
                 )
 
     def AppendSparseGenerators(self, sparse_generators):
@@ -607,26 +633,31 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                     generator = generators[0]
                 else:
                     # both indices and values are generated
-                    assert(len(generators) == 2)
+                    assert len(generators) == 2
                     op1_i, idx1_i, op1_v, idx1_v, g1, dev_1 = generators[0]
                     op2_i, idx2_i, op2_v, idx2_v, g2, dev_2 = generators[1]
-                    assert(g1 == g2)
+                    assert g1 == g2
                     assert dev_1 == dev_2, (
                         "Unequal devices for sparse generators: "
                         "{} and {}".format(dev1, dev2)
                     )
-                    assert(op1_i is None or op2_i is None)
-                    assert(op1_v is None or op2_v is None)
-                    assert(idx1_i == 0 or idx2_i == 0)
-                    assert(idx1_v == 0 or idx2_v == 0)
+                    assert op1_i is None or op2_i is None
+                    assert op1_v is None or op2_v is None
+                    assert idx1_i == 0 or idx2_i == 0
+                    assert idx1_v == 0 or idx2_v == 0
                     generator = SparseGradGenMeta(
-                        op1_i or op2_i, idx1_i + idx2_i,
-                        op1_v or op2_v, idx1_v + idx2_v,
-                        g1, dev_1)
+                        op1_i or op2_i,
+                        idx1_i + idx2_i,
+                        op1_v or op2_v,
+                        idx1_v + idx2_v,
+                        g1,
+                        dev_1,
+                    )
                 self.gradient_generators[name][version].append(generator)
 
     def BuildGradientGenerators(  # NOQA
-            self, fwd_op_idx, gradient_ops, g_output, g_input):
+        self, fwd_op_idx, gradient_ops, g_output, g_input
+    ):
         """Updates gradient_generators and gradient_frontier"""
         forward_op, in_versions, out_versions = self.ssa[fwd_op_idx]
         locally_generated_blobs = []
@@ -636,7 +667,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # (1) check that inputs are valid
             for s in grad_op.input:
                 self.CheckGradientOperatorInput(
-                    s, g_output, fwd_op_idx, locally_generated_blobs)
+                    s, g_output, fwd_op_idx, locally_generated_blobs
+                )
 
             # (2) add outputs to the locally generated blobs
             # If an output corresponds to the gradient of an input, we also
@@ -656,16 +688,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                         # corresponding to the same gradient in step (3)
                         if g.indices == output:
                             m = SparseGradGenMeta(
-                                grad_op, i, None, 0, g, grad_op.device_option)
+                                grad_op, i, None, 0, g, grad_op.device_option
+                            )
                         else:
-                            assert(g.values == output)
+                            assert g.values == output
                             m = SparseGradGenMeta(
-                                None, 0, grad_op, i, g, grad_op.device_option)
+                                None, 0, grad_op, i, g, grad_op.device_option
+                            )
                         sparse_generators[input_name][input_version].append(m)
                     else:
-                        self.gradient_generators[input_name][input_version] \
-                            .append(GradGenMeta(
-                                grad_op, i, g, grad_op.device_option))
+                        self.gradient_generators[input_name][input_version].append(
+                            GradGenMeta(grad_op, i, g, grad_op.device_option)
+                        )
 
         # (3) merge indices and values generators for sparse gradients, and
         # add them to gradient_generators
@@ -682,14 +716,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             if not g:
                 continue
             if type(g) is GradientSlice:
-                if str(g.indices) not in locally_generated_blobs and \
-                        str(g.values) not in locally_generated_blobs:
+                if (
+                    str(g.indices) not in locally_generated_blobs
+                    and str(g.values) not in locally_generated_blobs
+                ):
                     self.gradient_generators[input_name][input_version].append(
-                        SparseGradGenMeta(None, 0, None, 0, g, forward_op.device_option))
+                        SparseGradGenMeta(None, 0, None, 0, g, forward_op.device_option)
+                    )
             else:
                 if str(g) not in locally_generated_blobs:
                     self.gradient_generators[input_name][input_version].append(
-                        GradGenMeta(None, 0, g, forward_op.device_option))
+                        GradGenMeta(None, 0, g, forward_op.device_option)
+                    )
 
         # Finally, for the gradients specified in g_input, we update the
         # gradient frontier to reflect the input versions that the gradients
@@ -703,7 +741,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
     def _GetSumOpOutputName(self, generator, input_name):
         def remove_suffix(s, suffix):
             if s.endswith(suffix):
-                return s[:-len(suffix)]
+                return s[: -len(suffix)]
             return s
 
         for g in generator:
@@ -712,14 +750,14 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if grad_op:
                     return grad_op.output[idx]
             else:
-                assert(type(g) is SparseGradGenMeta)
+                assert type(g) is SparseGradGenMeta
                 op_i, idx_i, op_v, idx_v, _, _ = g
                 if op_i:
-                    return remove_suffix(op_i.output[idx_i], '_indices')
+                    return remove_suffix(op_i.output[idx_i], "_indices")
                 if op_v:
-                    return remove_suffix(op_v.output[idx_v], '_values')
+                    return remove_suffix(op_v.output[idx_v], "_values")
 
-        return input_name + '_grad'
+        return input_name + "_grad"
 
     IS_AUTO_GEN_SUM_OPS_TAG = "is_auto_gen_sum_ops"
 
@@ -729,14 +767,13 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         for generator in generators:
             for op in sum_ops:
                 op.device_option.CopyFrom(generator.device_option)
-                op.device_option.extra_info.extend([
-                    "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
-                ])
+                op.device_option.extra_info.extend(
+                    ["{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)]
+                )
             break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        new_grad_output = (
-            '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+        new_grad_output = "_" + grad_op.output[idx] + "_autosplit_{}".format(cnt)
         if grad_op.type == "If":
             disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
         else:
@@ -747,9 +784,10 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         if str(out_base_name) == str(g):
             # TODO not sure what this message really means
             raise RuntimeError(
-                'The gradient output of empty gradient op can not '
-                'be the same as the normal name of the current '
-                'input gradient.')
+                "The gradient output of empty gradient op can not "
+                "be the same as the normal name of the current "
+                "input gradient."
+            )
 
     def _MakeDenseSumOps(self, generators, out_base_name):
         sum_op_input = []
@@ -760,7 +798,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         first_grad_op = True
         for generator in generators:
             grad_op, idx, g, _ = generator
-            assert(type(g) is not GradientSlice)
+            assert type(g) is not GradientSlice
             if grad_op:
                 if first_grad_op:
                     first_grad_op = False
@@ -776,13 +814,14 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # Sum inplace mode works only for the first input
             # So we do a swap
             idx = sum_op_input.index(out_base_name)
-            sum_op_input[0], sum_op_input[idx] = (
-                sum_op_input[idx], sum_op_input[0]
+            sum_op_input[0], sum_op_input[idx] = (sum_op_input[idx], sum_op_input[0])
+        sum_ops = [
+            CreateOperator(
+                "Sum",
+                [BlobReference(x) for x in sum_op_input],
+                BlobReference(out_base_name),
             )
-        sum_ops = [CreateOperator(
-            "Sum",
-            [BlobReference(x) for x in sum_op_input],
-            BlobReference(out_base_name))]
+        ]
         return sum_ops, out_base_name
 
     def _MakeSparseSumOps(self, generators, out_base_name):
@@ -792,7 +831,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         cnt_v = 0
 
         for generator in generators:
-            assert(type(generator) is SparseGradGenMeta)
+            assert type(generator) is SparseGradGenMeta
             op_i, idx_i, op_v, idx_v, g, _ = generator
             if op_i:
                 out, cnt_i = self._DisambiguateGradOpOutput(op_i, idx_i, cnt_i)
@@ -807,10 +846,10 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 self._CheckSumOpsConflict(out_base_name, g.values)
                 values_concat_input.append(g.values)
 
-        indices_concat_output = out_base_name + '_indices_concat'
-        indices_concat_split = out_base_name + '_indices_concat_split'
-        values_concat_output = out_base_name + '_values_concat'
-        values_concat_split = out_base_name + '_values_concat_split'
+        indices_concat_output = out_base_name + "_indices_concat"
+        indices_concat_split = out_base_name + "_indices_concat_split"
+        values_concat_output = out_base_name + "_values_concat"
+        values_concat_split = out_base_name + "_values_concat_split"
         # Sum the given sparse representations by simply concatenating the
         # indices (resp. values) tensors together. We don't do any deduplication
         # of indices at this point. This will be done as needed before the
@@ -819,21 +858,21 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             CreateOperator(
                 "Concat",
                 [BlobReference(x) for x in indices_concat_input],
-                [BlobReference(x) for x in
-                    [indices_concat_output, indices_concat_split]],
-                axis=0
+                [
+                    BlobReference(x)
+                    for x in [indices_concat_output, indices_concat_split]
+                ],
+                axis=0,
             ),
             CreateOperator(
                 "Concat",
                 [BlobReference(x) for x in values_concat_input],
-                [BlobReference(x) for x in
-                    [values_concat_output, values_concat_split]],
-                axis=0
+                [BlobReference(x) for x in [values_concat_output, values_concat_split]],
+                axis=0,
             ),
         ]
         sum_op_output = GradientSlice(
-            indices=indices_concat_output,
-            values=values_concat_output,
+            indices=indices_concat_output, values=values_concat_output
         )
         return sum_ops, sum_op_output
 
@@ -841,11 +880,11 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         generators = self.gradient_generators[input_name][input_version]
         out_base_name = self._GetSumOpOutputName(generators, input_name)
         types = list(set(type(x) for x in generators))
-        assert(len(types) == 1)
+        assert len(types) == 1
         if types[0] is GradGenMeta:
             sum_ops, g = self._MakeDenseSumOps(generators, out_base_name)
         else:
-            assert(types[0] is SparseGradGenMeta)
+            assert types[0] is SparseGradGenMeta
             sum_ops, g = self._MakeSparseSumOps(generators, out_base_name)
         self._SetSumOpsDeviceOption(sum_ops, generators)
         return sum_ops, g
@@ -855,8 +894,9 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # sparse and dense gradients is not supported yet
         if len({type(g) for g in generator}) > 1:
             raise RuntimeError(
-                'Automatic aggregation of a mix of sparse and dense gradients '
-                'is not supported yet')
+                "Automatic aggregation of a mix of sparse and dense gradients "
+                "is not supported yet"
+            )
 
         # If for all the operators that used the operator, none or only one
         # produced the gradient, then no additional sum needs to be carried
@@ -873,16 +913,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 if g.grad_op:
                     all_gradient_names.append(g.gradient)
             else:
-                assert(type(g) is SparseGradGenMeta)
+                assert type(g) is SparseGradGenMeta
                 if g.gradient.values:
                     all_gradient_names.append(g.gradient.values)
 
         # Check if all grad op device options are the same.
         if len(all_device_options) >= 2 and not all(
-                device_option_equal(d, all_device_options[0])
-                for d in all_device_options[1:]):
-            raise RuntimeError('Unexpected behavior: not all grad ops '
-                               'have the same device option.')
+            device_option_equal(d, all_device_options[0])
+            for d in all_device_options[1:]
+        ):
+            raise RuntimeError(
+                "Unexpected behavior: not all grad ops " "have the same device option."
+            )
         return True
 
     def DoGradientAccumulation(self, fwd_op_idx):
@@ -910,7 +952,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         for _i, input_name in enumerate(set(forward_op.input)):
             input_version = in_versions[input_name]
             input_usage = self.input_usages[input_name][input_version]
-            if (len(input_usage) <= 1 or fwd_op_idx != input_usage[0]):
+            if len(input_usage) <= 1 or fwd_op_idx != input_usage[0]:
                 # We do not need to do gradient accumulation yet.
                 continue
             generator = self.gradient_generators[input_name][input_version]
@@ -920,8 +962,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             except RuntimeError as err:
                 raise RuntimeError(
                     "Gradients for param ''{}'' failed to verify: {}".format(
-                        input_name,
-                        err
+                        input_name, err
                     )
                 )
 
@@ -936,12 +977,13 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # a ConstantFill operator. Autogeneration for sparse gradients is
         # not supported
         generator = GradGenMeta(
-            autograd_op, 0 if autograd_op else None, str(grad),
-            autograd_op.device_option)
+            autograd_op,
+            0 if autograd_op else None,
+            str(grad),
+            autograd_op.device_option,
+        )
 
-        self.gradient_generators[str(y)][self.frontier[str(y)]].append(
-            generator)
-
+        self.gradient_generators[str(y)][self.frontier[str(y)]].append(generator)
 
     def _GetInitGradients(self, ys):
         input_to_grad = {}
@@ -951,15 +993,17 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             autograd_op = None
             if g is None:
                 autograd_op = CreateOperator(
-                    "ConstantFill", [y], [str(y) + "_autogen_grad"],
-                    value=1.0)
+                    "ConstantFill", [y], [str(y) + "_autogen_grad"], value=1.0
+                )
                 gradient_ops.append(autograd_op)
                 g = autograd_op.output[0]
             # Since the C++ gradient registry does not have notion of
             # NameScopes, we will convert all references to strings.
             input_to_grad[str(y)] = (
                 GradientSlice(str(g[0]), str(g[1]))
-                if isinstance(g, GradientSlice) else str(g))
+                if isinstance(g, GradientSlice)
+                else str(g)
+            )
             # Autogenerated gradients are assumed to be provided for the last
             # input version
             if autograd_op is not None:
@@ -967,31 +1011,32 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         return input_to_grad, gradient_ops
 
-    def _GenerateGradientsForForwardOp(
-            self, forward_op_idx, input_to_grad):
+    def _GenerateGradientsForForwardOp(self, forward_op_idx, input_to_grad):
         new_input_to_grad = {}
         gradient_ops = []
         forward_op, in_versions, out_versions = self.ssa[forward_op_idx]
-        g_output = list(
-            input_to_grad.get(name, None) for name in forward_op.output)
+        g_output = list(input_to_grad.get(name, None) for name in forward_op.output)
 
-        if not all(g is None for g in g_output) or (
-                forward_op.type == "ZeroGradient"):
+        if not all(g is None for g in g_output) or (forward_op.type == "ZeroGradient"):
             gradient_ops, g_input = GradientRegistry.GetGradientForOp(
-                forward_op, g_output)
+                forward_op, g_output
+            )
             # Check if the gradient operators are legal, and update
             # gradient_generators and gradient_frontier
             self.BuildGradientGenerators(
-                forward_op_idx, gradient_ops, g_output, g_input)
+                forward_op_idx, gradient_ops, g_output, g_input
+            )
             # Record the gradient map to all_input_to_grad.
             for name, grad in zip(forward_op.input, g_input):
                 # Do not overwrite an existing gradient with a None
                 # unless the input is also an output of the op, since
                 # we update the blob version when blob is output of an
                 # operator.
-                if grad is not None or \
-                    name not in input_to_grad or \
-                        name in list(forward_op.output):
+                if (
+                    grad is not None
+                    or name not in input_to_grad
+                    or name in list(forward_op.output)
+                ):
                     new_input_to_grad[name] = grad
 
         return new_input_to_grad, gradient_ops
@@ -1016,8 +1061,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # gradients.
         for y in viewkeys(ys):
             self.gradient_frontier[y] = self.frontier[y]
-            self.input_usages[str(y)][self.frontier[str(y)]].append(
-                len(self.ssa))
+            self.input_usages[str(y)][self.frontier[str(y)]].append(len(self.ssa))
 
         all_input_to_grad, all_gradient_ops = self._GetInitGradients(ys)
 
@@ -1026,15 +1070,15 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # we are playing it backwards, we cannot refer to variables that are
         # at a version older than current_versions because it is already been
         # overwritten.
-        for forward_op_idx in reversed(range(len(self.ssa))):
+        for forward_op_idx in reversed(list(range(len(self.ssa)))):
             input_to_grad, gradient_ops = self._GenerateGradientsForForwardOp(
-                forward_op_idx, all_input_to_grad)
+                forward_op_idx, all_input_to_grad
+            )
             all_input_to_grad.update(input_to_grad)
             all_gradient_ops += gradient_ops
 
             # If there are multiple use blobs, do gradient accumulation.
-            additional_sum_ops, grad_map = self.DoGradientAccumulation(
-                forward_op_idx)
+            additional_sum_ops, grad_map = self.DoGradientAccumulation(forward_op_idx)
             # This line is so that if in an accumulation some of the operators
             # have not produced gradients, they still do not overwrite the
             # general all_input_to_grad map.
@@ -1048,18 +1092,19 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         all_input_to_grad_out = {}
         for key, val in viewitems(all_input_to_grad):
             if val is not None:
-                if (isinstance(val, string_types) or
-                        isinstance(val, binary_type)):
+                if isinstance(val, string_types) or isinstance(val, binary_type):
                     grad_out = BlobReference(val)
                 else:
-                    grad_out = GradientSlice(BlobReference(val[0]),
-                                             BlobReference(val[1]))
+                    grad_out = GradientSlice(
+                        BlobReference(val[0]), BlobReference(val[1])
+                    )
                 all_input_to_grad_out[BlobReference(key)] = grad_out
         return all_gradient_ops, all_input_to_grad_out
 
 
 class GradientRegistry(object):
     """GradientRegistry holds the mapping from operators to their gradients."""
+
     gradient_registry_ = {}
 
     @classmethod
@@ -1095,7 +1140,8 @@ class GradientRegistry(object):
 
         g_output = [from_untyped(grad) for grad in g_output]
         grad_defs_str, g_input = C.get_gradient_defs(
-            op_def.SerializeToString(), g_output)
+            op_def.SerializeToString(), g_output
+        )
 
         def to_untyped(grad_wrapper):
             if grad_wrapper.is_empty():
@@ -1120,13 +1166,12 @@ class GradientRegistry(object):
         except Exception as e:
             # Not supported in C++; will try python registration next.
             if op.type in cls.gradient_registry_:
-                gradient_ops, g_input = cls.gradient_registry_[op.type](
-                    op, g_output
-                )
+                gradient_ops, g_input = cls.gradient_registry_[op.type](op, g_output)
             else:
                 raise Exception(
-                    "Exception when creating gradient for [{}]:{}.\nOp: \n{}".
-                    format(op.type, e, str(op))
+                    "Exception when creating gradient for [{}]:{}.\nOp: \n{}".format(
+                        op.type, e, str(op)
+                    )
                 )
 
         if gradient_ops is None:
@@ -1156,9 +1201,9 @@ class GradientRegistry(object):
         return ir.GetBackwardPass(ys)
 
 
-GradientRegistry.RegisterGradient('Do')(gen_do_gradient)
-GradientRegistry.RegisterGradient('If')(gen_if_gradient)
-GradientRegistry.RegisterGradient('While')(gen_while_gradient)
+GradientRegistry.RegisterGradient("Do")(gen_do_gradient)
+GradientRegistry.RegisterGradient("If")(gen_if_gradient)
+GradientRegistry.RegisterGradient("While")(gen_while_gradient)
 
 
 def get_ssa(net, blob_versions=None):
@@ -1264,16 +1309,16 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 
     def get_remapped_str(blob_str):
         if isinstance(blob_str, binary_type):
-            blob_str = blob_str.decode('utf-8')
-        return blob_remap.get(blob_str, blob_str).encode('utf-8')
+            blob_str = blob_str.decode("utf-8")
+        return blob_remap.get(blob_str, blob_str).encode("utf-8")
 
     for argument in op.arg:
         if len(argument.strings) > 0:
             for i in range(len(argument.strings)):
                 argument.strings[i] = get_remapped_str(argument.strings[i])
-        elif argument.name == 'timestep':
+        elif argument.name == "timestep":
             argument.s = get_remapped_str(argument.s)
-        elif argument.name.endswith('step_net'):
+        elif argument.name.endswith("step_net"):
             # argument is a proto
             remap_proto(argument, blob_remap)
 
@@ -1281,41 +1326,45 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
 def control_op_remap(op, prefix, blob_remap):
     net_arg_names = []
     if op.type == "If":
-        net_arg_names = ['then_net', 'else_net']
+        net_arg_names = ["then_net", "else_net"]
     else:
-        net_arg_names = ['loop_net', 'cond_net']
+        net_arg_names = ["loop_net", "cond_net"]
     for argument in op.arg:
         if argument.name in net_arg_names:
-            assert argument.n, \
-                "Expected non empty net in " + op.type + "'s " + argument.name + " argument"
+            assert argument.n, (
+                "Expected non empty net in "
+                + op.type
+                + "'s "
+                + argument.name
+                + " argument"
+            )
             subnet = Net(argument.n)
             remapped_subnet = subnet.Clone(
-                name=(subnet._net.name if subnet._net.name else '') + '_remapped',
-                blob_remap=blob_remap)
+                name=(subnet._net.name if subnet._net.name else "") + "_remapped",
+                blob_remap=blob_remap,
+            )
             argument.n.CopyFrom(remapped_subnet.Proto())
 
 
 DEFAULT_REMAP_FUNCS = {
-    'RecurrentNetwork': recurrent_network_op_remap,
-    'RecurrentNetworkGradient': recurrent_network_op_remap,
-    'If': control_op_remap,
-    'While': control_op_remap,
+    "RecurrentNetwork": recurrent_network_op_remap,
+    "RecurrentNetworkGradient": recurrent_network_op_remap,
+    "If": control_op_remap,
+    "While": control_op_remap,
 }
 
 
 def remap_proto(argument, blob_remap):
     subnet = Net(argument.n)
 
-    cloned_sub_net = subnet.Clone(
-        'cloned_sub_net',
-        blob_remap,
-    )
+    cloned_sub_net = subnet.Clone("cloned_sub_net", blob_remap)
 
     argument.n.CopyFrom(cloned_sub_net.Proto())
 
 
-def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
-                       keep_schema=True):
+def clone_and_bind_net(
+    net, name, prefix, blob_remap=None, inputs=None, keep_schema=True
+):
     """
     Clone the given Net, binding its input schema to the given `inputs` record.
     Blob names defined by the net are prepended with the given `prefix`.
@@ -1337,6 +1386,7 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
         blob_remap: a map from original blob names into remapped blob names
     """
     from caffe2.python import schema
+
     assert isinstance(net, Net)
     if blob_remap is None:
         blob_remap = {}
@@ -1348,14 +1398,16 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
         diff = set(original.field_names()) - set(inputs.field_names())
         assert len(diff) == 0, (
             "Schemas don't match, extra fields {diff} found in the net {name}. "
-            "original: {original}; inputs: {inputs}"
-            .format(
-                diff=diff, name=net.Name(), original=original.field_names(),
-                inputs=inputs.field_names()
+            "original: {original}; inputs: {inputs}".format(
+                diff=diff,
+                name=net.Name(),
+                original=original.field_names(),
+                inputs=inputs.field_names(),
             )
         )
-        original_mapping = dict(zip(original.field_names(),
-                                    original.field_blobs()))
+        original_mapping = dict(
+            list(zip(original.field_names(), original.field_blobs()))
+        )
         for fn, fb in zip(inputs.field_names(), inputs.field_blobs()):
             if fn in original_mapping:
                 blob_remap[str(original_mapping[fn])] = str(fb)
@@ -1378,24 +1430,25 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
 
 def _get_blob_ref(blob_name_or_ref):
     return (
-        blob_name_or_ref if isinstance(input, BlobReference)
+        blob_name_or_ref
+        if isinstance(input, BlobReference)
         else BlobReference(blob_name_or_ref)
     )
 
 
-def _recover_record_by_prefix(names, prefix=''):
+def _recover_record_by_prefix(names, prefix=""):
     """
     Tries to recover record by taking a subset of blob names with
     a given prefix name and interpreting them as schema column names
     """
     from caffe2.python import schema
-    column_names = [name[len(prefix):] for name in names
-                    if name.startswith(prefix)]
+
+    column_names = [name[len(prefix) :] for name in names if name.startswith(prefix)]
     if not column_names:
         return None
     return schema.from_column_list(
-        column_names,
-        col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
+        column_names, col_blobs=[_get_blob_ref(prefix + name) for name in column_names]
+    )
 
 
 class Net(object):
@@ -1405,17 +1458,16 @@ class Net(object):
     @staticmethod
     def current_prefix():
         from caffe2.python.net_builder import NetBuilder
+
         builder = NetBuilder.current(required=False)
-        return builder.name if builder else ''
+        return builder.name if builder else ""
 
     @staticmethod
     def _get_next_net_name(basename):
-        name = basename = '/'.join(
-            x for x in [Net.current_prefix(), basename] if x
-        )
+        name = basename = "/".join(x for x in [Net.current_prefix(), basename] if x)
         next_idx = 1
         while name in Net._net_names_used:
-            name = basename + '_' + str(next_idx)
+            name = basename + "_" + str(next_idx)
             next_idx += 1
         Net._net_names_used |= set([name])
         return name
@@ -1449,19 +1501,16 @@ class Net(object):
 
             # Set the next name index properly.
             existing_names = set(
-                sum(
-                    [list(op.input) for op in self._net.op], []
-                ) + sum(
-                    existing_outputs, []
-                )
+                sum([list(op.input) for op in self._net.op], [])
+                + sum(existing_outputs, [])
             )
             for outs in existing_outputs:
                 self._op_outputs.update(outs)
 
-            prefix_len = len(self._net.name + '_blob_')
+            prefix_len = len(self._net.name + "_blob_")
             autogen_indices = []
             for s in existing_names:
-                if s.startswith(self._net.name + '_blob_'):
+                if s.startswith(self._net.name + "_blob_"):
                     try:
                         autogen_indices.append(int(s[prefix_len]))
                     except ValueError:
@@ -1482,26 +1531,24 @@ class Net(object):
     def AppendNet(self, net, device_option=None):
         assert isinstance(net, Net)
         for i in net.Proto().external_input:
-            if (
-                i not in self.Proto().external_input and
-                i not in self._op_outputs
-            ):
+            if i not in self.Proto().external_input and i not in self._op_outputs:
                 self.Proto().external_input.append(i)
 
         self.Proto().external_output.extend(
             [
-                o for o in net.Proto().external_output
+                o
+                for o in net.Proto().external_output
                 if o not in self.Proto().external_output
             ]
         )
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            list(map(lambda x: x.device_option.CopyFrom(device_option), ops))
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:
-                        if arg.name.endswith('step_net'):
+                        if arg.name.endswith("step_net"):
                             for step_op in arg.n.op:
                                 step_op.device_option.CopyFrom(device_option)
 
@@ -1512,8 +1559,8 @@ class Net(object):
         for msg_or_blob in msg_or_blobs:
             if not isinstance(msg_or_blob, BlobReference):
                 blob = self.GivenTensorStringFill(
-                    [], self.NextName('log'),
-                    shape=[], values=[msg_or_blob])
+                    [], self.NextName("log"), shape=[], values=[msg_or_blob]
+                )
             else:
                 blob = msg_or_blob
             self.Print(blob, [])
@@ -1539,8 +1586,9 @@ class Net(object):
         If seed_on_op_def is set, the op rand_seed=hash(str(op))
         sequence_seed and seed_on_op_def cannot be both set to True.
         """
-        assert not (sequence_seed and seed_on_op_def), (
-            'sequence_seed and seed_on_op_def cannot be both set to True.')
+        assert not (
+            sequence_seed and seed_on_op_def
+        ), "sequence_seed and seed_on_op_def cannot be both set to True."
         for i, op in enumerate(self.Proto().op):
             if sequence_seed:
                 curr_seed = seed + i
@@ -1559,10 +1607,8 @@ class Net(object):
     def Const(self, array, blob_out=None, dtype=None):
         if isinstance(array, bool):
             return self.ConstantFill(
-                [],
-                blob_out or 1,
-                dtype=DataType.BOOL,
-                value=array)
+                [], blob_out or 1, dtype=DataType.BOOL, value=array
+            )
 
         if dtype is None:
             array = np.array(array)
@@ -1571,10 +1617,8 @@ class Net(object):
 
         def do_set(operator):
             return operator(
-                [],
-                blob_out or 1,
-                shape=array.shape,
-                values=array.flatten().tolist())
+                [], blob_out or 1, shape=array.shape, values=array.flatten().tolist()
+            )
 
         if array.dtype == np.int32:
             return do_set(self.GivenTensorIntFill)
@@ -1631,7 +1675,7 @@ class Net(object):
         """
         blob_name = str(blob_name)
         if not self.BlobIsDefined(blob_name):
-            raise KeyError('Net does not define blob %s' % blob_name)
+            raise KeyError("Net does not define blob %s" % blob_name)
         return BlobReference(blob_name, self)
 
     def Clone(
@@ -1683,9 +1727,7 @@ class Net(object):
             remap_list(new_op.output)
             if new_op.type in remap_funcs:
                 remap_funcs[new_op.type](
-                    new_op,
-                    (name + '/') if name else '',
-                    blob_remap,
+                    new_op, (name + "/") if name else "", blob_remap
                 )
             return new_op
 
@@ -1697,6 +1739,7 @@ class Net(object):
 
         if keep_schema:
             from caffe2.python import schema
+
             if self._input_record:
                 new_net._input_record = schema.from_blob_list(
                     self._input_record,
@@ -1758,11 +1801,15 @@ class Net(object):
                                outputs produced by new_net.
         """
         input_is_pair_list = isinstance(inputs, list) and all(
-            isinstance(i, tuple) and len(i) == 2 for i in inputs)
+            isinstance(i, tuple) and len(i) == 2 for i in inputs
+        )
         inputs = (
-            inputs if isinstance(inputs, (dict, OrderedDict)) else
-            OrderedDict(inputs) if input_is_pair_list else
-            OrderedDict(zip(inputs, inputs)))
+            inputs
+            if isinstance(inputs, (dict, OrderedDict))
+            else OrderedDict(inputs)
+            if input_is_pair_list
+            else OrderedDict(list(zip(inputs, inputs)))
+        )
         for output in outputs:
             assert self.BlobIsDefined(output), "{} is not defined".format(output)
         input_names = {str(k): str(v) for k, v in viewitems(inputs)}
@@ -1773,12 +1820,13 @@ class Net(object):
         used_op_ids = get_op_ids_in_path(ssa, blob_versions, inputs, outputs)
         disallowed_op_ids = get_op_ids_in_path(ssa, blob_versions, [], inputs)
         assert len(set(used_op_ids) & set(disallowed_op_ids)) == 0, (
-            'Cannot partially clone net: some of the ops required would ' +
-            'generate the given input.')
+            "Cannot partially clone net: some of the ops required would "
+            + "generate the given input."
+        )
 
         sub_ssa = [op for i, op in enumerate(ssa) if i in used_op_ids]
         undef_blobs = get_undefined_blobs(sub_ssa) - set(viewkeys(input_names))
-        prefix = (name + '/') if name else ''
+        prefix = (name + "/") if name else ""
 
         def remap(blob_name):
             if blob_name in input_names:
@@ -1790,8 +1838,7 @@ class Net(object):
 
         blob_mapping = {b: remap(b) for b in viewkeys(blob_versions)}
         new_net = self.Clone(name, blob_mapping, used_op_ids, remap_funcs)
-        new_in = [
-            blob_mapping[i] for i in viewkeys(input_names)] + list(undef_blobs)
+        new_in = [blob_mapping[i] for i in viewkeys(input_names)] + list(undef_blobs)
         new_out = [blob_mapping[o] for o in output_names]
         del new_net.Proto().external_input[:]
         new_net.Proto().external_input.extend(new_in)
@@ -1829,13 +1876,16 @@ class Net(object):
 
         Note: assume no inplace blob in net
         """
+
         def _find_tensor_input_op(tensor):
             if tensor in self.external_inputs:
                 op_idx = -1
             else:
-                assert tensor in new_producer.input, \
-                    "new producer {} is not taking in {}".format(
-                        new_producer.type, tensor)
+                assert (
+                    tensor in new_producer.input
+                ), "new producer {} is not taking in {}".format(
+                    new_producer.type, tensor
+                )
                 # assuming that the net has no inplace blob
                 op_idx = -2
                 for index, op in enumerate(self.Proto().op):
@@ -1874,9 +1924,9 @@ class Net(object):
         if net_tb is not None:
             for idx, op in enumerate(self.Proto().op):
                 if idx in net_tb:
-                    op.name = ':'.join(map(str, net_tb[idx][0]))
+                    op.name = ":".join(map(str, net_tb[idx][0]))
 
-    def NextScopedBlob(self, prefix='unnamed'):
+    def NextScopedBlob(self, prefix="unnamed"):
         """Return the blob that has not been defined or registered in the
         current net. It returns `ScopedBlobReference(prefix)`, if it's valid,
         otherwise `ScopedBlobReference(prefix) + '_auto_' + ?`. Different calls
@@ -1885,7 +1935,7 @@ class Net(object):
         output_blob_base = ScopedName(prefix)
         return self.NextBlob(output_blob_base)
 
-    def NextBlob(self, prefix='unnamed'):
+    def NextBlob(self, prefix="unnamed"):
         """Return the blob that has not been defined or registered in the
         current net. It returns `BlobReference(prefix)`, if it's valid,
         otherwise `BlobReference(prefix) + '_auto_' + ?`. Different calls
@@ -1894,8 +1944,9 @@ class Net(object):
         output_blob = output_blob_base
         index = 0
         while str(output_blob) in self._registered_blob_names or (
-                self.BlobIsDefined(output_blob)):
-            output_blob = output_blob_base + '_auto_' + str(index)
+            self.BlobIsDefined(output_blob)
+        ):
+            output_blob = output_blob_base + "_auto_" + str(index)
             index += 1
 
         self._registered_blob_names.add(str(output_blob))
@@ -1905,18 +1956,18 @@ class Net(object):
         """Returns the next name to be used, if you do not want to explicitly
         name your blob. [Deprecated, use NextBlob, NextScopedBlob instead]"""
         if prefix:
-            output_name_base = self._net.name + '/' + prefix
+            output_name_base = self._net.name + "/" + prefix
             output_name = output_name_base
             if output_id is not None:
-                output_name += ':' + str(output_id)
+                output_name += ":" + str(output_id)
             index = 2
             while self.BlobIsDefined(str(ScopedBlobReference(output_name))):
-                output_name = output_name_base + '_' + str(index)
+                output_name = output_name_base + "_" + str(index)
                 if output_id is not None:
-                    output_name += ':' + str(output_id)
+                    output_name += ":" + str(output_id)
                 index += 1
         else:
-            output_name = self._net.name + '_blob_' + str(self._next_name_index)
+            output_name = self._net.name + "_blob_" + str(self._next_name_index)
             self._next_name_index += 1
         return str(output_name)
 
@@ -1926,10 +1977,10 @@ class Net(object):
             self._op_outputs.update([text_type(o) for o in op.output])
 
     def _CheckLookupTables(self):
-        '''
+        """
         Called from unit tests to validate the internal lookup tables
         match the protobuf contents.
-        '''
+        """
         test_op_outputs = set()
         for op in self._net.op:
             for o in op.output:
@@ -1981,7 +2032,8 @@ class Net(object):
         """
 
         grad_ops, input_to_grad = GradientRegistry.GetBackwardPass(
-            self._net.op[skip:], ys)
+            self._net.op[skip:], ys
+        )
         # Check if in immediate mode: the grad_ops are actually being produced
         # by C++ and bypasses the CreateOperator() call, so in immediate mode
         # we will have to explicitly run them.
@@ -2000,7 +2052,8 @@ class Net(object):
         for input in inputs:
             input_name = str(input)
             assert str(input) not in self._external_input_map, (
-                'Net already contains an input named %s' % input_name)
+                "Net already contains an input named %s" % input_name
+            )
         for input in inputs:
             input_name = str(input)
             self._net.external_input.extend([input_name])
@@ -2017,17 +2070,13 @@ class Net(object):
             self.Proto().external_output.extend([str(output)])
 
     def AddScopedExternalInputs(self, *inputs):
-        res = self.AddExternalInput(
-            * [ScopedBlobReference(b) for b in inputs]
-        )
+        res = self.AddExternalInput(*[ScopedBlobReference(b) for b in inputs])
         if not isinstance(res, list):
             res = [res]
         return res
 
     def AddScopedExternalOutputs(self, *outputs):
-        return self.AddExternalOutput(
-            * [ScopedBlobReference(b) for b in outputs]
-        )
+        return self.AddExternalOutput(*[ScopedBlobReference(b) for b in outputs])
 
     # This returns a reference to the observer
     def AddObserver(self, observer_type):
@@ -2049,10 +2098,11 @@ class Net(object):
 
     def set_input_record(self, input_record):
         from caffe2.python import schema
-        assert self._input_record is None or (input_record.has_blobs() and
-            set(input_record.field_blobs()) ==
-            set(self._input_record.field_blobs())), (
-            'Input schema cannot be reset')
+
+        assert self._input_record is None or (
+            input_record.has_blobs()
+            and set(input_record.field_blobs()) == set(self._input_record.field_blobs())
+        ), "Input schema cannot be reset"
         if not input_record.has_blobs():
             with NameScope(self.Name()):
                 self._input_record = schema.NewRecord(self, input_record)
@@ -2074,10 +2124,10 @@ class Net(object):
             self.set_input_record(record)
 
     def set_output_record(self, record):
-        assert self._output_record is None or (record.has_blobs() and
-            set(record.field_blobs()) ==
-            set(self._output_record.field_blobs())), (
-            'Output schema cannot be reset')
+        assert self._output_record is None or (
+            record.has_blobs()
+            and set(record.field_blobs()) == set(self._output_record.field_blobs())
+        ), "Output schema cannot be reset"
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
@@ -2096,16 +2146,15 @@ class Net(object):
 
     def AppendOutputRecordField(self, field_name, record):
         from caffe2.python import schema
-        assert self._output_record is not None, (
-            'Tried to append to missing output record'
-        )
+
+        assert (
+            self._output_record is not None
+        ), "Tried to append to missing output record"
         for blob in record.field_blobs():
             assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
-        self._output_record = self._output_record + schema.Struct(
-            (field_name, record)
-        )
+        self._output_record = self._output_record + schema.Struct((field_name, record))
 
     def input_record(self):
         return self._input_record
@@ -2119,15 +2168,15 @@ class Net(object):
     def AddExternalOutputs(self, *outputs):
         self.AddExternalOutput(*outputs)
 
-    def DeduplicateGradientSlices(self, g, aggregator='sum'):
+    def DeduplicateGradientSlices(self, g, aggregator="sum"):
         assert isinstance(g, GradientSlice)
-        unique, remapping = self.Unique([g.indices], 2, engine='SparseHash')
-        if aggregator.lower() == 'sum':
+        unique, remapping = self.Unique([g.indices], 2, engine="SparseHash")
+        if aggregator.lower() == "sum":
             new_g = self.UnsortedSegmentSum([g.values, remapping], 1)
-        elif aggregator.lower() == 'mean':
+        elif aggregator.lower() == "mean":
             new_g = self.UnsortedSegmentMean([g.values, remapping], 1)
         else:
-            raise ValueError('{} is not supported'.format(aggregator))
+            raise ValueError("{} is not supported".format(aggregator))
         return GradientSlice(indices=unique, values=new_g)
 
     @staticmethod
@@ -2150,8 +2199,6 @@ class Net(object):
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
         self._RunAllOnGPU(self._net, gpu_id, use_cudnn)
-
-
 
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""
@@ -2181,14 +2228,15 @@ class Net(object):
             # In this case, we will auto-fill the given number of outputs
             # with auto-generated names.
             outputs = [
-                self.NextName(prefix=op_type, output_id=i)
-                for i in range(outputs)]
+                self.NextName(prefix=op_type, output_id=i) for i in range(outputs)
+            ]
         outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)
         self._ExtendOps([op])
 
         workspace.operator_tracebacks[self.Name()][
-            len(self._net.op) - 1] = _extract_stacktrace()
+            len(self._net.op) - 1
+        ] = _extract_stacktrace()
 
         if len(op.output) == 0:
             return
@@ -2198,27 +2246,28 @@ class Net(object):
             return tuple(BlobReference(o, self) for o in op.output)
 
     def __getattr__(self, op_type):
-        if op_type.startswith('__'):
-            raise AttributeError('Attribute {} not found.'.format(op_type))
+        if op_type.startswith("__"):
+            raise AttributeError("Attribute {} not found.".format(op_type))
         if not IsOperator(op_type) and not IsOperatorWithEngine(op_type, "CUDNN"):
             raise AttributeError(
-                'Method ' + op_type + ' is not a registered operator.' +
-                ' Did you mean: [' +
-                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
+                "Method "
+                + op_type
+                + " is not a registered operator."
+                + " Did you mean: ["
+                + ",".join(workspace.C.nearby_opnames(op_type))
+                + "]"
             )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
-            op_type, *args, **kwargs)
+            op_type, *args, **kwargs
+        )
 
     def __dir__(self):
         additional_methods = [
-            op
-            for op in _REGISTERED_OPERATORS
-            if '_ENGINE_' not in op]
-        return sorted(set(chain(
-            dir(type(self)),
-            viewkeys(self.__dict__),
-            additional_methods
-        )))
+            op for op in _REGISTERED_OPERATORS if "_ENGINE_" not in op
+        ]
+        return sorted(
+            set(chain(dir(type(self)), viewkeys(self.__dict__), additional_methods))
+        )
 
     def Python(
         self,
@@ -2227,7 +2276,7 @@ class Net(object):
         python_func_type=None,
         pass_workspace=False,
         grad_output_indices=None,
-        grad_input_indices=None
+        grad_input_indices=None,
     ):
         """
         Registers and returns a python operator.
@@ -2265,12 +2314,12 @@ class Net(object):
         which identify the indices of `f`'s inputs and outputs which have
         gradients.
         """
-        assert(IsOperator('Python'))
+        assert IsOperator("Python")
 
         def make_builder(t):
             if not isinstance(t, tuple):
-                return ''
-            assert len(t) == 3, 'Expected builder tuple (func, args, kwargs)'
+                return ""
+            assert len(t) == 3, "Expected builder tuple (func, args, kwargs)"
             func, args, kwargs = t
             normalized = (func, tuple(args), dict(kwargs))
             return pickle.dumps(normalized)
@@ -2278,22 +2327,24 @@ class Net(object):
         f_builder = make_builder(f)
         grad_f_builder = make_builder(grad_f)
 
-        assert (not grad_f) or ((not f_builder) == (not grad_f_builder)), (
-            'A tuple has to be passed to both f and grad_f or neither.')
+        assert (not grad_f) or (
+            (not f_builder) == (not grad_f_builder)
+        ), "A tuple has to be passed to both f and grad_f or neither."
 
         core_kwargs = {}
         if f_builder:
-            core_kwargs['pickled_builder'] = f_builder
-            core_kwargs['pickled_grad_builder'] = grad_f_builder
-            core_kwargs['pass_workspace'] = pass_workspace
+            core_kwargs["pickled_builder"] = f_builder
+            core_kwargs["pickled_grad_builder"] = grad_f_builder
+            core_kwargs["pass_workspace"] = pass_workspace
         else:
-            core_kwargs['token'] = _RegisterPythonImpl(
-                f, grad_f, python_func_type, pass_workspace=pass_workspace)
+            core_kwargs["token"] = _RegisterPythonImpl(
+                f, grad_f, python_func_type, pass_workspace=pass_workspace
+            )
 
         grad_output_indices = grad_output_indices or []
         grad_input_indices = grad_input_indices or []
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
-            'Python',
+            "Python",
             grad_output_indices=grad_output_indices,
             grad_input_indices=grad_input_indices,
             *args,
@@ -2326,51 +2377,59 @@ def copy_func_between_devices(src, dst):
         if src.device_id == dst.device_id:
             return None
         else:
+
             def fun(net, *args, **kw):
                 with DeviceScope(dst):
                     return net.Copy(*args, **kw)
+
             return fun
 
     if is_src_gpu and dst.device_type == CPU:
+
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
+
         return fun
 
     if src.device_type == CPU and is_dst_gpu:
+
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)
+
         return fun
 
-    raise ValueError('Non-supported devices: %s and %s' % (src, dst))
+    raise ValueError("Non-supported devices: %s and %s" % (src, dst))
 
 
 def device_equal(src, dst):
-    '''
+    """
     We are using this fucntion instead of == operator because optional-value
     comparison between empty device_options and {device_type:0, device_id:0}
     returns not equal in some cases.
-    '''
+    """
     return src.device_type == dst.device_type and src.device_id == dst.device_id
 
 
 def update_placeholder_op_output(op, blob_to_device):
-    '''
+    """
     Placeholder ops (for e.g. Recv) always runs on CPU. So ensure their
     output blobs reside on CPU.
-    '''
+    """
     outputs = []
     for output in op.output:
-        if (output in blob_to_device and
-                blob_to_device[output].device_type != caffe2_pb2.CPU):
-            output += '_cpu'
+        if (
+            output in blob_to_device
+            and blob_to_device[output].device_type != caffe2_pb2.CPU
+        ):
+            output += "_cpu"
         outputs.append(output)
     del op.output[:]
     op.output.extend(outputs)
 
 
-class RemapEntry:
+class RemapEntry(object):
     def __init__(self, blob, device):
         self.blob = blob
         self.device = device
@@ -2382,9 +2441,10 @@ class RemapEntry:
         return hash(self.blob + str(self.device))
 
 
-def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
-                            placeHolderOps=None):
-    '''
+def InjectCrossDeviceCopies(
+    net, blob_to_device=None, blob_remap=None, placeHolderOps=None
+):
+    """
     Injecting Copy functions between device within a net. Users can provide
     a net with part of operators using different device_options. This method
     will automatically create a new net with Copy ops inserted in it.
@@ -2405,8 +2465,8 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
       2. if not, this function will use net device option
       3. InferOpBlobDevices might fail to get the correct inference for ops like
          EnsureCPUOutput that could take in input from multiple places.
-    '''
-    new_net = net.Clone(net._net.name + '_cross_device', keep_schema=True)
+    """
+    new_net = net.Clone(net._net.name + "_cross_device", keep_schema=True)
     del new_net._net.op[:]
     if blob_to_device is None:
         blob_to_device = {}
@@ -2419,7 +2479,7 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
     # if external_inputs have device remappings generated by previous nets,
     # then add those remappings as external inputs as well.
     all_remaps = defaultdict(list)
-    for entry, mapped_blob in blob_remap.items():
+    for entry, mapped_blob in list(blob_remap.items()):
         all_remaps[entry.blob].append(mapped_blob)
     mapped_external_inputs = []
     for input in new_net._net.external_input:
@@ -2438,38 +2498,39 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
             input_dev, output_dev = InferOpBlobDevices(op)
 
         for dev, input in zip(input_dev, op.input):
-            assert net.BlobIsDefined(input), \
-                "input {} should be defined in the net.".format(input)
+            assert net.BlobIsDefined(
+                input
+            ), "input {} should be defined in the net.".format(input)
             if input not in blob_to_device:
                 if net.is_external_input(input):
                     blob_to_device[input] = net_option
                 else:
                     raise AttributeError(
-                        "No device information found for blob {}.".
-                        format(input)
+                        "No device information found for blob {}.".format(input)
                     )
 
             if not device_equal(blob_to_device[input], dev):
                 # reuse already moved input
-                if (RemapEntry(input, dev) in blob_remap and
-                        blob_to_device[blob_remap[RemapEntry(input, dev)]] == dev):
+                if (
+                    RemapEntry(input, dev) in blob_remap
+                    and blob_to_device[blob_remap[RemapEntry(input, dev)]] == dev
+                ):
                     temp_remap[input] = blob_remap[RemapEntry(input, dev)]
                 else:
                     # need to make input on correct device.
-                    copy_func = copy_func_between_devices(
-                        blob_to_device[input], dev
-                    )
+                    copy_func = copy_func_between_devices(blob_to_device[input], dev)
 
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
                         if device_option.device_type == CPU:
-                            suffix = '_cpu'
+                            suffix = "_cpu"
                         elif IsGPUDeviceType(device_option.device_type):
-                            suffix = '_gpu_' + str(device_option.device_id)
+                            suffix = "_gpu_" + str(device_option.device_id)
                         else:
                             raise RuntimeError(
-                                "Unknown device type: {}".
-                                format(device_option.device_type)
+                                "Unknown device type: {}".format(
+                                    device_option.device_type
+                                )
                             )
                         return blob + suffix
 
@@ -2487,15 +2548,12 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
         # same device info
         for dev, output in zip(output_dev, op.output):
             if output in blob_to_device and (
-                output not in op.input and
-                not device_equal(blob_to_device[output], dev)
+                output not in op.input and not device_equal(blob_to_device[output], dev)
             ):
                 raise RuntimeError(
                     "In-place blob: {} is not supported between operators "
                     "with different device option previous:{} now: {}. "
-                    "Failed op:\n {}".format(
-                        output, blob_to_device[output], dev, op
-                    )
+                    "Failed op:\n {}".format(output, blob_to_device[output], dev, op)
                 )
         new_op = caffe2_pb2.OperatorDef()
         new_op.CopyFrom(op)
@@ -2513,8 +2571,7 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
             except ValueError:
                 pass
 
-        blob_to_device.update(
-            {o: d for d, o in zip(output_dev, new_op.output)})
+        blob_to_device.update({o: d for d, o in zip(output_dev, new_op.output)})
         new_net.extend_ops([new_op])
 
     return new_net, blob_to_device
@@ -2534,10 +2591,10 @@ def InjectDeviceCopiesAmongNets(nets, blob_to_device_init=None):
     Some notes from wyiming:
       1. You MUST pass nets in execution order. e.g. [train_init, train]
     """
-    assert isinstance(nets, list), \
-        "nets {} should be a list of nets.".format(str(nets))
-    assert all(isinstance(net, Net) for net in nets), \
-        "nets {} should be a list of nets.".format(str(nets))
+    assert isinstance(nets, list), "nets {} should be a list of nets.".format(str(nets))
+    assert all(
+        isinstance(net, Net) for net in nets
+    ), "nets {} should be a list of nets.".format(str(nets))
     # A holistic blob to device mapping.
     blob_to_device = blob_to_device_init or {}
     blob_remap = {}
@@ -2545,9 +2602,7 @@ def InjectDeviceCopiesAmongNets(nets, blob_to_device_init=None):
 
     for net in nets:
         new_net, blob_to_device = InjectCrossDeviceCopies(
-            net,
-            blob_to_device=blob_to_device,
-            blob_remap=blob_remap,
+            net, blob_to_device=blob_to_device, blob_remap=blob_remap
         )
         new_nets.append(new_net)
 
@@ -2581,16 +2636,15 @@ def output_to_list(op_output):
         A list of BlobReferences.
     """
     assert type(op_output) in (list, tuple, BlobReference)
-    return (
-        [op_output]
-        if isinstance(op_output, BlobReference) else list(op_output))
+    return [op_output] if isinstance(op_output, BlobReference) else list(op_output)
 
 
 def _add_net_to_dict(net_dict, net):
     name = get_net_name(net)
     if name in net_dict:
         assert net_dict[name] is None or net == net_dict[name], (
-            'Different nets with same name: ' + name)
+            "Different nets with same name: " + name
+        )
         return False
     else:
         net_dict[name] = net if isinstance(net, Net) else None
@@ -2605,14 +2659,14 @@ class ExecutionStep(object):
         name = basename
         next_idx = 1
         while name in ExecutionStep._step_names_used:
-            name = basename + '_' + str(next_idx)
+            name = basename + "_" + str(next_idx)
             next_idx += 1
         ExecutionStep._step_names_used |= set([name])
         return name
 
     def __init__(self, name, nets=None, num_iter=None):
         self._step = caffe2_pb2.ExecutionStep()
-        self._step.name = name or ExecutionStep._get_next_step_name('step')
+        self._step.name = name or ExecutionStep._get_next_step_name("step")
         self._net_dict = OrderedDict()
         self._is_used = False
         self._substeps = []
@@ -2635,8 +2689,9 @@ class ExecutionStep(object):
         return self._step.name
 
     def _assert_can_mutate(self):
-        assert not self._is_used, (
-            'Cannot mutate a step that has already been added to a plan/step.')
+        assert (
+            not self._is_used
+        ), "Cannot mutate a step that has already been added to a plan/step."
 
     def _notify_is_used(self):
         self._is_used = True
@@ -2645,12 +2700,10 @@ class ExecutionStep(object):
         return self._step
 
     def HasNets(self):
-        return self._step.network is not None and (
-            len(self._step.network) > 0)
+        return self._step.network is not None and (len(self._step.network) > 0)
 
     def HasSubsteps(self):
-        return self._step.substep is not None and (
-            len(self._step.substep) > 0)
+        return self._step.substep is not None and (len(self._step.substep) > 0)
 
     def Nets(self):
         return list(viewvalues(self._net_dict))
@@ -2675,8 +2728,9 @@ class ExecutionStep(object):
         self._step.only_once = only_once
 
     def SetShouldStopBlob(self, should_stop_blob):
-        assert isinstance(should_stop_blob, BlobReference), (
-            "expects BlobReference here, got {}".format(type(should_stop_blob)))
+        assert isinstance(
+            should_stop_blob, BlobReference
+        ), "expects BlobReference here, got {}".format(type(should_stop_blob))
         self._assert_can_mutate()
         self._step.should_stop_blob = str(should_stop_blob)
 
@@ -2699,7 +2753,7 @@ class ExecutionStep(object):
 
     def AddSubstep(self, substep):
         self._assert_can_mutate()
-        assert not self.HasNets(), 'Cannot have both network and substeps.'
+        assert not self.HasNets(), "Cannot have both network and substeps."
         if isinstance(substep, ExecutionStep):
             substep._notify_is_used()
             if not substep.HasNets() and not substep.HasSubsteps():
@@ -2715,12 +2769,12 @@ class ExecutionStep(object):
 
     def SetConcurrentSubsteps(self, concurrent_substeps):
         self._assert_can_mutate()
-        assert not self.HasNets(), 'Cannot have both network and substeps.'
+        assert not self.HasNets(), "Cannot have both network and substeps."
         self._step.concurrent_substeps = concurrent_substeps
 
     def AddNet(self, net):
         self._assert_can_mutate()
-        assert not self.HasSubsteps(), 'Cannot have both network and substeps.'
+        assert not self.HasSubsteps(), "Cannot have both network and substeps."
         assert isinstance(net, Net)
         _add_net_to_dict(self._net_dict, net)
         self._step.network.extend([get_net_name(net)])
@@ -2743,14 +2797,18 @@ class ExecutionStep(object):
         Create ExecutionStep from ExecutionStep protobuf recursively
         """
         assert isinstance(step_proto, caffe2_pb2.ExecutionStep)
-        assert (len(step_proto.network) > 0 and len(step_proto.substep) == 0) or \
-            (len(step_proto.network) == 0 and len(step_proto.substep) > 0)
+        assert (len(step_proto.network) > 0 and len(step_proto.substep) == 0) or (
+            len(step_proto.network) == 0 and len(step_proto.substep) > 0
+        )
 
         steps_or_nets = []
         if len(step_proto.substep) > 0:
             for substep_proto in step_proto.substep:
-                steps_or_nets.append(ExecutionStep.create_from_proto(
-                    substep_proto, net_obj_dict, net_proto_dict))
+                steps_or_nets.append(
+                    ExecutionStep.create_from_proto(
+                        substep_proto, net_obj_dict, net_proto_dict
+                    )
+                )
         else:
             for net_name in step_proto.network:
                 if net_name not in net_obj_dict:
@@ -2761,32 +2819,45 @@ class ExecutionStep(object):
                 assert isinstance(net, Net)
                 steps_or_nets.append(net)
 
-        num_iter = step_proto.num_iter if step_proto.HasField('num_iter') else None
-        concurrent_substeps = step_proto.concurrent_substeps if\
-            step_proto.HasField('concurrent_substeps') else None
-        should_stop_blob = BlobReference(step_proto.should_stop_blob) if\
-            step_proto.HasField('should_stop_blob') else None
-        only_once = step_proto.only_once if\
-            step_proto.HasField('only_once') else None
-        num_concurrent_instances = step_proto.num_concurrent_instances if\
-            step_proto.HasField('num_concurrent_instances') else None
-        create_workspace = step_proto.create_workspace if\
-            step_proto.HasField('create_workspace') else None
-        run_every_ms = step_proto.run_every_ms if\
-            step_proto.HasField('run_every_ms') else None
+        num_iter = step_proto.num_iter if step_proto.HasField("num_iter") else None
+        concurrent_substeps = (
+            step_proto.concurrent_substeps
+            if step_proto.HasField("concurrent_substeps")
+            else None
+        )
+        should_stop_blob = (
+            BlobReference(step_proto.should_stop_blob)
+            if step_proto.HasField("should_stop_blob")
+            else None
+        )
+        only_once = step_proto.only_once if step_proto.HasField("only_once") else None
+        num_concurrent_instances = (
+            step_proto.num_concurrent_instances
+            if step_proto.HasField("num_concurrent_instances")
+            else None
+        )
+        create_workspace = (
+            step_proto.create_workspace
+            if step_proto.HasField("create_workspace")
+            else None
+        )
+        run_every_ms = (
+            step_proto.run_every_ms if step_proto.HasField("run_every_ms") else None
+        )
 
         return execution_step(
             step_proto.name,
             steps_or_nets,
             num_iter=num_iter,
-            report_net=None,        # DEPRECATED
-            report_interval=None,   # DEPRECATED
+            report_net=None,  # DEPRECATED
+            report_interval=None,  # DEPRECATED
             concurrent_substeps=concurrent_substeps,
             should_stop_blob=should_stop_blob,
             only_once=only_once,
             num_concurrent_instances=num_concurrent_instances,
             create_workspace=create_workspace,
-            run_every_ms=run_every_ms)
+            run_every_ms=run_every_ms,
+        )
 
 
 def add_nets_in_order(step, net_list):
@@ -2804,18 +2875,17 @@ def add_nets_in_order(step, net_list):
 
 
 class Plan(object):
-
     def __init__(self, name_or_step):
         self._plan = caffe2_pb2.PlanDef()
         self._net_dict = OrderedDict()
-        self._steps = []    # A list of ExecutionStep
+        self._steps = []  # A list of ExecutionStep
         if isinstance(name_or_step, ExecutionStep):
             self._plan.name = name_or_step.Name()
             self.AddStep(name_or_step)
         elif isinstance(name_or_step, basestring):
             self._plan.name = name_or_step
         else:
-            raise ValueError('name_or_step must be a string or ExecutionStep')
+            raise ValueError("name_or_step must be a string or ExecutionStep")
 
     def __str__(self):
         return self._plan.name
@@ -2874,7 +2944,8 @@ class Plan(object):
 
         for step_proto in plan_proto.execution_step:
             step = ExecutionStep.create_from_proto(
-                step_proto, net_obj_dict, net_proto_dict)
+                step_proto, net_obj_dict, net_proto_dict
+            )
             plan.AddStep(step)
 
         return plan
@@ -2882,30 +2953,32 @@ class Plan(object):
 
 def to_execution_step(step_or_nets, default_name=None):
     from caffe2.python.net_builder import NetBuilder
+
     if isinstance(step_or_nets, ExecutionStep):
         return step_or_nets
 
     stop_blob = None
-    if not default_name and hasattr(step_or_nets, 'name'):
+    if not default_name and hasattr(step_or_nets, "name"):
         default_name = step_or_nets.name
     if isinstance(step_or_nets, NetBuilder):
         stop_blob = step_or_nets._stop_blob
         step_or_nets = step_or_nets.get()
-    return execution_step(
-        default_name, step_or_nets, should_stop_blob=stop_blob)
+    return execution_step(default_name, step_or_nets, should_stop_blob=stop_blob)
 
 
-def execution_step(default_name,
-                   steps_or_nets,
-                   num_iter=None,
-                   report_net=None,
-                   report_interval=None,
-                   concurrent_substeps=None,
-                   should_stop_blob=None,
-                   only_once=None,
-                   num_concurrent_instances=None,
-                   create_workspace=False,
-                   run_every_ms=None):
+def execution_step(
+    default_name,
+    steps_or_nets,
+    num_iter=None,
+    report_net=None,
+    report_interval=None,
+    concurrent_substeps=None,
+    should_stop_blob=None,
+    only_once=None,
+    num_concurrent_instances=None,
+    create_workspace=False,
+    run_every_ms=None,
+):
     """
     Helper for creating an ExecutionStep.
     - steps_or_nets can be:
@@ -2920,8 +2993,9 @@ def execution_step(default_name,
       - Be sure to handle race conditions if setting from concurrent threads.
     - if no should_stop_blob or num_iter is provided, defaults to num_iter=1
     """
-    assert should_stop_blob is None or num_iter is None, (
-        'Cannot set both should_stop_blob and num_iter.')
+    assert (
+        should_stop_blob is None or num_iter is None
+    ), "Cannot set both should_stop_blob and num_iter."
     if should_stop_blob is None and num_iter is None:
         num_iter = 1
 
@@ -2957,7 +3031,8 @@ def execution_step(default_name,
                 step.AddSubstep(to_execution_step(x))
     elif steps_or_nets:
         raise ValueError(
-            'steps_or_nets must be a step, a net, or a list of nets or steps.')
+            "steps_or_nets must be a step, a net, or a list of nets or steps."
+        )
     return step
 
 
@@ -2968,7 +3043,7 @@ def scoped_execution_step(name, *args, **kwargs):
 
 
 def _extract_stacktrace():
-    '''
+    """
     This function extracts stacktrace without file system access
     by purely using sys._getframe() and removes part that belongs to
     this file (core.py). We are not using inspect module because
@@ -2980,7 +3055,7 @@ def _extract_stacktrace():
     if code is located on an NFS, file access might be slow
 
     Function returns a list of tuples (file_name, line_number, function)
-    '''
+    """
 
     result = []
     # Ignore top 3 layers of stack: this function, _CreateAndAddToSelf, and

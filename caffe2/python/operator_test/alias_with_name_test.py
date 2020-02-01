@@ -18,10 +18,7 @@ class TestAliasWithNameOp(hu.HypothesisTestCase):
         test_inputs = [test_input]
 
         alias_op = core.CreateOperator(
-            "AliasWithName",
-            ["input"],
-            ["output"],
-            device_option=gc,
+            "AliasWithName", ["input"], ["output"], device_option=gc
         )
         alias_op.arg.add().CopyFrom(utils.MakeArgument("name", "whatever_name"))
 

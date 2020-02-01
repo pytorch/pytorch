@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -21,9 +22,9 @@ def id_list_batch(draw):
     for _ in range(num_inputs):
         size = draw(st.integers(5, 10))
         values = draw(hnp.arrays(values_dtype, size, st.integers(1, 10)))
-        lengths = draw(hu.lengths(len(values),
-                                  min_segments=batch_size,
-                                  max_segments=batch_size))
+        lengths = draw(
+            hu.lengths(len(values), min_segments=batch_size, max_segments=batch_size)
+        )
         inputs.append(lengths)
         inputs.append(values)
     return inputs
@@ -35,14 +36,14 @@ def merge_id_lists_ref(*args):
     assert n % 2 == 0
     batch_size = len(args[0])
     num_inputs = int(n / 2)
-    lengths = np.array([np.insert(args[2 * i], 0, 0)
-                        for i in range(num_inputs)])
+    lengths = np.array([np.insert(args[2 * i], 0, 0) for i in range(num_inputs)])
     values = [args[2 * i + 1] for i in range(num_inputs)]
     offsets = [np.cumsum(lengths[j]) for j in range(num_inputs)]
 
     def merge_arrays(vs, offs, j):
-        concat = np.concatenate([vs[i][offs[i][j]:offs[i][j + 1]]
-                                for i in range(num_inputs)])
+        concat = np.concatenate(
+            [vs[i][offs[i][j] : offs[i][j + 1]] for i in range(num_inputs)]
+        )
         return np.sort(np.unique(concat))
 
     merged = [merge_arrays(values, offsets, j) for j in range(batch_size)]
@@ -60,7 +61,8 @@ class TestMergeIdListsOp(serial.SerializedTestCase):
         values_1 = np.array([5, 8, 9, 14, 9, 5], dtype=np.int64)
 
         merged_lengths, merged_values = merge_id_lists_ref(
-            lengths_0, values_0, lengths_1, values_1)
+            lengths_0, values_0, lengths_1, values_1
+        )
         expected_lengths = np.array([5, 2, 4], dtype=np.int32)
         expected_values = np.array([1, 5, 6, 8, 9, 9, 14, 2, 4, 5, 6], dtype=np.int64)
 
@@ -72,10 +74,12 @@ class TestMergeIdListsOp(serial.SerializedTestCase):
         num_inputs = int(len(inputs) / 2)
         op = core.CreateOperator(
             "MergeIdLists",
-            ["{prefix}_{i}".format(prefix=p, i=i)
+            [
+                "{prefix}_{i}".format(prefix=p, i=i)
                 for i in range(num_inputs)
-                for p in ["lengths", "values"]],
-            ["merged_lengths", "merged_values"]
+                for p in ["lengths", "values"]
+            ],
+            ["merged_lengths", "merged_values"],
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         self.assertReferenceChecks(gc, op, inputs, merge_id_lists_ref)

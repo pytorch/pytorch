@@ -5,6 +5,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import zip
+from builtins import str
+from builtins import range
 import networkx as nx
 import collections
 import time
@@ -18,7 +21,7 @@ import caffe2.python._import_c_extension as C
 
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
-LiveRange = collections.namedtuple('LiveRange', ["defined", "used", "size"])
+LiveRange = collections.namedtuple("LiveRange", ["defined", "used", "size"])
 
 
 def share_grad_blobs(
@@ -30,20 +33,24 @@ def share_grad_blobs(
     share_activations=False,
     blob_shapes=None,
 ):
-    '''
+    """
     Implements similar optimization as Torch's shareGradInput():
     for the gradients that are passed between layers, share blobs between
     operators when possible. This yields significant memory savings with
     deep networks.
 
     Returns an optimized protobuf (assign to net._net)
-    '''
+    """
+
     def is_grad_blob(b):
         name = str(b)
         # Note: need to look at _{namescope} pattern as it matches
         # to handle the auto-split gradients
-        return name.endswith("_grad") and (name.startswith(namescope) or
-            name.startswith("_" + namescope)) and name not in param_grads
+        return (
+            name.endswith("_grad")
+            and (name.startswith(namescope) or name.startswith("_" + namescope))
+            and name not in param_grads
+        )
 
     def is_grad_op(op):
         # TODO: something smarter
@@ -74,7 +81,7 @@ def share_grad_blobs(
     # Gradient ops
     grad_op_indices = []
     for idx, op in enumerate(netproto.op):
-        if (is_grad_op(op)):
+        if is_grad_op(op):
             grad_op_indices.append(idx)
 
     shared_blobs = set()
@@ -85,24 +92,26 @@ def share_grad_blobs(
     start_time = time.time()
     optim_str = C.memonger_compute_blob_recycling_for_dag(
         netproto.SerializeToString(),
-        [str(s).encode('utf-8') for s in losses],
+        [str(s).encode("utf-8") for s in losses],
         grad_op_indices,
-        set(str(s).encode('utf-8') for s in shared_blobs),
-        namescope.encode('utf-8'),
+        set(str(s).encode("utf-8") for s in shared_blobs),
+        namescope.encode("utf-8"),
         set() if dont_share_blobs is None else dont_share_blobs,
-        {} if blob_shapes is None else blob_shapes
+        {} if blob_shapes is None else blob_shapes,
     )
 
-    log.info("Memonger memory optimization took {} secs".format(
-        time.time() - start_time),
+    log.info(
+        "Memonger memory optimization took {} secs".format(time.time() - start_time)
     )
 
     optim = caffe2_pb2.NetDef()
     optim.ParseFromString(optim_str)
-    assert verify_graph_equality(net.Proto(), optim), \
-        "Memonger graph is not equal to original."
-    assert verify_inplace_blobs(net.Proto(), optim), \
-        "Inplace assignments differ in memonger net."
+    assert verify_graph_equality(
+        net.Proto(), optim
+    ), "Memonger graph is not equal to original."
+    assert verify_inplace_blobs(
+        net.Proto(), optim
+    ), "Inplace assignments differ in memonger net."
     return optim
 
 
@@ -131,36 +140,40 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
             if is_activation_blob(b):
                 activation_blobs.add(b)
         seen_as_output = seen_as_output.union(set(op.output))
-        assert not op.is_gradient_op, \
-            "You can only pass inference-only nets to optimize_inference_for_dag"
+        assert (
+            not op.is_gradient_op
+        ), "You can only pass inference-only nets to optimize_inference_for_dag"
     start_time = time.time()
     optim_str = C.memonger_compute_blob_recycling_for_dag(
         netproto.SerializeToString(),
-        [str(s).encode('utf-8') for s in input_blobs],
+        [str(s).encode("utf-8") for s in input_blobs],
         op_indices,
-        set(str(s).encode('utf-8') for s in activation_blobs),
-        namescope.encode('utf-8'),
+        set(str(s).encode("utf-8") for s in activation_blobs),
+        namescope.encode("utf-8"),
         set(),
-        {}
+        {},
     )
 
-    log.info("Memonger memory optimization took {} secs".format(
-        time.time() - start_time),
+    log.info(
+        "Memonger memory optimization took {} secs".format(time.time() - start_time)
     )
 
     optim = caffe2_pb2.NetDef()
     optim.ParseFromString(optim_str)
 
-    assert verify_graph_equality(net.Proto(), optim), \
-        "Memonger graph is not equal to original."
-    assert verify_inplace_blobs(net.Proto(), optim), \
-        "Inplace assignments differ in memonger net."
+    assert verify_graph_equality(
+        net.Proto(), optim
+    ), "Memonger graph is not equal to original."
+    assert verify_inplace_blobs(
+        net.Proto(), optim
+    ), "Inplace assignments differ in memonger net."
     return optim
 
 
 def estimate_memory_usage(protos, shapes, types, devicescope):
     import numpy as np
-    '''
+
+    """
     Estimate memory usage of a model. This is an estimate because
     we assume a single threaded execution and miss some internal
     memory usage of operators. Only estimates the memory for a given
@@ -170,7 +183,7 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
     during execution, as it uses only the final blob size.
 
     Returns (total, highwater, by op type) memory allocation in bytes.
-    '''
+    """
     sizeofs = {
         caffe2_pb2.TensorProto.DOUBLE: 8,
         caffe2_pb2.TensorProto.FLOAT: 4,
@@ -185,8 +198,11 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
     }
 
     def split_net(proto):
-        ops = [op for op in proto.op if
-               op.device_option == devicescope or op.type in {"Free", "Alias"}]
+        ops = [
+            op
+            for op in proto.op
+            if op.device_option == devicescope or op.type in {"Free", "Alias"}
+        ]
         del proto.op[:]
         proto.op.extend(ops)
         return proto
@@ -227,7 +243,7 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
 
 
 def release_blobs_when_used(netproto, dont_free_blobs, selector_fun=None):
-    '''
+    """
     Insert Free-ops after a blob has been used the last time, so that its
     memory can be reclaimed. Use this only with efficient caching memory
     managers (such as CUB, --caffe2_cuda_memory_pool=cub).
@@ -241,14 +257,14 @@ def release_blobs_when_used(netproto, dont_free_blobs, selector_fun=None):
 
     Returns a new protobuffer. To use with a model, use:
         model.net._net = memonger.release_blobs_when_used(..)
-    '''
+    """
     input_blobs = set()
     can_release = set()
     alias_blobs = set()
     netproto = copy.deepcopy(netproto)
 
     for op in netproto.op:
-        if op.type == 'Alias':
+        if op.type == "Alias":
             alias_blobs.add(op.input[0])
             continue
         for inp in op.input:
@@ -267,7 +283,7 @@ def release_blobs_when_used(netproto, dont_free_blobs, selector_fun=None):
     ops = list(netproto.op)
 
     # .. then find last use of each can-release blob, and insert a Free op
-    for j in reversed(range(0, len(netproto.op))):
+    for j in reversed(list(range(0, len(netproto.op)))):
         op = netproto.op[j]
         for inp in op.input:
             if inp in can_release:
@@ -280,7 +296,7 @@ def release_blobs_when_used(netproto, dont_free_blobs, selector_fun=None):
 
 
 def _find_source_nodes(g):
-    ''' Return nodes without predecessors '''
+    """ Return nodes without predecessors """
     ret = []
     for cn in g:
         cur_pred = list(g.predecessors(cn))
@@ -290,7 +306,7 @@ def _find_source_nodes(g):
 
 
 def _find_target_nodes(g):
-    ''' Return nodes without successors '''
+    """ Return nodes without successors """
     ret = []
     for cn in g:
         cur_succ = list(g.successors(cn))
@@ -323,7 +339,7 @@ def _add_single_target_ifneeded(g):
 
 
 def _get_path(pred_list, dist_list):
-    ''' Get the path from nx.bellman_ford()'s output '''
+    """ Get the path from nx.bellman_ford()'s output """
 
     # distances are negative
     assert all(dist_list[x] <= 0 for x in dist_list)
@@ -332,7 +348,6 @@ def _get_path(pred_list, dist_list):
 
     ret = []
     cur = target
-
 
     while cur is not None:
         ret.append(cur)
@@ -347,9 +362,9 @@ def _get_path(pred_list, dist_list):
 
 
 def _get_longest_paths(g, source_nodes):
-    ''' Get the longest path for nodes in 'source_nodes'
+    """ Get the longest path for nodes in 'source_nodes'
         Find with bellman_ford() by setting weight = -1
-    '''
+    """
 
     ng = copy.deepcopy(g)
     for u, v in ng.edges():
@@ -367,9 +382,9 @@ def _get_longest_paths(g, source_nodes):
 
 
 def _build_tree(paths):
-    ''' Build a tree for given paths based on common elements.
+    """ Build a tree for given paths based on common elements.
         Last elements of all paths are the same, which is the root of the tree.
-    '''
+    """
     assert all(cp[-1] == paths[0][-1] for cp in paths)
     g = nx.DiGraph()
     node_set = {y for x in paths for y in x}
@@ -385,9 +400,10 @@ def _build_tree(paths):
 
 
 def _compute_tree_height(g, root):
-    ''' Compute the heights of the tree for all nodes
+    """ Compute the heights of the tree for all nodes
         Height of leaves are 0
-    '''
+    """
+
     def _get_height(root):
         children = list(g.successors(root))
         height = 0
@@ -401,9 +417,10 @@ def _compute_tree_height(g, root):
 
 
 def _sort_tree_leaves(g, root):
-    ''' For each node, sort its child nodes based on the height of the nodes.
+    """ For each node, sort its child nodes based on the height of the nodes.
         Return the leaf nodes of the tree after sorting.
-    '''
+    """
+
     def _get_height(root):
         return g.node[root]["height"]
 
@@ -412,7 +429,7 @@ def _sort_tree_leaves(g, root):
         if not children:
             return [root]
         child_heights = [_get_height(x) for x in children]
-        order = sorted(range(len(children)), key=lambda x: child_heights[x])
+        order = sorted(list(range(len(children))), key=lambda x: child_heights[x])
         ret = []
         for co in order:
             cr = children[co]
@@ -424,7 +441,7 @@ def _sort_tree_leaves(g, root):
 
 
 def topological_sort_traversal_longest_path(g):
-    ''' The graph 'g' may contain several source nodes (nodes without incoming
+    """ The graph 'g' may contain several source nodes (nodes without incoming
         edge), which could be in any order and still be a valid
         topological sorting result. We would like to arrange these source nodes
         so that the average live spans of the computed blobs are shorter.
@@ -436,15 +453,15 @@ def topological_sort_traversal_longest_path(g):
         - Convert the longest paths to a tree with the target node being the root
           and source nodes being the leaves.
         - Sort the nodes of the tree based on the height of the tree.
-    '''
+    """
     gt = _add_single_target_ifneeded(g)
     source_nodes = _find_source_nodes(gt)
     lpaths = _get_longest_paths(gt, source_nodes)
     tree, root = _build_tree(list(viewvalues(lpaths)))
     sorted_sources = _sort_tree_leaves(tree, root)
-    assert(sorted(sorted_sources) == sorted(source_nodes))
+    assert sorted(sorted_sources) == sorted(source_nodes)
 
-    if nx.__version__ < '2.0':
+    if nx.__version__ < "2.0":
         ret = nx.topological_sort(g, sorted_sources)
     else:
         # Manually making a sorted descendent list
@@ -456,11 +473,14 @@ def topological_sort_traversal_longest_path(g):
                 if d not in seen_nodes:
                     seen_nodes.add(d)
                     dependency_order.append(d)
-        sort_key = dict((v, len(dependency_order) - i) for i, v in enumerate(dependency_order))
+        sort_key = dict(
+            (v, len(dependency_order) - i) for i, v in enumerate(dependency_order)
+        )
         ret = nx.algorithms.dag.lexicographical_topological_sort(
-            g, key=lambda x: sort_key[x])
+            g, key=lambda x: sort_key[x]
+        )
         ret = list(ret)
-    assert(len(ret) == len(g.node))
+    assert len(ret) == len(g.node)
     return ret
 
 
@@ -470,10 +490,11 @@ def topological_sort_traversal(g):
 
 def compute_ranges(linearized_ops, blob_sizes=None):
     if not blob_sizes:
-        log.warning('Provide blob sizes to get more accurate assignments.')
+        log.warning("Provide blob sizes to get more accurate assignments.")
 
     blobs = collections.defaultdict(
-        lambda: LiveRange(defined=None, used=None, size=None))
+        lambda: LiveRange(defined=None, used=None, size=None)
+    )
     for i, op in enumerate(linearized_ops):
         for blob in op.input:
             used = blobs[blob].used
@@ -503,8 +524,7 @@ def is_compatible(candidate_range, assignment, static_blobs):
     (name, range_) = assignment[-1]
     if name in static_blobs:
         return False
-    if candidate_range.defined is None or range_.defined is None \
-      or range_.used is None:
+    if candidate_range.defined is None or range_.defined is None or range_.used is None:
         return False
     return candidate_range.defined > range_.used
 
@@ -562,14 +582,14 @@ def compute_assignments_greedy(ranges_sorted, init_assignments=None):
 
 
 def _get_count(assignments):
-    ''' Return number of blobs in assignments '''
+    """ Return number of blobs in assignments """
     if assignments:
         return sum([len(x) for x in assignments])
     return 0
 
 
 def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
-    ''' Compute assignment for blobs in 'ranges_sorted' on top of 'init_assignment'
+    """ Compute assignment for blobs in 'ranges_sorted' on top of 'init_assignment'
         using dynamic programming + recursion.
 
         ranges_sorted: blobs sorted by 'used'
@@ -595,16 +615,17 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
                 f(b[0:-1], len(b) - 1, init) + [b[-1]]
             }
         where min{} gives the assignment with minimum memory usage.
-    '''
+    """
 
     def _get_compatible_prev(candidate_range, best_assignments, cur_idx):
-        ''' Find closest position k of best_assignments that is independent of
+        """ Find closest position k of best_assignments that is independent of
             candidate_range that candiate_range is compatible with all assignments
             in best_assignments[k].
             Return -1 if not found.
-        '''
+        """
+
         def is_compatible_all(candidate_range, assignments):
-            ''' return true if compatible for all assignments in assignments '''
+            """ return true if compatible for all assignments in assignments """
             return all([is_compatible(candidate_range[1], x, []) for x in assignments])
 
         ii = cur_idx - 1
@@ -616,7 +637,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
         return -1
 
     def _find_best(ranges, init_assignment, prev_best_assignment, counter):
-        ''' Find the best assignment for blobs 'ranges' given an initialized
+        """ Find the best assignment for blobs 'ranges' given an initialized
             assignment 'init_assignment'.
 
             Blobs in ranges[0:-1] should be incompatible with blob range[-1].
@@ -626,7 +647,7 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
             in a new assignment, the problem becomes a smaller problem to find
             the best assignment for ranges[0:-1] given the initial assignment
             init_assigment[0:k, (k+1):-1].
-        '''
+        """
         # Blob to check
         find_range = ranges[-1]
         # Blobs in ranges[0:-1] are incompatible with ranges[-1] so that we can
@@ -645,7 +666,8 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
                 cur_best_tmp = [x for i, x in enumerate(cur_best) if i != ii]
                 # reduce to a smaller dp problem
                 cur_best_tmp = compute_assignments_dp(
-                    ranges[:-1], cur_best_tmp, counter)
+                    ranges[:-1], cur_best_tmp, counter
+                )
                 cur_best = cur_best_tmp + [cur_best[ii]]
             best_candidates.append(cur_best)
         # Try to put 'find_range' in a new assignment
@@ -660,8 +682,9 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
 
     if counter and counter[0] % 5000 == 0:
         rs = [ranges_sorted[0][1].defined, ranges_sorted[-1][1].used]
-        log.info('Finding assignments {} ({} -> {})...'.format(
-            counter[0], rs[0], rs[1]))
+        log.info(
+            "Finding assignments {} ({} -> {})...".format(counter[0], rs[0], rs[1])
+        )
 
     init_assignment = init_assignment or []
     # best_assignments[k]: best assignments for first k blobs ranges_sorted[0:(k+1)]
@@ -670,14 +693,19 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
     for ii, cur_range in enumerate(ranges_sorted):
         # closest best_assignment that is independent of ranges_sorted[ii]
         prev_idx = _get_compatible_prev(cur_range, best_assignments, ii)
-        prev_best = copy.deepcopy(init_assignment) if prev_idx < 0 else \
-                    copy.deepcopy(best_assignments[prev_idx])
+        prev_best = (
+            copy.deepcopy(init_assignment)
+            if prev_idx < 0
+            else copy.deepcopy(best_assignments[prev_idx])
+        )
         # Need to find best assignment for blobs in 'ranges_part'
-        ranges_part = ranges_sorted[(prev_idx + 1):(ii + 1)]
+        ranges_part = ranges_sorted[(prev_idx + 1) : (ii + 1)]
         cur_best = _find_best(
-            ranges_part, prev_best,
+            ranges_part,
+            prev_best,
             best_assignments[-1] if best_assignments else init_assignment,
-            counter)
+            counter,
+        )
         assert _get_count(cur_best) == _get_count(prev_best) + len(ranges_part)
         best_assignments.append(copy.deepcopy(cur_best))
 
@@ -689,10 +717,10 @@ def compute_assignments_dp(ranges_sorted, init_assignment, counter=None):
 
 
 def get_updated_ranges(ranges, max_live=None):
-    ''' Set LiveRange.defined = -1 if it is None
+    """ Set LiveRange.defined = -1 if it is None
         Set LiveRange.used = max_live if it is None
         Set LiveRanee.size = 1 if it is None
-    '''
+    """
 
     def _get_max_live(ranges):
         max_live = max(x[1].used for x in ranges if x[1].used) + 1
@@ -716,23 +744,20 @@ def get_updated_ranges(ranges, max_live=None):
 
 
 def compute_assignments(ranges, static_blobs, algo):
-    '''
+    """
     algo: Method used to find assignments (AssignmentAlgorithm.GREEDY or
           AssignmentAlgorithm.DYNAMIC_PROGRAMMING).
           AssignmentAlgorithm.DYNAMIC_PROGRAMMING gives optimal solution at the
           cost of more computation.
           AssignmentAlgorithm.GREEDY may be better in the case 'blob_sizes' is
           not provided.
-    '''
+    """
 
     # Sort the ranges based on when they are last used.
     # If LiveRange.used is None, then the blob is never used and could
     # be consumed externally. Sort these to the end of the list as opposed
     # to the beginning so that they can be shared as well.
-    ranges = sorted(
-        viewitems(ranges),
-        key=lambda p: (p[1].used is None, p[1].used),
-    )
+    ranges = sorted(viewitems(ranges), key=lambda p: (p[1].used is None, p[1].used))
     # Update None values
     ranges = get_updated_ranges(ranges)
 
@@ -779,7 +804,8 @@ def compute_interference_graph(ops):
 
 
 Optimization = collections.namedtuple(
-    'Optimization', ['net', 'assignments', 'blob_assignments'])
+    "Optimization", ["net", "assignments", "blob_assignments"]
+)
 
 
 def apply_assignments(net, blob_assignments):
@@ -790,14 +816,13 @@ def apply_assignments(net, blob_assignments):
 
     for op in net.op:
         # Descend into subnets of the recurrent network
-        if op.type.startswith('RecurrentNetwork'):
+        if op.type.startswith("RecurrentNetwork"):
             apply_recurrent_blob_assignments(op, blob_assignments, canonical_name)
 
         for i, input_ in enumerate(op.input):
             op.input[i] = canonical_name(input_)
         for i, output in enumerate(op.output):
             op.output[i] = canonical_name(output)
-
 
 
 def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
@@ -825,17 +850,19 @@ class AssignmentAlgorithm(enum.Enum):
 def optimize_inference_fast(net, static_blobs):
     optim = caffe2_pb2.NetDef()
     optim_str = C.memonger_optimize_inference_net(
-        net.SerializeToString(),
-        [str(s).encode('utf-8') for s in static_blobs]
+        net.SerializeToString(), [str(s).encode("utf-8") for s in static_blobs]
     )
     optim.ParseFromString(optim_str)
     return optim
 
 
-def optimize_interference(net, static_blobs,
-                          ordering_function=topological_sort_traversal,
-                          blob_sizes=None,
-                          algo=AssignmentAlgorithm.GREEDY):
+def optimize_interference(
+    net,
+    static_blobs,
+    ordering_function=topological_sort_traversal,
+    blob_sizes=None,
+    algo=AssignmentAlgorithm.GREEDY,
+):
     """
     ordering_function: topological_sort_traversal or
                        topological_sort_traversal_longest_path.
@@ -875,9 +902,8 @@ def optimize_interference(net, static_blobs,
     blob_assignments = compute_blob_assignments(assignments)
     apply_assignments(net, blob_assignments)
     return Optimization(
-        net=net,
-        blob_assignments=blob_assignments,
-        assignments=assignments)
+        net=net, blob_assignments=blob_assignments, assignments=assignments
+    )
 
 
 def verify_inplace_blobs(net_a, net_b):
@@ -886,6 +912,7 @@ def verify_inplace_blobs(net_a, net_b):
     Particularly, that memonger did not add an in-place assignment when that
     did not exist before.
     """
+
     def get_inplaces(op):
         out = list(op.output)
         inplaces = []
@@ -928,12 +955,14 @@ def verify_graph_equality(net_a, net_b):
         return parent_list
 
     # Operator wise equality checks
-    if (len(net_a.op) != len(net_b.op)):
+    if len(net_a.op) != len(net_b.op):
         return False
     for op_a, op_b in zip(net_a.op, net_b.op):
-        if (op_a.type != op_b.type or
-                op_a.device_option != op_b.device_option or
-                op_a.engine != op_b.engine):
+        if (
+            op_a.type != op_b.type
+            or op_a.device_option != op_b.device_option
+            or op_a.engine != op_b.engine
+        ):
             return False
 
     # Print debug info
@@ -943,8 +972,7 @@ def verify_graph_equality(net_a, net_b):
         j = 0
         for a, b in zip(parent_list_a, parent_list_b):
             if a != b:
-                print("Difference {} vs {} \n {}".format(
-                    j, net_a.op[j], net_b.op[j]))
+                print("Difference {} vs {} \n {}".format(j, net_a.op[j], net_b.op[j]))
                 print("Parents: {} vs {}".format(a, b))
 
             j += 1
@@ -954,7 +982,8 @@ def verify_graph_equality(net_a, net_b):
 
 
 Statistics = collections.namedtuple(
-    'Statistics', ['baseline_nbytes', 'optimized_nbytes'])
+    "Statistics", ["baseline_nbytes", "optimized_nbytes"]
+)
 
 
 def blob_nbytes(blob):
@@ -962,21 +991,23 @@ def blob_nbytes(blob):
     try:
         sz = workspace.FetchBlob(blob).nbytes
     except Exception:
-        log.warning('Error when fetching blob {}'.format(blob))
+        log.warning("Error when fetching blob {}".format(blob))
     return sz
 
 
 def compute_statistics(assignments):
     blob_bytes = {
-        blob: blob_nbytes(blob) for assignment in assignments
-        for (blob, _) in assignment}
+        blob: blob_nbytes(blob)
+        for assignment in assignments
+        for (blob, _) in assignment
+    }
     baseline_nbytes = sum(viewvalues(blob_bytes))
     optimized_nbytes = sum(
-        max(blob_bytes[blob] for (blob, _) in assignment)
-        for assignment in assignments)
+        max(blob_bytes[blob] for (blob, _) in assignment) for assignment in assignments
+    )
     return Statistics(
-        baseline_nbytes=baseline_nbytes,
-        optimized_nbytes=optimized_nbytes)
+        baseline_nbytes=baseline_nbytes, optimized_nbytes=optimized_nbytes
+    )
 
 
 def collect_blob_sizes(net):

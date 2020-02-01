@@ -5,6 +5,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import object
 from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
@@ -40,8 +42,8 @@ class Cluster(object):
         if str(node) not in self._nodes:
             self._nodes.append(str(node))
         self._node_kwargs[str(node)] = _merge_node_kwargs(
-            node.kwargs(),
-            self._node_kwargs.get(str(node)))
+            node.kwargs(), self._node_kwargs.get(str(node))
+        )
 
     def nodes(self):
         """
@@ -54,7 +56,8 @@ class Cluster(object):
 
     def __repr__(self):
         return "Cluster(nodes={}, node_kwargs={})".format(
-            self.nodes(), self.node_kwargs())
+            self.nodes(), self.node_kwargs()
+        )
 
 
 @context.define_context(allow_default=True)
@@ -81,7 +84,7 @@ class Node(object):
         in order to specify properties of the node.
     """
 
-    def __init__(self, node='local', **kwargs):
+    def __init__(self, node="local", **kwargs):
         self._name = str(node)
         self._kwargs = kwargs
         Cluster.current().add_node(self)
@@ -102,45 +105,46 @@ class WorkspaceType(object):
     workspace, which is kept alive across runs, or whether a new child
     workspace will be created for the run and destroyed afterwards.
     """
-    PRIVATE = 'private'
-    GLOBAL = 'global'
+
+    PRIVATE = "private"
+    GLOBAL = "global"
 
 
 def get_setup_nets(key, steps_or_nets, target):
-    init_net = core.Net(key + '/init')
-    exit_net = core.Net(key + '/exit')
+    init_net = core.Net(key + "/init")
+    exit_net = core.Net(key + "/exit")
     init_nets = []
     exit_nets = []
     objs = []
     for step_or_net in steps_or_nets:
-        if hasattr(step_or_net, 'get_all_attributes'):
+        if hasattr(step_or_net, "get_all_attributes"):
             objs += step_or_net.get_all_attributes(key)
-        elif hasattr(step_or_net, 'get_attributes'):
+        elif hasattr(step_or_net, "get_attributes"):
             objs += step_or_net.get_attributes(key)
     for obj in objs:
         # these are needed in order to allow nesting of TaskGroup, which
         # is a feature not yet implemented.
-        if hasattr(obj, '_setup_used') and obj._setup_used:
+        if hasattr(obj, "_setup_used") and obj._setup_used:
             continue
-        if hasattr(obj, '_setup_target') and obj._setup_target != target:
+        if hasattr(obj, "_setup_target") and obj._setup_target != target:
             continue
-        if hasattr(obj, 'setup'):
+        if hasattr(obj, "setup"):
             nets = obj.setup(init_net)
             if isinstance(nets, (list, tuple)):
                 init_nets += nets
             elif isinstance(nets, (core.Net, core.ExecutionStep)):
                 init_nets.append(nets)
             elif nets is not None:
-                raise TypeError('Unsupported type for setup: %s' % type(nets))
+                raise TypeError("Unsupported type for setup: %s" % type(nets))
             obj._setup_used = True
-        if hasattr(obj, 'exit'):
+        if hasattr(obj, "exit"):
             nets = obj.exit(exit_net)
             if isinstance(nets, (list, tuple)):
                 exit_nets += nets
             elif isinstance(nets, (core.Net, core.ExecutionStep)):
                 exit_nets.append(nets)
             elif nets is not None:
-                raise TypeError('Unsupported type for setup: %s' % type(nets))
+                raise TypeError("Unsupported type for setup: %s" % type(nets))
             obj._setup_used = True
 
     if len(init_net.Proto().op) > 0:
@@ -155,10 +159,10 @@ def add_setup_steps(step, init_nets, exit_nets, name):
         return step
     steps = []
     if init_nets:
-        steps.append(core.execution_step('%s:init' % name, init_nets))
+        steps.append(core.execution_step("%s:init" % name, init_nets))
     steps.append(step)
     if len(exit_nets) > 0:
-        steps.append(core.execution_step('%s:exit' % name, exit_nets))
+        steps.append(core.execution_step("%s:exit" % name, exit_nets))
     return core.execution_step(name, steps)
 
 
@@ -193,7 +197,8 @@ class TaskGroup(object):
         # s4 will run at node 'n1'
         session.run(tg)
     """
-    LOCAL_SETUP = 'local_setup'
+
+    LOCAL_SETUP = "local_setup"
 
     def __init__(self, workspace_type=None):
         self._plan_cache = None
@@ -214,15 +219,14 @@ class TaskGroup(object):
         return self._remote_nets
 
     def add(self, task):
-        assert not self._already_used, (
-            'Cannot add Task to an already used TaskGroup.')
+        assert not self._already_used, "Cannot add Task to an already used TaskGroup."
         assert (
-            self._workspace_type is None or
-            task._workspace_type is None or
-            self._workspace_type == task._workspace_type)
+            self._workspace_type is None
+            or task._workspace_type is None
+            or self._workspace_type == task._workspace_type
+        )
         if task._workspace_type is None:
-            task._workspace_type = (
-                self._workspace_type or WorkspaceType.PRIVATE)
+            task._workspace_type = self._workspace_type or WorkspaceType.PRIVATE
         if self._workspace_type is None:
             self._workspace_type = task._workspace_type
         task._notify_used()
@@ -265,8 +269,9 @@ class TaskGroup(object):
         assert net is None or node not in self._report_nets
         if node not in self._report_nets:
             self._report_nets[node] = (
-                net if net else core.Net('%s/reporter' % node),
-                report_interval)
+                net if net else core.Net("%s/reporter" % node),
+                report_interval,
+            )
         return self._report_nets[node][0]
 
     def tasks_by_node(self, node_remap=None):
@@ -274,12 +279,12 @@ class TaskGroup(object):
         # work properly a second time.
         node_map = {}
         for task in self.tasks():
-            node_map[task.node] =\
-                node_remap(task.node) if node_remap else task.node
+            node_map[task.node] = node_remap(task.node) if node_remap else task.node
         if self._tasks_by_node is not None:
             tasks_by_node, prev_node_map = self._tasks_by_node
-            assert prev_node_map == node_map, (
-                'Cannot call tasks_by_node multiple times.')
+            assert (
+                prev_node_map == node_map
+            ), "Cannot call tasks_by_node multiple times."
             return tasks_by_node
 
         # now we have report_steps. report_net is deprecated
@@ -302,15 +307,15 @@ class TaskGroup(object):
             node_inits, node_exits = get_setup_nets(
                 TaskGroup.LOCAL_SETUP,
                 [t.get_step() for t in tasks] + report_steps,
-                self)
+                self,
+            )
             # shortcut for single task with no queue
             steps = report_steps
             outputs = []
             grouped_workspace_type = WorkspaceType.PRIVATE
             for task in tasks:
                 step = task.get_step()
-                step.SetCreateWorkspace(
-                    task.workspace_type() == WorkspaceType.PRIVATE)
+                step.SetCreateWorkspace(task.workspace_type() == WorkspaceType.PRIVATE)
                 if step is not None:
                     steps.append(step)
                 outputs += task.outputs()
@@ -319,26 +324,29 @@ class TaskGroup(object):
                 if task.workspace_type() == WorkspaceType.GLOBAL:
                     grouped_workspace_type = WorkspaceType.GLOBAL
             if len(steps) == 0:
-                steps.append(core.execution_step('empty', []))
+                steps.append(core.execution_step("empty", []))
             if len(steps) == 1:
                 step = steps[0]
             else:
                 step = core.execution_step(
-                    '%s:body' % node, steps, concurrent_substeps=True)
+                    "%s:body" % node, steps, concurrent_substeps=True
+                )
             if len(node_inits) > 0 or len(node_exits) > 0:
                 steps = []
                 if len(node_inits) > 0:
-                    steps.append(
-                        core.execution_step('%s:init' % node, node_inits))
+                    steps.append(core.execution_step("%s:init" % node, node_inits))
                 steps.append(step)
                 if len(node_exits) > 0:
-                    steps.append(
-                        core.execution_step('%s:exit' % node, node_exits))
+                    steps.append(core.execution_step("%s:exit" % node, node_exits))
                 step = core.execution_step(node, steps)
             Task(
-                node=node, step=step, outputs=outputs,
-                name='grouped_by_node',
-                group=grouped_by_node, workspace_type=grouped_workspace_type)
+                node=node,
+                step=step,
+                outputs=outputs,
+                name="grouped_by_node",
+                group=grouped_by_node,
+                workspace_type=grouped_workspace_type,
+            )
         self._tasks_by_node = (grouped_by_node, node_map)
         return grouped_by_node
 
@@ -354,7 +362,8 @@ class TaskGroup(object):
 
     def __repr__(self):
         return "TaskGroup(tasks={}, workspace_type={}, remote_nets={})".format(
-            self.tasks(), self.workspace_type(), self.remote_nets())
+            self.tasks(), self.workspace_type(), self.remote_nets()
+        )
 
 
 class TaskOutput(object):
@@ -381,7 +390,7 @@ class TaskOutput(object):
         self._fetch_func = _fetch_func
 
     def get(self):
-        assert self._values is not None, 'Output value not set yet.'
+        assert self._values is not None, "Output value not set yet."
         if self._is_scalar:
             return self._values[0]
         elif self._schema:
@@ -390,8 +399,7 @@ class TaskOutput(object):
             return self._values
 
     def fetch(self):
-        assert self._fetch_func is not None, (
-            'Cannot fetch value for this output.')
+        assert self._fetch_func is not None, "Cannot fetch value for this output."
         fetched_vals = [self._fetch_func(v) for v in self._values]
         if self._is_scalar:
             return fetched_vals[0]
@@ -417,6 +425,7 @@ def final_output(blob_or_record):
 
 class TaskOutputList(object):
     """ Keeps a list of outputs for a task """
+
     def __init__(self, outputs=None):
         self.outputs = outputs or []
 
@@ -434,9 +443,9 @@ class TaskOutputList(object):
         offset = 0
         for o in self.outputs:
             num = len(o.names)
-            o.set(values[offset:offset + num], _fetch_func)
+            o.set(values[offset : offset + num], _fetch_func)
             offset += num
-        assert offset == len(values), 'Wrong number of output values.'
+        assert offset == len(values), "Wrong number of output values."
 
     def __repr__(self):
         return "TaskOutputList(outputs={})".format(self.outputs)
@@ -475,30 +484,37 @@ class Task(object):
 
     # TASK_SETUP runs once per task, before/after all
     # concurrent task instances start/finish.
-    TASK_SETUP = 'task_setup'
+    TASK_SETUP = "task_setup"
     # Setup will run once for each instance of the task.
-    TASK_INSTANCE_SETUP = 'task_instance_setup'
-    REPORT_STEP = 'report_step'
+    TASK_INSTANCE_SETUP = "task_instance_setup"
+    REPORT_STEP = "report_step"
     _global_names_used = set()
 
     @staticmethod
     def _get_next_name(node, group, name):
-        basename = str(node) + '/' + str(name)
+        basename = str(node) + "/" + str(name)
         names_used = (
             Task._global_names_used
-            if group is None else
-            set(t.name for t in group._tasks_to_add))
+            if group is None
+            else set(t.name for t in group._tasks_to_add)
+        )
         cur_name = basename
         i = 0
         while cur_name in names_used:
             i += 1
-            cur_name = '%s:%d' % (basename, i)
+            cur_name = "%s:%d" % (basename, i)
         return cur_name
 
     def __init__(
-            self, step=None, outputs=None,
-            workspace_type=None, group=None, node=None, name=None,
-            num_instances=None):
+        self,
+        step=None,
+        outputs=None,
+        workspace_type=None,
+        group=None,
+        node=None,
+        name=None,
+        num_instances=None,
+    ):
         """
         Instantiate a Task and add it to the current TaskGroup and Node.
 
@@ -515,7 +531,7 @@ class Task(object):
         if not name and isinstance(step, core.ExecutionStep):
             name = step.Proto().name
         if not name:
-            name = 'task'
+            name = "task"
         # register this node name with active context
         self.node = str(Node.current(None if node is None else Node(node)))
         self.group = TaskGroup.current(group, required=False)
@@ -546,8 +562,9 @@ class Task(object):
         if self.group is not None:
             self.group._tasks_to_add.remove(self)
         self._assert_not_used()
-        assert self._step is None, 'This Task already has an execution step.'
+        assert self._step is None, "This Task already has an execution step."
         from caffe2.python import net_builder
+
         self._net_builder = net_builder.NetBuilder(_fullname=self.name)
         self._net_builder.__enter__()
         return self
@@ -564,13 +581,13 @@ class Task(object):
         return self._workspace_type
 
     def _assert_not_used(self):
-        assert not self._already_used, (
-            'Cannot modify task since it is already been used.')
+        assert (
+            not self._already_used
+        ), "Cannot modify task since it is already been used."
 
     def add_output(self, output):
         self._assert_not_used()
-        output = (
-            output if isinstance(output, TaskOutput) else TaskOutput(output))
+        output = output if isinstance(output, TaskOutput) else TaskOutput(output)
         self._outputs.append(output)
         return output
 
@@ -596,39 +613,47 @@ class Task(object):
         report_steps = [
             s
             for s in self._step.get_all_attributes(Task.REPORT_STEP)
-            if not hasattr(s, '_report_step_used')
+            if not hasattr(s, "_report_step_used")
         ]
         for step in report_steps:
             step._report_step_used = True
             if not step.Proto().run_every_ms:
                 step.RunEveryMillis(1000)
         task_init_nets, task_exit_nets = get_setup_nets(
-            Task.TASK_SETUP, [self._step] + report_steps, self)
+            Task.TASK_SETUP, [self._step] + report_steps, self
+        )
         instance_init_nets, instance_exit_nets = get_setup_nets(
-            Task.TASK_INSTANCE_SETUP, [self._step] + report_steps, self)
+            Task.TASK_INSTANCE_SETUP, [self._step] + report_steps, self
+        )
         if len(self._outputs) == 0:
-            output_net = core.Net('%s:output' % self.name)
-            self.add_output(output_net.ConstantFill(
-                [], 1, dtype=core.DataType.INT32, value=0))
+            output_net = core.Net("%s:output" % self.name)
+            self.add_output(
+                output_net.ConstantFill([], 1, dtype=core.DataType.INT32, value=0)
+            )
             task_exit_nets.append(output_net)
 
         # Add instance-level report steps
-        body = self._step if not report_steps else core.execution_step(
-            '%s:body' % self.name, report_steps + [self._step])
+        body = (
+            self._step
+            if not report_steps
+            else core.execution_step("%s:body" % self.name, report_steps + [self._step])
+        )
         # Enclose with instance-level (thread-local) setup nets
         step_with_instance_setup = add_setup_steps(
-            body, instance_init_nets, instance_exit_nets,
-            self.name + ':instance')
+            body, instance_init_nets, instance_exit_nets, self.name + ":instance"
+        )
         # Set up runtime concurrent instances
         if self._num_instances and self._num_instances > 1:
             step_with_instance_setup.SetCreateWorkspace(True)
             step_with_instance_setup = core.execution_step(
-                '%s:parallel',
+                "%s:parallel",
                 [step_with_instance_setup],
-                num_concurrent_instances=self._num_instances)
+                num_concurrent_instances=self._num_instances,
+            )
         # Enclose with task-level setup nets
         self._step_with_setup = add_setup_steps(
-            step_with_instance_setup, task_init_nets, task_exit_nets, self.name)
+            step_with_instance_setup, task_init_nets, task_exit_nets, self.name
+        )
 
         return self._step_with_setup
 
@@ -644,7 +669,8 @@ class Task(object):
 
     def __repr__(self):
         return "Task(name={}, node={}, outputs={})".format(
-            self.name, self.node, self.outputs())
+            self.name, self.node, self.outputs()
+        )
 
 
 class SetupNets(object):
@@ -692,4 +718,5 @@ class SetupNets(object):
 
     def __repr__(self):
         return "SetupNets(init_nets={}, exit_nets={})".format(
-            self.init_nets, self.exit_nets)
+            self.init_nets, self.exit_nets
+        )

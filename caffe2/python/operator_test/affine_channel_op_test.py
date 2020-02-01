@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from builtins import range
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -29,12 +30,17 @@ class TestAffineChannelOp(serial.SerializedTestCase):
         Y = X * scale + bias
         return [Y.reshape(dims)]
 
-    @serial.given(N=st.integers(1, 5), C=st.integers(1, 5),
-            H=st.integers(1, 5), W=st.integers(1, 5),
-            order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
-            in_place=st.booleans(), **hu.gcs)
-    def test_affine_channel_2d(
-            self, N, C, H, W, order, is_learnable, in_place, gc, dc):
+    @serial.given(
+        N=st.integers(1, 5),
+        C=st.integers(1, 5),
+        H=st.integers(1, 5),
+        W=st.integers(1, 5),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        is_learnable=st.booleans(),
+        in_place=st.booleans(),
+        **hu.gcs
+    )
+    def test_affine_channel_2d(self, N, C, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],
@@ -58,22 +64,27 @@ class TestAffineChannelOp(serial.SerializedTestCase):
                 return self.affine_channel_nhwc_ref(X, scale, bias)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref_op,
+            device_option=gc, op=op, inputs=inputs, reference=ref_op
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         num_grad = len(inputs) if is_learnable else 1
         for i in range(num_grad):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
-    @given(N=st.integers(1, 5), C=st.integers(1, 5), T=st.integers(1, 3),
-           H=st.integers(1, 3), W=st.integers(1, 3),
-           order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
-           in_place=st.booleans(), **hu.gcs)
+    @given(
+        N=st.integers(1, 5),
+        C=st.integers(1, 5),
+        T=st.integers(1, 3),
+        H=st.integers(1, 3),
+        W=st.integers(1, 3),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        is_learnable=st.booleans(),
+        in_place=st.booleans(),
+        **hu.gcs
+    )
     def test_affine_channel_3d(
-            self, N, C, T, H, W, order, is_learnable, in_place, gc, dc):
+        self, N, C, T, H, W, order, is_learnable, in_place, gc, dc
+    ):
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],
@@ -97,10 +108,7 @@ class TestAffineChannelOp(serial.SerializedTestCase):
                 return self.affine_channel_nhwc_ref(X, scale, bias)
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref_op,
+            device_option=gc, op=op, inputs=inputs, reference=ref_op
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         num_grad = len(inputs) if is_learnable else 1

@@ -19,39 +19,35 @@ class TestPredictor(unittest.TestCase):
     @property
     def _predict_net(self):
         net = caffe2_pb2.NetDef()
-        net.name = 'test-predict-net'
-        net.external_input[:] = ['A', 'B']
-        net.external_output[:] = ['C']
-        net.op.extend([
-            core.CreateOperator(
-                'MatMul',
-                ['A', 'B'],
-                ['C'],
-            )
-        ])
+        net.name = "test-predict-net"
+        net.external_input[:] = ["A", "B"]
+        net.external_output[:] = ["C"]
+        net.op.extend([core.CreateOperator("MatMul", ["A", "B"], ["C"])])
         return net.SerializeToString()
 
     @property
     def _init_net(self):
         net = caffe2_pb2.NetDef()
-        net.name = 'test-init-net'
-        net.external_output[:] = ['A', 'B']
-        net.op.extend([
-            core.CreateOperator(
-                'GivenTensorFill',
-                [],
-                ['A'],
-                shape=(2, 3),
-                values=np.zeros((2, 3), np.float32).flatten().tolist(),
-            ),
-            core.CreateOperator(
-                'GivenTensorFill',
-                [],
-                ['B'],
-                shape=(3, 4),
-                values=np.zeros((3, 4), np.float32).flatten().tolist(),
-            ),
-        ])
+        net.name = "test-init-net"
+        net.external_output[:] = ["A", "B"]
+        net.op.extend(
+            [
+                core.CreateOperator(
+                    "GivenTensorFill",
+                    [],
+                    ["A"],
+                    shape=(2, 3),
+                    values=np.zeros((2, 3), np.float32).flatten().tolist(),
+                ),
+                core.CreateOperator(
+                    "GivenTensorFill",
+                    [],
+                    ["B"],
+                    shape=(3, 4),
+                    values=np.zeros((3, 4), np.float32).flatten().tolist(),
+                ),
+            ]
+        )
         return net.SerializeToString()
 
     def test_run(self):
@@ -66,8 +62,6 @@ class TestPredictor(unittest.TestCase):
         A = np.zeros((2, 3), np.float32)
         B = np.ones((3, 4), np.float32)
         predictor = workspace.Predictor(self.init_net, self.predict_net)
-        outputs = predictor.run({
-            'B': B,
-        })
+        outputs = predictor.run({"B": B})
         self.assertEqual(len(outputs), 1)
         np.testing.assert_almost_equal(np.dot(A, B), outputs[0])

@@ -9,8 +9,7 @@ import ctypes
 import sys
 
 
-_set_global_flags = (
-    hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags'))
+_set_global_flags = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
 
 @contextlib.contextmanager

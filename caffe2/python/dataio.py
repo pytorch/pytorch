@@ -20,6 +20,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import str
+from builtins import zip
+from builtins import object
 from caffe2.python import core
 from caffe2.python.schema import Field, Struct, from_blob_list
 import numpy as np
@@ -36,13 +39,14 @@ class Reader(object):
     optionally support the `reset` operation, which is useful when multiple
     passes over the data are required.
     """
+
     def __init__(self, schema=None):
         if schema is not None:
             assert isinstance(schema, Field)
         self._schema = schema
 
     def schema(self):
-        assert self._schema is not None, 'Schema not provided for this reader.'
+        assert self._schema is not None, "Schema not provided for this reader."
         return self._schema
 
     def _set_schema(self, schema):
@@ -58,12 +62,11 @@ class Reader(object):
         pass
 
     def read_ex(self, local_init_net, local_finish_net):
-        read_net = core.Net('reader_body')
-        return ([read_net], ) + self.read(read_net)
+        read_net = core.Net("reader_body")
+        return ([read_net],) + self.read(read_net)
 
     def read_record_ex(self, local_init_net, local_finish_net):
-        nets, should_stop, fields = self.read_ex(
-            local_init_net, local_finish_net)
+        nets, should_stop, fields = self.read_ex(local_init_net, local_finish_net)
         if self._schema:
             fields = from_blob_list(self._schema, fields)
         return nets, should_stop, fields
@@ -88,7 +91,7 @@ class Reader(object):
                 fields: A tuple of BlobReference containing the latest batch
                     of data that was read.
         """
-        raise NotImplementedError('Readers must implement `read`.')
+        raise NotImplementedError("Readers must implement `read`.")
 
     def reset(self, net):
         """Append operations to `net` that will reset the reader.
@@ -96,7 +99,7 @@ class Reader(object):
         This can be used to read the data multiple times.
         Not all readers support this operation.
         """
-        raise NotImplementedError('This reader cannot be resetted.')
+        raise NotImplementedError("This reader cannot be resetted.")
 
     def read_record(self, read_net):
         should_stop, fields = self.read(read_net)
@@ -132,14 +135,13 @@ class Reader(object):
                 fields: A tuple of BlobReference containing the latest batch
                         of data that was read.
         """
-        reader_net = core.Net(reader_net_name or 'reader')
+        reader_net = core.Net(reader_net_name or "reader")
         should_stop, fields = self.read_record(reader_net)
         if external_should_stop is not None:
             should_stop = reader_net.Or([external_should_stop, should_stop])
         read_step = core.execution_step(
-            '{}_step'.format(reader_net_name),
-            reader_net,
-            should_stop_blob=should_stop)
+            "{}_step".format(reader_net_name), reader_net, should_stop_blob=should_stop
+        )
         return (read_step, fields)
 
 
@@ -153,6 +155,7 @@ class Writer(object):
     data, and `commit`, which adds operations to a net in order to indicate
     that no more data will be written.
     """
+
     _schema = None
 
     def schema(self):
@@ -168,7 +171,7 @@ class Writer(object):
             fields: a tuple of BlobReference containing the batch of data to
                     write.
         """
-        raise NotImplementedError('Writers must implement write.')
+        raise NotImplementedError("Writers must implement write.")
 
     def write_record(self, writer_net, fields):
         if isinstance(fields, Field):
@@ -182,20 +185,18 @@ class Writer(object):
 
     def write_ex(self, fields, local_init_net, local_finish_net, stop_blob):
         """Experimental extension to the interface. Don't use yet"""
-        write_net = core.Net('write_net')
+        write_net = core.Net("write_net")
         self.write(write_net, fields)
         return [write_net]
 
-    def write_record_ex(
-            self, fields, local_init_net, local_finish_net, stop_blob=None):
+    def write_record_ex(self, fields, local_init_net, local_finish_net, stop_blob=None):
         """Experimental extension to the interface. Don't use yet."""
         if isinstance(fields, Field):
             self._schema = fields
             fields = fields.field_blobs()
         if stop_blob is None:
             stop_blob = local_init_net.NextName("dequeue_status")
-        write_nets = self.write_ex(
-            fields, local_init_net, local_finish_net, stop_blob)
+        write_nets = self.write_ex(fields, local_init_net, local_finish_net, stop_blob)
         return (write_nets, stop_blob)
 
     def commit(self, finish_net):
@@ -209,6 +210,7 @@ class Writer(object):
 
 class ReaderBuilder(object):
     """ Allow usage of a reader in distributed fashion. """
+
     def schema(self):
         raise NotImplementedError()
 
@@ -249,10 +251,7 @@ class PipedReaderBuilder(ReaderBuilder):
     def new_reader(self, **kwargs):
         # Passing everything down since you could wrap a PipedReaderBuilder in
         # another PipedReaderBuilder
-        output = self._piper(
-            reader=self._builder.new_reader(**kwargs),
-            **kwargs
-        )
+        output = self._piper(reader=self._builder.new_reader(**kwargs), **kwargs)
         return output if isinstance(output, Reader) else output.reader()
 
 
@@ -296,8 +295,9 @@ class Pipe(object):
 
 class CounterReader(Reader):
     """ Reader that produces increasing integers. """
+
     def __init__(self):
-        Reader.__init__(self, schema=Struct(('iter', np.int64)))
+        Reader.__init__(self, schema=Struct(("iter", np.int64)))
         self.counter = None
         self.should_stop = None
 
@@ -305,10 +305,11 @@ class CounterReader(Reader):
         if self.counter is None:
             self.counter = global_init_net.CreateCounter([], init_count=0)
             self.should_stop = global_init_net.ConstantFill(
-                [], shape=[], dtype=core.DataType.BOOL, value=False)
+                [], shape=[], dtype=core.DataType.BOOL, value=False
+            )
 
     def read_ex(self, local_init_net, local_finish_net):
-        count_net = core.Net('limited_reader_counter')
+        count_net = core.Net("limited_reader_counter")
         value = count_net.CountUp([self.counter], 1)
         return [count_net], self.should_stop, [value]
 
@@ -326,15 +327,16 @@ class ReaderWithLimitBase(Reader):
     def __init__(self, reader):
         Reader.__init__(self, schema=reader._schema)
         self.reader = reader
-        self.net = core.Net('reader_with_limit')
+        self.net = core.Net("reader_with_limit")
         self._data_finished = self.net.AddExternalInput(
-            self.net.NextName('data_finished'))
+            self.net.NextName("data_finished")
+        )
         self.should_stop = None
 
     def setup_ex(self, global_init_net, global_finish_net):
         global_init_net.ConstantFill(
-            [], [self._data_finished],
-            shape=[], value=False, dtype=core.DataType.BOOL)
+            [], [self._data_finished], shape=[], value=False, dtype=core.DataType.BOOL
+        )
         self.reader.setup_ex(global_init_net, global_finish_net)
         self.setup_limiter(global_init_net, global_finish_net)
 
@@ -356,24 +358,26 @@ class ReaderWithLimitBase(Reader):
         """
 
         # Check if limiting constraint is met.
-        stop_condition_net = core.Net('limited_reader_condition')
+        stop_condition_net = core.Net("limited_reader_condition")
         should_stop = self.check_limiter_condition(stop_condition_net)
 
         # Call original reader.
         nets, local_data_finished, fields = self.reader.read_ex(
-            local_init_net, local_finish_net)
+            local_init_net, local_finish_net
+        )
         self._set_schema(self.reader._schema)
 
         # Check if original reader is done.
-        check_done_net = core.Net('limited_reader_post')
+        check_done_net = core.Net("limited_reader_post")
         # Copy to the same blob as the counter output to trigger reader
         # stopping - this is ok because execution will check should_stop_blob
         # after every single operation, so it has already been checked on this
         # iteration by this point.
         check_done_net.Copy(local_data_finished, should_stop)
         # Update externally-accessible flag indicating if reader is done
-        check_done_net.Or([self._data_finished, local_data_finished],
-                          [self._data_finished])
+        check_done_net.Or(
+            [self._data_finished, local_data_finished], [self._data_finished]
+        )
 
         return [stop_condition_net] + nets + [check_done_net], should_stop, fields
 
@@ -414,6 +418,7 @@ class ReaderWithLimit(ReaderWithLimitBase):
     exports a boolean blob indicating that the reader has exhausted
     the data steam.
     """
+
     def __init__(self, reader, num_iter=1):
         """Class initializer.
 
@@ -428,21 +433,21 @@ class ReaderWithLimit(ReaderWithLimitBase):
         self.counter = None
         self.num_iter = num_iter
         if self.num_iter is not None:
-            self.counter = self.net.AddExternalInput(
-                self.net.NextName('counter'))
+            self.counter = self.net.AddExternalInput(self.net.NextName("counter"))
 
     def setup_limiter(self, global_init_net, global_finish_net):
         if self.counter:
             global_init_net.CreateCounter(
-                [], [self.counter], init_count=int(self.num_iter))
+                [], [self.counter], init_count=int(self.num_iter)
+            )
 
     def check_limiter_condition(self, stop_condition_net):
         if self.counter:
             return stop_condition_net.CountDown([self.counter], 1)
         else:
             return stop_condition_net.ConstantFill(
-                [], 1,
-                shape=[], value=False, dtype=core.DataType.BOOL)
+                [], 1, shape=[], value=False, dtype=core.DataType.BOOL
+            )
 
 
 def CountUntil(num_iter):
@@ -456,6 +461,7 @@ class ReaderWithTimeLimit(ReaderWithLimitBase):
     exports a boolean blob indicating that the reader has exhausted
     the data steam.
     """
+
     def __init__(self, reader, duration=0):
         """Class initializer.
 
@@ -474,13 +480,13 @@ class ReaderWithTimeLimit(ReaderWithLimitBase):
 
     def setup_limiter(self, global_init_net, global_finish_net):
         if self.duration is not None and self.duration > 0:
-            duration_ns = int(self.duration * (10**9))
+            duration_ns = int(self.duration * (10 ** 9))
 
-            self.timer = global_init_net.TimerBegin(
-                [], counter_name='epoch_timer')
+            self.timer = global_init_net.TimerBegin([], counter_name="epoch_timer")
             start_time = global_init_net.TimerGet(self.timer)
             self.duration_ns_blob = global_init_net.ConstantFill(
-                [start_time], value=duration_ns)
+                [start_time], value=duration_ns
+            )
 
             global_finish_net.TimerEnd([self.timer], [])
 
@@ -488,7 +494,8 @@ class ReaderWithTimeLimit(ReaderWithLimitBase):
         if self.duration:
             time_elapsed = stop_condition_net.TimerGet(self.timer)
             return stop_condition_net.GE(
-                [time_elapsed, self.duration_ns_blob], str(self.should_stop))
+                [time_elapsed, self.duration_ns_blob], str(self.should_stop)
+            )
         else:
             return stop_condition_net.ConstantFill(
                 [], 1, shape=[], value=False, dtype=core.DataType.BOOL
@@ -521,6 +528,7 @@ class CompositeReader(Reader):
     Base class for a reader that wrap multiple readers, e.g., reading from
     multiple sources simultaneously.
     """
+
     def __init__(self, names, readers):
         """
         Args:
@@ -528,9 +536,11 @@ class CompositeReader(Reader):
             readers: list[Reader] Reader instances, must have schema
         """
         assert len(names) == len(readers)
-        super(CompositeReader, self).__init__(schema=Struct(*[
-            (name, reader.schema()) for name, reader in zip(names, readers)
-        ]))
+        super(CompositeReader, self).__init__(
+            schema=Struct(
+                *[(name, reader.schema()) for name, reader in zip(names, readers)]
+            )
+        )
         self._names = names
         self._readers = readers
 
@@ -548,7 +558,8 @@ class CompositeReader(Reader):
         all_sub_read_nets = []
         for name, reader in zip(self._names, self._readers):
             sub_read_nets, should_stop, record = reader.read_record_ex(
-                local_init_net, local_finish_net)
+                local_init_net, local_finish_net
+            )
             stop_blobs.append(should_stop)
             all_sub_read_nets.append(sub_read_nets)
             fields.extend(record.field_blobs())
@@ -556,7 +567,9 @@ class CompositeReader(Reader):
         read_nets = []
         # Use the stop blob of the last reader as stop blob of composite reader.
         local_should_stop = stop_blobs[-1]
-        for name, sub_read_nets, stop_blob in zip(self._names, all_sub_read_nets, stop_blobs):
+        for name, sub_read_nets, stop_blob in zip(
+            self._names, all_sub_read_nets, stop_blobs
+        ):
             read_nets.extend(sub_read_nets)
             if stop_blob == local_should_stop:
                 # Skip adding stop net because Or([A, A], A) doesn't pass operator
@@ -577,6 +590,7 @@ class CompositeReaderBuilder(ReaderBuilder):
     """
     A reader builder for CompositeReader
     """
+
     def __init__(self, names, reader_builders):
         """
         Args:
@@ -587,10 +601,12 @@ class CompositeReaderBuilder(ReaderBuilder):
         super(CompositeReaderBuilder, self).__init__()
         self._names = names
         self._reader_builders = reader_builders
-        self._schema = Struct(*[
-            (name, reader_builder.schema())
-            for name, reader_builder in zip(names, reader_builders)
-        ])
+        self._schema = Struct(
+            *[
+                (name, reader_builder.schema())
+                for name, reader_builder in zip(names, reader_builders)
+            ]
+        )
 
     def schema(self):
         return self._schema
@@ -610,10 +626,18 @@ class CompositeReaderBuilder(ReaderBuilder):
                 # batch counter is incremented only if every reader has data
                 kwargs["limiter"] = limiter
             sub_reader_data_finished_blobs = reader_builder.setup(**kwargs)
-            overlapping_keys = set(data_finished_blobs.keys()) & set(sub_reader_data_finished_blobs.keys())
-            overlapping_values = set(data_finished_blobs.values()) & set(sub_reader_data_finished_blobs.values())
-            assert overlapping_keys == set(), "Overlapping keys: {}".format(overlapping_keys)
-            assert overlapping_values == set(), "Overlapping values: {}".format(overlapping_values)
+            overlapping_keys = set(data_finished_blobs.keys()) & set(
+                sub_reader_data_finished_blobs.keys()
+            )
+            overlapping_values = set(data_finished_blobs.values()) & set(
+                sub_reader_data_finished_blobs.values()
+            )
+            assert overlapping_keys == set(), "Overlapping keys: {}".format(
+                overlapping_keys
+            )
+            assert overlapping_values == set(), "Overlapping values: {}".format(
+                overlapping_values
+            )
             data_finished_blobs.update(sub_reader_data_finished_blobs)
 
         return data_finished_blobs
@@ -624,10 +648,10 @@ class CompositeReaderBuilder(ReaderBuilder):
             reader = reader_builder.new_reader(**kwargs)
             if isinstance(reader, Reader):
                 pass
-            elif hasattr(reader, 'reader'):
+            elif hasattr(reader, "reader"):
                 reader = reader.reader()
             else:
-                raise ValueError('reader must be an instance of Reader or Pipe')
+                raise ValueError("reader must be an instance of Reader or Pipe")
             readers.append(reader)
 
         multi_reader = CompositeReader(self._names, readers)

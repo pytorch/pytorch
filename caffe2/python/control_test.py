@@ -3,9 +3,11 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import control, core, test_util, workspace
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -17,15 +19,18 @@ class TestControl(test_util.TestCase):
         self.init_net_ = core.Net("init-net")
         cnt = self.init_net_.CreateCounter([], init_count=0)
         const_n = self.init_net_.ConstantFill(
-            [], shape=[], value=self.N_, dtype=core.DataType.INT64)
+            [], shape=[], value=self.N_, dtype=core.DataType.INT64
+        )
         const_0 = self.init_net_.ConstantFill(
-            [], shape=[], value=0, dtype=core.DataType.INT64)
+            [], shape=[], value=0, dtype=core.DataType.INT64
+        )
 
         self.cnt_net_ = core.Net("cnt-net")
         self.cnt_net_.CountUp([cnt])
         curr_cnt = self.cnt_net_.RetrieveCount([cnt])
         self.init_net_.ConstantFill(
-            [], [curr_cnt], shape=[], value=0, dtype=core.DataType.INT64)
+            [], [curr_cnt], shape=[], value=0, dtype=core.DataType.INT64
+        )
         self.cnt_net_.AddExternalOutput(curr_cnt)
 
         self.cnt_2_net_ = core.Net("cnt-2-net")
@@ -33,7 +38,8 @@ class TestControl(test_util.TestCase):
         self.cnt_2_net_.CountUp([cnt])
         curr_cnt_2 = self.cnt_2_net_.RetrieveCount([cnt])
         self.init_net_.ConstantFill(
-            [], [curr_cnt_2], shape=[], value=0, dtype=core.DataType.INT64)
+            [], [curr_cnt_2], shape=[], value=0, dtype=core.DataType.INT64
+        )
         self.cnt_2_net_.AddExternalOutput(curr_cnt_2)
 
         self.cond_net_ = core.Net("cond-net")
@@ -53,8 +59,7 @@ class TestControl(test_util.TestCase):
         self.false_cond_net_.AddExternalOutput(false_blob)
 
         self.idle_net_ = core.Net("idle-net")
-        self.idle_net_.ConstantFill(
-            [], shape=[], value=0, dtype=core.DataType.INT64)
+        self.idle_net_.ConstantFill([], shape=[], value=0, dtype=core.DataType.INT64)
 
     def CheckNetOutput(self, nets_and_expects):
         """
@@ -62,8 +67,7 @@ class TestControl(test_util.TestCase):
         nets_and_expects is a list of tuples (net, expect)
         """
         for net, expect in nets_and_expects:
-            output = workspace.FetchBlob(
-                net.Proto().external_output[-1])
+            output = workspace.FetchBlob(net.Proto().external_output[-1])
             self.assertEqual(output, expect)
 
     def CheckNetAllOutput(self, net, expects):
@@ -73,18 +77,17 @@ class TestControl(test_util.TestCase):
         """
         self.assertEqual(len(net.Proto().external_output), len(expects))
         for i in range(len(expects)):
-            output = workspace.FetchBlob(
-                net.Proto().external_output[i])
+            output = workspace.FetchBlob(net.Proto().external_output[i])
             self.assertEqual(output, expects[i])
 
     def BuildAndRunPlan(self, step):
         plan = core.Plan("test")
-        plan.AddStep(control.Do('init', self.init_net_))
+        plan.AddStep(control.Do("init", self.init_net_))
         plan.AddStep(step)
         self.assertEqual(workspace.RunPlan(plan), True)
 
     def ForLoopTest(self, nets_or_steps):
-        step = control.For('myFor', nets_or_steps, self.N_)
+        step = control.For("myFor", nets_or_steps, self.N_)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, self.N_)])
 
@@ -93,12 +96,12 @@ class TestControl(test_util.TestCase):
         self.ForLoopTest([self.cnt_net_, self.idle_net_])
 
     def testForLoopWithStep(self):
-        step = control.Do('count', self.cnt_net_)
+        step = control.Do("count", self.cnt_net_)
         self.ForLoopTest(step)
         self.ForLoopTest([step, self.idle_net_])
 
     def WhileLoopTest(self, nets_or_steps):
-        step = control.While('myWhile', self.cond_net_, nets_or_steps)
+        step = control.While("myWhile", self.cond_net_, nets_or_steps)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, self.N_)])
 
@@ -107,12 +110,12 @@ class TestControl(test_util.TestCase):
         self.WhileLoopTest([self.cnt_net_, self.idle_net_])
 
     def testWhileLoopWithStep(self):
-        step = control.Do('count', self.cnt_net_)
+        step = control.Do("count", self.cnt_net_)
         self.WhileLoopTest(step)
         self.WhileLoopTest([step, self.idle_net_])
 
     def UntilLoopTest(self, nets_or_steps):
-        step = control.Until('myUntil', self.not_cond_net_, nets_or_steps)
+        step = control.Until("myUntil", self.not_cond_net_, nets_or_steps)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, self.N_)])
 
@@ -121,12 +124,12 @@ class TestControl(test_util.TestCase):
         self.UntilLoopTest([self.cnt_net_, self.idle_net_])
 
     def testUntilLoopWithStep(self):
-        step = control.Do('count', self.cnt_net_)
+        step = control.Do("count", self.cnt_net_)
         self.UntilLoopTest(step)
         self.UntilLoopTest([step, self.idle_net_])
 
     def DoWhileLoopTest(self, nets_or_steps):
-        step = control.DoWhile('myDoWhile', self.cond_net_, nets_or_steps)
+        step = control.DoWhile("myDoWhile", self.cond_net_, nets_or_steps)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, self.N_)])
 
@@ -135,12 +138,12 @@ class TestControl(test_util.TestCase):
         self.DoWhileLoopTest([self.idle_net_, self.cnt_net_])
 
     def testDoWhileLoopWithStep(self):
-        step = control.Do('count', self.cnt_net_)
+        step = control.Do("count", self.cnt_net_)
         self.DoWhileLoopTest(step)
         self.DoWhileLoopTest([self.idle_net_, step])
 
     def DoUntilLoopTest(self, nets_or_steps):
-        step = control.DoUntil('myDoUntil', self.not_cond_net_, nets_or_steps)
+        step = control.DoUntil("myDoUntil", self.not_cond_net_, nets_or_steps)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, self.N_)])
 
@@ -149,19 +152,19 @@ class TestControl(test_util.TestCase):
         self.DoUntilLoopTest([self.cnt_net_, self.idle_net_])
 
     def testDoUntilLoopWithStep(self):
-        step = control.Do('count', self.cnt_net_)
+        step = control.Do("count", self.cnt_net_)
         self.DoUntilLoopTest(step)
         self.DoUntilLoopTest([self.idle_net_, step])
 
     def IfCondTest(self, cond_net, expect, cond_on_blob):
         if cond_on_blob:
             step = control.Do(
-                'if-all',
-                control.Do('count', cond_net),
-                control.If('myIf', cond_net.Proto().external_output[-1],
-                           self.cnt_net_))
+                "if-all",
+                control.Do("count", cond_net),
+                control.If("myIf", cond_net.Proto().external_output[-1], self.cnt_net_),
+            )
         else:
-            step = control.If('myIf', cond_net, self.cnt_net_)
+            step = control.If("myIf", cond_net, self.cnt_net_)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, expect)])
 
@@ -184,13 +187,17 @@ class TestControl(test_util.TestCase):
             run_net = self.cnt_2_net_
         if cond_on_blob:
             step = control.Do(
-                'if-else-all',
-                control.Do('count', cond_net),
-                control.If('myIfElse', cond_net.Proto().external_output[-1],
-                           self.cnt_net_, self.cnt_2_net_))
+                "if-else-all",
+                control.Do("count", cond_net),
+                control.If(
+                    "myIfElse",
+                    cond_net.Proto().external_output[-1],
+                    self.cnt_net_,
+                    self.cnt_2_net_,
+                ),
+            )
         else:
-            step = control.If('myIfElse', cond_net,
-                              self.cnt_net_, self.cnt_2_net_)
+            step = control.If("myIfElse", cond_net, self.cnt_net_, self.cnt_2_net_)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(run_net, expect)])
 
@@ -209,12 +216,14 @@ class TestControl(test_util.TestCase):
     def IfNotCondTest(self, cond_net, expect, cond_on_blob):
         if cond_on_blob:
             step = control.Do(
-                'if-not',
-                control.Do('count', cond_net),
-                control.IfNot('myIfNot', cond_net.Proto().external_output[-1],
-                              self.cnt_net_))
+                "if-not",
+                control.Do("count", cond_net),
+                control.IfNot(
+                    "myIfNot", cond_net.Proto().external_output[-1], self.cnt_net_
+                ),
+            )
         else:
-            step = control.IfNot('myIfNot', cond_net, self.cnt_net_)
+            step = control.IfNot("myIfNot", cond_net, self.cnt_net_)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, expect)])
 
@@ -237,14 +246,19 @@ class TestControl(test_util.TestCase):
             run_net = self.cnt_net_
         if cond_on_blob:
             step = control.Do(
-                'if-not-else',
-                control.Do('count', cond_net),
-                control.IfNot('myIfNotElse',
-                              cond_net.Proto().external_output[-1],
-                              self.cnt_net_, self.cnt_2_net_))
+                "if-not-else",
+                control.Do("count", cond_net),
+                control.IfNot(
+                    "myIfNotElse",
+                    cond_net.Proto().external_output[-1],
+                    self.cnt_net_,
+                    self.cnt_2_net_,
+                ),
+            )
         else:
-            step = control.IfNot('myIfNotElse', cond_net,
-                                 self.cnt_net_, self.cnt_2_net_)
+            step = control.IfNot(
+                "myIfNotElse", cond_net, self.cnt_net_, self.cnt_2_net_
+            )
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(run_net, expect)])
 
@@ -262,70 +276,72 @@ class TestControl(test_util.TestCase):
 
     def testSwitch(self):
         step = control.Switch(
-            'mySwitch',
+            "mySwitch",
             (self.false_cond_net_, self.cnt_net_),
-            (self.true_cond_net_, self.cnt_2_net_)
+            (self.true_cond_net_, self.cnt_2_net_),
         )
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, 0), (self.cnt_2_net_, 2)])
 
     def testSwitchNot(self):
         step = control.SwitchNot(
-            'mySwitchNot',
+            "mySwitchNot",
             (self.false_cond_net_, self.cnt_net_),
-            (self.true_cond_net_, self.cnt_2_net_)
+            (self.true_cond_net_, self.cnt_2_net_),
         )
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(self.cnt_net_, 1), (self.cnt_2_net_, 0)])
 
     def testBoolNet(self):
-        bool_net = control.BoolNet(('a', True))
-        step = control.Do('bool', bool_net)
+        bool_net = control.BoolNet(("a", True))
+        step = control.Do("bool", bool_net)
         self.BuildAndRunPlan(step)
         self.CheckNetAllOutput(bool_net, [True])
 
-        bool_net = control.BoolNet(('a', True), ('b', False))
-        step = control.Do('bool', bool_net)
+        bool_net = control.BoolNet(("a", True), ("b", False))
+        step = control.Do("bool", bool_net)
         self.BuildAndRunPlan(step)
         self.CheckNetAllOutput(bool_net, [True, False])
 
-        bool_net = control.BoolNet([('a', True), ('b', False)])
-        step = control.Do('bool', bool_net)
+        bool_net = control.BoolNet([("a", True), ("b", False)])
+        step = control.Do("bool", bool_net)
         self.BuildAndRunPlan(step)
         self.CheckNetAllOutput(bool_net, [True, False])
 
     def testCombineConditions(self):
         # combined by 'Or'
         combine_net = control.CombineConditions(
-            'test', [self.true_cond_net_, self.false_cond_net_], 'Or')
-        step = control.Do('combine',
-                          self.true_cond_net_,
-                          self.false_cond_net_,
-                          combine_net)
+            "test", [self.true_cond_net_, self.false_cond_net_], "Or"
+        )
+        step = control.Do(
+            "combine", self.true_cond_net_, self.false_cond_net_, combine_net
+        )
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(combine_net, True)])
 
         # combined by 'And'
         combine_net = control.CombineConditions(
-            'test', [self.true_cond_net_, self.false_cond_net_], 'And')
-        step = control.Do('combine',
-                          self.true_cond_net_,
-                          self.false_cond_net_,
-                          combine_net)
+            "test", [self.true_cond_net_, self.false_cond_net_], "And"
+        )
+        step = control.Do(
+            "combine", self.true_cond_net_, self.false_cond_net_, combine_net
+        )
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(combine_net, False)])
 
     def testMergeConditionNets(self):
         # merged by 'Or'
         merge_net = control.MergeConditionNets(
-            'test', [self.true_cond_net_, self.false_cond_net_], 'Or')
-        step = control.Do('merge', merge_net)
+            "test", [self.true_cond_net_, self.false_cond_net_], "Or"
+        )
+        step = control.Do("merge", merge_net)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(merge_net, True)])
 
         # merged by 'And'
         merge_net = control.MergeConditionNets(
-            'test', [self.true_cond_net_, self.false_cond_net_], 'And')
-        step = control.Do('merge', merge_net)
+            "test", [self.true_cond_net_, self.false_cond_net_], "And"
+        )
+        step = control.Do("merge", merge_net)
         self.BuildAndRunPlan(step)
         self.CheckNetOutput([(merge_net, False)])

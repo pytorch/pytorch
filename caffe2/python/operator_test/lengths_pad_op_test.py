@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -12,13 +13,9 @@ import numpy as np
 
 
 class TestLengthsPadOp(serial.SerializedTestCase):
-
     @serial.given(
         inputs=hu.lengths_tensor(
-            dtype=np.float32,
-            min_value=1,
-            max_value=5,
-            allow_empty=True,
+            dtype=np.float32, min_value=1, max_value=5, allow_empty=True
         ),
         delta_length=st.integers(0, 10),
         padding_value=st.floats(-10.0, 10.0),
@@ -32,11 +29,12 @@ class TestLengthsPadOp(serial.SerializedTestCase):
         def lengths_pad_op(data, lengths):
             N = len(lengths)
             output = np.ndarray(
-                shape=(target_length * N, ) + data.shape[1:], dtype=np.float32)
+                shape=(target_length * N,) + data.shape[1:], dtype=np.float32
+            )
             output.fill(padding_value)
             ptr1, ptr2 = 0, 0
             for i in range(N):
-                output[ptr1:ptr1 + lengths[i]] = data[ptr2:ptr2 + lengths[i]]
+                output[ptr1 : ptr1 + lengths[i]] = data[ptr2 : ptr2 + lengths[i]]
                 ptr1 += target_length
                 ptr2 += lengths[i]
 
@@ -51,8 +49,5 @@ class TestLengthsPadOp(serial.SerializedTestCase):
         )
 
         self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[data, lengths],
-            reference=lengths_pad_op,
+            device_option=gc, op=op, inputs=[data, lengths], reference=lengths_pad_op
         )

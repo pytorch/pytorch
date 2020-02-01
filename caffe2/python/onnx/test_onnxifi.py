@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import json
 import numpy as np
 import os
@@ -12,7 +13,13 @@ import unittest
 import onnx
 import onnx.defs
 from onnx.backend.base import namedtupledict
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
+from onnx.helper import (
+    make_node,
+    make_graph,
+    make_tensor,
+    make_tensor_value_info,
+    make_model,
+)
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.models.download import ModelDownloader
@@ -43,11 +50,18 @@ class OnnxifiTest(TestCase):
         graph_def = make_graph(
             [make_node("Relu", ["X"], ["Y"])],
             name="test",
-            inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT,
-                [batch_size, 1, 3, 2])],
-            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
-                [batch_size, 1, 3, 2])])
-        model_def = make_model(graph_def, producer_name='relu-test')
+            inputs=[
+                make_tensor_value_info(
+                    "X", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2]
+                )
+            ],
+            outputs=[
+                make_tensor_value_info(
+                    "Y", onnx.TensorProto.FLOAT, [batch_size, 1, 3, 2]
+                )
+            ],
+        )
+        model_def = make_model(graph_def, producer_name="relu-test")
         op = core.CreateOperator(
             "Onnxifi",
             ["X"],
@@ -55,7 +69,8 @@ class OnnxifiTest(TestCase):
             onnx_model=model_def.SerializeToString(),
             input_names=["X"],
             output_names=["Y"],
-            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, batch_size, 1, 3, 2])
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, batch_size, 1, 3, 2],
+        )
         workspace.FeedBlob("X", X)
         workspace.RunOperatorOnce(op)
         Y = workspace.FetchBlob("Y")
@@ -63,33 +78,60 @@ class OnnxifiTest(TestCase):
 
     @unittest.skip("Need ONNXIFI backend support")
     def test_conv_graph(self):
-        X = np.array([[[[0., 1., 2., 3., 4.],  # (1, 1, 5, 5) input tensor
-                        [5., 6., 7., 8., 9.],
-                        [10., 11., 12., 13., 14.],
-                        [15., 16., 17., 18., 19.],
-                        [20., 21., 22., 23., 24.]]]]).astype(np.float32)
-        W = np.array([[[[1., 1., 1.],  # (1, 1, 3, 3) tensor for convolution weights
-                        [1., 1., 1.],
-                        [1., 1., 1.]]]]).astype(np.float32)
-        Y_without_padding = np.array([[[[54., 63., 72.],  # (1, 1, 3, 3) output tensor
-                                        [99., 108., 117.],
-                                        [144., 153., 162.]]]]).astype(np.float32)
+        X = np.array(
+            [
+                [
+                    [
+                        [0.0, 1.0, 2.0, 3.0, 4.0],  # (1, 1, 5, 5) input tensor
+                        [5.0, 6.0, 7.0, 8.0, 9.0],
+                        [10.0, 11.0, 12.0, 13.0, 14.0],
+                        [15.0, 16.0, 17.0, 18.0, 19.0],
+                        [20.0, 21.0, 22.0, 23.0, 24.0],
+                    ]
+                ]
+            ]
+        ).astype(np.float32)
+        W = np.array(
+            [
+                [
+                    [
+                        [1.0, 1.0, 1.0],  # (1, 1, 3, 3) tensor for convolution weights
+                        [1.0, 1.0, 1.0],
+                        [1.0, 1.0, 1.0],
+                    ]
+                ]
+            ]
+        ).astype(np.float32)
+        Y_without_padding = np.array(
+            [
+                [
+                    [
+                        [54.0, 63.0, 72.0],  # (1, 1, 3, 3) output tensor
+                        [99.0, 108.0, 117.0],
+                        [144.0, 153.0, 162.0],
+                    ]
+                ]
+            ]
+        ).astype(np.float32)
         graph_def = make_graph(
-            [make_node(
-                'Conv',
-                inputs=['X', 'W'],
-                outputs=['Y'],
-                kernel_shape=[3, 3],
-                # Default values for other attributes: strides=[1, 1], dilations=[1, 1], groups=1
-                pads=[0, 0, 0, 0],
-            )],
+            [
+                make_node(
+                    "Conv",
+                    inputs=["X", "W"],
+                    outputs=["Y"],
+                    kernel_shape=[3, 3],
+                    # Default values for other attributes: strides=[1, 1], dilations=[1, 1], groups=1
+                    pads=[0, 0, 0, 0],
+                )
+            ],
             name="test",
-            inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [1, 1, 5, 5]),
+            inputs=[
+                make_tensor_value_info("X", onnx.TensorProto.FLOAT, [1, 1, 5, 5]),
                 make_tensor_value_info("W", onnx.TensorProto.FLOAT, [1, 1, 3, 3]),
             ],
-            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
-                [1, 1, 3, 3])])
-        model_def = make_model(graph_def, producer_name='conv-test')
+            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, [1, 1, 3, 3])],
+        )
+        model_def = make_model(graph_def, producer_name="conv-test")
         # We intentional rewrite the input/output name so test that the
         # input/output binding of c2 op is positional
         op = core.CreateOperator(
@@ -100,7 +142,8 @@ class OnnxifiTest(TestCase):
             initializers=["W", "W0"],
             input_names=["X"],
             output_names=["Y"],
-            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, 1, 1, 3, 3])
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, 1, 1, 3, 3],
+        )
         workspace.FeedBlob("X0", X)
         workspace.FeedBlob("W0", W)
         workspace.RunOperatorOnce(op)
@@ -141,8 +184,8 @@ class OnnxifiTransformTest(TestCase):
         N = 1
         repeat = 1
         print("Batch size: {}, repeat inference {} times".format(N, repeat))
-        init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
-        self._add_head_tail(pred_net, 'real_data', 'real_softmax')
+        init_net, pred_net, _ = self.model_downloader.get_c2_model("resnet50")
+        self._add_head_tail(pred_net, "real_data", "real_softmax")
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
 
@@ -166,7 +209,7 @@ class OnnxifiTransformTest(TestCase):
             end = time.time()
             c2_time = end - start
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
-            Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
+            Y_c2 = namedtupledict("Outputs", net_outputs)(*output_values)
         workspace.ResetWorkspace()
 
         # Fill the workspace with the weights
@@ -175,11 +218,11 @@ class OnnxifiTransformTest(TestCase):
 
         # Cut the graph
         start = time.time()
-        pred_net_cut = onnxifi_caffe2_net(pred_net,
-                                          {input_name: input_blob_dims},
-                                          infer_shapes=True)
+        pred_net_cut = onnxifi_caffe2_net(
+            pred_net, {input_name: input_blob_dims}, infer_shapes=True
+        )
         del init_net, pred_net
-        #_print_net(pred_net_cut)
+        # _print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
@@ -195,9 +238,11 @@ class OnnxifiTransformTest(TestCase):
                 workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
-            print("Onnxifi runtime: {}s, improvement: {}%".format(trt_time, (c2_time - trt_time) / c2_time * 100))
+            print(
+                "Onnxifi runtime: {}s, improvement: {}%".format(
+                    trt_time, (c2_time - trt_time) / c2_time * 100
+                )
+            )
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
-            Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
+            Y_trt = namedtupledict("Outputs", net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
-
-

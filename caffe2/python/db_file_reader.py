@@ -15,7 +15,7 @@ import os
 
 class DBFileReader(Reader):
 
-    default_name_suffix = 'db_file_reader'
+    default_name_suffix = "db_file_reader"
 
     """Reader reads from a DB file.
 
@@ -38,6 +38,7 @@ class DBFileReader(Reader):
             Otherwise, schema will be automatically restored with
             schema.field_names() sorted in alphabetic order.
     """
+
     def __init__(
         self,
         db_path,
@@ -48,16 +49,16 @@ class DBFileReader(Reader):
         field_names=None,
     ):
         assert db_path is not None, "db_path can't be None."
-        assert db_type in C.registered_dbs(), \
-            "db_type [{db_type}] is not available. \n" \
+        assert db_type in C.registered_dbs(), (
+            "db_type [{db_type}] is not available. \n"
             "Choose one of these: {registered_dbs}.".format(
-                db_type=db_type,
-                registered_dbs=C.registered_dbs(),
+                db_type=db_type, registered_dbs=C.registered_dbs()
+            )
         )
 
         self.db_path = os.path.expanduser(db_path)
         self.db_type = db_type
-        self.name = name or '{db_name}_{default_name_suffix}'.format(
+        self.name = name or "{db_name}_{default_name_suffix}".format(
             db_name=self._extract_db_name_from_db_path(),
             default_name_suffix=self.default_name_suffix,
         )
@@ -67,12 +68,11 @@ class DBFileReader(Reader):
         # Before self._init_reader_schema(...),
         # self.db_path and self.db_type are required to be set.
         super(DBFileReader, self).__init__(self._init_reader_schema(field_names))
-        self.ds = Dataset(self._schema, self.name + '_dataset')
+        self.ds = Dataset(self._schema, self.name + "_dataset")
         self.ds_reader = None
 
     def _init_name(self, name):
-        return name or self._extract_db_name_from_db_path(
-        ) + '_db_file_reader'
+        return name or self._extract_db_name_from_db_path() + "_db_file_reader"
 
     def _init_reader_schema(self, field_names=None):
         """Restore a reader schema from the DB file.
@@ -99,14 +99,15 @@ class DBFileReader(Reader):
         if field_names:
             return from_column_list(field_names)
 
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        assert os.path.exists(
+            self.db_path
+        ), "db_path [{db_path}] does not exist".format(db_path=self.db_path)
         with core.NameScope(self.name):
             # blob_prefix is for avoiding name conflict in workspace
             blob_prefix = scope.CurrentNameScope()
         workspace.RunOperatorOnce(
             core.CreateOperator(
-                'Load',
+                "Load",
                 [],
                 [],
                 absolute_path=True,
@@ -117,7 +118,8 @@ class DBFileReader(Reader):
             )
         )
         col_names = [
-            blob_name[len(blob_prefix):] for blob_name in workspace.Blobs()
+            blob_name[len(blob_prefix) :]
+            for blob_name in workspace.Blobs()
             if blob_name.startswith(blob_prefix)
         ]
         schema = from_column_list(col_names)
@@ -138,15 +140,13 @@ class DBFileReader(Reader):
             self._init_field_blobs_as_empty(init_net)
             self._feed_field_blobs_from_db_file(init_net)
             self.ds_reader = self.ds.random_reader(
-                init_net,
-                batch_size=self.batch_size,
-                loop_over=self.loop_over,
+                init_net, batch_size=self.batch_size, loop_over=self.loop_over
             )
             self.ds_reader.sort_and_shuffle(init_net)
             self.ds_reader.computeoffset(init_net)
 
     def read(self, read_net):
-        assert self.ds_reader, 'setup_ex must be called first'
+        assert self.ds_reader, "setup_ex must be called first"
         return self.ds_reader.read(read_net)
 
     def _init_field_blobs_as_empty(self, init_net):
@@ -156,8 +156,9 @@ class DBFileReader(Reader):
 
     def _feed_field_blobs_from_db_file(self, net):
         """Load from the DB file at db_path and feed dataset field blobs"""
-        assert os.path.exists(self.db_path), \
-            'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+        assert os.path.exists(
+            self.db_path
+        ), "db_path [{db_path}] does not exist".format(db_path=self.db_path)
         net.Load(
             [],
             self.ds.get_blobs(),
@@ -176,4 +177,4 @@ class DBFileReader(Reader):
             Returns:
                 db_name: str.
         """
-        return os.path.basename(self.db_path).rsplit('.', 1)[0]
+        return os.path.basename(self.db_path).rsplit(".", 1)[0]

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 import numpy as np
 import unittest
 import time
@@ -18,7 +19,7 @@ def dummy_fetcher(fetcher_id, batch_size):
     data = np.zeros((n, 3))
     labels = []
     for j in range(n):
-        data[j, :] *= (j + fetcher_id)
+        data[j, :] *= j + fetcher_id
         labels.append(data[j, 0])
 
     return [np.array(data), np.array(labels)]
@@ -36,19 +37,13 @@ def dummy_fetcher_rnn(fetcher_id, batch_size):
 
 
 class DataWorkersTest(unittest.TestCase):
-
     def testNonParallelModel(self):
         workspace.ResetWorkspace()
 
         model = model_helper.ModelHelper(name="test")
         old_seq_id = data_workers.global_coordinator._fetcher_id_seq
         coordinator = data_workers.init_data_input_workers(
-            model,
-            ["data", "label"],
-            dummy_fetcher,
-            32,
-            2,
-            input_source_name="unittest"
+            model, ["data", "label"], dummy_fetcher, 32, 2, input_source_name="unittest"
         )
         new_seq_id = data_workers.global_coordinator._fetcher_id_seq
         self.assertEqual(new_seq_id, old_seq_id + 2)
@@ -146,7 +141,7 @@ class DataWorkersTest(unittest.TestCase):
             max_buffered_batches=1000,
             num_worker_threads=1,
             dont_rebatch=True,
-            input_source_name='train'
+            input_source_name="train",
         )
         coordinator.start()
 
@@ -159,7 +154,7 @@ class DataWorkersTest(unittest.TestCase):
             max_buffered_batches=1000,
             num_worker_threads=1,
             dont_rebatch=True,
-            input_source_name='val'
+            input_source_name="val",
         )
         coordinator1.start()
 
@@ -174,16 +169,16 @@ class DataWorkersTest(unittest.TestCase):
             for m in (model, val_model):
                 print(m.net.Proto().name)
                 workspace.RunNet(m.net.Proto().name)
-                last_data = workspace.FetchBlob('data2')[0][0][0]
-                last_lab = workspace.FetchBlob('label2')[0][0]
-                last_seq = workspace.FetchBlob('seq_lengths2')[0]
+                last_data = workspace.FetchBlob("data2")[0][0][0]
+                last_lab = workspace.FetchBlob("label2")[0][0]
+                last_seq = workspace.FetchBlob("seq_lengths2")[0]
 
                 # Run few rounds
                 for _i in range(10):
                     workspace.RunNet(m.net.Proto().name)
-                    data = workspace.FetchBlob('data2')[0][0][0]
-                    lab = workspace.FetchBlob('label2')[0][0]
-                    seq = workspace.FetchBlob('seq_lengths2')[0]
+                    data = workspace.FetchBlob("data2")[0][0][0]
+                    lab = workspace.FetchBlob("label2")[0][0]
+                    seq = workspace.FetchBlob("seq_lengths2")[0]
                     self.assertEqual(data, last_data + 1)
                     self.assertEqual(lab, last_lab + 1)
                     self.assertEqual(seq, last_seq + 1)

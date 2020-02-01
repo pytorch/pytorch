@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from builtins import range
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -44,10 +45,13 @@ class TestDenseVectorToIdList(hu.HypothesisTestCase):
     def test_dense_vector_to_id_list_ref(self):
         # Verify that the reference implementation is correct!
         dense_input = np.array(
-            [[1, 0, 0, 1, 0, 0, 0, 1],
-             [1, 0, 1, 0, 0, 0, 0, 1],
-             [0, 1, 0, 0, 0, 1, 0, 1]],
-            dtype=np.float32)
+            [
+                [1, 0, 0, 1, 0, 0, 0, 1],
+                [1, 0, 1, 0, 0, 0, 0, 1],
+                [0, 1, 0, 0, 0, 1, 0, 1],
+            ],
+            dtype=np.float32,
+        )
         sparse_lengths, sparse_values = dense_vector_to_id_list_ref(dense_input)
         expected_lengths = np.array([3, 3, 3], dtype=np.int32)
         expected_values = np.array([0, 3, 7, 0, 2, 7, 1, 5, 7], dtype=np.int64)
@@ -58,9 +62,7 @@ class TestDenseVectorToIdList(hu.HypothesisTestCase):
     @given(inputs=id_list_batch(), **hu.gcs_cpu_only)
     def test_dense_vector_to_id_list_op(self, inputs, gc, dc):
         op = core.CreateOperator(
-            "DenseVectorToIdList",
-            ["values"],
-            ["out_lengths", "out_values"]
+            "DenseVectorToIdList", ["values"], ["out_lengths", "out_values"]
         )
         self.assertDeviceChecks(dc, op, inputs, [0])
         self.assertReferenceChecks(gc, op, inputs, dense_vector_to_id_list_ref)
