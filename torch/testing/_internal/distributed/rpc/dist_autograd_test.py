@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import sys
 import threading
 import time
@@ -163,7 +161,7 @@ class ExecMode(Enum):
 
 @unittest.skipIf(
     not torch._six.PY3,
-    "Pytorch distributed autograd package " "does not support python2",
+    "Pytorch distributed autograd package does not support python2",
 )
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func(self, exec_mode, method, *args):
@@ -1685,7 +1683,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
 @unittest.skipIf(
     not torch._six.PY3,
-    "Pytorch distributed autograd package " "does not support python2",
+    "Pytorch distributed autograd package does not support python2",
 )
 class DistAutogradJitTest(RpcAgentTestFixture):
     @dist_init
@@ -1711,7 +1709,3 @@ class DistAutogradJitTest(RpcAgentTestFixture):
             self.assertIn(t2, grads)
             self.assertEqual(torch.ones(3, 3), grads[t1])
             self.assertEqual(torch.ones(3, 3), grads[t2])
-
-
-if __name__ == "__main__":
-    unittest.main()

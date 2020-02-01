@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import concurrent.futures
 import sys
 import time
@@ -12,7 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
-from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
@@ -247,27 +244,6 @@ def clear_global_rref():
     global_rref = None
 
 
-@torch.jit.script
-def one_arg(value):
-    return value + 1
-
-
-@torch.jit.script
-class MyScriptClass:
-    def __init__(self):
-        self.a = 10
-
-
-class MyScriptModule(torch.jit.ScriptModule):
-    def __init__(self):
-        super().__init__()
-        self.a = 10
-
-    @torch.jit.script_method
-    def my_method(self):
-        self.a = 11
-
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -275,7 +251,7 @@ load_tests = load_tests
 
 @unittest.skipIf(
     sys.version_info < (3, 0),
-    "Pytorch distributed rpc package " "does not support python2",
+    "Pytorch distributed rpc package does not support python2",
 )
 class RpcTest(RpcAgentTestFixture):
     @dist_init
@@ -830,66 +806,6 @@ class RpcTest(RpcAgentTestFixture):
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             fut.wait()
-
-    @dist_init
-    def test_torchscript_function(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-        rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-    @dist_init
-    def test_torchscript_function_exception(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
-            ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
-
-        with self.assertRaisesRegex(
-            Exception, r"one_arg\(\) expected at most"
-        ):
-            rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
-
-    @dist_init
-    def test_torchscript_functions_not_supported(self):
-        # Right now _rpc_sync_torchscript does not accept annotated torchscript
-        # class name or script module class name or their class method names.
-        # But rpc_sync still accepts script class name and run it in
-        # the same code path as python call.
-        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
-        # accept script module and script module method.
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptClass), args=()
-            )
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
-
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptModule), args=()
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
-                args=(),
-            )
-        # Python 3.5 and Python 3.6 throw different error message, the only
-        # common word can be greped is "pickle".
-        with self.assertRaisesRegex(Exception, "pickle"):
-            ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule().my_method, args=()
-            )
 
     @dist_init
     def test_nested_rpc(self):
@@ -1683,3 +1599,163 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+
+@torch.jit.script
+def one_arg(value):
+    return value + 1
+
+
+@torch.jit.script
+class MyScriptClass:
+    def __init__(self):
+        self.a = 10
+
+
+@torch.jit.interface
+class MyModuleInterface(torch.nn.Module):
+    def forward(self):
+        # type: () -> Tensor
+        pass
+
+
+class MyScriptModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super().__init__()
+        self.a = torch.randn(10)
+
+    @torch.jit.script_method
+    def forward(self):
+        # type: () -> Tensor
+        return self.a
+
+
+@unittest.skipIf(
+    sys.version_info < (3, 0),
+    "Pytorch distributed rpc package does not support python2",
+)
+class RpcJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_torchscript_function(self):
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
+
+        rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
+
+    @dist_init
+    def test_torchscript_function_exception(self):
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
+            ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
+
+        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
+            rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
+
+    @dist_init
+    def test_torchscript_functions_not_supported(self):
+        # Right now _rpc_sync_torchscript does not accept annotated torchscript
+        # class name or script module class name or their class method names.
+        # But rpc_sync still accepts script class name and run it in
+        # the same code path as python call.
+        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
+        # accept script module and script module method.
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        with self.assertRaisesRegex(
+            RuntimeError, "attempted to get undefined function"
+        ):
+            ret = rpc._rpc_sync_torchscript(
+                "worker{}".format(dst_rank),
+                torch._jit_internal._qualified_name(MyScriptClass),
+                args=(),
+            )
+        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
+
+        with self.assertRaisesRegex(
+            RuntimeError, "attempted to get undefined function"
+        ):
+            ret = rpc._rpc_sync_torchscript(
+                "worker{}".format(dst_rank),
+                torch._jit_internal._qualified_name(MyScriptModule),
+                args=(),
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "attempted to get undefined function"
+        ):
+            ret = rpc._rpc_sync_torchscript(
+                "worker{}".format(dst_rank),
+                torch._jit_internal._qualified_name(MyScriptModule().forward),
+                args=(),
+            )
+        # Python 3.5 and Python 3.6 throw different error message, the only
+        # common word can be greped is "pickle".
+        with self.assertRaisesRegex(Exception, "pickle"):
+            ret = rpc.rpc_sync(
+                "worker{}".format(dst_rank), MyScriptModule().forward, args=()
+            )
+
+    @unittest.skip("Need to register RRef as a JIT type")
+    @dist_init
+    def test_rref_as_arg(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_to_here(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            t = rref_var.to_here()
+            return t + 1
+
+        local_ret = rref_to_here(rref_var)
+        print(local_ret)
+        """
+        rpc_ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref_var,))
+        self.assertEqual(local_ret, rpc_ret)
+        """
+
+    @unittest.skip("Need to register RRef as a JIT type")
+    @dist_init
+    def test_remote_script_module(self):
+        assert self.world_size >= 2
+
+        if self.rank == 0:
+
+            @torch.jit.ignore
+            def my_script_module_init():
+                # type: () -> MyModuleInterface
+                return MyScriptModule()
+
+            @torch.jit.script
+            def construct_my_script_module():
+                # type: () -> MyModuleInterface
+                return my_script_module_init()
+
+            dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+            ref_script_module = rpc.remote(
+                dst_worker_name, construct_my_script_module, args=()
+            )
+
+        if self.rank == 1:
+
+            @torch.jit.script
+            def owner_run_ref_script_module(ref_script_module):
+                # type: (RRef[MyModuleInterface]) -> Tensor
+                module = ref_script_module.to_here()
+                return module.forward()
+
+            owner_local_ret = owner_run_ref_script_module(ref_script_module)
+            print(owner_local_ret, type(owner_local_ret))
+        """
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            run_ref_script_module,
+            args=(ref_script_module,))
+        self.assertEqual(ret, local_ret)
+        """
