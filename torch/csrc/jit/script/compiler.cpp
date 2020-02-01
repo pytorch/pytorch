@@ -2227,11 +2227,10 @@ struct to_ir {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
     const auto lhs = Select(stmt.lhs());
-    const auto basename = Var(lhs.value()).name();
+    auto lhsObject = emitSugaredExpr(lhs.value(), 1);
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
                               ->asValue(stmt.rhs().range(), method);
-    auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+    lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
