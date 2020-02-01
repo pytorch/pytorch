@@ -15614,6 +15614,16 @@ a")
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
 
+    def test_is_scripting_metacompile(self):
+        @torch.jit.script
+        def foo():
+            if torch.jit.is_scripting():
+                return 1
+            else:
+                print("hello") + 2
+
+        self.assertEqual(foo(), 1)
+
     def test_isinstance_metacompile(self):
         @torch.jit.script
         def test_primitive_type(x):
