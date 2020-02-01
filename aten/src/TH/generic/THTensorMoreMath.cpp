@@ -6,6 +6,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
@@ -257,6 +258,7 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
       dimension);
 
@@ -274,6 +276,7 @@ void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 
 void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
       dimension);
 
@@ -691,6 +694,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 
 void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
       dimension);
 
@@ -1010,7 +1014,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRES
 void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THTensor *rowR, *rowS;
-
+  dimension = at::maybe_wrap_dim(dimension, src);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(src), 3, "invalid dimension %d",
       dimension);
   THArgCheck(value > 0, 2, "non-positive-norm not supported");
