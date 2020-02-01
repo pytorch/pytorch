@@ -32,7 +32,7 @@ class BasePruningMethod(ABC):
             module (nn.Module): module containing the tensor to prune
             inputs: not used.
         """
-        setattr(module, self._tensor_name, self.apply_mask(module))
+        setattr(module, self._tensor_name, torch.nn.Parameter(self.apply_mask(module)))
 
     @abstractmethod
     def compute_mask(self, t, default_mask):
@@ -164,7 +164,7 @@ class BasePruningMethod(ABC):
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
             # copy `module[name]` to `module[name + '_orig']`
-            setattr(module, name + "_orig", orig)
+            setattr(module, name + "_orig", orig.data)
             # temporarily delete `module[name]`
             del module._parameters[name]
             default_mask = torch.ones_like(orig)  # temp
