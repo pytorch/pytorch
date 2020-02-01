@@ -684,7 +684,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
   if (signature.deprecated) {
     auto msg = c10::str(
-      "This overload of ", signature.name, " is deprecated:\n\t", 
+      "This overload of ", signature.name, " is deprecated:\n\t",
       signature.name, signature.toString());
     auto signatures = get_signatures();
     if (!signatures.empty()) {
