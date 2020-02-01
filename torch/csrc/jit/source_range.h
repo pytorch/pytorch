@@ -113,7 +113,9 @@ struct CAFFE2_API SourceRange {
     return end() - start();
   }
   static const size_t CONTEXT = 3;
-  void highlight(std::ostream& out) const;
+  void highlight(
+      std::ostream& out,
+      const std::string& context_name = "") const;
   // Customizable version of 'highlight' method.
   void print_with_context(
       std::ostream& out,

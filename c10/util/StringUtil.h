@@ -3,6 +3,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/string_utils.h>
+#include <c10/util/string_view.h>
 
 #include <cstddef>
 #include <ostream>
@@ -147,6 +148,35 @@ inline void printQuotedString(std::ostream& stmt, const std::string& str) {
     }
   }
   stmt << "\"";
+}
+
+inline std::vector<std::string> split(
+    c10::string_view str,
+    char delim,
+    bool ignoreEmpty) {
+  std::vector<std::string> out;
+
+  const size_t strSize = str.size();
+
+  size_t tokenStartPos = 0;
+  size_t tokenSize = 0;
+  for (size_t i = 0; i <= strSize - 1; ++i) {
+    if (str[i] == delim) {
+      if (!ignoreEmpty || tokenSize > 0) {
+        out.emplace_back(str.substr(tokenStartPos, tokenSize));
+      }
+
+      tokenStartPos = i + 1;
+      tokenSize = 0;
+    } else {
+      ++tokenSize;
+    }
+  }
+  tokenSize = strSize - tokenStartPos;
+  if (!ignoreEmpty || tokenSize > 0) {
+    out.emplace_back(str.substr(tokenStartPos, tokenSize));
+  }
+  return out;
 }
 
 } // namespace c10

@@ -49,19 +49,19 @@ ErrorReport::CallStack::~CallStack() {
 
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
-  msg << "\n" << ss.str();
-  msg << ":\n";
+  msg << "\n\n" << ss.str() << "\n\n";
+  if (error_stack.size() > 0) {
+    msg << "Traceback:\n";
+  }
+
   context.highlight(msg);
 
   if (error_stack.size() > 0) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
       auto callee = it + 1;
-
-      msg << "'" << it->fn_name
-          << "' is being compiled since it was called from '" << callee->fn_name
-          << "'\n";
       if (callee->caller_range) {
-        callee->caller_range->highlight(msg);
+        callee->caller_range->highlight(msg, callee->fn_name);
+        msg << "\n";
       } else {
         msg << "<no range>\n";
       }
@@ -71,7 +71,6 @@ const char* ErrorReport::what() const noexcept {
   the_message = msg.str();
   return the_message.c_str();
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
