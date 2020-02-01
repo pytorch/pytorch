@@ -22,6 +22,7 @@ from torch.testing._internal.dist_utils import (
     get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
+    wait_until_pending_users_flushed,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -654,14 +655,7 @@ class RpcTest(RpcAgentTestFixture):
                     # this, we wait until the current RRef context doesn't have
                     # any pending users, which indicates that the confirmation
                     # was processed on this worker.
-                    num_pending_users = int(
-                        _rref_context_get_debug_info()["num_pending_users"]
-                    )
-                    while num_pending_users != 0:
-                        time.sleep(0.1)
-                        num_pending_users = int(
-                            _rref_context_get_debug_info()["num_pending_users"]
-                        )
+                    wait_until_pending_users_flushed()
 
             events = prof.function_events
             rpc_event = [
@@ -1372,6 +1366,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 2
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1397,6 +1392,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 3
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
