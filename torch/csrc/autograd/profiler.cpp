@@ -214,6 +214,7 @@ void enableProfiler(ProfilerConfig config) {
 }
 
 thread_event_lists disableProfiler() {
+  std::cout << "IN disable profiler" << std::endl;
   if (state == ProfilerState::Disabled) {
     throw std::runtime_error("can't disable profiler when it's not running");
   }
@@ -228,6 +229,8 @@ thread_event_lists disableProfiler() {
   } else {
     thread_event_lists result;
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
+    LOG(WARNING) << "list size is " << all_event_lists_map.size();
+    std::cout << "gathering profiler output for " << all_event_lists_map.size() << " distinct thread event lists " << std::endl;
     for (auto it = all_event_lists_map.begin(); it != all_event_lists_map.end();) {
       auto & list = it->second;
       result.emplace_back(list->consolidate());

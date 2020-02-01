@@ -1223,6 +1223,9 @@ RegisterOperators reg(
      Operator(
          prim::fork,
          [](const Node* node) -> Operation {
+           std::cout << "forking" << std::endl;
+           // simulate a fork that takes a long tiem
+           std::this_thread::sleep_for(std::chrono::seconds(5));
            Code code(node->g(attr::Subgraph));
            int n_inputs = node->inputs().size();
            AT_ASSERT(node->blocks().size() == 0);
