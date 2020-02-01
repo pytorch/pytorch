@@ -2697,6 +2697,20 @@ class TestNN(NNTestCase):
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
 
+    @unittest.skipIf(not PY3, "mock is not available in Python 2")
+    def test_pruning_update_named_parameter(self):
+        """
+        Test that the registered parameters of a module are appropriately
+        updated after pruning. The module's parameters should be the prune tensor
+        """
+        def names(named_parameters):
+            return [k for k, _ in named_parameters]
+
+        m = nn.Linear(4, 2)
+        prune.l1_unstructured(m, 'weight', amount=2)
+
+        expected_parameter_names = ["weight", 'bias']
+        self.assertEqual(expected_parameter_names,  names(m.named_parameters()))
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)

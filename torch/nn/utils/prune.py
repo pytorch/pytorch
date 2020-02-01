@@ -164,7 +164,7 @@ class BasePruningMethod(ABC):
         # and deleting the original parameter
         if not isinstance(method, PruningContainer):
             # copy `module[name]` to `module[name + '_orig']`
-            module.register_parameter(name + "_orig", orig)
+            setattr(module, name + "_orig", orig)
             # temporarily delete `module[name]`
             del module._parameters[name]
             default_mask = torch.ones_like(orig)  # temp
@@ -182,7 +182,7 @@ class BasePruningMethod(ABC):
             # reparametrize by saving mask to `module[name + '_mask']`...
             module.register_buffer(name + "_mask", mask)
             # ... and the new pruned tensor to `module[name]`
-            setattr(module, name, method.apply_mask(module))
+            module.register_parameter(name,  method.apply_mask(module))
             # associate the pruning method to the module via a hook to
             # compute the function before every forward() (compile by run)
             module.register_forward_pre_hook(method)
