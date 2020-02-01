@@ -3155,7 +3155,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return 2
+        return 3
 
     def _get_wrapped_func(self, func):
         # Get the original function which was wrapped in the decorator.
@@ -3210,8 +3210,15 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # run new events. It was observed cuda could stuck if not
             # aborting nccl communicators before throwing Operation timed out
             a = torch.rand(10).cuda(self.rank)
-        else:
+        elif self.rank == 1:
             func()
+        else:
+            # Wait for timeout
+            time.sleep(2 * self.op_timeout_sec)
+
+            # Now verify communicators on this rank have been aborted by the watchdog thread.
+            with self.assertRaisesRegex(RuntimeError, "NCCL communicator was aborted"):
+                process_group.allreduce(torch.rand(10).cuda(self.rank))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
@@ -3257,6 +3264,20 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env('2147483647')
         self._run_invalid_nccl_blocking_wait_env('4294967295')
 
+    def _wait_for_comm_abort(self, process_group):
+        '''
+        Waits for the watchdog thread to abort communicators for the process group.
+        '''
+        while True:
+            try:
+                process_group.allreduce(torch.rand(10).cuda(self.rank))
+            except Exception as e:
+                if "NCCL communicator was aborted" in str(e):
+                    return
+                else:
+                    raise e
+            time.sleep(1)
+
     @requires_nccl()
     @skip_if_not_multigpu
     @skip_if_rocm
@@ -3266,20 +3287,20 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
         # Initialize process_group.
         timeout = 1
-        c10d.distributed_c10d.init_process_group(
-            backend=dist.Backend.NCCL, store=store, world_size=2, rank=self.rank,
-            timeout=timedelta(seconds=timeout))
-        c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
+        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(RuntimeError, "(Operation timed out!)|(NCCL error: unhandled system error)"):
-                c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
         else:
-            # Ensure the other rank sleeps to trigger timeout.
+            # Sleep to ensure timeout.
             time.sleep(2 * timeout)
+
+            self._wait_for_comm_abort(process_group)
 
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
