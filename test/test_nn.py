@@ -2709,8 +2709,8 @@ class TestNN(NNTestCase):
         m = nn.Linear(4, 2)
         prune.l1_unstructured(m, 'weight', amount=2)
 
-        expected_parameter_names = ["weight", 'bias']
-        self.assertEqual(expected_parameter_names,  names(m.named_parameters()))
+        expected_parameter_names = sorted(["weight", 'bias'])
+        self.assertEqual(expected_parameter_names,  sorted(names(m.named_parameters())))
 
     def test_weight_norm(self):
         input = torch.randn(3, 5)
