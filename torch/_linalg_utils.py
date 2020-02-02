@@ -5,42 +5,6 @@
 import torch
 
 
-def uniform(low=0.0, high=1.0, size=None, dtype=None, device=None):
-    """Returns a tensor filled with random numbers from a uniform
-    distribution on the interval :math:`[low, high)`
-
-    Arguments::
-
-      size (int...): a sequence of integers defining the shape of the
-        output tensor.  Can be a variable number of arguments or a
-        collection like a list or tuple.
-
-      dtype (:class:`torch.dtype`, optional): the desired data type of
-        returned tensor.  Default: if ``None``, uses a global default
-        (see :func:`torch.set_default_tensor_type`).
-
-      device (:class:`torch.device`, optional): the desired device of
-        returned tensor.  Default: if ``None``, uses the current
-        device for the default tensor type (see
-        :func:`torch.set_default_tensor_type`). :attr:`device` will be
-        the CPU for CPU tensor types and the current CUDA device for
-        CUDA tensor types.
-
-    """
-    attrs = dict(dtype=dtype, device=device)
-    if size is None:
-        r = low + (high - low) * torch.rand(1, **attrs)[0]
-    else:
-        r = low + (high - low) * torch.rand(*size, **attrs)
-    if dtype in [torch.complex32, torch.complex64, torch.complex128]:
-        if size is None:
-            i = low + (high - low) * torch.rand(1, **attrs)[0]
-        else:
-            i = low + (high - low) * torch.rand(*size, **attrs)
-        return r + 1j * i
-    return r
-
-
 def is_sparse(A):
     """Check if tensor A is a sparse tensor"""
     if isinstance(A, torch.Tensor):
@@ -50,29 +14,26 @@ def is_sparse(A):
 
 def get_floating_dtype(A):
     """Return the floating point dtype of tensor A.
+
+    Integer types map to float32.
     """
-    if isinstance(A, torch.Tensor):
-        index = (0, ) * len(A.shape)
-        return (A.__getitem__(index) * 1.0).dtype
-    return A.dtype.type
+    dtype = A.dtype
+    if dtype in (torch.float16, torch.float32, torch.float64):
+        return dtype
+    return torch.float32
 
 
-def _identity_matmul(A, other):
-    return other
+def matmul(A, B):
+    """Multiply two matrices.
 
-
-def get_matmul(A):
-    """Return matrix multiplication implementation.
+    If A is None, return B. A can be sparse or dense. B is always
+    dense.
     """
-    if A is None:  # A is identity
-        return _identity_matmul
-    if isinstance(A, torch.Tensor):
-        if is_sparse(A):
-            return torch.sparse.mm
-        else:
-            return torch.matmul
-    raise NotImplementedError('get_matmul(<{} instance>)'
-                              .format(type(A).__name__))
+    if A is None:
+        return B
+    if is_sparse(A):
+        return torch.sparse.mm(A, B)
+    return torch.matmul(A, B)
 
 
 def conjugate(A):
@@ -106,7 +67,7 @@ def norm(A):
             return A.norm(dim=(-2, -1), p='fro')
         except RuntimeError:
             # e.g. conj is not available in CUDA
-            return get_matmul(A)(transpose(A), A).trace() ** 0.5
+            return matmul(transpose(A), A).trace() ** 0.5
     else:
         raise TypeError("expected Tensor but got %s" % (type(A).__name__))
 
@@ -114,7 +75,7 @@ def norm(A):
 def bform(X, A, Y):
     """Return bilinear form of matrices: :math:`X^T A Y`.
     """
-    return get_matmul(X)(transpose(X), get_matmul(A)(A, Y))
+    return matmul(transpose(X), matmul(A, Y))
 
 
 def qform(A, S):

@@ -13644,7 +13644,7 @@ class TestTorchDeviceType(TestCase):
 
     def _test_lobpcg_method(self, device, dtype, method):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
-        from torch._linalg_utils import get_matmul, qform
+        from torch._linalg_utils import matmul, qform
         from torch.lobpcg import lobpcg
 
         def test_tracker(istep, A, B, X, E, R, rerr, nc, k, tol, **params):
@@ -13688,14 +13688,12 @@ class TestTorchDeviceType(TestCase):
                     continue
                 A = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
                 B = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
-                mm_A = get_matmul(A)
-                mm_B = get_matmul(B)
 
                 # classical eigenvalue problem, smallest eigenvalues
                 E, V = lobpcg(A, k=k, n=n, largest=False)
                 self.assertEqual(E.shape, batches + (k,))
                 self.assertEqual(V.shape, batches + (m, k))
-                self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
                 e = torch.symeig(A)[0]
                 e_smallest = e[..., :k]
                 self.assertEqual(E, e_smallest)
@@ -13704,15 +13702,15 @@ class TestTorchDeviceType(TestCase):
                 E, V = lobpcg(A, k=k, n=n, largest=True)
                 e_largest, _ = torch.sort(e[..., -k:], descending=True)
                 self.assertEqual(E, e_largest, prec=prec)
-                self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
                 # generalized eigenvalue problem, smallest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-                self.assertEqual(mm_A(A, V), mm(mm_B(B, V), E.diag_embed()), prec=prec)
+                self.assertEqual(matmul(A, V), mm(matmul(B, V), E.diag_embed()), prec=prec)
 
                 # generalized eigenvalue problem, largest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
-                self.assertEqual(mm_A(A, V) / E.max(), mm(mm_B(B, V), (E / E.max()).diag_embed()),
+                self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                                  prec=prec)
 
         # check sparse input
@@ -13729,28 +13727,26 @@ class TestTorchDeviceType(TestCase):
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             A_eigenvalues = torch.arange(1, m + 1, dtype=dtype) / m
-            mm_A = get_matmul(A)
-            mm_B = get_matmul(B)
             e_smallest = A_eigenvalues[..., :k]
             e_largest, _ = torch.sort(A_eigenvalues[..., -k:], descending=True)
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
             self.assertEqual(E, e_smallest)            
-            self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
 
             # classical eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=True)
-            self.assertEqual(mm_A(A, V), mm(V, E.diag_embed()), prec=prec)
+            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), prec=prec)
             self.assertEqual(E, e_largest)
 
             # generalized eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-            self.assertEqual(mm_A(A, V), mm_B(B, mm(V, E.diag_embed())), prec=prec)
+            self.assertEqual(matmul(A, V), matmul(B, mm(V, E.diag_embed())), prec=prec)
 
             # generalized eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
-            self.assertEqual(mm_A(A, V) / E.max(), mm(mm_B(B, V), (E / E.max()).diag_embed()),
+            self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              prec=prec)
 
     @skipCUDAIfNoMagma
@@ -13758,7 +13754,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_lobpcg_utils(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_matrix
-        from torch._linalg_utils import get_matmul
+        from torch._linalg_utils import matmul
         from torch.lobpcg import svqb
         from torch.lobpcg import _ortho as ortho
         from torch.lobpcg import _get_rayleigh_ritz_transform as get_rayleigh_ritz_transform
@@ -13768,36 +13764,35 @@ class TestTorchDeviceType(TestCase):
             # check svqb
             M = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
             Uin = random_matrix(m, n, device=device)
-            mm_M = get_matmul(M)
             for drop in [False, True]:
                 Uout = svqb(M, Uin, drop=drop)
-                self.assertEqual(mm(Uout.transpose(-2, -1), mm_M(M, Uout)),
+                self.assertEqual(mm(Uout.transpose(-2, -1), matmul(M, Uout)),
                                  torch.eye(Uout.shape[-1], device=device, dtype=dtype))
 
             nv = max(1, n - 1)
             V = svqb(M, random_matrix(m, nv, device=device), drop=False)
-            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, V)),
+            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, V)),
                              torch.eye(V.shape[-1], device=device, dtype=dtype))
 
             # check ortho
             Uin = random_matrix(m, n, device=device)
             U, _ = ortho(M, Uin, V, use_drop=False)
-            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
                              torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
                              torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
 
             U, _ = ortho(M, Uin, V, use_drop=True)
-            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
                              torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
                              torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
 
             Uin[:, 0] = V[:, 0]
             U, _ = ortho(M, Uin, V, use_drop=True)
-            self.assertEqual(mm(U.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
                              torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), mm_M(M, U)),
+            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
                              torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
 
             # check get_RR_transform
@@ -13805,11 +13800,11 @@ class TestTorchDeviceType(TestCase):
             S = random_matrix(m, n, device=device)
             for B in [None, random_symmetric_pd_matrix(m, device=device, dtype=dtype)]:
                 Ri = get_rayleigh_ritz_transform(B, S)
-                M = torch.chain_matmul(Ri.transpose(-2, -1), S.transpose(-2, -1), get_matmul(A)(A, S), Ri)
+                M = torch.chain_matmul(Ri.transpose(-2, -1), S.transpose(-2, -1), matmul(A, S), Ri)
                 E, Z = torch.symeig(M, eigenvectors=True)
                 C = torch.matmul(Ri, Z)
-                self.assertEqual(torch.chain_matmul(S.transpose(-2, -1), get_matmul(A)(A, S), C),
-                                 torch.chain_matmul(S.transpose(-2, -1), get_matmul(B)(B, S), C, E.diag_embed()))
+                self.assertEqual(torch.chain_matmul(S.transpose(-2, -1), matmul(A, S), C),
+                                 torch.chain_matmul(S.transpose(-2, -1), matmul(B, S), C, E.diag_embed()))
 
     @slowTest
     @onlyCPU

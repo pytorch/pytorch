@@ -50,9 +50,10 @@ def get_approximate_basis(A, q, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
+    niter = int(niter)
     m, n = A.shape[-2:]
     dtype = _utils.get_floating_dtype(A)
-    matmul = _utils.get_matmul(A)
+    matmul = _utils.matmul
 
     R = torch.randn(n, q, dtype=dtype, device=A.device)
 
@@ -63,12 +64,11 @@ def get_approximate_basis(A, q, niter=2, M=None):
             (Q, _) = matmul(A_H, Q).qr()
             (Q, _) = matmul(A, Q).qr()
     else:
-        matmul2 = _utils.get_matmul(M)
         M_H = _utils.transjugate(M)
-        (Q, _) = (matmul(A, R) - matmul2(M, R)).qr()
+        (Q, _) = (matmul(A, R) - matmul(M, R)).qr()
         for i in range(niter):
-            (Q, _) = (matmul(A_H, Q) - matmul2(M_H, Q)).qr()
-            (Q, _) = (matmul(A, Q) - matmul2(M, Q)).qr()
+            (Q, _) = (matmul(A_H, Q) - matmul(M_H, Q)).qr()
+            (Q, _) = (matmul(A, Q) - matmul(M, Q)).qr()
 
     return Q
 
@@ -114,11 +114,10 @@ def svd(A, q=6, niter=2, M=None):
 
     """
     m, n = A.shape[-2:]
-    matmul = _utils.get_matmul(A)
+    matmul = _utils.matmul
     if M is None:
         M_t = None
     else:
-        matmul2 = _utils.get_matmul(M)
         M_t = _utils.transpose(M)
     A_t = _utils.transpose(A)
 
@@ -132,7 +131,7 @@ def svd(A, q=6, niter=2, M=None):
         if M is None:
             B_t = matmul(A, Q_c)
         else:
-            B_t = matmul(A, Q_c) - matmul2(M, Q_c)
+            B_t = matmul(A, Q_c) - matmul(M, Q_c)
         U, S, V = torch.svd(B_t)
         V = Q.matmul(V)
     else:
@@ -141,7 +140,7 @@ def svd(A, q=6, niter=2, M=None):
         if M is None:
             B = matmul(A_t, Q_c)
         else:
-            B = matmul(A_t, Q_c) - matmul2(M_t, Q_c)
+            B = matmul(A_t, Q_c) - matmul(M_t, Q_c)
         U, S, V = torch.svd(_utils.transpose(B))
         U = Q.matmul(U)
 

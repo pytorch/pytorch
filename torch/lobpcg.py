@@ -191,8 +191,8 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
 
     # Estimate A and B norms
     X_norm = _utils.norm(X)
-    A_norm = _utils.norm(_utils.get_matmul(A)(A, X)) / X_norm
-    B_norm = _utils.norm(_utils.get_matmul(B)(B, X)) / X_norm
+    A_norm = _utils.norm(_utils.matmul(A, X)) / X_norm
+    B_norm = _utils.norm(_utils.matmul(B, X)) / X_norm
 
     S = torch.zeros(A.shape[:-1] + (3 * n,), dtype=dtype, device=device)
 
@@ -276,8 +276,6 @@ def svqb(M, U, tau=1e-6, drop=False):
     """
     if torch.numel(U) == 0:
         return U
-    mm = torch.matmul
-    mm_M = _utils.get_matmul(M)
     UMU = _utils.qform(M, U)
     d = UMU.diagonal(0, -2, -1)
 
@@ -332,7 +330,7 @@ def _ortho(M, U, V, tau_ortho=1e-6, tau_drop=1e-6, tau_replace=1e-6,
       stats (dict) : statistics information
     """
     mm = torch.matmul
-    mm_M = _utils.get_matmul(M)
+    mm_M = _utils.matmul
     MV_norm = _utils.norm(mm_M(M, V))
     MU = mm_M(M, U)
     VMU = mm(_utils.transpose(V), MU)
@@ -421,8 +419,9 @@ def _get_rayleigh_ritz_transform(B, S):
 def _residual(A, B, X, E):
     """Return residual :math:`A X - B X diag(E)`.
     """
+    mm = _utils.matmul
     n = X.shape[-1]
-    return _utils.get_matmul(A)(A, X) - torch.matmul(_utils.get_matmul(B)(B, X), torch.diag_embed(E[:n]))
+    return mm(A, X) - torch.matmul(mm(B, X), torch.diag_embed(E[:n]))
 
 
 def _lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
@@ -441,7 +440,7 @@ def _lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
     np = 0
     nc, rerr = converged_count(R, X, E)
     S[..., :n] = X
-    W = _utils.get_matmul(iK)(iK, R)
+    W = _utils.matmul(iK, R)
     ns = n + np + W.shape[-1]
     S[..., n + np:ns] = W
 
@@ -482,7 +481,7 @@ def _lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
         # update S
         S[:, :n] = X
         S[:, n:n + np] = P
-        W = _utils.get_matmul(iK)(iK, R[:, nc:])
+        W = _utils.matmul(iK, R[:, nc:])
         ns = n + np + W.shape[-1]
         S[:, n + np:ns] = W
 
