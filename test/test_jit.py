@@ -4014,6 +4014,10 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_oneline_func(self):
+        def fn(x): return x  # noqa: E704
+
+        self.checkScript(fn, (torch.ones(2, 2), ))
 
     def test_request_bailout(self):
         with enable_profiling_mode():
