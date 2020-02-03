@@ -70,9 +70,9 @@ inline Tensor Tensor::operator[](int64_t index) const {
 #define AT_FORALL_BINARY_OPS(_) \
 _(+,x.add(y), y.add(x)) \
 _(*,x.mul(y), y.mul(x)) \
-_(-,x.sub(y), ::at::empty_like(y, at::MemoryFormat::Contiguous).fill_(x).sub_(y)) \
-_(/,x.div(y), ::at::empty_like(y, at::MemoryFormat::Contiguous).fill_(x).div_(y)) \
-_(%,x.remainder(y), ::at::empty_like(y, at::MemoryFormat::Contiguous).fill_(x).remainder_(y)) \
+_(-,x.sub(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).sub_(y)) \
+_(/,x.div(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).div_(y)) \
+_(%,x.remainder(y), ::at::empty_like(y, at::MemoryFormat::Preserve).fill_(x).remainder_(y)) \
 _(<,x.lt(y), y.gt(x)) \
 _(<=,x.le(y), y.ge(x)) \
 _(>,x.gt(y),y.lt(x)) \

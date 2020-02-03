@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from caffe2.python import workspace, crf, brew
 from caffe2.python.model_helper import ModelHelper
 import numpy as np
-from scipy.misc import logsumexp
+from scipy.special import logsumexp
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from hypothesis import given

@@ -48,7 +48,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 template <typename T>
 static std::ostream& printValueRefs(
     std::ostream& out,
-    const at::ArrayRef<T>& nodes) {
+    const at::ArrayRef<T> nodes) {
   size_t i = 0;
   for (auto n : nodes) {
     if (i++ > 0) {
@@ -64,11 +64,11 @@ static std::ostream& printValueRefs(
 
 std::ostream& operator<<(
     std::ostream& out,
-    const at::ArrayRef<const Value*>& nodes) {
+    const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
+std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -81,7 +81,9 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
+std::ostream& operator<<(
+    std::ostream& out,
+    const const_value_list_with_types& l) {
   size_t i = 0;
   for (auto n : l.values) {
     if (i++ > 0) {
@@ -94,30 +96,42 @@ std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
   return out;
 }
 
-template <typename T>
-static void printPrimList(std::ostream& out, const std::vector<T>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0) {
-      out << ", ";
+static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
+  // 1-elem tensors are usually boxed scalars, so print them like it
+  if (tensor.numel() == 1) {
+    auto scalar_tensor = tensor.view({}).item();
+    out << "{";
+    if (scalar_tensor.isFloatingPoint()) {
+      out << scalar_tensor.toDouble();
+    } else {
+      out << scalar_tensor.toLong();
     }
-    out << item;
+    out << "}";
+  } else if (tensor.numel() <= max_tensor_display_size) {
+    // TODO: This is awful code.  Also it doesn't work on Windows.
+    std::ostringstream tensor_ss;
+    tensor_ss << tensor;
+    std::string tensor_s{tensor_ss.str()};
+    // Remove newlines
+    std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+    out << tensor_s;
+  } else {
+    out << "<Tensor>";
   }
-  out << "]";
 }
 
-static void printStrList(
-    std::ostream& out,
-    const std::vector<std::string>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0)
-      out << ", ";
-    c10::printQuotedString(out, item);
-  }
-  out << "]";
+static void printAttribute(std::ostream& out, const IValue& ival) {
+  const auto customFormatter = [](std::ostream& ss, const IValue& input) {
+    if (input.isTensor()) {
+      printAttribute(ss, input.toTensor());
+      return true;
+    } else if (input.isTensorList()) {
+      ss << "[<Tensors>]";
+      return true;
+    }
+    return false;
+  };
+  ival.repr(out, customFormatter);
 }
 
 static void printTypeList(
@@ -136,50 +150,31 @@ static void printTypeList(
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
-      out << f(name);
+      printAttribute(out, f(name));
       break;
     case AttributeKind::fs:
-      printPrimList(out, fs(name));
+      printAttribute(out, fs(name));
       break;
     case AttributeKind::i:
-      out << i(name);
+      printAttribute(out, i(name));
       break;
     case AttributeKind::is:
-      printPrimList(out, is(name));
+      printAttribute(out, is(name));
       break;
     case AttributeKind::s:
-      c10::printQuotedString(out, s(name));
+      printAttribute(out, s(name));
       break;
     case AttributeKind::ss:
-      printStrList(out, ss(name));
+      printAttribute(out, ss(name));
       break;
-    case AttributeKind::t: {
-      at::Tensor tensor = t(name);
-      // 1-elem tensors are usually boxed scalars, so print them like it
-      if (tensor.numel() == 1) {
-        auto scalar_tensor = tensor.view({}).item();
-        out << "{";
-        if (scalar_tensor.isFloatingPoint()) {
-          out << scalar_tensor.toDouble();
-        } else {
-          out << scalar_tensor.toLong();
-        }
-        out << "}";
-      } else if (tensor.numel() <= max_tensor_display_size) {
-        // TODO: This is awful code.  Also it doesn't work on Windows.
-        std::ostringstream tensor_ss;
-        tensor_ss << tensor;
-        std::string tensor_s{tensor_ss.str()};
-        // Remove newlines
-        std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-        out << tensor_s;
-      } else {
-        out << "<Tensor>";
-      }
+    case AttributeKind::t:
+      printAttribute(out, t(name));
       break;
-    }
     case AttributeKind::ts:
       out << "[<Tensors>]";
+      break;
+    case AttributeKind::ival:
+      printAttribute(out, ival(name));
       break;
     case AttributeKind::g:
       out << "<Graph>";
@@ -196,8 +191,8 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void Node::printAttributes(std::ostream &out,
-                           bool ignore_subgraph = false) const {
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -233,10 +228,14 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream &Node::print(std::ostream &out, size_t level,
-                          std::vector<const Node *> *groups,
-                          bool print_source_locations, bool print_attributes,
-                          bool print_scopes, bool print_body) const {
+std::ostream& Node::print(
+    std::ostream& out,
+    size_t level,
+    std::vector<const Node*>* groups,
+    bool print_source_locations,
+    bool print_attributes,
+    bool print_scopes,
+    bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -818,6 +817,22 @@ void Value::replaceAllUsesWith(Value* newValue) {
   }
 }
 
+void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isAfter(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
+}
+
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
@@ -1062,6 +1077,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
+      callstack_(c10::nullopt),
       op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
@@ -1113,6 +1129,7 @@ void Node::cloneFrom(Node* s) {
     scope_ = s->scope_;
   }
   copyAttributes(*s);
+  callstack_ = s->callstack_;
 }
 
 void Node::replaceAllUsesWith(Node* n) {
@@ -1453,6 +1470,7 @@ Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
     tuple_type = TupleType::create(std::move(types));
   }
   auto n = create(prim::TupleConstruct, values);
+
   n->output()->setType(tuple_type);
   return n;
 }
@@ -1591,10 +1609,10 @@ Node* Graph::createIsInstance(
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
   std::vector<std::string> kinds;
   if (is_list) {
-    kinds.push_back("list");
+    kinds.emplace_back("list");
   }
   if (is_tuple) {
-    kinds.push_back("tuple");
+    kinds.emplace_back("tuple");
   }
   n->ss_(attr::kinds, std::move(kinds));
   n->tys_(attr::types, types.vec());
@@ -1614,7 +1632,7 @@ Value* Graph::insertFunctionCall(
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
                            ->output()
-                           ->setType(FunctionType::create(std::move(callee)));
+                           ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
   Value* result = insertNode(create(prim::CallFunction, inputs))
@@ -1655,11 +1673,10 @@ Node* Graph::createClone(
 }
 
 Value* Graph::insertConstant(
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+  return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {
@@ -1710,12 +1727,46 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(
-    Node* to_replace,
-    Graph& callee) {
+std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
-  auto new_outputs =
-      insertGraph(*to_replace->owningGraph(), callee, to_replace->inputs());
+  std::unordered_map<Value*, Value*> value_map;
+  auto new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *(callee->optimized_graph()),
+      to_replace->inputs(),
+      value_map);
+
+  std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
+      new_callstack_entries;
+
+  // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
+  // are missing nodes without outputs (e.g. prim::Print).
+  std::unordered_set<Node*> updated_nodes;
+  for (const auto& kv : value_map) {
+    Node* new_node = kv.second->node();
+    if (!updated_nodes.insert(new_node).second) {
+      continue;
+    }
+
+    auto new_node_cs = new_node->callstack();
+
+    InlinedCallStack* raw_callstack_ptr =
+        new_node_cs ? new_node_cs->get() : nullptr;
+
+    if (!new_callstack_entries.count(raw_callstack_ptr)) {
+      if (new_node_cs) {
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                *new_node_cs, callee, to_replace->sourceRange());
+      } else {
+        new_callstack_entries[raw_callstack_ptr] =
+            c10::make_intrusive<InlinedCallStack>(
+                callee, to_replace->sourceRange());
+      }
+    }
+    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+  }
+
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
@@ -1751,8 +1802,8 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
 std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
-    ArrayRef<Value*> inputs) {
-  std::unordered_map<Value*, Value*> value_map;
+    ArrayRef<Value*> inputs,
+    std::unordered_map<Value*, Value*>& value_map) {
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   AT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -1771,6 +1822,14 @@ std::vector<Value*> insertGraph(
   }
 
   return outputs;
+}
+
+std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  return insertGraph(g, callee, inputs, value_map);
 }
 
 void ProfileOp::cloneFrom(Node* other_) {

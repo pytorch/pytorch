@@ -11,31 +11,6 @@ namespace jit {
 
 namespace {
 
-IValue wrap(IValue&& ivalue) {
-  if (ivalue.isTensor()) {
-    return std::move(ivalue).toTensor();
-  } else if (ivalue.isTensorList()) {
-    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = list.extract(i);
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericList()) {
-    c10::impl::GenericList list = std::move(ivalue).toGenericList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = wrap(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()) {
-      item.setValue(wrap(item.value()));
-    }
-    return std::move(ivalue);
-  } else {
-    return std::move(ivalue);
-  }
-}
-
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
@@ -69,8 +44,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               node->addInput(none);
               continue;
             } else {
-              type =
-                  reinterpret_cast<OptionalType*>(type.get())->getElementType();
+              type = type->expect<OptionalType>()->getElementType();
             }
           }
           if (type->isSubtypeOf(TensorType::get())) {
@@ -89,19 +63,20 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             AT_ASSERT(iter->isString());
             tracer::addInputs(
                 node, args[i].name().c_str(), iter->toStringRef());
+          } else if (type->kind() == TypeKind::NumberType) {
+            tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
           } else if (type->kind() == TypeKind::ListType) {
-            const auto& elem_type =
-                reinterpret_cast<ListType*>(type.get())->getElementType();
+            const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
-              auto list = iter->toTensorListRef();
+              auto list = iter->toTensorVector();
               tracer::addInputs(node, args[i].name().c_str(), list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
               // NB: now, tracer doesn't support tracing double list. We add special
               // handling here, since in our case, we assume that all the doubles
               // in the list are constants
-              auto value = iter->toDoubleListRef();
+              auto value = iter->toDoubleVector();
               std::vector<Value*> info(value.size());
               for (size_t value_index = 0; value_index < value.size(); ++value_index) {
                 info[value_index] = graph->insertConstant(value[value_index]);
@@ -112,11 +87,11 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toIntListRef());
+                  node, args[i].name().c_str(), iter->toIntVector());
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), c10::impl::toVector(iter->toBoolList()));
+                  node, args[i].name().c_str(), iter->toBoolList().vec());
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
@@ -139,11 +114,6 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
       c10::Dispatcher::singleton().callBoxed(op, &stack);
 #endif // USE_STATIC_DISPATCH
 
-      // wrap tensor outputs as variable
-      for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {
-        *iter = wrap(std::move(*iter));
-      }
-
       if (tracer_state) {
         jit::tracer::setTracingState(std::move(tracer_state));
         int i = 0;
@@ -154,8 +124,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
           } else if (type->kind() == TypeKind::ListType) {
-            const auto& elem_type =
-                reinterpret_cast<ListType*>(type.get())->getElementType();
+            const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
               AT_ASSERT(iter->isTensorList());
               tracer::addOutput(node, iter->toTensorList());
@@ -195,14 +164,24 @@ struct Registerer final {
     // this immediately calls the listener on all existing ops,
     // and calls it in future whenever a new op is registered
     c10::Dispatcher::singleton().addRegistrationListener(
-      c10::guts::make_unique<RegistrationListener>()
+      std::make_unique<RegistrationListener>()
     );
   }
 };
 
-// global instance to run its constructor on startup
-Registerer registerer;
+Registerer& registerer() {
+  static Registerer registerer;
+  return registerer;
+}
 
+// global instance to run its constructor on startup
+Registerer& dummy = registerer();
+
+} // namespace
+
+void ensure_c10_registerer_defined() {
+  registerer();
 }
-}
+
+} // namespace jit
 }

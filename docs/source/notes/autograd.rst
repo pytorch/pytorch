@@ -1,3 +1,5 @@
+.. _autograd-mechanics:
+
 Autograd mechanics
 ==================
 
@@ -55,6 +57,8 @@ will also require them.
 
     # Optimize only the classifier
     optimizer = optim.SGD(model.fc.parameters(), lr=1e-2, momentum=0.9)
+
+.. _how-autograd-encodes-history:
 
 How autograd encodes the history
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

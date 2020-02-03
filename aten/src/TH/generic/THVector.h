@@ -27,7 +27,6 @@ TH_API void THVector_(normal_fill)(scalar_t *data,
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
-TH_API void THVector_(sigmoid)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erfc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
@@ -37,7 +36,6 @@ TH_API void THVector_(tan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(atan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(tanh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(pow)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
-TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
 

@@ -66,8 +66,12 @@ void Error::AppendMessage(const std::string& new_msg) {
 namespace Warning {
 
 namespace {
-  static WarningHandler base_warning_handler_ = WarningHandler();
-  static thread_local WarningHandler* warning_handler_ = &base_warning_handler_;
+  WarningHandler* getHandler() {
+    static WarningHandler base_warning_handler_ = WarningHandler();
+    return &base_warning_handler_;
+  };
+  static thread_local WarningHandler* warning_handler_ = getHandler();
+
 }
 
 void warn(SourceLocation source_location, const std::string& msg) {

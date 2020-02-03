@@ -466,7 +466,7 @@ Tensor max_unpooling2d_backward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntArrayRef output_size) {
-  auto grad_input = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_unpooling2d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size);
   return grad_input;
@@ -600,7 +600,7 @@ Tensor max_unpooling3d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef stride,
     IntArrayRef padding) {
-  auto grad_input = at::empty_like(self, at::MemoryFormat::Contiguous);
+  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_unpooling3d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;

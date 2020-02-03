@@ -22,8 +22,7 @@ void TestOut2Basic(DeprecatedTypeProperties& T) {
 
 // with scalar
 void TestOut2WithScalar(DeprecatedTypeProperties& T) {
-  auto aScalar = ones({1}, T);
-  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto aScalar = ones({}, T);
   auto b = randn({3, 5}, T);
   ASSERT_TRUE(
       (aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
@@ -56,8 +55,7 @@ void TestOut3Basic(DeprecatedTypeProperties& T) {
 
 // with scalar
 void TestOut3WithScalar(DeprecatedTypeProperties& T) {
-  auto aTensorScalar = ones({1}, T);
-  aTensorScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto aTensorScalar = ones({}, T);
   auto b = randn({3, 2, 1}, T);
   auto c = randn({1, 2, 5}, T);
   std::vector<int64_t> expanded_sizes = {3, 2, 5};
@@ -92,8 +90,7 @@ void TestIn2Basic(DeprecatedTypeProperties& T) {
 // with scalar
 void TestIn2WithScalar(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
-  auto bScalar = ones({1}, T);
-  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto bScalar = ones({}, T);
   ASSERT_TRUE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
 }
 
@@ -120,8 +117,7 @@ void TestIn3WithScalar(DeprecatedTypeProperties& T) {
   auto b = randn({3, 1, 2}, T);
   auto c = randn({1, 5, 1}, T);
   auto aClone = a.clone();
-  auto bScalar = ones({1}, T);
-  bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  auto bScalar = ones({}, T);
   ASSERT_TRUE(a.addcmul_(bScalar, c)
                   .equal(aClone.addcmul_(
                       bScalar.expand(a.sizes()), c.expand(a.sizes()))));
@@ -148,8 +144,7 @@ void TestExplicitDimWithScalar(DeprecatedTypeProperties& T) {
   auto a = randn({1}, T);
   auto b = randn({5, 3}, T);
   auto c = randn({3, 7}, T);
-  Tensor aScalar = ones({1}, T);
-  aScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
+  Tensor aScalar = ones({}, T);
   ASSERT_TRUE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
 }
 

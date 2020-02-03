@@ -31,14 +31,18 @@ void EmbeddingImpl::reset() {
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
-    torch::nn::init::normal_(weight);
-    if (options.padding_idx() != c10::nullopt) {
-      torch::NoGradGuard no_grad;
-      weight[*options.padding_idx()].fill_(0);
-    }
+    reset_parameters();
   } else {
     TORCH_CHECK(options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}), "Shape of _weight does not match num_embeddings and embedding_dim");
     weight = register_parameter("weight", options._weight());
+  }
+}
+
+void EmbeddingImpl::reset_parameters() {
+  torch::nn::init::normal_(weight);
+  if (options.padding_idx() != c10::nullopt) {
+    torch::NoGradGuard no_grad;
+    weight[*options.padding_idx()].fill_(0);
   }
 }
 
@@ -82,13 +86,17 @@ void EmbeddingBagImpl::reset() {
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
-    torch::nn::init::normal_(weight);
+    reset_parameters();
   } else {
     TORCH_CHECK(
       options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}),
       "Shape of weight does not match num_embeddings and embedding_dim");
     weight = register_parameter("weight", options._weight());
   }
+}
+
+void EmbeddingBagImpl::reset_parameters() {
+  torch::nn::init::normal_(weight);
 }
 
 torch::Tensor EmbeddingBagImpl::forward(const Tensor& input, const Tensor& offsets, const Tensor& per_sample_weights) {
@@ -101,7 +109,8 @@ torch::Tensor EmbeddingBagImpl::forward(const Tensor& input, const Tensor& offse
     options.scale_grad_by_freq(),
     options.mode(),
     options.sparse(),
-    per_sample_weights);
+    per_sample_weights,
+    options.include_last_offset());
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
@@ -121,6 +130,9 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   }
   if (!c10::get_if<enumtype::kMean>(&options.mode())) {
       stream << ", mode=" << torch::enumtype::get_enum_name(options.mode());
+  }
+  if (options.include_last_offset()) {
+    stream << ", include_last_offset=" << std::boolalpha << options.include_last_offset();
   }
   stream << ")";
 }

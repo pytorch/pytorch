@@ -3,7 +3,6 @@
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
 
-#include <TH/THMath.h>
 #include <vector>
 #include <stack>
 #include <tuple>

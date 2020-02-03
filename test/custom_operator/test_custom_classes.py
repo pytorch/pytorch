@@ -35,19 +35,19 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_no_return_class(self):
         def f():
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             return val.info()
         self.assertEqual(*test_equality(f, lambda x: x))
 
     def test_constructor_with_args(self):
         def f():
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             return val
         self.assertEqual(*test_equality(f, lambda x: x.info()))
 
     def test_function_call_with_args(self):
         def f():
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             val.increment(1)
             return val
 
@@ -55,7 +55,7 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_function_method_wrong_type(self):
         def f():
-            val = torch.classes.Foo(5, 3)
+            val = torch.classes._TorchScriptTesting_Foo(5, 3)
             val.increment("asdf")
             return val
 
@@ -65,8 +65,8 @@ class TestCustomOperators(unittest.TestCase):
     @unittest.skip("We currently don't support passing custom classes to custom methods.")
     def test_input_class_type(self):
         def f():
-            val = torch.classes.Foo(1, 2)
-            val2 = torch.classes.Foo(2, 3)
+            val = torch.classes._TorchScriptTesting_Foo(1, 2)
+            val2 = torch.classes._TorchScriptTesting_Foo(2, 3)
             val.combine(val2)
             return val
 
@@ -74,14 +74,14 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_stack_string(self):
         def f():
-            val = torch.classes.StackString(["asdf", "bruh"])
+            val = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
             return val.pop()
         self.assertEqual(*test_equality(f, lambda x: x))
 
     def test_stack_push_pop(self):
         def f():
-            val = torch.classes.StackString(["asdf", "bruh"])
-            val2 = torch.classes.StackString(["111", "222"])
+            val = torch.classes._TorchScriptTesting_StackString(["asdf", "bruh"])
+            val2 = torch.classes._TorchScriptTesting_StackString(["111", "222"])
             val.push(val2.pop())
             return val.pop() + val2.pop()
         self.assertEqual(*test_equality(f, lambda x: x))

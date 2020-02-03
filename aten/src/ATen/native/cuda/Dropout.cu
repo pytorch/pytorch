@@ -89,7 +89,7 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  Tensor ret = at::empty_like(self, at::MemoryFormat::Contiguous);
+  Tensor ret = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
 //empty tensors should not get here, but just in case, avoid FPE
@@ -149,7 +149,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
 }
 
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
-   Tensor ret = at::empty_like(self, at::MemoryFormat::Contiguous);
+   Tensor ret = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;

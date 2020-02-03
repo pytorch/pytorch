@@ -3,6 +3,7 @@
 #include "activation_distribution_observer.h"
 #include "caffe2_dnnlowp_utils.h"
 #include "quantization_error_minimization.h"
+#include "caffe2/opt/custom/fakefp16_transform.h"
 
 namespace caffe2 {
 namespace python {
@@ -65,6 +66,40 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       },
       pybind11::arg("net_name"),
       pybind11::arg("out_file_name"),
+      pybind11::arg("dump_freq") = -1,
+      pybind11::arg("mul_nets") = false);
+
+  m.def(
+      "AddOutputColumnMaxHistogramObserver",
+      [](const string& net_name,
+         const string& out_file_name,
+         const std::vector<std::string>& observe_column_max_for_blobs,
+         int dump_freq,
+         bool mul_nets) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        CAFFE_ENFORCE(
+            gWorkspace->GetNet(net_name), "Can't find net ", net_name);
+        pybind11::gil_scoped_release g;
+
+        NetBase* net = gWorkspace->GetNet(net_name);
+        const Observable<NetBase>::Observer* observer = nullptr;
+
+        observer = net->AttachObserver(
+            make_unique<OutputColumnMaxHistogramNetObserver>(
+                net,
+                out_file_name,
+                observe_column_max_for_blobs,
+                2048,
+                dump_freq,
+                mul_nets));
+
+        CAFFE_ENFORCE(observer != nullptr);
+        return pybind11::cast(observer);
+      },
+      pybind11::arg("net_name"),
+      pybind11::arg("out_file_name"),
+      pybind11::arg("observe_column_max_for_blobs"),
       pybind11::arg("dump_freq") = -1,
       pybind11::arg("mul_nets") = false);
 
@@ -195,7 +230,9 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
           "max", [](dnnlowp::TensorQuantizationParams& qparam) {
             return qparam.Max();
           });
-
+  m.def("get_fakefp16_mapping", [](bool use_fp16_acc, bool use_nnpi) {
+    return caffe2::opt::getFakeFp16OpMapping(use_fp16_acc, use_nnpi);
+  });
   m.def(
       "ChooseStaticQuantizationParams",
       [](float min,
