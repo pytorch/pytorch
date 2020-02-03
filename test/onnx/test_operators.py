@@ -257,6 +257,10 @@ class TestOperators(TestCase):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
         self.assertONNX(nn.BatchNorm2d(2), x, training=True, keep_initializers_as_inputs=True)
 
+    def test_batchnorm_training_opset12(self):
+        x = torch.ones(2, 2, 2, 2, requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(2), x, training=True, keep_initializers_as_inputs=True, opset_version=12)
+
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x, keep_initializers_as_inputs=True)
@@ -671,6 +675,18 @@ class TestOperators(TestCase):
     def test_dropout(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.max(functional.dropout(x, training=False)), x)
+
+    def test_dropout_default(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x,)), x)
+
+    def test_dropout_training(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=True)), x)
+
+    def test_dropout_training_opset12(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.max(functional.dropout(x, training=True)), x, opset_version=12)
 
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)

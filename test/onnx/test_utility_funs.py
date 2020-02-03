@@ -5,8 +5,10 @@ import torch
 import torch.onnx
 from torch.onnx import utils
 from torch.onnx.symbolic_helper import _set_opset_version
+from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
 import onnx
+import onnxruntime  # noqa
 
 import io
 import copy
@@ -307,6 +309,91 @@ class TestUtilityFuns(TestCase):
                                     'unwrap model from torch.nn.DataParallel. Try '):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    def test_export_mode(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                return y
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+        f = io.BytesIO()
+
+        # set mode to in inference mode and export in training mode
+        model.eval()
+        old_state = model.training
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=True)
+        assert model.training == old_state
+
+        # set mode to training mode and export in inference mode
+        model.train()
+        old_state = model.training
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=False)
+        assert model.training == old_state
+
+    @skipIfUnsupportedOpsetVersion("TODO: Enable test when BatchNorm is implemented in ORT for opset 12.")
+    def test_batchnorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3, affine=True)
+
+            def forward(self, x):
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+        out = model(x)
+
+        # state after 1 train epoch
+        running_mean = model.bn.running_mean
+        running_var = model.bn.running_var
+        saved_mean = x.mean((0, 2, 3))
+        saved_var = x.var((0, 2, 3))
+
+        pytorch_out = [out.detach().numpy(),
+                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
+                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
+
+        model_export = MyModule()
+        f = io.BytesIO()
+        torch.onnx.export(model_export, (x,), f,
+                          opset_version=self.opset_version, training=True)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+
+        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+        [np.testing.assert_allclose(out, ort_out) for out, ort_out in zip(pytorch_out, ort_outs)]
+
+    @skipIfUnsupportedOpsetVersion("TODO: Enable test when Dropout is implemented in ORT for opset 12.")
+    def test_dropout_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.4)
+
+            def forward(self, x):
+                dropout = self.dropout(x)
+                return dropout
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version, training=True)
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
+        ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
+        ort_outs = ort_sess.run(None, ort_inputs)
+        assert x != ort_outs[0]
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -318,6 +405,11 @@ TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
 TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=11))
+
+# opset 12 tests
+TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 
 if __name__ == '__main__':

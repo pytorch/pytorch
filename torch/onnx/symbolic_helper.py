@@ -466,6 +466,11 @@ def _set_operator_export_type(operator_export_type):
     global _operator_export_type
     _operator_export_type = operator_export_type
 
+_training_mode = None
+def _set_training_mode(training_mode):
+    global _training_mode
+    _training_mode = training_mode
+
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
