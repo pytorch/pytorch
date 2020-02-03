@@ -111,6 +111,12 @@ void magmaOrgqr(
     magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info);
 
 template<class scalar_t>
+void magmaEig(magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, scalar_t* A,
+    magma_int_t lda, scalar_t* wr, scalar_t* wi, scalar_t* VL, magma_int_t ldvl,
+    scalar_t* VR, magma_int_t ldvr, scalar_t* work, magma_int_t lwork,
+    magma_int_t* info);
+
+template<class scalar_t>
 void magmaSymeig(
     magma_vec_t jobz, magma_uplo_t uplo, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     scalar_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork,
@@ -423,6 +429,26 @@ void magmaOrgqr<float>(
     magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
     float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
   magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaEig<double>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, double* A,
+    magma_int_t lda, double* wr, double* wi, double* VL, magma_int_t ldvl,
+    double* VR, magma_int_t ldvr, double* work, magma_int_t lwork,
+    magma_int_t* info) {
+  magma_dgeev_m(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaEig<float>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, float* A,
+    magma_int_t lda, float* wr, float* wi, float* VL, magma_int_t ldvl,
+    float* VR, magma_int_t ldvr, float* work, magma_int_t lwork,
+    magma_int_t* info) {
+  magma_sgeev_m(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1183,6 +1209,95 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
                          r_working_copy.narrow(-2, 0, n_columns_q).triu());
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_eig(Tensor& self, Tensor& reigvals, Tensor& ieigvals, Tensor& eigvecs, bool eigenvectors, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("eig: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data_ptr<scalar_t>();
+  auto reigvals_data = reigvals.data_ptr<scalar_t>();
+  auto ieigvals_data = ieigvals.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto eigvals_stride = reigvals.size(-2);
+  int64_t batch_size = batchCount(self);
+  magma_int_t n = magma_int_cast(self.size(-1), "n");
+
+  magma_vec_t jobvl = MagmaNoVec;
+  magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
+  magma_int_t ldvr = eigenvectors ? n : 1;
+
+  magma_int_t info;
+  // Follow the practice in symeig which running it first to get the optimum work size.
+  magma_int_t lwork = -1;
+  scalar_t wkopt;
+  scalar_t* eigvecs_data = eigenvectors ? eigvecs.data_ptr<scalar_t>() : NULL;
+  magmaEig<scalar_t>(jobvl, jobvr, n, self_data, n, reigvals_data, ieigvals_data, NULL, 1, eigvecs_data, ldvr, &wkopt, lwork, &info);
+
+  scalar_t* work;
+  lwork = magma_int_cast(wkopt, "work_size");
+  ALLOCATE_ARRAY(work, scalar_t, lwork);
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* reigvals_working_ptr = &reigvals_data[i * eigvals_stride];
+    scalar_t* ieigvals_working_ptr = &ieigvals_data[i * eigvals_stride];
+    scalar_t* eigvecs_working_ptr = eigenvectors ? &eigvecs_data[i * self_matrix_stride] : NULL;
+
+    magmaEig<scalar_t>(jobvl, jobvr, n, self_working_ptr, n,
+                       reigvals_working_ptr, ieigvals_working_ptr, NULL, 1,
+                       eigvecs_working_ptr, ldvr, work, lwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _eig_helper_cuda(const Tensor& self, bool eigenvectors) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto dim = self.dim();
+  auto self_sizes = self.sizes().vec();
+
+  if (self.numel() == 0) {
+    self_sizes[self_sizes.size()-1] = 2;
+    auto eigvals = at::empty(self_sizes, self.options());
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  }
+
+  // magmaEig uses hybrid CPU/multi GPU calculation where the input matrix starts
+  // from the CPU host and the calculation is done in the appropriate device.
+  // Therefore, we need to move the matrices to the CPU first then move it back
+  // to GPU before returning.
+
+  // making the last index to be 1 for later concatenation
+  self_sizes[self_sizes.size()-1] = 1;
+  auto reigvals = at::empty(self_sizes, self.options().device(at::kCPU));
+  auto ieigvals = at::empty(self_sizes, self.options().device(at::kCPU));
+
+  auto self_working_copy = cloneBatchedColumnMajor(self).to(at::kCPU);
+  auto eigvecs = eigenvectors ? cloneBatchedColumnMajor(self).to(at::kCPU) : at::empty({0}, self.options().device(at::kCPU));
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
+    apply_eig<scalar_t>(self_working_copy, reigvals, ieigvals, eigvecs, eigenvectors, infos);
+  });
+  auto eigvals = at::cat({reigvals, ieigvals}, -1);
+
+  if (dim > 2) {
+    batchCheckErrors(infos, "eig_cpu");
+  } else {
+    singleCheckErrors(infos[0], "eig_cpu");
+  }
+  if (eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), eigvecs.to(self.device()));
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), at::empty({0}, self.options()));
+  }
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
@@ -1214,7 +1329,7 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_int_t liwork = -1;
   magma_int_t iwkopt;
   magmaSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, wA, n, &wkopt, lwork, &iwkopt, liwork, &info);
-  
+
   scalar_t* work;
   magma_int_t* iwork;
   lwork = magma_int_cast(wkopt, "work_size");

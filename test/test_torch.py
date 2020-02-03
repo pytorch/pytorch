@@ -13051,8 +13051,8 @@ class TestTorchDeviceType(TestCase):
         self._test_memory_format_transformations('cuda', input_generator_fn, transformation_cpu_fn, default_is_preserve=True)
         self._test_memory_format_transformations('cpu', input_generator_fn, transformation_cuda_fn, default_is_preserve=True)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
     @dtypes(torch.double)
     def test_eig(self, device, dtype):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
