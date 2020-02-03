@@ -778,7 +778,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           &reserve_size
           ));
     reserve = at::empty(reserve_size, input.options().dtype(kByte));
-    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
@@ -795,7 +794,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));
-    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
@@ -914,7 +912,6 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         ));
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-  setCuDNNStreamToCurrent();
   AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -1018,7 +1015,6 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         &workspace_size
         ));
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-  setCuDNNStreamToCurrent();
   AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -1064,9 +1060,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
 
-  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, at::MemoryFormat::Contiguous);
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, at::MemoryFormat::Contiguous);
-  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, at::MemoryFormat::Contiguous)) : grad_cy_r;
+  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
@@ -1123,7 +1119,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
-  // a bufer to e.g. run RNNs in test mode.
+  // a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;

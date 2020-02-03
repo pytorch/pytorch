@@ -58,9 +58,6 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    // this is done intentionally done after build because copy has a "promotion"
-    // rule that always "promote" to target dtype.
-    iter.promote_common_dtype();
     AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(0), "copy_", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
     });
@@ -119,7 +116,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
 
-  // Enable p2p access between devices. (No-op if it invovles the CPU)
+  // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
 
   if (copy_requires_temporaries(iter, p2p_enabled)) {
@@ -132,7 +129,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // Type conversions are performed on the CPU for CPU-GPU copies and on
     // the src device for GPU-GPU copies.
     if (iter.device_type(0) == kCUDA) {
-      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, at::MemoryFormat::Contiguous);
+      dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);

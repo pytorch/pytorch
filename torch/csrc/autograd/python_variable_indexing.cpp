@@ -131,8 +131,8 @@ static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, 
   return self.select(dim, unpacked_index);
 }
 
-static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
+static Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
@@ -149,7 +149,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,
-    torch::utils::type_to_string(getDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
+    torch::utils::options_to_string(options).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
@@ -213,7 +213,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (PySequence_Check(obj)) {
       // TODO: Naughty naughty get out of jail free
       // (Fixing this means I have to fix the call chain though :/)
-      handle_var(sequenceToVariable(legacyExtractTypeId(self), obj));
+      handle_var(sequenceToVariable(legacyExtractDispatchKey(self), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {
@@ -240,14 +240,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -20,6 +20,7 @@ class PyRRef {
   WorkerInfo owner() const;
   py::object toHere();
   py::object localValue();
+  std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
 

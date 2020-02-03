@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
-from common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
+from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode
 from textwrap import dedent
 from itertools import product, permutations
@@ -309,7 +309,7 @@ class TestFuser(JitTestCase):
             with enable_profiling_mode():
                 warmup_backward(c.sum())
             graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'aten::Float'})
+            self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
@@ -553,7 +553,7 @@ class TestFuser(JitTestCase):
                                                                   "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
+    @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation

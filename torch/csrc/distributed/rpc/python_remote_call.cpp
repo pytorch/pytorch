@@ -44,7 +44,7 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
   values.pop_back();
   auto serializedPyObj = SerializedPyObj::fromIValues(std::move(values));
 
-  return c10::guts::make_unique<PythonRemoteCall>(
+  return std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), std::move(retRRefId), std::move(retForkId));
 }
 

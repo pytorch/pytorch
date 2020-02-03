@@ -61,9 +61,9 @@ namespace test_true_for_each_type {
 
 namespace test_map {
     class MyClass {};
-    static_assert(std::is_same<typelist<>, map_t<c10::guts::add_lvalue_reference_t, typelist<>>>::value, "");
-    static_assert(std::is_same<typelist<int&>, map_t<c10::guts::add_lvalue_reference_t, typelist<int>>>::value, "");
-    static_assert(std::is_same<typelist<int&, double&, const MyClass&>, map_t<c10::guts::add_lvalue_reference_t, typelist<int, double, const MyClass>>>::value, "");
+    static_assert(std::is_same<typelist<>, map_t<std::add_lvalue_reference_t, typelist<>>>::value, "");
+    static_assert(std::is_same<typelist<int&>, map_t<std::add_lvalue_reference_t, typelist<int>>>::value, "");
+    static_assert(std::is_same<typelist<int&, double&, const MyClass&>, map_t<std::add_lvalue_reference_t, typelist<int, double, const MyClass>>>::value, "");
 }
 
 namespace test_head {

@@ -9,6 +9,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <cstring>
 #include <map>
@@ -44,13 +45,21 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   ~GatherRangesToDenseOp() noexcept override {
     if (totalRanges_ > minObservation_) {
+      string debugString;
+      if (this->has_debug_def()) {
+        debugString =
+            "Info from operator: " + ProtoDebugString(this->debug_def());
+      } else {
+        debugString = "Info from operator: no op def";
+      }
+
       LOG(INFO) << "In GatherRangesToDenseOp:\n"
                 << "  Lifetime empty ranges for each feature is "
                 << emptyRanges_ << ".\n"
                 << "  Lifetime mismatched ranges for each feature is "
                 << mismatchedRanges_ << ".\n"
                 << "  With a total of " << totalRanges_ << " examples.\n"
-                << this->getErrorMsg();
+                << debugString;
     }
   }
 
@@ -154,23 +163,21 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
     // Check whether the empty and mismatch ratio exceeded the threshold.
     totalRanges_ += batchSize;
-    if (totalRanges_ >= minObservation_) {
-      for (int j = 0; j < OutputSize(); ++j) {
-        CAFFE_ENFORCE_GT(
-            totalRanges_ * maxMismatchedRatio_,
-            mismatchedRanges_[j],
-            "Ratio of range length mismatch for feature at index ",
-            j,
-            " is ",
-            (static_cast<double>(mismatchedRanges_[j]) /
-             static_cast<double>(totalRanges_)),
-            " (",
-            mismatchedRanges_[j],
-            "/",
-            totalRanges_,
-            ") which exceeds ",
-            maxMismatchedRatio_);
-      }
+    for (int j = 0; j < OutputSize(); ++j) {
+      CAFFE_ENFORCE_GT(
+          std::max(totalRanges_, minObservation_) * maxMismatchedRatio_,
+          mismatchedRanges_[j],
+          "Ratio of range length mismatch for feature at index ",
+          j,
+          " is ",
+          (static_cast<double>(mismatchedRanges_[j]) /
+           static_cast<double>(totalRanges_)),
+          " (",
+          mismatchedRanges_[j],
+          "/",
+          totalRanges_,
+          ") which exceeds ",
+          maxMismatchedRatio_);
     }
 
     return true;

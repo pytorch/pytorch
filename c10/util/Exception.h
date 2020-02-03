@@ -115,6 +115,12 @@ class C10_API IndexError : public Error {
 };
 
 
+// Used in ATen for non finite indices.  These turn into
+// ExitException when they cross to Python.
+class C10_API EnforceFiniteError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
@@ -196,7 +202,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -238,7 +244,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -259,11 +265,25 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+
+// Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
+// build, and does nothing in release build.  It is appropriate to use
+// in situations where you want to add an assert to a hotpath, but it is
+// too expensive to run this assert on production builds.
+#ifdef NDEBUG
+// Optimized version - generates no code.
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+  while (false)           \
+  TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+#else
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+#endif
+
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_INDEX(cond, ...)          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \

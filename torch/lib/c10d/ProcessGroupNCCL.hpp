@@ -27,7 +27,7 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // specifically, each NCCL call is scheduled on a separate CUDA stream that is
 // different from the current CUDA stream. This is for the purpose of
 // achieving potentially concurrency and better performance. As a result,
-// it is the callers' responsibilty to make sure that the CUDA stream their
+// it is the callers' responsibility to make sure that the CUDA stream their
 // code works on needs to wait for the NCCL operation from
 // this class.
 //
@@ -68,7 +68,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    void wait() override;
+    bool wait() override;
+
+    void abort() override;
 
     // Let current stream wait on the completing of the NCCL work
     // Throws on exceptions. Blocking operation, which will wait for work
@@ -175,6 +177,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather_base(
+      at::Tensor& outputbuffer,
+      at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
