@@ -10,6 +10,10 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 
+#include <torch/custom_class.h>
+
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+
 namespace at {
 namespace native {
 namespace fbgemm_utils {
@@ -195,5 +199,71 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 } // namespace fbgemm_utils
 } // namespace native
 } // namespace at
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
+  static int custom_class_handler = torch::jit::registerCustomClassHandler();
+  static auto register_linear_params =
+      torch::jit::class_<LinearPackedParamsBase>("LinearPackedParamsBase")
+          .def_pickle(
+              [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
+                  -> c10::IValue { // __getstate__
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::tie(weight, bias) = params->unpack();
+                return c10::ivalue::Tuple::create(
+                    std::move(weight),
+                    std::move(bias),
+                    params->backend(),
+                    params->bit_width());
+              },
+              [](c10::IValue state)
+                  -> c10::intrusive_ptr<
+                      LinearPackedParamsBase> { // __setstate__
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::string backend, bit_width;
+                auto state_tup = state.toTuple();
+                TORCH_INTERNAL_ASSERT(state_tup->elements().size() == 4);
+                weight = std::move(state_tup->elements()[0]).toTensor();
+                bias = std::move(state_tup->elements()[1]).toTensor();
+                backend = std::move(state_tup->elements()[2]).toString();
+                bit_width = std::move(state_tup->elements()[3]).toString();
+                if (backend == "FBGEMM") {
+                  if (bit_width == "FP32") {
+                    return PackedLinearWeight::prepack(
+                        std::move(weight), std::move(bias));
+                  } else if (bit_width == "FP16") {
+                    return PackedLinearWeightFp16::prepack(
+                        std::move(weight), std::move(bias));
+                  } else {
+                    TORCH_CHECK(
+                        false,
+                        "Unknown bit-width specifier",
+                        bit_width,
+                        " in serialized LinearPackedParams object!");
+                  }
+                } else if (backend == "QNNPACK") {
+                  TORCH_CHECK(
+                      bit_width == "FP32",
+                      "QNNPACK only supports FP32 bit width currently. Got ",
+                      bit_width);
+                  return PackedLinearWeightsQnnp::prepack(
+                      std::move(weight), std::move(bias));
+                } else {
+                  TORCH_CHECK(
+                      false,
+                      "Tried to deserialize LinearPackedParams object with ",
+                      "unknown backend type ",
+                      backend);
+                }
+              });
+  return register_linear_params;
+}
+
+namespace {
+
+static auto linear_params = register_linear_params();
+
+} // namespace
 
 #endif // USE_FBGEMM
