@@ -88,13 +88,13 @@ struct FBGEMM_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   at::Tensor apply(
       at::Tensor input,
       double output_scale,
-      int64_t output_zero_point) override [[noreturn]] {
+      int64_t output_zero_point) override {
     TORCH_INTERNAL_ASSERT(false);
   }
   at::Tensor apply_relu(
       at::Tensor input,
       double output_scale,
-      int64_t output_zero_point) override [[noreturn]] {
+      int64_t output_zero_point) override {
     TORCH_INTERNAL_ASSERT(false);
   }
 
