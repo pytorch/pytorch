@@ -11567,13 +11567,10 @@ class TestTorchDeviceType(TestCase):
             expected = brute_pdist(y, p=p)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(torch.allclose(expected, actual))
-            if grad_check and expected.size() != torch.Size([0]):
+            if not TEST_WITH_ROCM and grad_check and expected.size() != torch.Size([0]):
                 g0 = torch.rand_like(actual)
                 actual.backward(g0)
                 expected.backward(g0)
-                print('shape {}, device {}, p {}, dtype {}, trans {}'.format(
-                    shape, device, p, dtype, trans))
-                print('grad.abx().max(): {}'.format((x.grad - y.grad).abs().max()))
                 self.assertTrue(torch.allclose(x.grad, y.grad))
 
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
