@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
+#ifdef USE_FBGEMM
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
   auto packB = w.get();
 
@@ -37,12 +38,16 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
 
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight_origin, bias);
 }
+#endif // USE_FBGEMM
 
+#ifdef USE_PYTORCH_QNNPACK
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
     unpack() {
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias);
 }
+#endif // USE_PYTORCH_QNNPACK
 
+#ifdef USE_FBGEMM
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
     unpack() {
   auto& packed_weight_ptr = w;
@@ -58,6 +63,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
 
   return std::make_tuple(unpacked_weight.to(at::kFloat), bias);
 }
+#endif // USE_FBGEMM
 
 namespace at {
 namespace native {
