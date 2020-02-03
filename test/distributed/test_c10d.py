@@ -3171,7 +3171,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3222,31 +3222,31 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_clean_exit(self):
         self._test_nccl_errors_blocking(lambda : sys.exit(0))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_nonzero_exit(self):
         self._test_nccl_errors_blocking(lambda : sys.exit(1))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda : os.abort())
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
 
@@ -3257,7 +3257,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_invalid_nccl_blocking_wait_env(self):
         self._run_invalid_nccl_blocking_wait_env('abc')
         self._run_invalid_nccl_blocking_wait_env('-1')
@@ -3279,7 +3279,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             time.sleep(1)
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)

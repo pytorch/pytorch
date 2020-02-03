@@ -47,9 +47,8 @@ void testHelper(const std::string& prefix = "") {
   std::vector<std::shared_ptr<c10d::TCPStore>> clientTCPStores;
   std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientTCPStores.push_back(
-        std::make_unique<c10d::TCPStore>(
-            "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
+    clientTCPStores.push_back(std::make_unique<c10d::TCPStore>(
+        "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
     clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
         new c10d::PrefixStore(prefix, clientTCPStores[i])));
   }

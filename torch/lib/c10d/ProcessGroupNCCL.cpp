@@ -303,9 +303,9 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     ncclCommWatchdogInternal();
     LOG(INFO) << "NCCL watchdog thread terminated normally";
-  } catch (std::exception &e) {
+  } catch (std::exception& e) {
     LOG(INFO) << "NCCL watchdog thread terminated with exception: " << e.what();
-  } catch (...)  {
+  } catch (...) {
     LOG(INFO) << "NCCL watchdog thread terminated with unknown exception";
   }
 }

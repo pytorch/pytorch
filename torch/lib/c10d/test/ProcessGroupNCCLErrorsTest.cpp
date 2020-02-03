@@ -168,7 +168,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, std::chrono::milliseconds(1000));
+  ProcessGroupNCCLSimulateErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(1000));
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -198,7 +199,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1, std::chrono::milliseconds(3000));
+  ProcessGroupNCCLTimedOutErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(3000));
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -222,7 +224,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
     return;
   }
 
-  ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, std::chrono::milliseconds(3000));
+  ProcessGroupNCCLSimulateErrors pg(
+      store_, 0, 1, std::chrono::milliseconds(3000));
 
   auto work = pg.allreduce(tensors_);
   pg.barrier()->wait();
