@@ -725,18 +725,23 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   bool expandable = are_expandable(mean.sizes(), std.sizes());
-  bool empty_output = output.sizes().equals({0});
+  bool empty_output = output.numel() == 0;
 
   if (expandable) {
     auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(empty_output || output.sizes().equals(shape), "output size is not the same as broadcast size of mean and std");
+    TORCH_CHECK(empty_output || output.sizes().equals(shape), "output size is not the same as broadcasted size of mean and std");
     if (empty_output) {
       at::native::resize_(output, shape);
     }
   }
   else {
-    TORCH_CHECK(mean.numel() == std.numel(), "mean and std should have same number of element when nonexpandable");
-    TORCH_CHECK(empty_output || output.sizes().equals(mean.sizes()), "output size is not the same as the size of mean");
+    TORCH_CHECK(mean.numel() == std.numel(), "std and mean are not broadcastable and have different number of elements");
+    TORCH_CHECK(empty_output || output.sizes().equals(mean.sizes()), "std and mean are not broadcastable, output size is not the same as mean size");
+    TORCH_WARN_ONCE(
+        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
+        "supported mode of operation, but is now deprecated and the support will be removed in a later release. "
+        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
+        "Please ensure that std and mean are broadcastable to avoid these issues.");
     if (empty_output) {
       at::native::resize_(output, mean.sizes());
     }
@@ -749,11 +754,6 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
   if (!expandable) {
-    TORCH_WARN_ONCE(
-        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
-        "supported mode of operation, but is now deprecated and the support will be removed in a later release. "
-        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
-        "Please ensure that std and mean are broadcastable to avoid these issues.");
     output.mul_(std.reshape(mean.sizes())).add_(mean);
   }
   else {
