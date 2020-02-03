@@ -654,25 +654,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Change the dimensionality of a tensor.  This is truly a resize:
-   * old sizes, if they are still valid, are preserved (this invariant
-   * is utilized by some call-sites, e.g., the implementation of squeeze, which
-   * mostly wants the sizes to stay the same).  New dimensions are given zero
-   * size and zero stride; this is probably not what you want--you should
-   * set_size/set_stride afterwards.
-   *
-   * TODO: This should be jettisoned in favor of `set_sizes_and_strides`,
-   * which is harder to misuse.
-   */
-  virtual void resize_dim(int64_t ndim) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_dim ", err_msg_tensor_metadata_change_not_allowed);
-    sizes_.resize(ndim, 0);
-    strides_.resize(ndim, 0);
-    refresh_numel();
-    refresh_contiguous();
-  }
-
-  /**
    * Change the size at some dimension.  This DOES NOT update strides;
    * thus, most changes to size will not preserve contiguity.  You probably
    * also want to call set_stride() when you call this.
@@ -696,7 +677,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void set_stride(int64_t dim, int64_t new_stride) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_tensor_metadata_change_not_allowed);
     strides_[dim] = new_stride;
-    refresh_numel();
     refresh_contiguous();
   }
 
@@ -1530,9 +1510,7 @@ private:
   // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
   // equivalent to having an autograd_meta_ pointing to a default constructed
   // AutogradMeta; intuitively, tensors which don't require grad will have this
-  // field set to null.  If !key_set_.has(VariableTensorId), then
-  // autograd_meta == nullptr (but not vice versa, due to the nullptr
-  // optimization)
+  // field set to null.
   //
   // This means accessors on autograd_meta_ have to be careful to test if they
   // got a nullptr, and handle default behavior appropriately in that case.
@@ -1601,23 +1579,9 @@ protected:
   // (which do not have a device.)
   c10::optional<c10::Device> device_opt_;
 
-  // The set of DispatchKeys which describe this tensor
-  //
-  // INVARIANT: key_set_.has(DispatchKey::VariableTensorId) (every tensor
-  // is a variable).  Historically this was not the case (there was a
-  // distinction between plain tensors and variables), but because
-  // we merged Variable and Tensor, this invariant now always holds.
-  // This invariant is currently enforced in the constructor of TensorImpl.
-  //
-  // You might be wondering why we don't just not include VariableTensorId
-  // from the type set, if it is always set.  The answer is, we still need
-  // to dispatch differently from variables, and then mask out the variable
-  // id once we are done handling autograd.  If the boolean here was
-  // inverted, we wouldn't be able to get autograd codepath (since there's
-  // be no DispatchKey to dispatch to!)  We cannot set VariableTensorId
-  // as the default value contained in the *included* tensor type id set
-  // as TLS requires our state to be zero-initialized (i.e., it is not
-  // included).
+  // The set of DispatchKeys which describe this tensor.  NB: this
+  // does NOT include VariableTensorId (historically, it did, but
+  // not anymore!)
   DispatchKeySet key_set_;
 
   // You get to have eight byte-size fields here, before you
