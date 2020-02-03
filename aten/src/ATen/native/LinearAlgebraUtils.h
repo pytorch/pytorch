@@ -97,7 +97,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
       } else if (strstr(name, "eig")) {
         AT_ERROR(name, ": For batch ", i, ": the QR algorithm failed to compute all the eigenvalues, "
                  "and no eigenvectors have been computed; elements and ", info+1, ":N of W contain "
-                 "eigenvalues which have converged.")
+                 "eigenvalues which have converged.");
       } else if (strstr(name, "symeig")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
