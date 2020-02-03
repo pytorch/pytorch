@@ -486,11 +486,117 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, G
 }
 
 void random_full_64_range_kernel(TensorIterator& iter, Generator* gen_) {
-  // TODO
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cuda", [&] {
+    if (std::is_same<scalar_t, int64_t>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, float>::value) { // and half?
+      auto random_func = [] __device__ (uint64_t rand) {
+        return static_cast<int64_t>(rand);
+      };
+      distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+          ulonglong2 ret;
+          uint4 rand_val = curand4(state);
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+          return ret;
+        },
+        random_func);
+    } else if (std::is_same<scalar_t, bool>::value) {
+      auto random_func = [] __device__ (uint32_t rand) {
+        return static_cast<scalar_t>(rand & 1);
+      };
+      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+          return curand4(state);
+        },
+        random_func);
+    } else {
+      auto random_func = [] __device__ (uint32_t rand) {
+        return static_cast<scalar_t>(rand);
+      };
+      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+          return curand4(state);
+        },
+        random_func);
+    }
+  });
 }
 
 void random_kernel(TensorIterator& iter, Generator* gen_) {
-  // TODO
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+  if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cpu", [&] {
+      if (std::is_same<scalar_t, double>::value) {
+        auto random_func = [] __device__ (uint64_t rand) {
+          return static_cast<int64_t>(rand % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
+        };
+        distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
+          gen,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+            ulonglong2 ret;
+            uint4 rand_val = curand4(state);
+            ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+            ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+            return ret;
+          },
+          random_func);
+      } else {
+        auto random_func = [] __device__ (uint32_t rand) {
+          return static_cast<int32_t>(rand % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
+        };
+        distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+          gen,
+          [] __device__ (curandStatePhilox4_32_10_t* state) {
+            return curand4(state);
+          },
+          random_func);
+      }
+    });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_cpu", [&] {
+      if (std::is_same<scalar_t, int64_t>::value) {
+        auto random_func = [] __device__ (uint64_t rand) {
+          return static_cast<int64_t>(rand % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
+        };
+        distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
+          gen,
+          [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+            ulonglong2 ret;
+            uint4 rand_val = curand4(state);
+            ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+            ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+            return ret;
+          },
+          random_func);
+      } else if (std::is_same<scalar_t, bool>::value) {
+        auto random_func = [] __device__ (uint32_t rand) {
+          return static_cast<int32_t>(rand & 1);
+        };
+        distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+          gen,
+          [] __device__ (curandStatePhilox4_32_10_t* state) {
+            return curand4(state);
+          },
+          random_func);
+      } else {
+        auto random_func = [] __device__ (uint32_t rand) {
+          return static_cast<int32_t>(rand % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
+        };
+        distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+          gen,
+          [] __device__ (curandStatePhilox4_32_10_t* state) {
+            return curand4(state);
+          },
+          random_func);
+      }
+    });
+  }
 }
 
 void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
