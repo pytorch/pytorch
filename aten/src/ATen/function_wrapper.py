@@ -1366,7 +1366,7 @@ def create_derived(backend_type_env, declarations):
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
     def allocate_arg(arg, output_count, backend, scalar_name):
-        # type: (Environment, THFormal, int) -> List[str]
+        # type: (THFormal, int, str, str) -> List[str]
         name = arg['name']
         allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(Backend=backend, ScalarName=scalar_name)
         tensor_arg = '{}_'.format(name)
@@ -1421,15 +1421,15 @@ def create_derived(backend_type_env, declarations):
         body = []  # type: List[str]
         body += handle_zero_dim(env, option)
 
-        switch_prologue = []
+        switch_prologue = []  # type: List[str]
         output_count = 0
         cases = []
 
         for arg in option['arguments']:
             # make a new allocation of TensorImpl, then wrap a Tensor around it.
-             if arg.get('allocate', False):
-                    switch_prologue += allocate_arg(arg, output_count, env['Backend'], 'dispatch_scalar_type')
-                    output_count += 1
+            if arg.get('allocate', False):
+                switch_prologue += allocate_arg(arg, output_count, env['Backend'], 'dispatch_scalar_type')
+                output_count += 1
 
         for scalar_name, c_type, accreal, _ in scalar_types:
             if scalar_name in scalar_type_cases:
