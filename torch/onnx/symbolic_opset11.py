@@ -249,7 +249,12 @@ def _len(g, self):
 
 
 def __getitem_(g, self, i):
-    return g.op("SequenceAt", self, i)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        # SequenceAt requires that the input be a List of Tensors
+        return g.op("SequenceAt", self, i)
+    else:
+        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        return getitem(g, self, i)
 
 
 def append(g, self, tensor):

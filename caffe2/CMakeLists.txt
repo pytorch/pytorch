@@ -275,10 +275,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_H_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
   set(TORCH_GENERATED_CODE
@@ -307,12 +303,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
     "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
@@ -511,9 +503,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/torchscript_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
