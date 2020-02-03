@@ -642,7 +642,7 @@ class TestDataParallel(TestCase):
             def forward(self, x):
                 self._testcase.assertWarnsRegex(
                     lambda: self.zero_grad(),
-                    "The parameters in data parallel modules are copied from the original module.")
+                    "Calling .zero_grad() from a module that was passed to a nn.DataParallel() has no effect.")
                 return x
 
         module = Net(self).cuda()

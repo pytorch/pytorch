@@ -1173,8 +1173,9 @@ class Module(object):
 
         def zero_grad():
             warnings.warn(
-                "The parameters in data parallel modules are copied from the original module."
-                "This means they are not leaf nodes in autograd and so don't accumulate gradients.\n"
+                "Calling .zero_grad() from a module that was passed to a nn.DataParallel() has no effect. "
+                "The parameters are copied (in a differentiable manner) from the original module. "
+                "This means they are not leaf nodes in autograd and so don't accumulate gradients. "
                 "If you need gradients in your forward method, consider using autograd.grad instead.")
             replica = weak_self()
             if replica:
