@@ -142,9 +142,9 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
   is_target.zero_();
 
-  // special case ndims == 0: produce scalar output for scalar inputs
+  // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
-  if (reduction != Reduction::None || ndims == 0) {
+  if (reduction != Reduction::None || target.dim() <= 1) {
     output.resize_({});
   } else {
     output.resize_({nframe});

@@ -30,7 +30,7 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
@@ -81,11 +81,23 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
-  set(CPU_INTEL ON)
+if (WIN32)
+  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
+  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
+  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
+  if ($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 else ()
-  set(CPU_INTEL OFF)
+  if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 endif ()
+
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
@@ -107,11 +119,9 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-cmake_dependent_option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
-  "NOT MSVC" OFF)
+option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
-option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
 option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -260,7 +270,7 @@ if (MSVC)
     endif()
 
     # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
+    # against libraries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
 
@@ -283,10 +293,17 @@ if (MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+IF(NOT MSVC)
+  SET(CUDA_NVCC_FLAGS_DEBUG "${CUDA_NVCC_FLAGS_DEBUG} -g -G --source-in-ptx")
+  SET(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${CUDA_NVCC_FLAGS_RELWITHDEBINFO} -g -lineinfo --source-in-ptx")
+ENDIF(NOT MSVC)
+
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
+  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
@@ -383,10 +400,6 @@ if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
 endif()
 
-if(BUILD_NAMEDTENSOR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBUILD_NAMEDTENSOR")
-endif()
-
 if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
 endif()
@@ -405,8 +418,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")

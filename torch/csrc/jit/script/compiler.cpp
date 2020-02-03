@@ -696,9 +696,17 @@ struct to_ir {
   }
 
   // see [setstate type]
-  static TypePtr getTypeForSetStateArg(const Self* self) {
+  static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    self->getClassType()->getMethod("__getstate__")->ensure_defined();
+    auto getstate = self->getClassType()->getMethod("__getstate__");
+    if (!getstate) {
+      throw ErrorReport(def.range())
+          << "`__setstate__` defined but not `__getstate__`. "
+          << "You must have both defined on a ScriptModule "
+          << "to customize serialization.\n"
+          << "Did you forget to use `@torch.jit.export`?";
+    }
+    getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
         ->getSchema()
@@ -725,10 +733,10 @@ struct to_ir {
     // well-formed
     TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
     const auto numDeclParams = def.decl().params().size();
-    TORCH_CHECK(
-        numDeclParams,
-        "Expected 2 arguments for __setstate__, got: ",
-        numDeclParams);
+    if (numDeclParams != 2) {
+      throw ErrorReport(def.range())
+          << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams;
+    }
     return true;
   }
 
@@ -783,7 +791,7 @@ struct to_ir {
       auto arg = schema.arguments().at(arg_annotation_idx++);
       if (shouldDeriveType) {
         TORCH_INTERNAL_ASSERT(schema.arguments().size() == 1);
-        const auto& inferredStateType = getTypeForSetStateArg(self);
+        const auto& inferredStateType = getTypeForSetStateArg(def, self);
         arg = arg.cloneWithType(inferredStateType);
       }
 
@@ -847,7 +855,7 @@ struct to_ir {
   }
 
   void emitClosure(const Def& def) {
-    // invoked once the closure block is set as the enviroment
+    // invoked once the closure block is set as the environment
     auto emit_body = [&](Block* closure_block) {
       emitDef(
           def,
@@ -888,6 +896,29 @@ struct to_ir {
     auto continue_node =
         graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
     graph->insertNode(continue_node);
+  }
+
+  void emitDelete(const Delete& stmt) {
+    if (stmt.expr().kind() != TK_SUBSCRIPT) {
+      throw ErrorReport(stmt.range())
+          << "del statements are only supported for list"
+             " and dict item deletion";
+    }
+    Subscript subscript(stmt.expr());
+    const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+    if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+      throw ErrorReport(stmt.range())
+          << "del statements only support deletion at a single index, "
+             "slicing is not supported"
+             " (see https://github.com/pytorch/pytorch/issues/31430)";
+    }
+    const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+    const SourceRange& val_range = subscript.value().range();
+    Value* idx = emitExpr(subscript_exprs[0]);
+    Value* val = sv->asValue(val_range, method);
+    auto node = graph->create(aten::Delete, {val, idx}, 0)
+                    ->setSourceRange(stmt.range());
+    graph->insertNode(node);
   }
 
   void emitReturn(const Return& stmt) {
@@ -981,6 +1012,9 @@ struct to_ir {
           break;
         case TK_DEF:
           emitClosure(Def(stmt));
+          break;
+        case TK_DELETE:
+          emitDelete(Delete(stmt));
           break;
         default:
           throw ErrorReport(stmt)
@@ -1096,8 +1130,12 @@ struct to_ir {
             }
           }
         }
-        return CondValue(
-            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+        auto expr_out = emitToBool(emitExpr(expr));
+        c10::optional<bool> static_if = c10::nullopt;
+        if (expr_out->node()->kind() == aten::is_scripting) {
+          static_if = true;
+        }
+        return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }
   }
@@ -2193,11 +2231,10 @@ struct to_ir {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
     const auto lhs = Select(stmt.lhs());
-    const auto basename = Var(lhs.value()).name();
+    auto lhsObject = emitSugaredExpr(lhs.value(), 1);
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
                               ->asValue(stmt.rhs().range(), method);
-    auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+    lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2764,20 +2801,26 @@ struct to_ir {
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
         TypePtr elem_type = TensorType::get();
-        if (type_hint && type_hint->kind() == TypeKind::ListType) {
-          elem_type = type_hint->expect<ListType>()->getElementType();
+        if (type_hint) {
+          if (type_hint->kind() == TypeKind::ListType) {
+            elem_type = type_hint->expect<ListType>()->getElementType();
+          } else {
+            // If the type hint was not a List[T] throw an error
+            throw ErrorReport(tree)
+                << "Expected a List type hint but instead got "
+                << type_hint->python_str();
+          }
         } else if (!values.empty()) {
-          elem_type = values.at(0)->type();
+          std::stringstream ss;
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+          auto maybe_elem_type = unifyTypeList(types, ss);
+          if (!maybe_elem_type) {
+            throw ErrorReport(tree) << "Lists must contain only a single type\n"
+                                    << ss.str();
+          }
+          elem_type = maybe_elem_type.value();
         }
 
-        // Tensors are special because they have dymnamic properties. So any
-        // list containing tensors should be typed with the unified typeof all
-        // the elements.
-        if (elem_type->isSubtypeOf(TensorType::get())) {
-          for (const auto& value : values) {
-            elem_type = unifyTypes(elem_type, value->type()).value();
-          }
-        }
         for (auto v : values) {
           std::stringstream ss;
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
@@ -2803,6 +2846,7 @@ struct to_ir {
         auto value_trees = dl.value_inputs().tree()->trees();
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
+
         for (size_t i = 0; i < key_trees.size(); ++i) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
@@ -2815,14 +2859,33 @@ struct to_ir {
           auto dict_type = type_hint->expect<DictType>();
           key_type = dict_type->getKeyType();
           value_type = dict_type->getValueType();
-        } else if (!keys.empty()) {
-          key_type = keys.at(0)->type();
-          value_type = values.at(0)->type();
-        } else {
+        } else if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
+        } else {
+          key_type = keys.at(0)->type();
+          value_type = values.at(0)->type();
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
+
+        auto checkTypeOfValues = [](const TypePtr& type,
+                                    const char* what,
+                                    const std::vector<Value*>& values,
+                                    TreeList trees) {
+          for (size_t i = 0, N = values.size(); i < N; ++i) {
+            std::stringstream ss;
+            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
+              throw ErrorReport(trees[i])
+                  << "Dict " << what
+                  << " must contain only a single type, expected: "
+                  << type->python_str() << " but found "
+                  << values[i]->type()->python_str() << " instead.\n"
+                  << ss.str();
+            }
+          }
+        };
+        checkTypeOfValues(key_type, "keys", keys, key_trees);
+        checkTypeOfValues(value_type, "values", values, value_trees);
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
@@ -3274,13 +3337,21 @@ c10::QualifiedName CompilationUnit::mangle(
   for (auto& atom : atoms) {
     auto pos = atom.find(manglePrefix);
     if (pos != std::string::npos) {
-      std::string newAtom;
-      newAtom.reserve(atom.size());
+      auto num = atom.substr(pos + manglePrefix.size());
+      // current mangle index in the name
+      size_t num_i = c10::stoi(num);
+      // bump the mangleIndex_ to num_i + 1
+      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
+      std::string newAtomPrefix;
+      newAtomPrefix.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
-      newAtom.append(atom, 0, pos);
-      newAtom.append(manglePrefix);
-      newAtom.append(c10::to_string(mangleIndex_++));
-      atom = newAtom;
+      newAtomPrefix.append(atom, 0, pos);
+      newAtomPrefix.append(manglePrefix);
+      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      // increment mangleIndex_ until the type is not defined
+      while (get_type(QualifiedName(atoms))) {
+        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      }
       return QualifiedName(atoms);
     }
   }
@@ -3402,6 +3473,14 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
   ConstantPooling(to_clean);
+  // full constant propagation runs ops with mutable inputs if it can
+  // prove that the inputs are not mutated anywhere in the graph.
+  // if a mutating node is removed in the graph (e.g. constant prop inlined a
+  // a constant if) then the next time constant prop is run it might be able
+  // to run nodes it was not able to previously, and the graph may change
+  // (jitter) So we run only constant prop w immutable types here bc
+  // successive runs of immutable constant prop does not change the graph
+  ConstantPropagationImmutableTypes(to_clean);
   // For jitter
   CanonicalizeOutputs(to_clean);
 }

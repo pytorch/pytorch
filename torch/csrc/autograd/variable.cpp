@@ -47,7 +47,7 @@ at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   std::unique_ptr<c10::AutogradMetaInterface> make() const override {
-    return c10::guts::make_unique<AutogradMeta>();
+    return std::make_unique<AutogradMeta>();
   }
   const at::Tensor& undefined_tensor() const override {
     return singleton_undefined_tensor;
@@ -66,7 +66,7 @@ namespace impl {
     TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
     auto p = self.unsafeGetTensorImpl();
     if (!p->autograd_meta()) {
-      p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
+      p->set_autograd_meta(std::make_unique<AutogradMeta>());
     }
     return get_autograd_meta(self);
   }
@@ -331,7 +331,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       fn->storage_offset = self.storage_offset();
       fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.options()
       , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);

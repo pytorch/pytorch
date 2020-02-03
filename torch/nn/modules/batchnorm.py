@@ -11,8 +11,7 @@ from .. import init
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
-    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked',
+    __constants__ = ['track_running_stats', 'momentum', 'eps',
                      'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
@@ -506,8 +505,9 @@ class SyncBatchNorm(_BatchNorm):
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
-                module_output.weight.data = module.weight.data.clone(memory_format=torch.preserve_format).detach()
-                module_output.bias.data = module.bias.data.clone(memory_format=torch.preserve_format).detach()
+                with torch.no_grad():
+                    module_output.weight.copy_(module.weight)
+                    module_output.bias.copy_(module.bias)
                 # keep requires_grad unchanged
                 module_output.weight.requires_grad = module.weight.requires_grad
                 module_output.bias.requires_grad = module.bias.requires_grad

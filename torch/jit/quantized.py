@@ -237,10 +237,10 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
         )
 
 
-@torch.jit.script
 def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
+
 
 class QuantizedRNNBase(torch.jit.ScriptModule):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',

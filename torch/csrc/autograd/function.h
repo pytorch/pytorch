@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -116,12 +115,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     RECORD_FUNCTION(
         this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
 
-#ifdef BUILD_NAMEDTENSOR
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
-#endif
     return apply(std::move(inputs));
   }
 
@@ -137,11 +134,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::DeprecatedTypeProperties& type
+    const at::TensorOptions& options
   , at::IntArrayRef shape
   , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(type, shape, device);
+    input_metadata_.emplace_back(options, shape, device);
     return input_nr;
   }
 

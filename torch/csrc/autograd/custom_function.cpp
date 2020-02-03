@@ -99,7 +99,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 }
 
 void check_variable_result(const Variable& original, const Variable& result, std::string hook_name) {
-  if (original.type() != result.type()) {
+  if (!original.options().type_equal(result.options())) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the type of value (";
     ss << "was " << original.toString() << " got ";

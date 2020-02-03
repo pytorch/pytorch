@@ -24,7 +24,7 @@ OPERATOR_SCHEMA(ClipTensorByScaling)
     .Input(
         2,
         "additional_threshold",
-        "An optional additonal threshold to scale the orignal threshold")
+        "An optional additional threshold to scale the original threshold")
     .Arg("threshold", "Threshold to determine whether to scale down the tensor")
     .Output(
         0,

@@ -1,18 +1,21 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/native/c10_utils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <vector>
 
 namespace at {
 namespace native {
-namespace {
 
 DEFINE_DISPATCH(qcat_nhwc_stub);
 DEFINE_DISPATCH(qcat_relu_nhwc_stub);
+
+namespace {
 
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
@@ -34,15 +37,11 @@ bool is_valid_quantization_scheme(const Tensor& t) {
  * Note: This function uses a dequantization.
  */
 template <bool ReLUFused>
-Tensor quantized_cat(
+Tensor quantized_cat_impl(
     const c10::List<Tensor>& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {
-  TORCH_CHECK(
-      is_valid_quantization_scheme(qxs[0]),
-      "Only per-tensor quantization is supported in 'cat'!")
-
   if (is_cat_nhwc_fast_path(qxs, dim)) {
     if (ReLUFused) {
       return qcat_relu_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
@@ -83,10 +82,12 @@ class QCat final : public torch::OperatorKernel {
       int64_t dim,
       c10::optional<double> scale,
       c10::optional<int64_t> zero_point) {
+    TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+                "Only per-tensor quantization is supported in 'cat'!")
     double _scale = scale.has_value() ? scale.value() : qxs.get(0).q_scale();
     int64_t _zero_point =
         zero_point.has_value() ? zero_point.value() : qxs.get(0).q_zero_point();
-    return quantized_cat<ReLUFused>(qxs, dim, _scale, _zero_point);
+    return quantized_cat_impl<ReLUFused>(qxs, dim, _scale, _zero_point);
   }
 };
 
@@ -94,8 +95,12 @@ template <bool ReLUFused = false>
 class QCatOut final : public torch::OperatorKernel {
  public:
   Tensor operator()(const c10::List<Tensor>& qxs, int64_t dim, Tensor out) {
+    TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+                "Only per-tensor quantization is supported in 'cat'!")
+    TORCH_CHECK(is_valid_quantization_scheme(out),
+                "Only per-tensor quantization is supported in 'cat'!")
     auto out_ =
-        quantized_cat<ReLUFused>(qxs, dim, out.q_scale(), out.q_zero_point());
+        quantized_cat_impl<ReLUFused>(qxs, dim, out.q_scale(), out.q_zero_point());
     at::native::copy_(out, out_, /*non_blocking=*/false);
     return out;
   }
@@ -106,20 +111,40 @@ static auto registry =
         .op("quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCat<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_relu(Tensor[] qx, int dim, float? scale, int? zero_point)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCat<true>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_out(Tensor[] qx, int dim, Tensor out)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCatOut<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::cat_relu_out(Tensor[] qx, int dim, Tensor out)"
             " -> Tensor",
             torch::RegisterOperators::options().kernel<QCatOut<true>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
-} // namespace native
-} // namespace at
+
+Tensor quantized_cat(TensorList qxs, int64_t dim) {
+  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+              "Only per-tensor quantization is supported in 'cat'!")
+  double _scale = qxs[0].q_scale();
+  int64_t _zero_point = qxs[0].q_zero_point();
+  return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
+}
+
+Tensor& quantized_cat_out(Tensor& out, TensorList qxs, int64_t dim) {
+  TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
+              "Only per-tensor quantization is supported in 'cat'!")
+  TORCH_CHECK(is_valid_quantization_scheme(out),
+              "Only per-tensor quantization is supported in 'cat'!")
+  auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
+                                        out.q_zero_point());
+  at::native::copy_(out, out_, /*non_blocking=*/false);
+  return out;
+}
+
+}  // namespace native
+}  // namespace at

@@ -8,7 +8,7 @@ package caffe2;
 // (2) We do not use extension because that used to create quite some conflicts
 //     in Caffe's protobuf design.
 // (3) We have not used any proto3 specific features, such as Any or Map. This
-//     is mainly for backward compability purposes but we may consider using
+//     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
 
 // ExternalDataProto stores the pointer to the content of TensorProto
@@ -62,6 +62,8 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
+
+    ZERO_COLLISION_HASH = 14;  // zero-collision hash state
   }
   optional DataType data_type = 2 [default = FLOAT];
 
@@ -395,7 +397,7 @@ message ExecutionStep {
   optional int64 run_every_ms = 11;
 
   // If false or not set, execute sub-steps serially.
-  // If true, execute all substeps concurrently, each one in a separte thread.
+  // If true, execute all substeps concurrently, each one in a separate thread.
   optional bool concurrent_substeps = 6;
 
   // Name of a scalar boolean tensor.

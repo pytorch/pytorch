@@ -115,4 +115,16 @@ ShapeInfo getShapeInfoFromBlob(const Blob* blob);
 
 bool operator==(const ShapeInfo& lhs, const ShapeInfo& rhs);
 
+// Construct a ShapeInfo instance from TensorShape and constructed dimType.
+// Default first dimension of dimType is BATCH, reason:
+// We treat first dimension of hinted shapes as BATCH.
+// If there are shape hints on blobs in the workspace,
+// since they are already inserted as CONSTANT, it will take effect here.
+// For SEQ typed tensors, there are only a few of them and they will be
+// handled by BoundShapeInferencer.
+CAFFE2_API ShapeInfo constructShapeInfoWithDefaultDimType(
+    TensorShape shape,
+    TensorBoundShape_DimType defaultFirstDimType =
+        TensorBoundShape_DimType_BATCH);
+
 } // namespace caffe2

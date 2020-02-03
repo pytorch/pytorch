@@ -41,4 +41,15 @@ bool operator==(const ShapeInfo& lhs, const ShapeInfo& rhs) {
       lhs.shape.SerializeAsString() == rhs.shape.SerializeAsString();
 }
 
+ShapeInfo constructShapeInfoWithDefaultDimType(
+    TensorShape shape,
+    TensorBoundShape_DimType defaultFirstDimType) {
+  std::vector<TensorBoundShape_DimType> dimType(
+      shape.dims_size(), TensorBoundShape_DimType_CONSTANT);
+  if (dimType.size()) {
+    dimType[0] = defaultFirstDimType;
+  }
+  return ShapeInfo(dimType, shape);
+}
+
 } // namespace caffe2

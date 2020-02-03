@@ -2,7 +2,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
       # TODO: stop hardcoding this
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:405"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:07597f23-fa81-474c-8bef-5c8a91b50595"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -47,7 +47,7 @@
   pytorch_cpp_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:405"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:07597f23-fa81-474c-8bef-5c8a91b50595"
     resource_class: large
     machine:
       image: ubuntu-1604:201903-01
@@ -107,7 +107,7 @@
             export IN_CIRCLECI=1
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
@@ -174,14 +174,14 @@
 
             # Install CUDA 10.0
             sudo rm -rf ~/CUDAMacOSXInstaller.app || true
-            curl https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cuda_10.0.130_mac_installer.zip -o ~/cuda_10.0.130_mac_installer.zip
             unzip ~/cuda_10.0.130_mac_installer.zip -d ~/
             sudo ~/CUDAMacOSXInstaller.app/Contents/MacOS/CUDAMacOSXInstaller --accept-eula --no-window
             sudo cp /usr/local/cuda/lib/libcuda.dylib /Developer/NVIDIA/CUDA-10.0/lib/libcuda.dylib
             sudo rm -rf /usr/local/cuda || true
 
             # Install cuDNN 7.6.5 for CUDA 10.0
-            curl https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
+            curl --retry 3 https://s3.amazonaws.com/ossci-macos/cudnn-10.0-osx-x64-v7.6.5.32.tgz -o ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz
             rm -rf ~/cudnn-10.0-osx-x64-v7.6.5.32 && mkdir ~/cudnn-10.0-osx-x64-v7.6.5.32
             tar -xzvf ~/cudnn-10.0-osx-x64-v7.6.5.32.tgz -C ~/cudnn-10.0-osx-x64-v7.6.5.32
             sudo cp ~/cudnn-10.0-osx-x64-v7.6.5.32/cuda/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/include/
@@ -189,7 +189,7 @@
             sudo chmod a+r /Developer/NVIDIA/CUDA-10.0/include/cudnn.h /Developer/NVIDIA/CUDA-10.0/lib/libcudnn*
 
             # Install sccache
-            sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
@@ -205,7 +205,7 @@
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:07597f23-fa81-474c-8bef-5c8a91b50595"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -291,7 +291,7 @@
   pytorch_android_publish_snapshot:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:07597f23-fa81-474c-8bef-5c8a91b50595"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -327,7 +327,7 @@
   pytorch_android_gradle_build-x86_32:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-only-x86_32
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:405"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:07597f23-fa81-474c-8bef-5c8a91b50595"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -373,14 +373,14 @@
   pytorch_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "10.2.1"
+      xcode: "11.2.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
       - checkout
       - run_brew_for_ios_build
       - run:
-          name: cert install
+          name: Run Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
@@ -412,29 +412,43 @@
             export TCLLIBPATH="/usr/local/lib"
 
             # Install conda
-            curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-            chmod +x ~/Downloads/conda.sh
-            /bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+            curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+            chmod +x ~/conda.sh
+            /bin/bash ~/conda.sh -b -p ~/anaconda
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
+
             # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+            retry () {
+                $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
             git submodule update --init --recursive
+
             # export
             export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+
             # run build script
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+
+            #check the custom build flag
+            echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
+            if [ -n "${SELECTED_OP_LIST}" ]; then
+                export SELECTED_OP_LIST="${PROJ_ROOT}/ios/TestApp/custom_build/${SELECTED_OP_LIST}"
+            fi
             export BUILD_PYTORCH_MOBILE=1
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
-          name: Test
+          name: Run Build Test
           no_output_timeout: "30m"
           command: |
             set -e
@@ -451,3 +465,25 @@
               echo 'xcodebuild failed!'
               exit 1
             fi
+      - run:
+          name: Run Simulator Tests
+          no_output_timeout: "2h"
+          command: |
+            set -e
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
+              echo "not SIMULATOR build, skip it."
+              exit 0
+            fi
+            WORKSPACE=/Users/distiller/workspace
+            PROJ_ROOT=/Users/distiller/project
+            source ~/anaconda/bin/activate
+            pip install pillow==7.0.0 --progress-bar off
+            #install the latest version of PyTorch and TorchVision
+            pip install torch "torchvision>=0.5.0" --progress-bar off
+            #run unit test
+            cd ${PROJ_ROOT}/ios/TestApp/benchmark
+            python trace_model.py
+            ruby setup.rb
+            cd ${PROJ_ROOT}/ios/TestApp
+            instruments -s -devices
+            fastlane scan

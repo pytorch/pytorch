@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/UnaryOps.h>
 
 namespace at {
 namespace native {

@@ -61,35 +61,5 @@
     THArgCheck(COND, ARG, FORMAT, s1.str);        \
   }
 
-#include <THNN/generic/BCECriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/ELU.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/HardTanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/GatedLinearUnit.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/LeakyReLU.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/LogSigmoid.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftMarginCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/RReLU.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftPlus.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SoftShrink.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
