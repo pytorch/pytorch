@@ -151,21 +151,19 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Find torchbind classes
-    if (var.isObject()) {
+    if (isCustomClass(var)) {
       auto obj = script::Object(var.toObject());
       auto qualname = obj.type()->name();
-      if (qualname) {
-        auto custom_class_type = getCustomClass(qualname->qualifiedName());
-        if (custom_class_type) {
-          auto capsule = var.toObject()->getAttr("capsule");
-          for (size_t i = 0; i < env_stack.size(); ++i) {
-            auto& value_map = env_stack.at(env_stack.size() - 1 - i);
-            auto it = value_map.find(capsule);
-            if (it == value_map.end()) {
-              continue;
-            }
-            return it->second;
+      auto custom_class_type = getCustomClass(qualname->qualifiedName());
+      if (custom_class_type) {
+        auto capsule = var.toObject()->getAttr("capsule");
+        for (size_t i = 0; i < env_stack.size(); ++i) {
+          auto& value_map = env_stack.at(env_stack.size() - 1 - i);
+          auto it = value_map.find(capsule);
+          if (it == value_map.end()) {
+            continue;
           }
+          return it->second;
         }
       }
     }
@@ -332,11 +330,8 @@ static void gatherParametersAndBuffers(
       addInput(
           state, s.value, s.value.type(), trace_get_attr);
     }
-    if (auto class_type = s.value.type()->cast<ClassType>()) {
-      if (class_type->name() &&
-          getCustomClass(class_type->name()->qualifiedName())) {
-        tracer::setValueTrace(s.value, trace_get_attr);
-      }
+    if (isCustomClass(s.value)) {
+      tracer::setValueTrace(s.value, trace_get_attr);
     }
     if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
@@ -437,9 +432,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < elements.size(); ++i) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
-  } else if (
-      v.isObject() && v.toObject()->type()->name() &&
-      getCustomClass(v.toObject()->type()->name()->qualifiedName())) {
+  } else if (isCustomClass(v)) {
     auto capsule = v.toObject()->getAttr("capsule");
     env_stack.back()[capsule] = value;
   } else if (v.isFuture() || v.isObject()) {

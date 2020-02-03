@@ -16,6 +16,11 @@ std::shared_ptr<script::CompilationUnit>& classCU() {
   return cu;
 }
 
+bool isCustomClass(const c10::IValue& v) {
+  return v.isObject() && v.toObject()->type()->name() &&
+      getCustomClass(v.toObject()->type()->name()->qualifiedName());
+}
+
 namespace {
 
 TypePtr realCustomClassHandler(const std::string& name) {

@@ -63,6 +63,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             AT_ASSERT(iter->isString());
             tracer::addInputs(
                 node, args[i].name().c_str(), iter->toStringRef());
+          } else if (type->kind() == TypeKind::NumberType) {
+            tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
           } else if (type->kind() == TypeKind::ListType) {
             const auto& elem_type = type->expect<ListType>()->getElementType();
             if (elem_type->isSubtypeOf(TensorType::get())) {
