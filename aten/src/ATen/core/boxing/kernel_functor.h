@@ -59,6 +59,19 @@ namespace detail {
   struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
+  template <bool AllowDeprecatedTypes, class... Args>
+  struct TypeCheckHelper;
+
+  template <bool AllowDeprecatedTypes>
+  struct TypeCheckHelper<AllowDeprecatedTypes> {};
+
+  template <bool AllowDeprecatedTypes, class Head, class... Rest>
+  struct TypeCheckHelper<AllowDeprecatedTypes, Head, Rest...> : assert_is_valid_input_type<Head, AllowDeprecatedTypes>,
+                           TypeCheckHelper<AllowDeprecatedTypes, Rest...> {};
+
+  template<class... Contained, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::tuple<Contained...>, AllowDeprecatedTypes> : TypeCheckHelper<AllowDeprecatedTypes, Contained...> {};
+
   template<class Key, class Value, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<Dict<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
@@ -172,6 +185,11 @@ namespace detail {
   struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
   };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<c10::IValue, std::decay_t<T>>::value>> {
+  };
+
 
 
   template<class T, bool AllowDeprecatedTypes>
