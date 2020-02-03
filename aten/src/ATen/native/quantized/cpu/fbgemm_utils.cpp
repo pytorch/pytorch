@@ -201,33 +201,33 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 } // namespace at
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
+  using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>, std::string, std::string>;
   static int custom_class_handler = torch::jit::registerCustomClassHandler();
   static auto register_linear_params =
       torch::jit::class_<LinearPackedParamsBase>("LinearPackedParamsBase")
           .def_pickle(
               [](const c10::intrusive_ptr<LinearPackedParamsBase>& params)
-                  -> c10::IValue { // __getstate__
+                  -> SerializationType { // __getstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 std::tie(weight, bias) = params->unpack();
-                return c10::ivalue::Tuple::create(
+                std::cout << "here\n";
+                return std::make_tuple(
                     std::move(weight),
                     std::move(bias),
                     params->backend(),
                     params->bit_width());
               },
-              [](c10::IValue state)
+              [](SerializationType state)
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 std::string backend, bit_width;
-                auto state_tup = state.toTuple();
-                TORCH_INTERNAL_ASSERT(state_tup->elements().size() == 4);
-                weight = std::move(state_tup->elements()[0]).toTensor();
-                bias = std::move(state_tup->elements()[1]).toTensor();
-                backend = std::move(state_tup->elements()[2]).toString();
-                bit_width = std::move(state_tup->elements()[3]).toString();
+                weight = std::move(std::get<0>(state));
+                bias = std::move(std::get<1>(state));
+                backend = std::move(std::get<2>(state));
+                bit_width = std::move(std::get<3>(state));
                 if (backend == "FBGEMM") {
                   if (bit_width == "FP32") {
                     return PackedLinearWeight::prepack(
