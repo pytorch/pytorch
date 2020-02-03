@@ -18,6 +18,7 @@ TORCH_API Val* promote_new(Val *v1, Val* v2){
             return new Int();
     }
     std::runtime_error("Did not recognize out type.");
+    return new Int(-1);
 }
 
 TORCH_API Val* add(Val* v1, Val* v2){

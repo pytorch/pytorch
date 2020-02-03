@@ -6,7 +6,7 @@ namespace fuser {
 
 thread_local Fusion* FusionGuard::cur_fusion = nullptr;
 
-std::ostream& operator<<(std::ostream& os, const std::deque<Val*>& vals) {
+std::ostream& operator<<(std::ostream& os, const std::deque<const Val*>& vals) {
   os << "( ";
   for (auto* val : vals) {
     os << val;
@@ -26,9 +26,9 @@ std::ostream& operator<<(std::ostream& os, const Fusion& fusion) {
     os << "\n->Body(\n";
 
     for (auto* expr : fusion.exprs()) {
-      os << expr;
+      os << expr << "\n";
     }
-    os<<"\n)";
+    os<<")";
   }
 
   if(fusion.outputs().size()>0)

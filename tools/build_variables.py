@@ -172,6 +172,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/common/arith.cpp",
     "torch/csrc/jit/fuser/common/ir.cpp",
     "torch/csrc/jit/fuser/common/visitor.cpp",
+    "torch/csrc/jit/fuser/common/mutator.cpp",
     "torch/csrc/jit/fuser/common/fusion.cpp",
     "torch/csrc/jit/fuser/cpu/asmjit_codegen.cpp",
     "torch/csrc/jit/function.cpp",

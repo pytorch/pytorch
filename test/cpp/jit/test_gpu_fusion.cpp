@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/visitor.h>
+#include <torch/csrc/jit/fuser/common/mutator.h>
 #include <torch/csrc/jit/fuser/common/arith.h>
 
 #include <iostream>
@@ -86,6 +87,19 @@ void testGPU_FusionSimpleTypePromote(){
   auto f5 = add(f4, i1);
 
   TORCH_CHECK(f5->getValType() == ValType::Float);
+}
+
+void testGPU_FusionMutator(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  
+  Float* f4 = new Float{1.f};
+  Int* i1 = new Int{3};
+  Val* f5 = add(f4, i1);
+  BaseMutator mutator;
+  mutator.mutate(&fusion);
+  std::cout<<"Zeroed? "<<fusion<<std::endl;
+
 }
 
 void testGPU_Fusion() {}
