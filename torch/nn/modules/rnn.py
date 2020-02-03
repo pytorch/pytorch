@@ -111,7 +111,9 @@ class RNNBase(Module):
                 return
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes
-        dtype = self._flat_weights[0].dtype
+
+        first_fw = self._flat_weights[0]
+        dtype = first_fw.dtype
         for fw in self._flat_weights:
             if (not torch.is_tensor(fw.data) or not (fw.data.dtype == dtype) or
                     not fw.data.is_cuda or
