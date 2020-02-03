@@ -14,13 +14,13 @@ namespace rpc {
 
 namespace callback {
 // It's the callback for RemoteCall.
-void confirmPendingUser(
+void TORCH_API confirmPendingUser(
     const rpc::Message& message,
     const c10::optional<utils::FutureError>& futErr);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
-class RRefContext {
+class TORCH_API RRefContext {
  public:
   static RRefContext& getInstance();
   // NB: This method must be called before destructing RRefContext singleton.
