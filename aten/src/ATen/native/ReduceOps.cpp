@@ -8,6 +8,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorDimApply.h>
 #include <ATen/Parallel.h>
 
 #include <algorithm>
@@ -234,24 +235,17 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummax_cpu", [&]() -> void {
-    auto values__data = values.data_ptr<scalar_t>();
-    auto self__data = self.data_ptr<scalar_t>();
-    auto indices__data = indices.data_ptr<int64_t>();
-    int64_t values__stride_dim = values.stride(dim);
-    int64_t self__stride_dim = self.stride(dim);
-    int64_t indices__stride_dim = indices.stride(dim);
-    values__data[0] = self__data[0];
-    auto cummax = values__data[0];
-    indices__data[0] = 0;
-    auto idx = 0;
-    for(int64_t i = 1; i < self.size(dim); i++) {
-      if(self__data[i*self__stride_dim] >= cummax) {
-        cummax = self__data[i*self__stride_dim];
-        idx = i;
-      }
-      values__data[i*values__stride_dim] = cummax;
-      indices__data[i*indices__stride_dim] = idx;
-    }
+    TENSOR_DIM_APPLY3(scalar_t, self, scalar_t, values, int64_t, indices, dim,
+      auto cummax = self_data[0];
+      int idx = 0;
+      for(int i = 0; i < self.size(dim); i++) {
+        if(self_data[i*self_stride] >= cummax) {
+              cummax = self_data[i*self_stride];
+              idx = i;
+          }
+          values_data[i*values_stride] = cummax;
+          indices_data[i*indices_stride] = idx;
+      });
   });
 }
 
@@ -262,13 +256,7 @@ std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const T
     NoNamesGuard guard;
     values.resize_(self.sizes());
     indices.resize_(self.sizes());
-    if(self.dim() == 0) {
-      values.fill_(self);
-      indices.fill_(0);
-    }
-    else if(self.numel() != 0) {
-      at::_cummax_helper(self, values, indices, dim);
-    }
+    at::_cummax_helper(self, values, indices, dim);
   }
   namedinference::propagate_names(values, self);
   namedinference::propagate_names(indices, self);
@@ -284,24 +272,17 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummin_cpu", [&]() -> void {
-    auto values__data = values.data_ptr<scalar_t>();
-    auto self__data = self.data_ptr<scalar_t>();
-    auto indices__data = indices.data_ptr<int64_t>();
-    int64_t values__stride_dim = values.stride(dim);
-    int64_t self__stride_dim = self.stride(dim);
-    int64_t indices__stride_dim = indices.stride(dim);
-    values__data[0] = self__data[0];
-    auto cummin = values__data[0];
-    indices__data[0] = 0;
-    auto idx = 0;
-    for(int64_t i = 1; i < self.size(dim); i++) {
-      if(self__data[i*self__stride_dim] <= cummin) {
-        cummin = self__data[i*self__stride_dim];
-        idx = i;
-      }
-      values__data[i*values__stride_dim] = cummin;
-      indices__data[i*indices__stride_dim] = idx;
-    }
+    TENSOR_DIM_APPLY3(scalar_t, self, scalar_t, values, int64_t, indices, dim,
+      auto cummin = self_data[0];
+      int idx = 0;
+      for(int i = 0; i < self.size(dim); i++) {
+        if(self_data[i*self_stride] <= cummin) {
+          cummin = self_data[i*self_stride];
+          idx = i;
+        }
+        values_data[i*values_stride] = cummin;
+        indices_data[i*indices_stride] = idx;
+      });
   });
 }
 
@@ -312,13 +293,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
     NoNamesGuard guard;
     values.resize_(self.sizes());
     indices.resize_(self.sizes());
-    if(self.dim() == 0) {
-      values.fill_(self);
-      indices.fill_(0);
-    }
-    else if(self.numel() != 0) {
-      at::_cummin_helper(self, values, indices, dim);
-    }
+    at::_cummin_helper(self, values, indices, dim);
   }
   namedinference::propagate_names(values, self);
   namedinference::propagate_names(indices, self);
