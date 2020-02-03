@@ -2,6 +2,7 @@ from collections import OrderedDict, namedtuple
 import functools
 import itertools
 import weakref
+import warnings
 
 import torch
 from ..parameter import Parameter
@@ -1166,15 +1167,18 @@ class Module(object):
         replica._buffers = replica._buffers.copy()
         replica._modules = replica._modules.copy()
 
-        # zero_grad on the replica should zero the parent as well
+        # Warn users that gradients don't behave as expected on replica modules
         old_zero_grad = replica.__class__.zero_grad
         weak_self = weakref.ref(replica)
 
         def zero_grad():
+            warnings.warn(
+                "The parameters in data parallel modules are copied from the original module."
+                "This means they are not leaf nodes in autograd and so don't accumulate gradients.\n"
+                "If you need gradients in your forward method, consider using autograd.grad instead.")
             replica = weak_self()
             if replica:
                 old_zero_grad(replica)
-            self.zero_grad()
 
         replica.zero_grad = zero_grad
 
