@@ -725,23 +725,30 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   bool expandable = are_expandable(mean.sizes(), std.sizes());
-  // allow resize if output is an empty tensor
-  if (output.sizes().equals({0})) {
-    if (expandable) {
-      auto shape = at::infer_size(mean.sizes(), std.sizes());
+  bool empty_output = output.sizes().equals({0});
+
+  if (expandable) {
+    auto shape = at::infer_size(mean.sizes(), std.sizes());
+    TORCH_CHECK(empty_output || output.sizes().equals(shape), "output size is not the same as broadcast size of mean and std");
+    if (empty_output) {
       at::native::resize_(output, shape, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    else {
+  }
+  else {
+    TORCH_CHECK(mean.numel() == std.numel(), "mean and std should have same number of element when nonexpandable");
+    TORCH_CHECK(empty_output || output.sizes().equals(mean.sizes()), "output size is not the same as the size of mean");
+    if (empty_output) {
       at::native::resize_(output, mean.sizes(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
   }
+
   normal_cuda_(output, 0, 1, gen);
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  if (mean.numel() == std.numel() && !expandable) {
+  if (!expandable) {
     TORCH_WARN_ONCE(
         "std and mean have the same number of elements, but are not broadcastable. This was previously a "
         "supported mode of operation, but is now deprecated and the support will be removed in a later release. "

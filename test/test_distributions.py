@@ -1603,57 +1603,38 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
-    def test_normal_shape_cpu(self):
-        # CPU version normal is written in legacy code (TH).
-        # It won't support tensor broadcasting until it is migrated using new tensor iterator.
-        tensor23 = torch.rand(2, 3)
-        tensor21 = torch.rand(2, 1)
-        tensor6 = torch.rand(6)
-        tensor4 = torch.rand(4)
-        # normal case
-        self.assertEqual(torch.normal(tensor23, tensor23).size(), (2, 3))
-        # expandable (broadcasting) case (only when std or dev is scalar)
-        self.assertEqual(torch.normal(tensor23, 2).size(), (2, 3))
-        self.assertEqual(torch.normal(2, tensor23).size(), (2, 3))
-        # std and mean have same elements case
-        self.assertEqual(torch.normal(tensor23, tensor6).size(), (2, 3))
-        self.assertEqual(torch.normal(tensor6, tensor23).size(), (6,))
-        # std and mean have different number of element
-        with self.assertRaises(RuntimeError):
-            torch.normal(tensor23, tensor21)
-        with self.assertRaises(RuntimeError):
-            torch.normal(tensor23, tensor4)
+    def test_normal_shape(self):
+        for device in torch.testing.get_all_device_types():
+            tensor1 = torch.rand(1, device=device)
+            tensor4 = torch.rand(4, device=device)
+            tensor120 = torch.rand(120, device=device)
+            tensor2145 = torch.rand(2, 1, 4, 5, device=device)
+            tensor2345 = torch.rand(2, 3, 4, 5, device=device)
+            tensor2345_non_contiguous = torch.rand(2, 4, 3, 5, device=device).permute(0, 2, 1, 3)
+            tensor2345_channels_last = tensor2345.contiguous(memory_format=torch.channels_last)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_normal_shape_gpu(self):
-        tensor12 = torch.rand(1, 2, device='cuda')
-        tensor21 = torch.rand(2, 1, device='cuda')
-        tensor22 = torch.rand(2, 2, device='cuda')
-        tensor23 = torch.rand(2, 3, device='cuda')
-        tensor6 = torch.rand(6, device='cuda')
-        tensor4 = torch.rand(4, device='cuda')
-        tensor3 = torch.rand(3, device='cuda')
-        tensor1 = torch.rand(1, device='cuda')
-        # normal case
-        self.assertEqual(torch.normal(tensor23, tensor23).size(), (2, 3))
-        # expandable (broadcasting) case (including scalar case)
-        self.assertEqual(torch.normal(tensor23, tensor21).size(), (2, 3))
-        self.assertEqual(torch.normal(tensor23, tensor3).size(), (2, 3))
-        self.assertEqual(torch.normal(tensor23, tensor1).size(), (2, 3))
-        self.assertEqual(torch.normal(tensor21, tensor12).size(), (2, 2))
-        self.assertEqual(torch.normal(tensor23, 2).size(), (2, 3))
-        self.assertEqual(torch.normal(2, tensor23).size(), (2, 3))
-        # non expandable but std and mean have same elements case
-        self.assertEqual(torch.normal(tensor23, tensor6).size(), (2, 3))
-        self.assertEqual(torch.normal(tensor6, tensor23).size(), (6,))
-        # non expandable and std and mean have different number of element
-        with self.assertRaises(RuntimeError):
-            torch.normal(tensor23, tensor4)
-        # out version works if the output tensor doesn't need resize
-        self.assertEqual(torch.normal(tensor21, tensor12, out=tensor22).size(), (2, 2))
-        # out version does not allow output tensor resize
-        with self.assertRaises(RuntimeError):
-            torch.normal(tensor21, tensor12, out=tensor1)
+            # inputs have same size
+            self.assertEqual(torch.normal(tensor2345, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345_non_contiguous, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345, tensor2345_channels_last).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345_non_contiguous, tensor2345_channels_last).size(), (2, 3, 4, 5))
+            # scalar case
+            self.assertEqual(torch.normal(tensor2345, 2).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(2, tensor2345).size(), (2, 3, 4, 5))
+            # inputs are expandable tensors
+            if device == 'cpu':
+                # CPU version is written in legacy code (TH), it doesn't support broadcasting
+                with self.assertRaisesRegex(RuntimeError, "inconsistent tensor size"):
+                    torch.normal(tensor2345, tensor2145)
+            else:
+                self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
+                self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
+            # inputs are non-expandable tensors, but they have same number of elements
+            self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
+            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+            # inputs are non-expandable tensors and they don't have same number of elements
+            with self.assertRaises(RuntimeError):
+                torch.normal(tensor2345, tensor4)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
