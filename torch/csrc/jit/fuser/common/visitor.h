@@ -1,15 +1,21 @@
 #pragma once
 
-#include <torch/csrc/jit/fuser/common/ir.h>
-
 #include <torch/csrc/WindowsTorchApiMacro.h>
-
 #include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
+struct Statement;
+struct Tensor;
+struct Float;
+struct Int;
+struct Add;
+struct Val;
+struct Expr;
+
+//TODO: Make BaseHandler that other vistiors can inherit from.
 struct TORCH_API SimpleHandler {
   int handle(const Statement* const statement);
   int handle(const Float* const f);

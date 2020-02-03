@@ -93,16 +93,17 @@ namespace jit {
 
 >>>>>>> Move tests for GPU fusion.
 
-#define TH_FORALL_TESTS_CUDA(_) \
-  _(ArgumentSpec)               \
-  _(CompleteArgumentSpec)       \
-  _(GraphExecutor)              \
-  _(ModuleConversion)           \
-  _(Interp)                     \
+#define TH_FORALL_TESTS_CUDA(_)  \
+  _(ArgumentSpec)                \
+  _(CompleteArgumentSpec)        \
+  _(GraphExecutor)               \
+  _(ModuleConversion)            \
+  _(Interp)                      \
   _(GPU_FusionSimpleArith)       \
   _(GPU_FusionContainer)         \
   _(GPU_FusionSimpleTypePromote) \
   _(GPU_FusionDispatch)          \
+  _(GPU_FusionMutator)       \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

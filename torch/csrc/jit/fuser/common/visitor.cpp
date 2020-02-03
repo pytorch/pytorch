@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/visitor.h>
 
 #include <iostream>
@@ -11,7 +12,7 @@ namespace fuser {
 */
 
 int SimpleHandler::handle(const Statement* statement){
-  return -1;
+    throw std::runtime_error("Could not identify statement. Did you update dispatch in ir.cpp?");
 }
 
 int SimpleHandler::handle(const Float* f){

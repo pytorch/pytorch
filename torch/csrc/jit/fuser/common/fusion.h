@@ -18,10 +18,8 @@ namespace fuser {
 // TODO: hasUses(Val)
 // TODO: val->uses mapping? expr->location mapping?
 // TODO: plumb through helpers, ex. Val.replaceAllUsesWith(Val)
-//          (registration's make this easy)
+//          (registration makes this easy)
 // TODO: DCE pass
-// TODO: printFusion (allow mem location inlining)
-// TODO:
 // TODO: comment
 
 struct Fusion;
@@ -47,11 +45,8 @@ public:
 
 };
 
-struct TORCH_API Fusion {
-  Fusion() {
-    region_ = new Region{};
-    region_->setFusion(this);
-  }
+struct TORCH_API Fusion : public IRInputOutput{
+  Fusion() {}
 
   // Not copyable
   Fusion(const Fusion& other) = delete;
@@ -61,42 +56,39 @@ struct TORCH_API Fusion {
   Fusion& operator=(Fusion&& other) = default;
 
   ~Fusion(){
-    delete region_;
 
     for (auto it = val_map_.begin(); it != val_map_.end(); ++it) {
       delete it->first;
     }
 
     for (auto it = expr_map_.begin(); it != expr_map_.end(); ++it) {
-      auto* expr = it->first;
-      for (auto* region : expr->regions()) {
-        delete region;
-      }
-      delete expr;
+      delete it->first;
     }
   };
 
-  // Functions for inserting expressions
-  // TODO: Lets put some safety into these 2 functions. Run through a quick dependency check
-  // on the expr's inputs.
-  void insertAtStart(Expr* expr) { region_->insertAtStart(expr); }
-  void insertAtEnd(Expr* expr) { region_->insertAtEnd(expr); }
-
-  void insertLeftBeforeRight(Expr* left, Expr* right) {
-    region_->insertLeftBeforeRight(left, right);
+  //Probably this should be implicit in register Expr
+  //i.e. if an expr is registered with an output
+  //we should check if it's an output of any other expr.
+  //If it is, we should delete that expr.
+  void remove_expr(const Expr* expr){
+    if(!inFusion(expr))
+      throw std::runtime_error("Cannot remove expr as it is not registered with this fusion.");
+    expr_map_.erase(expr);
+    delete expr;
   }
-  void insertLeftAfterRight(Expr* left, Expr* right) {
-    region_->insertLeftAfterRight(left, right);
-  }
-
-  const std::deque<Val*>& inputs() const noexcept { return region_->inputs(); }
-  const std::deque<Val*>& outputs() const noexcept { return region_->outputs(); }
-  const std::deque<Expr*>& exprs() const noexcept { return region_->exprs(); }
-
 
   // Functions for adding inputs and outputs
-  void addInput(Val* input) { region_->addInput(input); registerVal(input);}
-  void addOutput(Val* output) { region_->addOutput(output); registerVal(output);}
+  void addInput(const Val* input) {
+    if(!inFusion(input))
+      throw std::runtime_error("Cannot register input as it does not belong to this fusion.");
+    IRInputOutput::addInput(input);
+  }
+
+  void addOutput(const Val* output) {
+    if(!inFusion(output))
+      throw std::runtime_error("Cannot register output as it does not belong to this fusion.");
+    IRInputOutput::addOutput(output);
+  }
 
   // Functions for querying / enumerating IR objets
   bool inFusion(const Statement* stmt){
@@ -110,72 +102,51 @@ struct TORCH_API Fusion {
     return infusion;
   }
 
-  // Functions for registering IR objects
-  StmtNameType registerStatement(Statement* stmt) {
+  StmtNameType registerStatement(const Statement* stmt) {
+    if(inFusion(stmt))
+      return stmt->name();
+
     if (stmt->isVal()) {
-      return registerVal(static_cast<Val*>(stmt));
+      return registerVal(static_cast<const Val*>(stmt));
     }else if(stmt->isExpr()){
-      return registerExpr(static_cast<Expr*>(stmt));
+      return registerExpr(static_cast<const Expr*>(stmt));
     }
-    std::runtime_error("Could not register statement.");
+
+    throw std::runtime_error("Could not register statement.");
     return UNINITIALIZED_STMTNAMETYPE;
   }
 
-  StmtNameType registerVal(Val* val) {
+  //TODO: Lets topologically sort these.
+  std::vector<const Expr*> exprs() const {
+    std::vector<const Expr*> exprs;
+    for(const auto it : expr_map_)
+      exprs.push_back(it.first);
+    return exprs;
+  }
+
+  // TODO: Simplify this function, we register values as soon as they're created
+  StmtNameType registerVal(const Val* val) {
     if (val->fusion()) {
-      TORCH_CHECK(inFusion(val));
+      TORCH_CHECK(inFusion(val)); //Registered with another fusion
       return val->name();
     }
-
-    val->setFusion(this);
-    val->setName(getValName());
     val_map_[val] = val->name();
-
     return val->name();
   }
 
-  void registerRegion(Region* region) {
-    // TODO: If we alreay have a region should we allow over-writing it?
-    //If already registered, do nothing
-    if (region->fusion()) {
-      TORCH_CHECK(region->fusion() == this);
-      return;
-    }
-
-    region->setFusion(this);
-
-    for (auto* input : region->inputs()) {
-      registerStatement(input);
-    }
-
-    for (auto* expr : region->exprs()) {
-      registerStatement(expr);
-    }
-
-    for (auto* output : region->outputs()) {
-      registerStatement(output);
-    }
-  }
-
-  StmtNameType registerExpr(Expr* expr){
+  StmtNameType registerExpr(const Expr* expr){
     if (expr->fusion()) {
       TORCH_CHECK(inFusion(expr));
       return expr->name();
     }
 
-    expr->setFusion(this);
-    expr->setName(getExprName());
     expr_map_[expr] = expr->name();
 
-    for (Val* input : expr->inputs()) {
+    for (const Val* input : expr->inputs()) {
       registerVal(input);
     }
 
-    for (auto* region : expr->regions()) {
-      registerRegion(region);
-    }
-
-    for (Val* output : expr->outputs()) {
+    for (const Val* output : expr->outputs()) {
       registerVal(output);
     }
 
@@ -183,8 +154,6 @@ struct TORCH_API Fusion {
   }
 
 private:
-  Region* region_ = nullptr;
-
   std::unordered_map<const Val*, StmtNameType> val_map_;
   std::unordered_map<const Expr*, StmtNameType> expr_map_;
 
@@ -196,6 +165,6 @@ private:
 };
 
   TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& fusion);
-  TORCH_API std::ostream& operator<<(std::ostream& os, const std::deque<Val*>& vals);
+  TORCH_API std::ostream& operator<<(std::ostream& os, const std::deque<const Val*>& vals);
 
 }}} // torch::jit::fuser
