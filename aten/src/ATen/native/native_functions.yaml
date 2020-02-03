@@ -4707,16 +4707,16 @@
     CPU: _symeig_helper_cpu
     CUDA: _symeig_helper_cuda
 
-- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CPU: legacy::cpu::_th_eig_out
-    CUDA: legacy::cuda::_th_eig_out
+- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+
+- func: _eig_helper(Tensor self, bool eigenvectors) -> (Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_eig
-    CUDA: legacy::cuda::_th_eig
+    CPU: _eig_helper_cpu
+    CUDA: _eig_helper_cuda
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 

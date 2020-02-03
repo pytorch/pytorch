@@ -94,6 +94,10 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       if (strstr(name, "svd")) {
         AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
+      } else if (strstr(name, "eig")) {
+        AT_ERROR(name, ": For batch ", i, ": the QR algorithm failed to compute all the eigenvalues, "
+                 "and no eigenvectors have been computed; elements and ", info+1, ":N of W contain "
+                 "eigenvalues which have converged.")
       } else if (strstr(name, "symeig")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
@@ -262,7 +266,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
     // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     S_empty = at::empty(sizes, input.options().dtype(dtype).device(at::kCPU));
   }
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
