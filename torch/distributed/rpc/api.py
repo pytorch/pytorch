@@ -9,7 +9,6 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
-from torch._jit_internal import _qualified_name
 
 from . import (
     RpcBackendOptions,
@@ -22,11 +21,11 @@ from . import (
     _invoke_remote_torchscript,
     _invoke_rpc_builtin,
     _invoke_rpc_python_udf,
-    _invoke_rpc_script,
+    _invoke_rpc_torchscript,
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
-    _set_rpc_timeout,
     _set_and_start_rpc_agent,
+    _set_rpc_timeout,
     backend_registry,
 )
 from .internal import (
@@ -179,9 +178,7 @@ def _wait_all_workers():
         _set_rpc_timeout(timeout)
         worker_name_to_response_future_dict = dict()
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(
-                follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,)
-            )
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,))
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
@@ -406,7 +403,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
     """
     qualified_name = torch.jit._find_builtin(func)
-    info = _to_worker_info(to)
+    dst_worker_info = _to_worker_info(to)
 
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
@@ -416,23 +413,23 @@ def remote(to, func, args=None, kwargs=None):
             RPCExecMode.REMOTE,
             str(qualified_name) if qualified_name is not None else func.__qualname__,
             get_worker_info().name,
-            info.name,
+            dst_worker_info.name,
         )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        return _invoke_remote_builtin(info, qualified_name, rf, *args, **kwargs)
+        return _invoke_remote_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         return _remote_torchscript(
-            info, torch._jit_internal._qualified_name(func), args, kwargs
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        return _invoke_remote_python_udf(info, pickled_python_udf, tensors, rf)
+        return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
 
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
@@ -440,7 +437,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
         raise TypeError("function should be callable.")
 
     qualified_name = torch.jit._find_builtin(func)
-    info = _to_worker_info(to)
+    dst_worker_info = _to_worker_info(to)
     # If profiling is enabled, kick off the timer and retrieve back a
     # RecordFunction instance.
     rf = None
@@ -449,19 +446,23 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
             rpc_type,
             str(qualified_name) if qualified_name is not None else func.__qualname__,
             get_worker_info().name,
-            info.name,
+            dst_worker_info.name,
         )
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
     if qualified_name is not None:
-        fut = _invoke_rpc_builtin(info, qualified_name, rf, *args, **kwargs)
+        fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
+    elif isinstance(func, torch.jit.ScriptFunction):
+        fut = _invoke_rpc_torchscript(
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
+        )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
         )
-        fut = _invoke_rpc_python_udf(info, pickled_python_udf, tensors, rf)
+        fut = _invoke_rpc_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
     return fut
 
 
@@ -535,13 +536,8 @@ def rpc_sync(to, func, args=None, kwargs=None):
         >>> rpc.shutdown()
 
     """
-    # If invoking an annotated TorchScript function,
-    # call the internal API _rpc_sync_torchscript()
-    if isinstance(func, torch.jit.ScriptFunction):
-        return _rpc_sync_torchscript(to, _qualified_name(func), args, kwargs)
-    else:
-        fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
-        return fut.wait()
+    fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs)
+    return fut.wait()
 
 
 @_require_initialized
@@ -609,11 +605,7 @@ def rpc_async(to, func, args=None, kwargs=None):
     """
     # If invoking an annotated TorchScript function,
     # call the internal API _rpc_async_torchscript()
-    if isinstance(func, torch.jit.ScriptFunction):
-        fut = _rpc_async_torchscript(to, _qualified_name(func), args, kwargs)
-    else:
-        fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
-    return fut
+    return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
 
 
 # All below private APIs are for making rpc torch script call that can be
@@ -727,7 +719,7 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    fut = _invoke_rpc_script(to, qualified_name, *args, **kwargs)
+    fut = _invoke_rpc_torchscript(to, qualified_name, *args, **kwargs)
     return fut
 
 
