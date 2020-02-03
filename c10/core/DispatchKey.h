@@ -31,6 +31,7 @@ enum class DispatchKey : uint8_t {
   IDEEPTensorId, // Caffe2 only
   HIPTensorId, // PyTorch/Caffe2 supported
   SparseHIPTensorId, // PyTorch only
+  FPGATensorId, // PyTorch only
   MSNPUTensorId, // PyTorch only
   XLATensorId, // PyTorch only
   MkldnnCPUTensorId,
