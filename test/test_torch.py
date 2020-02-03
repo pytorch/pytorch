@@ -8786,10 +8786,9 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     def test_svd_lowrank(self, device):
         import torch
-        import torch.lowrank
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        def run_subtest(actual_rank, matrix_size, batches, device, **options):
+        def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
@@ -8804,7 +8803,7 @@ class TestTorchDeviceType(TestCase):
                 a = a_input.to_dense()
 
             q = min(*size)
-            u, s, v = torch.svd_lowrank(a_input, q=q, **options)
+            u, s, v = svd_lowrank(a_input, q=q, **options)
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
@@ -8838,21 +8837,26 @@ class TestTorchDeviceType(TestCase):
         ]:
             # dense input
             for batches in all_batches:
-                run_subtest(actual_rank, size, batches, device)
+                run_subtest(actual_rank, size, batches, device, torch.svd_lowrank)
                 if size != size[::-1]:
-                    run_subtest(actual_rank, size[::-1], batches, device)
+                    run_subtest(actual_rank, size[::-1], batches, device, torch.svd_lowrank)
 
         # sparse input
         for size in [(17, 4), (4, 17), (17, 17), (100, 40), (40, 100), (1000, 1000)]:
             for density in [0.005, 0.1]:
-                run_subtest(None, size, (), device, density=density)
+                run_subtest(None, size, (), device, torch.svd_lowrank, density=density)
+
+        # jitting support
+        jitted = torch.jit.script(torch.svd_lowrank)
+        actual_rank, size, batches = 2, (17, 4), ()
+        run_subtest(actual_rank, size, batches, device, jitted)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_pca(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, **options):
+        def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
@@ -8865,7 +8869,7 @@ class TestTorchDeviceType(TestCase):
                 a_input = random_sparse_matrix(rows, columns, density, device=device)
                 a = a_input.to_dense()
 
-            u, s, v = torch.pca(a_input, q=guess_rank, **options)
+            u, s, v = pca(a_input, q=guess_rank, **options)
 
             self.assertEqual(s.shape[-1], guess_rank)
             self.assertEqual(u.shape[-2], rows)
@@ -8901,15 +8905,20 @@ class TestTorchDeviceType(TestCase):
                         actual_rank + 6,
                 ]:
                     if guess_rank <= min(*size):
-                        run_subtest(guess_rank, actual_rank, size, batches, device)
-                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca)
 
         # sparse input
         for guess_rank, size in [
                 (4, (17, 4)), (4, (4, 17)), (16, (17, 17)),
                 (21, (100, 40)), (20, (40, 100)), (600, (1000, 1000))]:
             for density in [0.005, 0.1]:
-                run_subtest(guess_rank, None, size, (), device, density=density)
+                run_subtest(guess_rank, None, size, (), device, torch.pca, density=density)
+
+        # jitting support
+        jitted = torch.jit.script(torch.pca)
+        guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
+        run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]

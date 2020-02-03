@@ -1,7 +1,7 @@
 """Implement various linear algebra algorithms for low rank matrices.
 """
 
-__all__ = ['svd', 'pca']
+__all__ = ['svd_lowrank', 'pca']
 
 import torch
 from . import _linalg_utils as _utils 
@@ -50,6 +50,7 @@ def get_approximate_basis(A, q, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
+    # type: (Tensor, int, int, Optional[Tensor]) -> Tensor
     niter = int(niter)
     m, n = A.shape[-2:]
     dtype = _utils.get_floating_dtype(A)
@@ -73,7 +74,7 @@ def get_approximate_basis(A, q, niter=2, M=None):
     return Q
 
 
-def svd(A, q=6, niter=2, M=None):
+def svd_lowrank(A, q=6, niter=2, M=None):
     """Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
@@ -113,6 +114,12 @@ def svd(A, q=6, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
+    # type: (Tensor, int, int, Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+    return _svd_lowrank(A, q=q, niter=niter, M=M)
+
+
+def _svd_lowrank(A, q=6, niter=2, M=None):
+    # type: (Tensor, int, int, Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
     m, n = A.shape[-2:]
     matmul = _utils.matmul
     if M is None:
@@ -207,6 +214,7 @@ def pca(A, q=None, center=True, niter=2):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
+    # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
     (m, n) = A.shape[-2:]
 
     if q is None:
@@ -222,12 +230,12 @@ def pca(A, q=None, center=True, niter=2):
     dtype = _utils.get_floating_dtype(A)
 
     if not center:
-        return svd(A, q, niter=niter)
+        return _svd_lowrank(A, q, niter=niter, M=None)
 
     if _utils.is_sparse(A):
         if len(A.shape) != 2:
             raise ValueError('pca input is expected to be 2-dimensional tensor')
-        c = torch.sparse.sum(A, dim=-2) / m
+        c = torch.sparse.sum(A, dim=(-2,)) / m
         # reshape c
         column_indices = c.indices()[0]
         indices = torch.zeros(2, len(column_indices),
@@ -239,10 +247,10 @@ def pca(A, q=None, center=True, niter=2):
 
         ones_m1_t = torch.ones(A.shape[:-2] + (1, m), dtype=dtype, device=A.device)
         M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
-        return svd(A, q, niter=niter, M=M)
+        return _svd_lowrank(A, q, niter=niter, M=M)
     else:
-        c = A.sum(axis=-2) / m
+        c = A.sum(dim=(-2,)) / m
         C = c.reshape(A.shape[:-2] + (1, n))
         ones_m1 = torch.ones(A.shape[:-1] + (1, ), dtype=dtype, device=A.device)
         M = ones_m1.matmul(C)
-        return svd(A - M, q, niter=niter)
+        return _svd_lowrank(A - M, q, niter=niter, M=None)

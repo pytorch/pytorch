@@ -29,6 +29,7 @@ def matmul(A, B):
     If A is None, return B. A can be sparse or dense. B is always
     dense.
     """
+    # type: (Optional[Tensor], Tensor) -> Tensor
     if A is None:
         return B
     if is_sparse(A):
