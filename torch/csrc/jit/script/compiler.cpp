@@ -2965,6 +2965,7 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
+    TORCH_CHECK(getSliceInd(step_nv.value(*graph), loc) > 0, "slice step must be positive");
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 

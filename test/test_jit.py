@@ -5805,6 +5805,13 @@ a")
 
         self.checkScript(func4, [x], optimize=True)
 
+        def func5(x):
+            return x[::-1]
+
+        with self.assertRaisesRegex(RuntimeError, 'slice step must be positive'):
+            scripted_fn = torch.jit.script(func5)
+            scripted_fn(x)
+
     def test_gather(self):
         def func(x):
             return x[0]
