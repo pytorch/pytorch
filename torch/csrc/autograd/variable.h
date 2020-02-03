@@ -297,8 +297,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     an equivalent graph (corresponding to the view operations) without using
 ///     the user-provided grad_fn. If the provided grad_fn does more
 ///     than the backward of the view, then the DifferentiableViewMeta must be
-///     created with allow_rebase_history=false to prevent the engine from
-///     ignoring the provided grad_fn.
+///     created with allow_rebase_history=OnRebase::ERROR to prevent the engine
+///     from ignoring the provided grad_fn.
 ///
 /// Interaction with GradMode:
 /// The particular case that we consider here is:
@@ -312,8 +312,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     torch.autograd.grad(base.sum(), var)  <- what should it return?
 ///
 /// Given that there is no consensus on what this particular code should return,
-/// we explicitely forbid it by setting allow_rebase_history=false for all
-/// differentiable views created in no_grad mode.
+/// we explicitely forbid it by setting allow_rebase_history=OnRebase::ERROR for
+/// all differentiable views created in no_grad mode.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -343,15 +343,16 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  /// Boolean flag that signifies if the history of this Tensor can be rebased
-  /// or if it is forbidden.
-  bool allow_rebase_history;
+  /// Flag that control what happens when a Tensor's history is rebased
+  enum class OnRebase: uint8_t { ALLOW, WARN, ERROR };
+  OnRebase allow_rebase_history;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, bool allow_rebase_history=true);
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+                         OnRebase allow_rebase_history=OnRebase::ALLOW);
   ~DifferentiableViewMeta();
 };
 
@@ -386,7 +387,8 @@ inline Variable make_variable_differentiable_view(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base), allow_rebase_history));
+      data_impl_copy.get(), std::move(base),
+      allow_rebase_history? DifferentiableViewMeta::OnRebase::ALLOW: DifferentiableViewMeta::OnRebase::ERROR));
     return Variable(data_impl_copy);
     }
   return Variable();

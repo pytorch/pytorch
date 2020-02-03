@@ -3573,39 +3573,44 @@ for shape in [(1,), ()]:
 
                     # Are the computed gradients correct ?
                     if inplace and output_is_a_view:
-                        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
-                            gradcheck(fn, (a, b))
-                    else:
-                        if fn_id == "view_of_temp" and inplace:
-                            # TODO: This should compute the right gradients
-                            with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                        with warnings.catch_warnings(record=True) as w:
+                            if fn_id == "view_of_temp":
+                                # This will be fixed after the deprecation cycle and the warning becomes
+                                # an error.
+                                with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                    gradcheck(fn, (a, b))
+                            else:
+                                # This works but the custom backward is not called (or called with partial)
+                                # gradients as tested below
                                 gradcheck(fn, (a, b))
-                        else:
-                            gradcheck(fn, (a, b))
-
-                    if inplace and output_is_a_view:
-                        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
-                            gradcheck(fn, (a, b))
+                        self.assertTrue(len(w) > 0)
                     else:
-                        # Was the custom backward called properly
-                        bw_called[0] = 0
-                        ga_nz[0] = True  # For the case where the backward is not called
+                        gradcheck(fn, (a, b))
+
+                    # Was the custom backward called properly
+                    bw_called[0] = 0
+                    ga_nz[0] = True  # For the case where the backward is called
+                    with warnings.catch_warnings(record=True) as w:
                         fn(a, b).backward()
 
-                        expected_called = 1
-                        expected_ga_nz = True
-                        if fn_id in ["one_output"] and inplace:
-                            # TODO: When we return an input, view_as is done in grad mode enabled
-                            expected_called = 0
+                    expected_called = 1
+                    expected_ga_nz = True
+                    expected_warning = False
+                    if fn_id in ["one_output", "view_of_temp"] and inplace:
+                        # TODO: When we return an input, view_as is done in grad mode enabled
+                        expected_called = 0
 
-                        if fn_id == "two_output" and inplace:
-                            # TODO: The backward only sees part of the gradient as the other part
-                            # is computed with a AsStridedBackward
-                            expected_ga_nz = False
+                    if fn_id == "two_output" and inplace:
+                        # TODO: The backward only sees part of the gradient as the other part
+                        # is computed with a AsStridedBackward
+                        expected_ga_nz = False
 
-                        self.assertTrue(bw_called[0] == expected_called)
-                        self.assertTrue(ga_nz[0] == expected_ga_nz)
+                    if output_is_a_view and inplace:
+                        expected_warning = True
 
+                    self.assertTrue(bw_called[0] == expected_called)
+                    self.assertTrue(ga_nz[0] == expected_ga_nz)
+                    self.assertTrue((len(w) == 1) == expected_warning)
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -3645,8 +3650,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         out = ComplexView.apply(a.clone(), idx)
-        with self.assertRaisesRegex(RuntimeError, "is being modified inplace"):
+        with warnings.catch_warnings(record=True) as w:
             out += 1
+        self.assertEqual(len(w), 1)
 
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
