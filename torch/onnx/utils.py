@@ -150,6 +150,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # onnx only supports tensors, so we turn all out number types into tensors
         torch._C._jit_pass_erase_number_types(graph)
 
+        torch._C._jit_pass_fixup_jit_exceptions(graph)
+
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 

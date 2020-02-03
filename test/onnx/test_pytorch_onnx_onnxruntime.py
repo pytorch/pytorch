@@ -2421,10 +2421,12 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
         self.run_test(model, x)
+        self.run_test(torch.jit.script(model), x)
 
         model = torch.nn.ReflectionPad2d((3, 0, 2, 1))
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+        self.run_test(torch.jit.script(model), x)
 
     def test_replication_pad(self):
         model = torch.nn.ReplicationPad1d(2)
