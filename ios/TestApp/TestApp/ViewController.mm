@@ -16,6 +16,10 @@
   NSError* err;
   NSData* configData = [NSData
       dataWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"config" ofType:@"json"]];
+  if (!configData) {
+    NSLog(@"Config.json not found!");
+    return;
+  }
   NSDictionary* config = [NSJSONSerialization JSONObjectWithData:configData
                                                          options:NSJSONReadingAllowFragments
                                                            error:&err];

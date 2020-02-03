@@ -371,5 +371,143 @@ struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CTCLoss);
 
+// ============================================================================
+
+struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
+  explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `PoissonNLLLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& log_input, const Tensor& targets);
+
+  /// The options with which this `Module` was constructed.
+  PoissonNLLLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `PoissonNLLLossImpl`.
+/// See the documentation for `PoissonNLLLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(PoissonNLLLoss);
+
+// ============================================================================
+
+struct TORCH_API MarginRankingLossImpl : public Cloneable<MarginRankingLossImpl> {
+  explicit MarginRankingLossImpl(const MarginRankingLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `MarginRankingLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input1,
+    const Tensor& input2, const Tensor& targets);
+
+  /// The options with which this `Module` was constructed.
+  MarginRankingLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MarginRankingLossImpl`.
+/// See the documentation for `MarginRankingLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(MarginRankingLoss);
+
+// ============================================================================
+
+/// The negative log likelihood loss. It is useful to train a classification
+/// problem with `C` classes. The `input` given through a forward call is expected
+/// to contain log-probabilities of each class. `input` has to be a Tensor of size
+/// either :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+/// with :math:`K \geq 1` for the `K`-dimensional case (described later).
+struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
+  explicit NLLLossImpl(
+      const NLLLossOptions& options_ = {});
+
+  /// Pretty prints the `NLLLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  void reset() override;
+
+  Tensor forward(
+      const Tensor& input,
+      const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  NLLLossOptions options;
+
+  /// A manual rescaling weight given to to each class.
+  Tensor weight;
+};
+
+/// A `ModuleHolder` subclass for `NLLLoss`.
+/// See the documentation for `NLLLossImpl` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(NLLLoss);
+
+// ============================================================================
+
+/// Creates a criterion that combines :func:`nn.LogSoftmax` and
+/// :func:`nn.NLLLoss` in one single class. It is useful when training a 
+/// classification problem with `C` classes. If provided, the optional argument
+/// :attr:`weight` should be a 1D `Tensor` assigning weight to each of the classes.
+struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
+  explicit CrossEntropyLossImpl(
+      const CrossEntropyLossOptions& options_ = {});
+    
+  void reset() override;
+    
+  /// Pretty prints the `CrossEntropyLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(
+      const Tensor& input,
+      const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  CrossEntropyLossOptions options;
+
+  /// A manual rescaling weight given to to each class.
+  Tensor weight;
+};
+
+/// A `ModuleHolder` subclass for `CrossEntropyLoss`.
+/// See the documentation for `CrossEntropyLossImpl` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(CrossEntropyLoss);
+
+// ============================================================================
+
+struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl> {
+  explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `BCEWithLogitsLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  BCEWithLogitsLossOptions options;
+
+  /// A manual rescaling weight given to the loss of each batch element.
+  Tensor weight;
+
+  /// A weight of positive examples.
+  Tensor pos_weight;
+};
+
+/// A `ModuleHolder` subclass for `BCEWithLogitsLossImpl`.
+/// See the documentation for `BCEWithLogitsLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(BCEWithLogitsLoss);
+
 } // namespace nn
 } // namespace torch

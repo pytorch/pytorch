@@ -104,7 +104,7 @@ struct CaptureList {
       //  This is to avoid any implicit mutation to TensorList happened
       //  between forward & backward.
       capture_types_.emplace_back(CAPTURE_LIST);
-      c10::ArrayRef<at::Tensor> tensors = val.toTensorListRef();
+      auto tensors = val.toTensorList();
       sizes_.push_back(tensors.size());
 
       for (const at::Tensor& tensor : tensors) {
@@ -185,7 +185,7 @@ struct UnpackInstructions {
         } break;
         case PUSH_LIST: {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
-          stack.emplace_back(c10::impl::toList(std::move(lst)));
+          stack.emplace_back(lst);
         } break;
       }
     }
@@ -241,7 +241,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (const at::Tensor& tensor : v.toTensorListRef()) {
+        for (const at::Tensor& tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -261,11 +261,11 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
+    add_next_edge(v.defined() ? torch::autograd::impl::gradient_edge(v) : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
-      for (const at::Tensor& tensor : value.toTensorListRef()) {
+      for (const at::Tensor& tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
     } else {
@@ -277,7 +277,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.type().scalarType())) {
+    if (at::isFloatingType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
@@ -287,7 +287,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addInputIValue(const IValue& v) {
     if (v.isTensorList()) {
-      c10::ArrayRef<at::Tensor> tensors = v.toTensorListRef();
+      auto tensors = v.toTensorList();
       input_instructions_.pushTensorList(tensors.size());
       for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
@@ -477,7 +477,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan = getPlanFor(stack);
+  ExecutionPlan plan =
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -494,7 +495,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  ExecutionPlan getPlanFor(Stack& stack) override {
+  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+      override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -579,7 +581,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 4. If this graph will be differentiated, we need to slice out the
     //          symbolically differentiable subgraphs for further optimizations.
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
-    //          (or the whole grpah if we know we won't need its derivative).
+    //          (or the whole graph if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,
@@ -632,8 +634,14 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
-  return pImpl->getPlanFor(inputs);
+size_t GraphExecutor::getDefaultNumBailOuts() {
+  return getProfilingMode() ? getBailoutDepth().load() : 0;
+}
+
+ExecutionPlan GraphExecutor::getPlanFor(
+    Stack& inputs,
+    size_t remaining_bailout_depth) {
+  return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {
@@ -690,22 +698,9 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
     return true;
   }
 
-  if (getProfilingMode()) {
-    for (const Value* input : graph->inputs()) {
-      for (const auto& use : input->uses()) {
-        if (use.user->kind() == prim::BailOut) {
-          auto ptt = use.user->output()->type()->expect<TensorType>();
-          if (ptt->requiresGrad() && *ptt->requiresGrad()) {
-            return true;
-          }
-        }
-      }
-    }
-  } else {
-    for (const Value* input : graph->inputs()) {
-      if (input->type()->requires_grad()) {
-        return true;
-      }
+  for (const Value* input : graph->inputs()) {
+    if (input->type()->requires_grad()) {
+      return true;
     }
   }
 
@@ -713,10 +708,6 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 }
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-  // run custom passes that different backends can register
-  for (const auto& pass : getCustomPasses()) {
-    pass(graph);
-  }
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   DecomposeOps(graph);
@@ -732,16 +723,22 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   QuantFusion(graph);
 
   FuseGraph(graph);
+
+  // Run custom passes that different backends can register.
+  // This is done last to give internal optimization passes priority.
+  for (const auto& pass : getCustomPasses()) {
+    pass(graph);
+  }
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph) {
   // Basic graph preprocessing to eliminate noise.
   EliminateDeadCode(graph);
   EliminateCommonSubexpression(graph);
-  ConstantPooling(graph);
 
   PeepholeOptimize(graph);
   ConstantPropagation(graph);
+  ConstantPooling(graph);
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.

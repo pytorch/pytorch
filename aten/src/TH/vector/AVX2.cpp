@@ -111,26 +111,4 @@ void THFloatVector_normal_fill_AVX2(float *data,
   }
 }
 
-void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  const __m256 one = _mm256_set1_ps(1.0f);
-  const __m256 zero = _mm256_set1_ps(0.0f);
-  __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i = 0; i <= ((n)-16); i += 16) {
-    YMM0 = _mm256_loadu_ps(x + i);
-    YMM1 = _mm256_loadu_ps(x + i + 8);
-    YMM0 = _mm256_sub_ps(zero, YMM0);
-    YMM1 = _mm256_sub_ps(zero, YMM1);
-    YMM2 = _mm256_add_ps(one, exp256_ps(YMM0));
-    YMM3 = _mm256_add_ps(one, exp256_ps(YMM1));
-    YMM2 = _mm256_div_ps(one, YMM2);
-    YMM3 = _mm256_div_ps(one, YMM3);
-    _mm256_storeu_ps(y + i, YMM2);
-    _mm256_storeu_ps(y + i + 8, YMM3);
-  }
-  for (; i < (n); i++) {
-    y[i] = 1.0f / (1.0f + expf(-x[i]));
-  }
-}
-
 #endif // defined(__AVX2__)

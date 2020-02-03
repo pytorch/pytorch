@@ -10,28 +10,6 @@
 namespace torch {
 namespace nn {
 
-/// Options for a pad functional.
-struct TORCH_API PadOptions {
-  typedef c10::variant<
-    enumtype::kConstant,
-    enumtype::kReflect,
-    enumtype::kReplicate,
-    enumtype::kCircular> mode_t;
-
-  PadOptions(std::vector<int64_t> pad);
-
-  /// m-elements tuple, where m/2 <= input dimensions and m is even.
-  TORCH_ARG(std::vector<int64_t>, pad);
-
-  /// "constant", "reflect", "replicate" or "circular". Default: "constant"
-  TORCH_ARG(mode_t, mode) = torch::kConstant;
-
-  /// fill value for "constant" padding. Default: 0
-  TORCH_ARG(double, value) = 0;
-};
-
-// ============================================================================
-
 /// Options for a `D`-dimensional ReflectionPad module.
 template <size_t D>
 struct TORCH_API ReflectionPadOptions {
@@ -114,6 +92,32 @@ using ConstantPad2dOptions = ConstantPadOptions<2>;
 
 /// `ConstantPadOptions` specialized for 3-D ConstantPad.
 using ConstantPad3dOptions = ConstantPadOptions<3>;
+
+// ============================================================================
+
+namespace functional {
+
+/// Options for a pad functional.
+struct TORCH_API PadFuncOptions {
+  typedef c10::variant<
+    enumtype::kConstant,
+    enumtype::kReflect,
+    enumtype::kReplicate,
+    enumtype::kCircular> mode_t;
+
+  PadFuncOptions(std::vector<int64_t> pad);
+
+  /// m-elements tuple, where m/2 <= input dimensions and m is even.
+  TORCH_ARG(std::vector<int64_t>, pad);
+
+  /// "constant", "reflect", "replicate" or "circular". Default: "constant"
+  TORCH_ARG(mode_t, mode) = torch::kConstant;
+
+  /// fill value for "constant" padding. Default: 0
+  TORCH_ARG(double, value) = 0;
+};
+
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

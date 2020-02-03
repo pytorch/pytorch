@@ -38,6 +38,10 @@ void LinearImpl::reset() {
     bias = register_parameter("bias", {}, /*requires_grad=*/false);
   }
 
+  reset_parameters();
+}
+
+void LinearImpl::reset_parameters() {
   torch::nn::init::kaiming_uniform_(weight, std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   if (bias.defined()) {
     int64_t fan_in, fan_out;
@@ -88,6 +92,10 @@ void BilinearImpl::reset() {
     bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
   }
 
+  reset_parameters();
+}
+
+void BilinearImpl::reset_parameters() {
   const auto bound = 1.0 / std::sqrt(weight.size(1));
   init::uniform_(weight, -bound, bound);
   if (bias.defined()) {

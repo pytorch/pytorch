@@ -44,13 +44,13 @@ constexpr int checkStaticTypes() {
 }
 
 template <typename... Ts, size_t... Is>
-constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(guts::index_sequence<Is...>) {
+constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(std::index_sequence<Is...>) {
   return (
     // Check types for common errors
     checkStaticTypes<Ts...>(),
 
     // Create the return value
-    std::array<ArgumentDef, sizeof...(Ts)>{{ArgumentDef{&getTypePtr_<guts::decay_t<Ts>>::call}...}}
+    std::array<ArgumentDef, sizeof...(Ts)>{{ArgumentDef{&getTypePtr_<std::decay_t<Ts>>::call}...}}
   );
 }
 
@@ -61,7 +61,7 @@ template<class... ParameterTypes>
 struct createArguments<guts::typelist::typelist<ParameterTypes...>> final {
   static constexpr std::array<ArgumentDef, sizeof...(ParameterTypes)> call() {
     return createArgumentVectorFromTypes<ParameterTypes...>(
-        guts::make_index_sequence<sizeof...(ParameterTypes)>()
+        std::make_index_sequence<sizeof...(ParameterTypes)>()
     );
   }
 };
@@ -78,13 +78,13 @@ template<class... ReturnTypes>
 struct createReturns<std::tuple<ReturnTypes...>, void> final {
   static constexpr std::array<ArgumentDef, sizeof...(ReturnTypes)> call() {
     return createArgumentVectorFromTypes<ReturnTypes...>(
-        guts::make_index_sequence<sizeof...(ReturnTypes)>()
+        std::make_index_sequence<sizeof...(ReturnTypes)>()
     );
   }
 };
 
 template<class ReturnType>
-struct createReturns<ReturnType, guts::enable_if_t<!std::is_same<void, ReturnType>::value && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
+struct createReturns<ReturnType, std::enable_if_t<!std::is_same<void, ReturnType>::value && !guts::is_instantiation_of<std::tuple, ReturnType>::value>> final {
   static constexpr std::array<ArgumentDef, 1> call() {
     return createReturns<std::tuple<ReturnType>>::call();
   }

@@ -1,11 +1,13 @@
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
 namespace torch {
 namespace jit {
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(1) {}
+    : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
@@ -58,7 +60,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
     if (t.isTensor()) {
 
       if (t.toTensor().defined()) {
-        auto pttp = TensorType::create(t.toTensor());
+        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
         std::lock_guard<std::mutex> lock(this->mutex_);
         if (auto type = pno->type()->cast<TensorType>()) {
           if (!first) {
@@ -125,15 +127,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   auto pop = pr->createProfileNode(counter, {});
   new_g->appendNode(pop);
   return pr;
-}
-
-TensorTypePtr ProfilingRecord::toTensorTypePtr(const IValue& ival) {
-  if (ival.isTensor()) {
-    auto tensor = ival.toTensor();
-    return TensorType::create(tensor);
-  }
-
-  return {nullptr};
 }
 
 } // namespace jit

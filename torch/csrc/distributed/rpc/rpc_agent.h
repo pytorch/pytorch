@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/future_message.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/types.h>
@@ -11,6 +10,12 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+struct RpcBackendOptions {
+  RpcBackendOptions() = default;
+  std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
+};
 
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo {
@@ -40,6 +45,10 @@ struct TORCH_API WorkerInfo {
         name_);
   }
 
+  bool operator==(const WorkerInfo& rhs) {
+    return (id_ == rhs.id_) && (name_ == rhs.name_);
+  }
+
   static constexpr size_t MAX_NAME_LEN = 128;
 
   const std::string name_;
@@ -66,7 +75,10 @@ class TORCH_API RpcAgent {
   // NB: RpcAgent implementations should not start serving requests until
   // ``start()`` is called, as there could be other contexts that have not been
   // initialized yet at this time.
-  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
+  RpcAgent(
+      WorkerInfo id,
+      std::unique_ptr<RequestCallback> cb,
+      std::chrono::milliseconds rpcTimeout);
 
   virtual ~RpcAgent();
 
@@ -74,9 +86,9 @@ class TORCH_API RpcAgent {
   // ``FutureMessage`` ptr. The implementation must be asynchronous, i.e., it
   // cannot block until it receives the response.
   //
-  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be completed
-  // when the response arrives. For other message types, the Future should be
-  // ignored by the caller.
+  // If ``message.isRequest()`` is true, the ``FutureMessage`` will be
+  // completed when the response arrives. For other message types, the Future
+  // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) = 0;
@@ -93,6 +105,18 @@ class TORCH_API RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
+  virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
+
+  // Retrieve the timeout for all RPCs.
+  inline std::chrono::milliseconds getRpcTimeout() const {
+    return rpcTimeout_.load();
+  }
+
+  // Set the timeout for all RPCs
+  inline void setRpcTimeout(const std::chrono::milliseconds& rpcTimeout) {
+    rpcTimeout_.store(rpcTimeout);
+  }
+
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
   virtual void join() = 0;
@@ -102,23 +126,57 @@ class TORCH_API RpcAgent {
   virtual void sync() = 0;
 
   // start accepting requests
-  virtual void start() {}
+  virtual void start() = 0;
 
-  // Set the default rpc agent.
-  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+  // Stop accepting requests and shutdown the RPC framework as soon as possible
+  // by terminating all RPC threads.
+  virtual void shutdown() = 0;
 
-  // Retrieve the default rpc agent.
-  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+  // Check if current RPC agent is set.
+  static bool isCurrentRpcAgentSet();
+
+  // Retrieve the valid current RPC agent.
+  static std::shared_ptr<RpcAgent> getCurrentRpcAgent();
+
+  // Set the current RPC agent.
+  static void setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent);
+
+  // Retrieve metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getMetrics() = 0;
+
+  // Retrive debug info in addition to metrics as KV map
+  virtual std::unordered_map<std::string, std::string> getDebugInfo();
+
+  // Flag to control whether GIL wait times
+  // should be profiled or not.
+  void enableGILProfiling(bool flag);
+
+  // Retrieve wheher we should profile GIL wait times or not.
+  bool isGILProfilingEnabled();
 
  protected:
   const WorkerInfo workerInfo_;
-  const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+  std::atomic<std::chrono::milliseconds> rpcTimeout_;
+  std::atomic<bool> profilingEnabled_;
 
  private:
-  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
+  static std::shared_ptr<RpcAgent> currentRpcAgent_;
+  // Add GIL wait time data point to metrics
+  virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
+  friend class PythonRpcHandler;
 };
 
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+namespace std {
+template <>
+struct hash<torch::distributed::rpc::WorkerInfo> {
+  std::size_t operator()(
+      const torch::distributed::rpc::WorkerInfo& worker_info) const noexcept {
+    return worker_info.id_;
+  }
+};
+} // namespace std

@@ -71,7 +71,7 @@ struct TORCH_API Function {
   // The enable_if check is to ensure that the user doesn't explicitly provide
   // the parameter X.
   template<typename X=T, typename... Args>
-  static auto apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
+  static auto apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
 };
 
 // Context to save information during forward that can be accessed in backward
@@ -148,27 +148,23 @@ struct CppNode : public Node {
   void save_variables_to_ctx();
 };
 
-template <typename T>
-using enable_if_var_t = typename std::enable_if<std::is_constructible<Variable, T>::value>::type;
-
-template <typename T>
-using enable_if_not_var_t = typename std::enable_if<!std::is_constructible<Variable, T>::value>::type;
-
-template <typename T, typename... Args>
-enable_if_not_var_t<T> extract_vars(std::vector<bool> &is_var, variable_list& list, T&& cur, Args&& ... args) {
-  is_var.push_back(false);
-  extract_vars(is_var, list, std::forward<Args>(args)...);
-}
-
-template <typename T, typename... Args>
-enable_if_var_t<T> extract_vars(std::vector<bool> &is_var, variable_list& list, T&& cur, Args&& ... args) {
-  is_var.push_back(true);
-  list.emplace_back(cur);
-  extract_vars(is_var, list, std::forward<Args>(args)...);
-}
+struct ExtractVariables : IterArgs<ExtractVariables> {
+  std::vector<bool>& is_var_;
+  variable_list& list_;
+  ExtractVariables(std::vector<bool>& is_var, variable_list& list) : is_var_(is_var), list_(list) {}
+  void operator()(const at::Tensor& x) {
+    is_var_.push_back(true);
+    list_.emplace_back(x);
+  }
+  template <typename T>
+  void operator()(const T& x) {
+    is_var_.push_back(false);
+  }
+};
 
 template <typename... Args>
-void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&& ... args) {
+inline void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&&... args) {
+  ExtractVariables(is_var, list).apply(std::forward<Args>(args)...);
 }
 
 template <typename T>
@@ -179,7 +175,7 @@ typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_typ
 
 template<class T>
 template<typename X, typename... Args>
-auto Function<T>::apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
+auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 

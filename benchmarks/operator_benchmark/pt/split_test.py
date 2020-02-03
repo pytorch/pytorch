@@ -14,11 +14,12 @@ import torch
 split_configs_short = op_bench.config_list(
     attr_names=["M", "N", "parts"],
     attrs=[
+        [8, 8, 2],
         [256, 512, 2],
         [512, 512, 2],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )
@@ -27,7 +28,7 @@ split_configs_long = op_bench.cross_product_configs(
     M=[128, 1024],
     N=[128, 1024],
     parts=[2, 4],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 

@@ -62,7 +62,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       newstyle_outputs_(),
 #endif
       input_size_(operator_def.input_size()),
-      event_(caffe2::make_unique<Event>(device_option_)) {
+      event_(std::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
   inputs_.reserve(operator_def.input_size());
   for (const string& input_str : operator_def.input()) {
@@ -99,7 +99,7 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
     // into that list. currently, this means that only tensors from that list
     // are accessible as inputs. any hypothetical input tensors that come after
     // the list are not accessible.
-    return inputs[0].toTensorListRef().size();
+    return inputs[0].toTensorVector().size();
   }
   // it's not a tensor list. Count the number of tensor inputs and return them.
   size_t num_tensor_inputs = 0;

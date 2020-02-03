@@ -63,7 +63,7 @@ OPERATOR_SCHEMA(SparseNormalize)
         "A bool variable to control whether to use max norm \
     or constant norm. When use_max_norm = false, constant norm is used so that \
     all the embedding vectors are scaled to have a L2 norm equals to A \
-    (see blow arugment norm=A). If use_max_norm = true, \
+    (see blow argument norm=A). If use_max_norm = true, \
     max norm is used so that embedding is scaled so that its l2 norm is no larger \
     than A. If an embedding's norm is less than A originally, \
     the embedding is left unchanged.\

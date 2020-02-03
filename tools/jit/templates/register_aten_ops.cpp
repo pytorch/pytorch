@@ -63,7 +63,7 @@ at::Tensor toOptionalTensor(const IValue& v) {
 // tensor type in interpreter, it should only be used in this file
 std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
   // v is a list of optional tensor, loop over as generic list
-  auto vlist = v.toGenericListRef();
+  auto vlist = v.toListRef();
   std::vector<Tensor> res;
 
   for (const IValue &v: vlist) {
@@ -85,6 +85,11 @@ c10::OperatorOptions atenOperatorOptions() {
   result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
   return result;
 }
+
+int (*DUMMY_OPERATION)(Stack&) = [](Stack& stack) -> int {
+  TORCH_CHECK(false, "Operator has been stripped in the custom build.")
+  return 0;
+};
 
 RegisterOperators reg(
     {Operator(

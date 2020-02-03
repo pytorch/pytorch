@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
@@ -262,7 +263,7 @@ __global__ void atomicadaptivemaxgradinput(
       int64_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
       int64_t argmax = (*ptr_ind);
-      atomicAdd(&(gradInput_d[argmax]), grad_delta);
+      gpuAtomicAdd(&(gradInput_d[argmax]), grad_delta);
     }
   }
 }
@@ -508,7 +509,7 @@ Tensor adaptive_max_pool3d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool3d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
