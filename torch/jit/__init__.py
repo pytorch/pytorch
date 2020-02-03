@@ -1653,9 +1653,9 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
-        def save_for_mobile(self, *args, **kwargs):
+        def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
-            _save_for_mobile(f)
+            _save_for_lite_interpreter(f)
 
             Add (or update) the bytecode session to the script model. The updated model is used
             in lite interpreter for mobile applications.
@@ -1871,7 +1871,7 @@ class TracedModule(ScriptModule):
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
         for name, val in orig.__dict__.items():
-            if torch._C._jit_is_traceable_ivalue(val) and name not in orig._parameters and name not in orig._buffers:
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
                 setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
