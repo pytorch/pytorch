@@ -6,7 +6,7 @@
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
 // `errno` to `EINVAL` in child process on some macos
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
-// be inspected if an error occured.
+// be inspected if an error occurred.
 //
 // All functions used in `libshm` (so far) indicate error by returning `-1`. If
 // you want to use a function with a different error reporting mechanism, you

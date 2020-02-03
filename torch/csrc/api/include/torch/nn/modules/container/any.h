@@ -285,18 +285,10 @@ class AnyModule::Value {
   friend struct TestValue;
 
   /// Constructs the `Value` from value type.
-  template <
-      typename T,
-      typename =
-          torch::disable_if_t<std::is_same<autograd::Variable, T>::value>>
+  template <typename T>
   explicit Value(T&& value)
       : content_(
             torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
-
-  /// Constructs the `Value` from an `autograd::Variable`, first converting it
-  /// to a `torch::Tensor`.
-  explicit Value(autograd::Variable variable)
-      : Value(Tensor(std::move(variable))) {}
 
   /// \internal
   /// The static type of the object we store in the `Value`, which erases the

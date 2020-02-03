@@ -117,7 +117,8 @@ class NLLLoss(_WeightedLoss):
         l_n = - w_{y_n} x_{n,y_n}, \quad
         w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
-    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
+    :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then
 
     .. math::
@@ -193,7 +194,7 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(conv(data)), target)
         >>> output.backward()
     """
-    __constants__ = ['ignore_index', 'weight', 'reduction']
+    __constants__ = ['ignore_index', 'reduction']
 
     def __init__(self, weight=None, size_average=None, ignore_index=-100,
                  reduce=None, reduction='mean'):
@@ -489,7 +490,7 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
-    __constants__ = ['reduction', 'weight']
+    __constants__ = ['reduction']
 
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean'):
         super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
@@ -587,8 +588,6 @@ class BCEWithLogitsLoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    __constants__ = ['weight', 'pos_weight', 'reduction']
-
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean', pos_weight=None):
         super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
@@ -904,7 +903,7 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
-    __constants__ = ['weight', 'ignore_index', 'reduction']
+    __constants__ = ['ignore_index', 'reduction']
 
     def __init__(self, weight=None, size_average=None, ignore_index=-100,
                  reduce=None, reduction='mean'):
@@ -954,7 +953,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
     """
-    __constants__ = ['weight', 'reduction']
+    __constants__ = ['reduction']
 
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean'):
         super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
@@ -1101,7 +1100,7 @@ class MultiMarginLoss(_WeightedLoss):
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
     """
-    __constants__ = ['p', 'margin', 'weight', 'reduction']
+    __constants__ = ['p', 'margin', 'reduction']
 
     def __init__(self, p=1, margin=1., weight=None, size_average=None,
                  reduce=None, reduction='mean'):

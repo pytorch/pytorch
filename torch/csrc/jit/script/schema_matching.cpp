@@ -49,7 +49,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-// Applies implict conversion from value trying to turn it into type
+// Applies implicit conversion from value trying to turn it into type
 // concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
@@ -256,7 +256,7 @@ static bool varargsCanBeUsedAsList(
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list &&
+  return is_last_argument && argument_is_list && !arg_is_broadcasting_list &&
       !typevar_list;
 }
 
@@ -440,6 +440,17 @@ MatchedSchema matchSchema(
   throw ErrorReport(loc) << failure_messages.str();
 }
 
+MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<Value*> args,
+    at::ArrayRef<NamedValue> kwargs) {
+  std::vector<NamedValue> named_args =
+      fmap(args, [](Value* v) { return NamedValue(v); });
+  return matchSchema(schema, loc, graph, named_args, kwargs);
+}
+
 static std::string prefixLine(
     const std::string& str,
     const std::string& prefix) {
@@ -513,13 +524,13 @@ static Value* packOutputs(
     return values[0];
   }
   std::shared_ptr<FunctionSchema> schema;
+  TupleTypePtr named_tuple = nullptr;
   if (field_names) {
-    schema = TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) { return v->type(); }));
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    named_tuple = TupleType::createNamed(
+        c10::nullopt, field_names.value(), std::move(types));
   }
-  return g
-      .insertNode(
-          g.createTuple(values, c10::nullopt, std::move(schema)))
-      ->output();
+  return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node

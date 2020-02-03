@@ -616,8 +616,8 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   ~UnCopyableDataset() = default;
 
   Example<> get(size_t index) override {
-    return {torch::tensor(static_cast<int64_t>(index)),
-            torch::tensor(static_cast<int64_t>(index))};
+    return {torch::tensor({static_cast<int64_t>(index)}),
+            torch::tensor({static_cast<int64_t>(index)})};
   }
 
   torch::optional<size_t> size() const override {
@@ -1983,7 +1983,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
           // output, hence verify the logic. In this test, the cache size is
           // configured to be the same as chunk size and batch size. So the
           // chunk data is written to the cache one by one. Only the current
-          // batch is retrieved, the next chunk is writen. Now in iteration 0,
+          // batch is retrieved, the next chunk is written. Now in iteration 0,
           // after the first batch is retrieved, when we save the dataset
           // statues, there are three possible scenarios for the writer thread:
           // 1. it hasn't started loading the next chunk data yet, so the

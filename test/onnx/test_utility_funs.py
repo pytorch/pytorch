@@ -137,10 +137,26 @@ class TestUtilityFuns(TestCase):
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
             def forward(self, x):
-                a = torch.tensor([[1., 2., 3.]])
-                b = torch.tensor([[4., 5., 6.]])
+                # Why did I insert a Cast here?  There appears to be intentional
+                # behavior in ONNX constant folding where constant tensors which
+                # are not attached to any known to be foldable onnx
+                # operations don't get extracted into the initializer graph.  So
+                # without these casts, we will actually fail to pull out one of
+                # the constants, thus failing constant folding.  I think the
+                # test is wrong but I don't have time to write a more correct
+                # test (I think the right way to go about the test is to setup
+                # a predicate for what invariant graphs should hold after
+                # constant folding, and then verify this predicate holds.
+                # I think the asserts below are an attempt at this predicate,
+                # but it is not right!)
+                #
+                # More commentary at
+                # https://github.com/pytorch/pytorch/pull/18698/files#r340107552
+                a = torch.tensor([[1., 2., 3.]]).to(torch.float)
+                b = torch.tensor([[4., 5., 6.]]).to(torch.float)
                 c = torch.cat((a, b), 0)
-                return b + c
+                d = b + c
+                return x + d
 
         _set_opset_version(self.opset_version)
         x = torch.ones(2, 3)
@@ -151,7 +167,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+        assert len(list(graph.nodes())) == 2
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
@@ -188,6 +204,74 @@ class TestUtilityFuns(TestCase):
                                              do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_reshape(self):
+        class ReshapeModule(torch.nn.Module):
+            def __init__(self, ):
+                super(ReshapeModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                b = self.weight.reshape(1, -1, 1, 1)
+                return x * b
+
+        _set_opset_version(self.opset_version)
+        x = torch.randn(4, 5)
+        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Reshape"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_div(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                div = self.weight.div(torch.tensor([1, 2, 3, 4, 5]))
+                return div * x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Div"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_mul(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                mul = self.weight.mul(torch.tensor([1, 2, 3, 4, 5]))
+                return mul / x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Mul"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_sqrt(self):
+        class Module(torch.nn.Module):
+            def __init__(self, ):
+                super(Module, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                sqrt = torch.sqrt(self.weight)
+                return sqrt / x
+
+        x = torch.randn(2, 5)
+        _set_opset_version(self.opset_version)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Sqrt"
         assert len(list(graph.nodes())) == 1
 
     def test_strip_doc_string(self):
@@ -228,6 +312,12 @@ class TestUtilityFuns(TestCase):
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
+
+
+# opset 11 tests
+TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=11))
 
 
 if __name__ == '__main__':

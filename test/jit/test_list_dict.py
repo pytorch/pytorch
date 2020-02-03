@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import inspect
 from typing import List, Dict
 from textwrap import dedent
 from collections import OrderedDict
@@ -12,7 +13,12 @@ from torch._six import PY2
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase
+
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestList(JitTestCase):
     def test_in_check(self):
@@ -91,6 +97,44 @@ class TestList(JitTestCase):
             return
         with self.assertRaisesRegex(RuntimeError, "previously has type"):
             self.checkScript(reassign_nested, (), optimize=False)
+
+    def test_del(self):
+        def inputs():
+            return [1, 2, 3, 4]
+
+        def fn(x):
+            # type: (List[int]) -> List[int]
+            del x[1]
+            return x
+
+        python_out = fn(inputs())
+        # checkScript reuses the same object, but here it's being mutated so do
+        # it manually
+        cu = torch.jit.CompilationUnit()
+        cu.define(dedent(inspect.getsource(fn)))
+        self.assertEqual(cu.fn(inputs()), python_out)
+        self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
+
+        @torch.jit.script
+        def fn2(x):
+            # type: (List[int]) -> List[int]
+            del x[100]
+            return x
+
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            fn2([])
+
+        with self.assertRaisesRegex(RuntimeError, "only supported for list and dict"):
+            @torch.jit.script
+            def fn(x):
+                del x
+
+        with self.assertRaisesRegex(RuntimeError, "deletion at a single index"):
+            @torch.jit.script
+            def fn(x):
+                # type: (List[int]) -> List[int]
+                del x[1:3]
+                return x
 
     def test_min_bool_list(self):
         def jit_min_list(a, b):
@@ -311,6 +355,14 @@ class TestList(JitTestCase):
 
         test_mutation()
         FileCheck().check("aten::sort").run(test_mutation.graph_for())
+
+        def test_sorted_copy():
+            a = [torch.tensor(2), torch.tensor(0), torch.tensor(1)]
+            b = sorted(a)
+            a[0] = torch.tensor(10)
+            return a, b
+
+        self.checkScript(test_sorted_copy, ())
 
     def test_list_slice(self):
         def test_regular_slice():
@@ -847,6 +899,25 @@ class TestDict(JitTestCase):
     def dict2(self):
         return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
+    def test_del(self):
+        def inputs():
+            return {'hi': 2, 'bye': 3}
+
+        def fn(x):
+            # type: (Dict[str, int]) -> Dict[str, int]
+            del x['hi']
+            return x
+
+        python_out = fn(inputs())
+        # checkScript reuses the same object, but here it's being mutated so do
+        # it manually
+        cu = torch.jit.CompilationUnit()
+        cu.define(dedent(inspect.getsource(fn)))
+        self.assertEqual(cu.fn(inputs()), python_out)
+        self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
+        with self.assertRaisesRegex(RuntimeError, "KeyError"):
+            self.checkScript(fn, [{}])
+
     def test_keys(self):
         @torch.jit.script
         def keys(x):
@@ -1071,7 +1142,7 @@ class TestDict(JitTestCase):
         self.assertEqual(fn(), {'ok': 10})
 
     def test_key_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+        with self.assertRaisesRegex(RuntimeError, "but instead found type"):
             @torch.jit.script
             def fn(a):
                 # type: (Dict[str, int]) -> int
@@ -1164,9 +1235,3 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
-
-
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")

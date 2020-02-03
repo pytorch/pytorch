@@ -524,6 +524,10 @@ if(USE_FBGEMM)
     set(USE_FBGEMM OFF)
   endif()
   if(MSVC)
+    message(WARNING
+      "FBGEMM is currently not supported on windows with MSVC. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
     set(USE_FBGEMM OFF)
   endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
@@ -795,12 +799,15 @@ endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
-    message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
-    include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
     message(STATUS "Using third_party/pybind11.")
-    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+    set(pybind11_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+    install(DIRECTORY ${pybind11_INCLUDE_DIRS}
+            DESTINATION ${CMAKE_INSTALL_PREFIX}
+            FILES_MATCHING PATTERN "*.h")
 endif()
+message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
+include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 
 # ---[ MPI
 if(USE_MPI)
@@ -898,28 +905,17 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+      caffe2::cufft caffe2::curand caffe2::cublas)
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      IF(CUDNN_STATIC)
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-          caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
-      ELSE()
-        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
-      ENDIF()
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
       caffe2_update_option(USE_CUDNN OFF)
-    endif()
-    if(CAFFE2_STATIC_LINK_CUDA)
-      # When statically linking, this must be the order of the libraries
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
-    else()
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
     endif()
     if(CAFFE2_USE_TENSORRT)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
@@ -966,8 +962,10 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
+    list(APPEND HIP_CXX_FLAGS -std=c++14)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
        list(APPEND HIP_CXX_FLAGS -g)
@@ -1182,7 +1180,13 @@ function (add_onnx_tensorrt_subdir)
   # We pass the paths we found to onnx tensorrt.
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
+  set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
+  if (FIND_CUDA_MODULE_DEPRECATED)
+    # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
+    set(CMAKE_VERSION "3.9.0")
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
+  set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
 endfunction()
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (USE_TENSORRT)
@@ -1234,7 +1238,7 @@ if (NOT INTERN_BUILD_MOBILE)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
 
   if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    SET(CMAKE_CXX_STANDARD 11)
+    SET(CMAKE_CXX_STANDARD 14)
   endif()
 
   LIST(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})

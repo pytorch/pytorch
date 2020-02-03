@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from test_pytorch_common import TestCase, run_tests, flatten
+from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
 import torch
 import torch.onnx
@@ -14,7 +14,7 @@ import inspect
 import glob
 import os
 import shutil
-import common_utils as common
+import torch.testing._internal.common_utils as common
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -265,6 +265,16 @@ class TestOperators(TestCase):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
+    def test_conv_onnx_irv4_opset8(self):
+        # This test point checks that for opset 8 (or lower), even if
+        # keep_initializers_as_inputs is set to False, it is ignored,
+        # and initializers are listed as ONNX graph input, in accordance
+        # with ONNX IR v3 semantics (which apply to opset version <= 8).
+        x = torch.ones(1, 2, 5, 7, requires_grad=True)
+        conv_node = nn.Conv2d(2, 4, 3, bias=False)
+        conv_node.weight.data.fill_(1.0)
+        self.assertONNX(conv_node, x, opset_version=8, keep_initializers_as_inputs=False)
+
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
         model = torch.nn.Conv2d(3, 2, 3)
@@ -490,6 +500,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_slice_dynamic(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x[x.size(0):, x.size(1) - 3], x, opset_version=10)
+
     def test_sign(self):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.sign(), x)
@@ -555,9 +569,19 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    def test_upsample_nearest(self):
+    def test_upsample_nearest_scale(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest', recompute_scale_factor=False), x)
+
+    def test_upsample_nearest_scale_default_scale_factor(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2.,
+                        mode='nearest'), x)
+
+    def test_upsample_nearest_size(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, size=16, mode='nearest'), x)
 
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -727,7 +751,7 @@ class TestOperators(TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs)
+        self.assertONNX(model, inputs, custom_opsets={'org.pytorch._caffe2': 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -756,6 +780,14 @@ class TestOperators(TestCase):
 
         input = torch.randn(5, 3, 2)
         self.assertONNX(TestModel(), input, opset_version=11)
+
+    def test_bitshift(self):
+        class BitshiftModel(torch.nn.Module):
+            def forward(self, input, input2):
+                return input >> 1, input2 >> 2
+        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
+        input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
+        self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
@@ -794,6 +826,12 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_meshgrid(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
     def test_topk(self):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
@@ -813,6 +851,15 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    def test_dim(self):
+        x = torch.ones((2, 2), requires_grad=True)
+        self.assertONNX(lambda x: torch.scalar_tensor(x.dim()), x)
+
+    @skipIfNoLapack
+    def test_det(self):
+        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
+        self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
 if __name__ == '__main__':

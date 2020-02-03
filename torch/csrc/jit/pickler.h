@@ -31,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
@@ -84,19 +85,6 @@ enum class PickleOpCode : char {
   STACK_GLOBAL = '\x93',
   MEMOIZE = '\x94',
   FRAME = '\x95'
-};
-
-enum PicklerClass : uint8_t {
-  // A reference to the tensor table
-  TENSOR = 0,
-  // List[int]
-  INTLIST = 1,
-  // List[Tensor]
-  TENSORLIST = 2,
-  // List[float]
-  DOUBLELIST = 3,
-  // List[bool]
-  BOOLLIST = 4
 };
 
 using ::c10::IValue;
@@ -163,15 +151,15 @@ class Pickler {
   void pushLiteralTensor(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
+  void pushDevice(const IValue& ivalue);
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);
 
   void pushBinGet(uint32_t memo_id);
-  void pushClass(PicklerClass cls);
   void pushSpecializedList(
       const IValue& ivalue,
-      PicklerClass cls,
+      const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(
       const std::string& module_name,
@@ -252,6 +240,7 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
+  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

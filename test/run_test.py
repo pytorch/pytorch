@@ -14,86 +14,87 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
 PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
-    'autograd',
-    'cpp_extensions',
-    'c10d',
-    'c10d_spawn',
-    'cuda',
-    'cuda_primary_ctx',
-    'dataloader',
-    'distributed',
-    'distributions',
-    'docs_coverage',
-    'expecttest',
-    'fake_quant',
-    'indexing',
-    'jit',
-    'logging',
-    'mkldnn',
-    'multiprocessing',
-    'multiprocessing_spawn',
-    'nccl',
-    'nn',
-    'numba_integration',
-    'optim',
-    'qat',
-    'quantization',
-    'quantized',
-    'quantized_tensor',
-    'quantized_nn_mods',
-    'quantizer',
-    'sparse',
-    'torch',
-    'type_info',
-    'type_hints',
-    'utils',
-    'namedtuple_return_api',
-    'jit_fuser',
-    'tensorboard',
-    'namedtensor',
-    'type_promotion',
-    'jit_disabled',
-    'function_schema',
+    'test_autograd',
+    'test_cpp_extensions',
+    'distributed/test_c10d',
+    'distributed/test_c10d_spawn',
+    'test_cuda',
+    'test_cuda_primary_ctx',
+    'test_dataloader',
+    'distributed/test_data_parallel',
+    'distributed/test_distributed',
+    'test_distributions',
+    'test_docs_coverage',
+    'test_expecttest',
+    'test_fake_quant',
+    'test_indexing',
+    'test_jit',
+    'test_logging',
+    'test_mkldnn',
+    'test_multiprocessing',
+    'test_multiprocessing_spawn',
+    'distributed/test_nccl',
+    'test_nn',
+    'test_numba_integration',
+    'test_optim',
+    'test_qat',
+    'test_quantization',
+    'test_quantized',
+    'test_quantized_tensor',
+    'test_quantized_nn_mods',
+    'test_sparse',
+    'test_serialization',
+    'test_torch',
+    'test_type_info',
+    'test_type_hints',
+    'test_utils',
+    'test_namedtuple_return_api',
+    'test_jit_fuser',
+    'test_jit_simple',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+    'test_tensorboard',
+    'test_namedtensor',
+    'test_type_promotion',
+    'test_jit_disabled',
+    'test_function_schema',
+    'test_overrides',
 ]
 
-# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
 # skip python2 for rpc and dist_autograd tests that do not support python2
 if PY33:
     TESTS.extend([
-        'rpc_fork',
-        'rpc_spawn',
-        'dist_autograd_fork',
-        'dist_autograd_spawn',
+        'distributed/rpc/test_rpc_spawn',
+        'distributed/rpc/test_dist_autograd_spawn',
+        'distributed/rpc/test_dist_optimizer_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.extend([
-        'jit_py3',
+        'test_jit_py3',
     ])
 
 WINDOWS_BLACKLIST = [
-    'distributed',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'distributed/test_distributed',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
 ]
 
 ROCM_BLACKLIST = [
-    'cpp_extensions',
-    'distributed',
-    'multiprocessing',
-    'rpc_fork',
-    'rpc_spawn',
-    'dist_autograd_fork',
-    'dist_autograd_spawn',
+    'test_cpp_extensions',
+    'distributed/test_distributed',
+    'test_multiprocessing',
+    'distributed/rpc/test_rpc_spawn',
+    'distributed/rpc/test_dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -102,15 +103,18 @@ DISTRIBUTED_TESTS_CONFIG = {}
 if dist.is_available():
     if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
-            'WORLD_SIZE': '3'
+            'WORLD_SIZE': '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-mpi'
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
-            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG['gloo'] = {
-            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
+            'TEST_REPORT_SOURCE_OVERRIDE': 'dist-gloo'
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -143,7 +147,6 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
 
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
     return run_test(executable, test_module, test_directory, options, '--subprocess')
-
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
@@ -230,9 +233,9 @@ def test_distributed(executable, test_module, test_directory, options):
 
 
 CUSTOM_HANDLERS = {
-    'cuda_primary_ctx': test_cuda_primary_ctx,
-    'cpp_extensions': test_cpp_extensions,
-    'distributed': test_distributed,
+    'test_cuda_primary_ctx': test_cuda_primary_ctx,
+    'test_cpp_extensions': test_cpp_extensions,
+    'distributed/test_distributed': test_distributed,
 }
 
 
@@ -354,7 +357,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
             occurrence (first is default)
 
     Returns:
-        index of the first or last occurance of the given test
+        index of the first or last occurrence of the given test
     """
     idx = 0
     found_idx = -1
@@ -428,24 +431,23 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
-        test_name = 'test_{}'.format(test)
+
         test_module = parse_test_module(test)
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
-        handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(executable, test_name, test_directory, options)
+        print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
+        handler = CUSTOM_HANDLERS.get(test, run_test)
+        return_code = handler(executable, test_module, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
-            message = '{} failed!'.format(test_name)
+            message = '{} failed!'.format(test)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
                 signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
                 message += ' Received signal: {}'.format(signal_name)
             raise RuntimeError(message)
-
     if options.coverage:
         shell(['coverage', 'combine'])
         shell(['coverage', 'html'])

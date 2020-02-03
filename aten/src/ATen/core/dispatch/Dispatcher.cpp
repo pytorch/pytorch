@@ -31,7 +31,9 @@ OpRegistrationListener::~OpRegistrationListener() {}
 Dispatcher::Dispatcher()
 : operators_()
 , operatorLookupTable_()
-, listeners_(guts::make_unique<detail::RegistrationListenerList>())
+, backendFallbackKernels_()
+, backendsWithoutFallthrough_(DispatchKeySet::FULL)
+, listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
 Dispatcher::~Dispatcher() {}
@@ -51,16 +53,24 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overloa
   });
 }
 
+OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overload_name) {
+  return findSchema({name, overload_name}).value();
+}
+
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
-      std::ostringstream str;
-      str << schema << " vs " << found->schema();
-      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", found->schema());
     }
-    if (found->options() != options) {
-      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+    if (options.isDefaultAliasAnalysisKind()) {
+      // just do nothing and let it pass.
+    } else if (found->options().isDefaultAliasAnalysisKind()) {
+      found->operatorIterator_->op.updateOptionsAliasAnalysis(options.aliasAnalysis());
+    } else {
+      TORCH_CHECK(
+        found->options() == options,
+        "Tried to register multiple operators with the same schema but different options: ", toString(schema));
     }
     return *found;
   }
@@ -75,7 +85,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   return handle;
 }
 
-SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
+std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -89,9 +99,9 @@ SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, O
     listeners_->callOnOperatorRegistered(op);
   }
 
-  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op, op_name] {
+  return std::make_pair(RegistrationHandleRAII([this, op, op_name] {
     deregisterSchema_(op, op_name);
-  })};
+  }), op);
 }
 
 void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name) {
@@ -116,7 +126,25 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+  auto inserted = backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
+  TORCH_CHECK(inserted == impl::KernelFunctionTable::SetKernelResult::ADDED_NEW_KERNEL, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
+  if (kernel.isFallthrough()) {
+    backendsWithoutFallthrough_ = backendsWithoutFallthrough_.remove(dispatchKey);
+  }
+
+  return RegistrationHandleRAII([this, dispatchKey] {
+    deregisterBackendFallbackKernel_(dispatchKey);
+  });
+}
+
+void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
+  auto result = backendFallbackKernels_.removeKernelIfExists(dispatchKey);
+  backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
+  TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
+}
+
+RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, DispatchKey dispatch_key, KernelFunction kernel) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), std::move(kernel));
 }
@@ -134,6 +162,22 @@ void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener>
   }
 
   listeners_->addListener(std::move(listener));
+}
+
+[[noreturn]] void Dispatcher::reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey) {
+  if (dispatchKey == DispatchKey::Undefined) {
+    TORCH_CHECK(false,
+          "There were no tensor arguments to this function (e.g., you passed an "
+          "empty list of Tensors), but no fallback function is registered for schema ", dispatchTable.operatorName(),
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          "Available functions are ", dispatchTable.listAllDispatchKeys())
+  }
+
+  const std::string dispatchKeyStr = toString(dispatchKey);
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 }

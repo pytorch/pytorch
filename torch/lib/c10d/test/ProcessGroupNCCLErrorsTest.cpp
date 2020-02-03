@@ -71,16 +71,64 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   bool simulate_error_;
 };
 
+class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
+ public:
+  WorkNCCLTimedoutErrors(
+      const std::vector<at::Device>& devices,
+      bool set_timedout_error)
+      : WorkNCCL(devices), set_timedout_error_(set_timedout_error) {}
+
+ private:
+  bool isCompleted() override {
+    if (set_timedout_error_) {
+      return false;
+    }
+    return c10d::ProcessGroupNCCL::WorkNCCL::isCompleted();
+  }
+
+ private:
+  bool set_timedout_error_;
+};
+
+class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
+ public:
+  ProcessGroupNCCLTimedOutErrors(
+      const std::shared_ptr<c10d::Store>& store,
+      int rank,
+      int size)
+      : ProcessGroupNCCLSimulateErrors(store, rank, size),
+        set_timedout_error_(false) {}
+
+  std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
+      std::vector<at::Device> devices) override {
+    return std::make_shared<WorkNCCLTimedoutErrors>(
+        devices, set_timedout_error_);
+  }
+
+  void set_timedout_error() {
+    set_timedout_error_ = true;
+  }
+
+  void reset_timedout_error() {
+    set_timedout_error_ = false;
+  }
+
+ private:
+  bool set_timedout_error_;
+};
+
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
  protected:
-  bool skipTest() {
+  std::pair<bool, std::string> skipTest() {
     if (cudaNumDevices() == 0) {
-      return true;
+      return std::make_pair(true, "Skipping test since CUDA is not available");
     }
 #ifdef USE_C10D_NCCL
-    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion;
+    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion
+        ? std::make_pair(true, "Skipping test since NCCL version is too old")
+        : std::make_pair(false, "");
 #else
-    return false;
+    return std::make_pair(false, "");
 #endif
   }
 
@@ -106,7 +154,11 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
-  if (skipTest()) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
     return;
   }
 
@@ -139,9 +191,46 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   EXPECT_TRUE(work->isSuccess());
   EXPECT_EQ(1, pg.getNCCLCommCacheSize());
 }
+TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
+    return;
+  }
+
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1);
+
+  auto work = pg.allreduce(tensors_);
+  work->wait();
+  EXPECT_TRUE(work->isSuccess());
+  EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+
+  // Now run all reduce with errors.
+  pg.set_timedout_error();
+  work = pg.allreduce(tensors_);
+  EXPECT_THROW(work->wait(), std::runtime_error);
+
+  // Should remove the nccl communicators which hit errors from the cache.
+  std::this_thread::sleep_for(2 * pg.getWatchdogSleepInterval());
+  EXPECT_EQ(0, pg.getNCCLCommCacheSize());
+
+  // Verify we can recover from errors.
+  pg.reset_timedout_error();
+  work = pg.allreduce(tensors_);
+  work->wait();
+  EXPECT_TRUE(work->isSuccess());
+  EXPECT_EQ(1, pg.getNCCLCommCacheSize());
+}
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  if (skipTest()) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
     return;
   }
 

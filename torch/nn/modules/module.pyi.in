@@ -11,7 +11,7 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 T = TypeVar('T')
 # We parameter modules by the return type of its `forward` (and therefore `__call__`) method. This allows
 # type inference to infer that the return value of calling a module in the canonical way (via `__call__)` is the
-# same as the custom `forward` function of the submodule. Submodules tha wish to opt in this functionality be 
+# same as the custom `forward` function of the submodule. Submodules that wish to opt in this functionality be
 # defined as eg class ReturnsTwoTensors(Module[Tuple[Tensor, Tensor]]): ...
 T_co = TypeVar('T_co', covariant=True)
 
@@ -19,7 +19,9 @@ T_co = TypeVar('T_co', covariant=True)
 class Module(Generic[T_co]):
     def __init__(self) -> None: ...
 
-    def forward(self, *input: Any, **kwargs: Any) -> T_co: ...
+    forward: Callable[..., T_co]
+
+    __call__: Callable[..., T_co]
 
     def register_buffer(self, name: str, tensor: Tensor) -> None: ...
 
