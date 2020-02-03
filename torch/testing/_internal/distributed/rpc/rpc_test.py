@@ -1702,8 +1702,6 @@ class RpcTest(RpcAgentTestFixture):
 
         if self.rank == 0:
             # func exists on caller, but not callee.
-            # TODO: Need to enhance RemoteException to return the correct
-            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
             # wait for remote end to remove the binding of foo_add func.
             wait_for_value_future()
             # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
