@@ -76,7 +76,7 @@ At the top level, all TorchScript programs are represented as a Module. Modules 
 
 * named Parameters - tensors used in training such as `weight` or `bias`
 * named Methods - functions that can be run on the module such as `forward`
-* names sub-Modules - used for code organization.
+* named sub-Modules - used for code organization.
 
 This mirrors the `nn.Module` objects used in Python. All TorchScript code is a member of some module. This includes pure functions such as those created by annotating a Python function with `@torch.jit.script`, which are represented internally as a Module that has a single method `forward` that contains the implementation of the function.
 
