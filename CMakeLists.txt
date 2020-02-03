@@ -272,7 +272,7 @@ if (MSVC)
     endif()
 
     # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
+    # against libraries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
 
@@ -295,10 +295,17 @@ if (MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+IF(NOT MSVC)
+  SET(CUDA_NVCC_FLAGS_DEBUG "${CUDA_NVCC_FLAGS_DEBUG} -g -G --source-in-ptx")
+  SET(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${CUDA_NVCC_FLAGS_RELWITHDEBINFO} -g -lineinfo --source-in-ptx")
+ENDIF(NOT MSVC)
+
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
+  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile

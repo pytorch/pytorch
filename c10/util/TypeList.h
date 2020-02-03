@@ -293,31 +293,19 @@ struct find_if<typelist<Head, Tail...>, Condition, std::enable_if_t<!Condition<H
 /**
  * Maps a list of types into a list of values.
  * Examples:
- *   // C++14 example
+ *   // Example 1
  *   auto sizes =
  *     map_types_to_values<typelist<int64_t, bool, uint32_t>>(
  *       [] (auto t) { return sizeof(decltype(t)::type); }
  *     );
  *   //  sizes  ==  std::tuple<size_t, size_t, size_t>{8, 1, 4}
  *
- *   // C++14 example
+ *   // Example 2
  *   auto shared_ptrs =
  *     map_types_to_values<typelist<int, double>>(
  *       [] (auto t) { return make_shared<typename decltype(t)::type>(); }
  *     );
  *   // shared_ptrs == std::tuple<shared_ptr<int>, shared_ptr<double>>()
- *
- *   // C++11 example
- *   struct map_to_size {
- *     template<class T> constexpr size_t operator()(T) {
- *       return sizeof(typename T::type);
- *     }
- *   };
- *   auto sizes =
- *     map_types_to_values<typelist<int64_t, bool, uint32_t>>(
- *       map_to_size()
- *     );
- *   //  sizes  ==  std::tuple<size_t, size_t, size_t>{8, 1, 4}
  */
 namespace detail {
 template<class T> struct type_ final {

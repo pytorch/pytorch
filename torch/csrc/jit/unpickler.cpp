@@ -10,28 +10,6 @@ namespace jit {
 
 using ::c10::IValue;
 
-PicklerClass getClass(const std::string& str) {
-  if (str == "build_tensor_from_id") {
-    return PicklerClass::TENSOR;
-  } else if (str == "build_intlist") {
-    return PicklerClass::INTLIST;
-  } else if (str == "build_tensorlist") {
-    return PicklerClass::TENSORLIST;
-  } else if (str == "build_doublelist") {
-    return PicklerClass::DOUBLELIST;
-  } else if (str == "build_boollist") {
-    return PicklerClass::BOOLLIST;
-  }
-
-  // TODO [unpickler refactor]
-  if (str == "TensorID") {
-    return PicklerClass::TENSOR;
-  } else if (str == "IntList") {
-    return PicklerClass::INTLIST;
-  }
-  AT_ERROR("Unknown class name for unpickler: ", str);
-}
-
 static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
   if (root.isObject()) {
     restoreAccurateTypeTags(root, root.type());
@@ -80,10 +58,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
+      case PyObjectType::Kind:
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
       case QSchemeType::Kind:
+      case LayoutType::Kind:
+      case ScalarTypeType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
@@ -120,11 +101,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case ListType::Kind: {
         // specialized lists do not need their type refined, so we can exit
         // early here
-        if (!w.value.isGenericList()) {
+        if (!w.value.isList()) {
           break;
         }
         auto elem_type = w.static_type->cast<ListType>()->getElementType();
-        auto lst = w.value.toGenericList();
+        auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue& item : lst) {
           Work elem = {elem_type, item};
@@ -166,7 +147,6 @@ IValue Unpickler::parse_ivalue() {
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
   restoreAccurateTypeTagsIfPossible(stack_[0]);
-
   return stack_[0];
 }
 
@@ -227,21 +207,18 @@ inline void append<bool>(std::vector<bool>& a, bool&& e) {
   a.push_back(e);
 }
 
-template <typename T>
-static IValue toSpecializedList(const IValue& generic) {
-  auto ivalues = generic.toGenericListRef();
-  std::vector<T> specialized;
-  specialized.reserve(ivalues.size());
-  for (const IValue& iv : ivalues) {
-    append(specialized, iv.to<T>());
-  }
-  return IValue(std::move(specialized));
-}
-
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
   return fmap(v.toTuple()->elements(), [](const IValue& v) -> int64_t {
     return v.toInt();
   });
+}
+
+// note we cannot use toIntList, toDoubleList because during unpickling the
+// lists are not yet tagged
+template <typename T>
+static std::vector<T> convertList(const IValue& v) {
+  return fmap(
+      v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -451,56 +428,56 @@ void Unpickler::readGlobal(
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
   if (module_name == "__main__") {
-    auto pickler_class = getClass(class_name);
-    globals_.emplace_back([this, pickler_class] {
-      // TODO: [unpickler refactor]
-      auto setitem_data = stack_.back();
-      stack_.pop_back();
-      switch (pickler_class) {
-        case PicklerClass::TENSOR:
-          TORCH_INTERNAL_ASSERT(
-              tensor_table_,
-              "Pickler tried to write a tensor but had no tensor table to write to");
-          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
-          break;
-        case PicklerClass::INTLIST:
-          stack_.emplace_back(toSpecializedList<int64_t>(setitem_data));
-          break;
-        default:
-          AT_ERROR("Unknown pickler class id", pickler_class);
-      }
-    });
+    if (class_name == "TensorID") {
+      globals_.emplace_back([this] {
+        auto setitem_data = stack_.back();
+        stack_.pop_back();
+        TORCH_INTERNAL_ASSERT(
+            tensor_table_,
+            "Pickler tried to write a tensor but had no tensor table to write to");
+        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+      });
+    } else if (class_name == "IntList") {
+      globals_.emplace_back([this] {
+        stack_.back().toList().unsafeSetElementType(IntType::get());
+      });
+    } else {
+      AT_ERROR("Unknown pickler class id", class_name);
+    }
   } else if (module_name == "torch.jit._pickle") {
-    // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
-    auto pickler_class = getClass(class_name);
-    globals_.emplace_back([this, pickler_class] {
-      // Pop reduce arg off the stack
-      auto data = stack_.back().toTuple()->elements().at(0);
-      stack_.pop_back();
-      switch (pickler_class) {
-        case PicklerClass::TENSOR:
-          TORCH_CHECK(
-              tensor_table_,
-              "Found a tensor table reference but Unpickler"
-              " has no tensor table\n");
-          stack_.emplace_back(tensor_table_->at(data.toInt()));
-          break;
-        case PicklerClass::INTLIST:
-          stack_.emplace_back(toSpecializedList<int64_t>(data));
-          break;
-        case PicklerClass::TENSORLIST:
-          stack_.emplace_back(toSpecializedList<at::Tensor>(data));
-          break;
-        case PicklerClass::DOUBLELIST:
-          stack_.emplace_back(toSpecializedList<double>(data));
-          break;
-        case PicklerClass::BOOLLIST:
-          stack_.emplace_back(toSpecializedList<bool>(data));
-          break;
-        default:
-          AT_ERROR("Unknown pickler class id");
+    if (class_name == "build_tensor_from_id") {
+      globals_.emplace_back([this] {
+        // Pop reduce arg off the stack
+        auto data = stack_.back().toTuple()->elements().at(0);
+        stack_.pop_back();
+            TORCH_CHECK(
+                tensor_table_,
+                "Found a tensor table reference but Unpickler"
+                " has no tensor table\n");
+            stack_.emplace_back(tensor_table_->at(data.toInt()));
+      });
+    } else {
+      TypePtr elem_type = nullptr;
+      if (class_name == "build_intlist") {
+        elem_type = IntType::get();
+      } else if (class_name == "build_tensorlist") {
+        elem_type = TensorType::get();
+      } else if (class_name == "build_doublelist") {
+        elem_type = FloatType::get();
+      } else if (class_name == "build_boollist") {
+        elem_type = BoolType::get();
+      } else {
+        AT_ERROR("Unknown pickler class id ", class_name);
       }
-    });
+      // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
+      globals_.emplace_back([this, elem_type] {
+        // Pop reduce arg off the stack
+        auto data = stack_.back().toTuple()->elements().at(0).toList();
+        stack_.pop_back();
+        data.unsafeSetElementType(elem_type);
+        stack_.emplace_back(std::move(data));
+      });
+    }
   } else if (
       module_name == "torch._utils" &&
       (class_name == "_rebuild_tensor_v2" ||
@@ -594,11 +571,8 @@ void Unpickler::rebuildTensor(bool quantized) {
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
         case at::kPerChannelAffine: {
-          const auto& scales_list = qparams.at(1).toDoubleList();
-          std::vector<double> scales(scales_list.begin(), scales_list.end());
-          const auto& zero_points_list = qparams.at(2).toIntList();
-          std::vector<int64_t> zero_points(
-              zero_points_list.begin(), zero_points_list.end());
+          std::vector<double> scales = convertList<double>(qparams.at(1));
+          std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
           int64_t axis = qparams.at(3).toInt();
           result = _empty_per_channel_affine_quantized(
               {0},
@@ -712,8 +686,8 @@ void Unpickler::readList(IValue list_ivalue) {
     for (const auto& elem : elements) {
       list.push_back(elem.toBool());
     }
-  } else if (list_ivalue.isGenericList()) {
-    auto list = std::move(list_ivalue).toGenericList();
+  } else if (list_ivalue.isList()) {
+    auto list = std::move(list_ivalue).toList();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem);

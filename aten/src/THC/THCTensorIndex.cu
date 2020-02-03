@@ -17,6 +17,7 @@
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
 #include <c10/macros/Macros.h>
+#include <ATen/WrapDimUtils.h>
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -148,7 +149,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
         IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+      gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
     }
   }
 }
@@ -197,7 +198,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
       IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+    gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
 }
 

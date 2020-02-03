@@ -56,9 +56,9 @@ fi
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
-  export PYTORCH_BUILD_VERSION="1.4.0.dev$DATE"
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE"
 else
-  export PYTORCH_BUILD_VERSION="1.4.0.dev$DATE+$DESIRED_CUDA"
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE+$DESIRED_CUDA"
 fi
 export PYTORCH_BUILD_NUMBER=1
 
@@ -96,7 +96,7 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.4.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.5.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"

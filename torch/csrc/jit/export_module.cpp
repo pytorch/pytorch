@@ -115,7 +115,7 @@ class ScriptModuleSerializer {
       convertNamedType(class_deps_[i]);
     }
 
-    // Mapping of filename => src. We need this because multiple clases may go
+    // Mapping of filename => src. We need this because multiple classes may go
     // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
     for (auto& item : file_streams_) {
       const std::string filename = qualifierToArchivePath(item.key(), "code/");

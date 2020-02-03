@@ -9,6 +9,9 @@
 #include <sstream>
 #include <thread>
 
+#include <gtest/gtest.h>
+#include <torch/cuda.h>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -37,9 +40,10 @@ class SignalTest {
   std::shared_ptr<::c10d::ProcessGroup::Work> run(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
-    // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
+    // Set a timeout that is small enough to make this test run fast, but also
+    // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
+    options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
@@ -122,9 +126,10 @@ class CollectiveTest {
   void start(int rank, int size) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
-    // Use tiny timeout to make this test run fast
+    // Set a timeout that is small enough to make this test run fast, but also
+    // make sure that we don't get timeouts in the ProcessGroupGloo constructor.
     ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
+    options.timeout = std::chrono::milliseconds(1000);
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
@@ -180,9 +185,7 @@ void testAllreduce(const std::string& path, const at::DeviceType b) {
     auto& tensor = outputs[i][0];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[j], expected);
     }
   }
 }
@@ -233,9 +236,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
           auto& tensor = outputs[k][l];
           auto data = tensor.data_ptr<float>();
           for (auto n = 0; n < tensor.numel(); n++) {
-            if (data[n] != expected) {
-              throw std::runtime_error("BOOM!");
-            }
+            EXPECT_EQ(data[n], expected);
           }
         }
       }
@@ -264,87 +265,67 @@ void testSend(const std::string& path) {
   auto tests = CollectiveTest::initialize(path, size);
 
   constexpr uint64_t tag = 0x1337;
+  // test that waiting for work to be sent can be aborted successfully.
+  auto selfRank = 0;
+  auto dstRank = 1;
+  std::vector<at::Tensor> tensors = {
+      at::ones({16, 16}),
+  };
+  auto& pg = tests[selfRank].getProcessGroup();
+  auto sendWork = pg.send(tensors, dstRank, tag);
+  bool sendCompleted;
+  std::thread waitSendThreadAbort([&]() { sendCompleted = sendWork->wait(); });
+  sendWork->abort();
+  // Block until the sendWork gets successfully aborted
+  waitSendThreadAbort.join();
+  EXPECT_FALSE(sendCompleted);
 
-  // Create a sender thread and ensure that sendWork can be aborted.
-  std::thread senderThread([&]() {
-    auto selfRank = 0;
-    auto destRank = 1;
+  // Now create a separate sender thread to ensure that future waitsends can
+  // complete successfully.
 
-    auto& pg = tests[selfRank].getProcessGroup();
-
-    std::vector<at::Tensor> tensors = {
-        at::ones({16, 16}),
-    };
-    // Ensure that we can abort SendWork
-    auto work = pg.send(tensors, destRank, tag);
-    bool sendCompleted;
-    std::thread waitSendWorkThread([&]() { sendCompleted = work->wait(); });
-    work->abort();
-    waitSendWorkThread.join();
-    TORCH_CHECK(!sendCompleted);
-
-    // Ensure that future waits can complete successfully.
-    work = pg.send(tensors, destRank, tag);
-    sendCompleted = work->wait();
-    TORCH_CHECK(sendCompleted);
-  });
-
-  // Helper receiver thread to simulate a real send/recv pair.
-  std::thread receiverThread([&]() {
+  // Helper receiver to simulate a real recv/send pair
+  std::thread recvThread([&]() {
     auto selfRank = 1;
     auto srcRank = 0;
-
     auto& pg = tests[selfRank].getProcessGroup();
-
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
     };
 
-    // Receive for first send.
-    auto work = pg.recv(tensors, srcRank, tag);
-    work->wait();
-
-    // Receive for 2nd send.
-    work = pg.recv(tensors, srcRank, tag);
-    work->wait();
+    auto recvWork = pg.recv(tensors, srcRank, tag);
+    recvWork->wait();
   });
 
-  senderThread.join();
-  receiverThread.join();
+  // Sender thread
+  std::thread sendThread([&]() { sendCompleted = sendWork->wait(); });
+  sendThread.join();
+  recvThread.join();
+  EXPECT_TRUE(sendCompleted);
 }
 
 void testRecv(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size);
-
   constexpr uint64_t tag = 0x1337;
+  // test that waiting for work to be received can be aborted successfully.
+  auto selfRank = 0;
+  auto srcRank = 1;
+  std::vector<at::Tensor> tensors = {
+      at::ones({16, 16}),
+  };
+  auto& pg = tests[selfRank].getProcessGroup();
+  auto recvWork = pg.recv(tensors, srcRank, tag);
+  bool recvCompleted;
+  std::thread waitRecvThreadAbort([&]() { recvCompleted = recvWork->wait(); });
+  recvWork->abort();
+  // Block until the first recv gets successfully aborted
+  waitRecvThreadAbort.join();
+  EXPECT_FALSE(recvCompleted);
 
-  // Create a receiver thread and ensure that recvWork can be aborted.
-  std::thread receiverThread([&]() {
-    auto selfRank = 0;
-    auto srcRank = 1;
+  // Now create a separate receiver thread to ensure that future waits can
+  // complete successfully.
 
-    auto& pg = tests[selfRank].getProcessGroup();
-
-    std::vector<at::Tensor> tensors = {
-        at::ones({16, 16}),
-    };
-
-    // Ensure that we can abort recvWork
-    auto work = pg.recv(tensors, srcRank, tag);
-    bool recvCompleted;
-    std::thread waitRecvWorkThread([&]() { recvCompleted = work->wait(); });
-    work->abort();
-    waitRecvWorkThread.join();
-    TORCH_CHECK(!recvCompleted);
-
-    // Ensure that future recvWork can complete successfully.
-    work = pg.recv(tensors, srcRank, tag);
-    recvCompleted = work->wait();
-    TORCH_CHECK(recvCompleted);
-  });
-
-  // Helper sender thread to simluate a real recv/send pair.
+  // Helper sender thread to simulate a real recv/send pair.
   std::thread senderThread([&]() {
     auto selfRank = 1;
     auto destRank = 0;
@@ -354,79 +335,99 @@ void testRecv(const std::string& path) {
     std::vector<at::Tensor> tensors = {
         at::ones({16, 16}),
     };
-    // Send for first recv.
-    auto work = pg.send(tensors, destRank, tag);
-    work->wait();
-
-    // Send for 2nd recv.
-    work = pg.send(tensors, destRank, tag);
-    work->wait();
+    auto sendWork = pg.send(tensors, destRank, tag);
+    sendWork->wait();
   });
-
-  receiverThread.join();
+  // Receiver thread.
+  std::thread receiverThread([&]() { recvCompleted = recvWork->wait(); });
   senderThread.join();
+  receiverThread.join();
+  EXPECT_TRUE(recvCompleted);
 }
 
-int main(int argc, char** argv) {
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGSTOP);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
-    }
+TEST(ProcessGroupGlooTest, testSIGSTOPException) {
+  // test SIGSTOP
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
+    return;
   }
 
-  {
-    TemporaryFile file;
-    auto work = testSignal(file.path, SIGKILL);
-    try {
-      std::rethrow_exception(work->exception());
-    } catch (const std::exception& ex) {
-      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
-    }
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGSTOP);
+  EXPECT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+}
+
+TEST(ProcessGroupGlooTest, testSIGKILLException) {
+  // test SIGKILL
+  // Fork() and TSAN don't play well together, so skip the test if we're testing
+  // with TSAN.
+  if (isTSANEnabled()) {
+    LOG(INFO) << "Skipping test since Fork() + TSAN is broken";
+    return;
   }
 
+  TemporaryFile file;
+  auto work = testSignal(file.path, SIGKILL);
+  EXPECT_FALSE(work->isSuccess());
+  EXPECT_THROW(std::rethrow_exception(work->exception()), std::exception);
+}
+
+TEST(ProcessGroupGlooTest, testAllReduceCPU) {
   {
     TemporaryFile file;
     testAllreduce(file.path, at::DeviceType::CPU);
   }
+}
 
-#ifdef USE_CUDA
-  {
-    TemporaryFile file;
-    testAllreduce(file.path, at::DeviceType::CUDA);
-  }
-#endif
-
+TEST(ProcessGroupGlooTest, testBroadcastCPU) {
   {
     TemporaryFile file;
     testBroadcast(file.path, at::DeviceType::CPU);
   }
+}
 
-#ifdef USE_CUDA
-  {
-    TemporaryFile file;
-    testBroadcast(file.path, at::DeviceType::CUDA);
-  }
-#endif
-
+TEST(ProcessGroupGlooTest, testBarrier) {
   {
     TemporaryFile file;
     testBarrier(file.path);
   }
+}
 
+TEST(ProcessGroupGlooTest, testSend) {
   {
     TemporaryFile file;
     testSend(file.path);
   }
+}
 
+TEST(ProcessGroupGlooTest, testRecv) {
   {
     TemporaryFile file;
     testRecv(file.path);
   }
-
-  std::cout << "Test successful" << std::endl;
-  return 0;
 }
+
+#ifdef USE_CUDA
+// CUDA-only tests
+TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAllreduce(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testBroadcast(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+#endif

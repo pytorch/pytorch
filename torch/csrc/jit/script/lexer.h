@@ -102,6 +102,7 @@ namespace script {
   _(TK_LIST_COMP, "list comprehension", "")      \
   _(TK_BREAK, "break", "break")                  \
   _(TK_CONTINUE, "continue", "continue")         \
+  _(TK_DELETE, "del", "del")                     \
   _(TK_PASS, "pass", "pass")                     \
   _(TK_CLASS_DEF, "class", "class")              \
   _(TK_IMPORT, "import", "import")
@@ -509,7 +510,7 @@ struct Lexer {
   std::shared_ptr<Source> source;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
-  std::vector<int> indent_stack; // stack of identation level of blocks
+  std::vector<int> indent_stack; // stack of indentation level of blocks
   // Invariant: this should always contain at least a single element
   std::vector<Token> next_tokens;
   SharedParserData& shared;

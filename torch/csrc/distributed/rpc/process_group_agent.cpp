@@ -26,11 +26,34 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
   return counters_;
 }
 
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+ProcessGroupAgent::AverageMetricsTracker::AverageMetricsTracker(
+    std::string key,
+    uint64_t currentSum,
+    uint64_t currentCount)
+    : key_(std::move(key)),
+      currentSum_(currentSum),
+      currentCount_(currentCount) {}
+
+void ProcessGroupAgent::AverageMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
+  return currentCount_ == 0 ? 0 : currentSum_ / (double)currentCount_;
+}
+
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
 const ProcessGroupAgent::steady_clock_time_point
     ProcessGroupAgent::kInfiniteTimeoutTimePoint =
         std::chrono::time_point<std::chrono::steady_clock>::max();
+const std::string kNumPendingRequests = "agent.num_pending_requests";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -78,6 +101,10 @@ ProcessGroupAgent::ProcessGroupAgent(
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
+  // initialize metric info counters
+  metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
+      std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -107,6 +134,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   allWorkerInfo_.reserve(pg_->getSize());
   for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
+  }
+}
+
+ProcessGroupAgent::~ProcessGroupAgent() {
+  if (rpcRunning_) {
+    shutdown();
   }
 }
 
@@ -258,18 +291,18 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           std::forward_as_tuple(requestId),
           std::forward_as_tuple(FutureInfo(future, endTime, to.id_, timeout)));
       // insert future into timeouts map to keep track of its timeout
-      auto& requestIdVec = futureTimeouts_[endTime];
-      requestIdVec.push_back(requestId);
+      auto& requestIds = futureTimeouts_[endTime];
+      requestIds.insert(requestId);
       // Signal the watchdog to monitor future timeouts if this is the first
       // future created or it has earlier end time than other futures in the
       // map.
       if (futureTimeouts_.begin()->first == endTime &&
-          (requestIdVec.size() == 1)) {
+          (requestIds.size() == 1)) {
         notifyThread = true;
       }
     }
     if (notifyThread) {
-      // Notify the wathdog thread only after releasing the lock,
+      // Notify the watchdog thread only after releasing the lock,
       // so watchdog can acquire lock on waking up.
       futureTimeoutCV_.notify_one();
     }
@@ -281,7 +314,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // Sending to ourselves: bypass the send logic and enqueue directly
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
-    TORCH_CHECK(!message.isShutdown(), "Shutting down self not supported");
     threadPool_.run(std::bind(
         [this](const Message& message) {
           sendCounts_.increment(pg_->getRank());
@@ -320,50 +352,54 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   return future;
 }
 
+void ProcessGroupAgent::handleSend(const SendWork& work) {
+  std::string serializedPayload =
+      wireSerialize(work.message_.payload(), work.message_.tensors());
+
+  std::vector<torch::Tensor> preamble = {torch::tensor(
+      {(int64_t)pg_->getRank(),
+       (int64_t)serializedPayload.length(),
+       (int64_t)work.message_.type(),
+       (int64_t)work.message_.id()},
+      {torch::kInt64})};
+
+  // ProcessGroup is not thread-safe when sending with the same tag,
+  // hence the lock
+  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
+  const auto dst = work.to_.id_;
+  std::vector<torch::Tensor> payload = {torch::from_blob(
+      (void*)serializedPayload.c_str(),
+      serializedPayload.length(),
+      {torch::kChar})};
+  pendingSends.reserve(2);
+
+  sendCounts_.increment(dst);
+
+  {
+    std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
+    pendingSends.emplace_back(pg_->send(preamble, dst, dst /* channelTag */));
+    pendingSends.emplace_back(pg_->send(payload, dst, dst /* channelTag */));
+  }
+  for (auto& pendingSend : pendingSends) {
+    pendingSend->wait();
+  }
+}
+
 void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload =
-            wireSerialize(work.message_.payload(), work.message_.tensors());
-
-        std::vector<torch::Tensor> preamble = {torch::tensor(
-            {(int64_t)pg_->getRank(),
-             (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type(),
-             (int64_t)work.message_.id()},
-            {torch::kInt64})};
-
-        // ProcessGroup is not thread-safe when sending with the same tag, hence
-        // the lock
-        std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
-        const auto dst = work.to_.id_;
-        if (work.message_.isShutdown()) {
-          pendingSends.reserve(1);
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
+        try {
+          handleSend(work);
+        } catch (std::exception& e) {
+          if (work.message_.isRequest()) {
+            std::ostringstream ss;
+            ss << "Encountered exception in ProcessGroupAgent::enqueueSend: "
+               << e.what();
+            auto exceptionMsg =
+                rpc::createExceptionResponse(work.message_, ss.str());
+            markFutureWithError(exceptionMsg);
           }
-        } else {
-          std::vector<torch::Tensor> payload = {torch::from_blob(
-              (void*)serializedPayload.c_str(),
-              serializedPayload.length(),
-              {torch::kChar})};
-          pendingSends.reserve(2);
-
-          sendCounts_.increment(dst);
-
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
-            pendingSends.emplace_back(
-                pg_->send(payload, dst, dst /* channelTag */));
-          }
-        }
-        for (auto& pendingSend : pendingSends) {
-          pendingSend->wait();
         }
       },
       std::move(work)));
@@ -432,7 +468,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
             // look up the corresponding future by its time out and request ID,
             // and remove it from the timeouts map
             auto& futuresAtTime = futureTimeouts_[endTime];
-            auto it = std::find(futuresAtTime.begin(), futuresAtTime.end(), id);
+            auto it = futuresAtTime.find(id);
             TORCH_INTERNAL_ASSERT(
                 it != futuresAtTime.end(),
                 "Error: could not find future in futureTimeouts map, race condition.");
@@ -460,6 +496,42 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       std::move(work)));
 }
 
+void ProcessGroupAgent::markFutureWithError(Message& message) {
+  TORCH_INTERNAL_ASSERT(
+      message.type() == MessageType::EXCEPTION,
+      "markFutureWithError should be only called with Message that has type Exception.");
+  auto id = message.id();
+  std::shared_ptr<FutureMessage> fm = nullptr;
+  {
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    const auto& futureInfo = futures_.find(id);
+
+    if (futureInfo == futures_.end()) {
+      // Did not find future in map - this can occur when the future has timed
+      // out and been processed accordingly.
+      return;
+    }
+    fm = futureInfo->second.future_;
+    auto rpcEndTime = futureInfo->second.endTime_;
+    futures_.erase(id);
+    // look up the corresponding future by its time out and request ID,
+    // and remove it from the timeouts map
+    auto& futuresAtTime = futureTimeouts_[rpcEndTime];
+    auto it = futuresAtTime.find(id);
+    TORCH_INTERNAL_ASSERT(
+        it != futuresAtTime.end(),
+        "Error: could not find future in futureTimeouts map, race condition.");
+    futuresAtTime.erase(it);
+    if (futuresAtTime.empty()) {
+      // remove the key from futureTimeouts_
+      futureTimeouts_.erase(rpcEndTime);
+    }
+  }
+
+  fm->setError(std::string(message.payload().begin(), message.payload().end()));
+  futureCV_.notify_all();
+}
+
 void ProcessGroupAgent::listenLoop() {
   while (rpcRunning_.load()) {
     // rank, tensor size, message type
@@ -480,15 +552,6 @@ void ProcessGroupAgent::listenLoop() {
     auto size = preamble_items[1];
     MessageType type = MessageType(preamble_items[2]);
     int64_t id = preamble_items[3];
-
-    if (type == MessageType::SHUTDOWN) {
-      // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
-      // before logging, but it is not appropriate to call InitGoogleLogging()
-      // here either.
-      LOG(INFO) << "Shutting down ProcessGroupAgent " << workerInfo_.name_
-                << std::endl;
-      return;
-    }
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
@@ -572,7 +635,7 @@ const std::vector<ProcessGroupAgent::FutureInfo> ProcessGroupAgent::
       // to check the remaining futures.
       break;
     } else {
-      const std::vector<int64_t>& futureIDs = it->second;
+      const auto& futureIDs = it->second;
       for (const auto& futureID : futureIDs) {
         auto futureIt = futures_.find(futureID);
         TORCH_INTERNAL_ASSERT(
@@ -592,17 +655,29 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   {
     std::unique_lock<std::mutex> lock(futureMutex_);
-    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+    auto futuresSize = futures_.size();
+    lock.unlock();
+    metrics[kNumPendingRequests] = c10::to_string(futuresSize);
   }
-  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
-  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  if (isGILProfilingEnabled()) {
+    // Add time-series based metrics, just GIL wait times for now.
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(avgGilWaitTime);
+    }
+  }
   return metrics;
 }
 
-std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
-  /* This would later include more info other than metrics for eg: may include
-     stack traces for the threads owned by the agent */
-  return getMetrics();
+void ProcessGroupAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]->addData(
+      gilWaitTime.count());
 }
 
 } // namespace rpc
