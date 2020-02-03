@@ -10020,7 +10020,7 @@ class TestTorchDeviceType(TestCase):
         a[1, :] = -inf
         actual = a.cumlogsumexp(1)
         max = np.maximum.accumulate(a.numpy(), axis=1)
-        expected = np.log(max + np.cumsum(np.exp(a - max), axis=1))
+        expected = max + np.log(np.cumsum(np.exp(a - max), axis=1))
         self.assertEqual(expected.shape, actual.shape)
         self.assertTrue(np.allclose(expected, actual.numpy()))
         # check that out is actually inplace
