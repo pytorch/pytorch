@@ -63,21 +63,37 @@ void Error::AppendMessage(const std::string& new_msg) {
   msg_without_backtrace_ = msg_without_backtrace();
 }
 
-void Warning::warn(SourceLocation source_location, std::string msg) {
-  warning_handler_(source_location, msg.c_str());
+namespace Warning {
+
+namespace {
+  WarningHandler* getHandler() {
+    static WarningHandler base_warning_handler_ = WarningHandler();
+    return &base_warning_handler_;
+  };
+  static thread_local WarningHandler* warning_handler_ = getHandler();
+
 }
 
-void Warning::set_warning_handler(handler_t handler) {
+void warn(SourceLocation source_location, const std::string& msg) {
+  warning_handler_->process(source_location, msg);
+}
+
+void set_warning_handler(WarningHandler* handler) noexcept(true) {
   warning_handler_ = handler;
 }
 
-void Warning::print_warning(
+WarningHandler* get_warning_handler() noexcept(true) {
+  return warning_handler_;
+}
+
+} // namespace Warning
+
+void WarningHandler::process(
     const SourceLocation& source_location,
-    const char* msg) {
+    const std::string& msg) {
   std::cerr << "Warning: " << msg << " (" << source_location << ")\n";
 }
 
-Warning::handler_t Warning::warning_handler_ = &Warning::print_warning;
 
 std::string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI

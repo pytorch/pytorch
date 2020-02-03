@@ -147,7 +147,7 @@ static void set_results(const std::tuple<res_t...>& result, const TensorIterator
 }
 
 template <typename T, typename... Args>
-struct all_same : c10::guts::conjunction<
+struct all_same : guts::conjunction<
   std::is_same<T, Args>...
 > {};
 

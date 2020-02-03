@@ -68,7 +68,7 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
-  AT_DISPATCH_FLOATING_TYPES(t.scalar_type(), "renormRows_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, block.x * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
@@ -360,7 +360,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
   result.resize_({numDist, n_sample});
 
-  AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
     assert(props != NULL);
@@ -398,12 +398,12 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
       // For sampling without replacement, we modify the distribution
       // for subsequent samples in this space
-      Tensor origDist = native::empty_like(self_v);
+      Tensor origDist = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       origDist.copy_(self_v);
 
-      Tensor normDist = native::empty_like(self_v);
+      Tensor normDist = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-      Tensor prefixSum = native::empty_like(self_v);
+      Tensor prefixSum = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows
       normDist.copy_(origDist);

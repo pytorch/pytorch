@@ -10,6 +10,25 @@ import weakref
 from torch._six import imap
 from torch._C import _add_docstr
 from numbers import Number
+import functools
+
+
+def _wrap_type_error_to_not_implemented(f):
+    from torch import _six
+    import inspect
+
+    # functools.wraps doesn't work well with methods in python 2
+    method_assignments = ('__name__', '__doc__')
+    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
+                else functools.WRAPPER_ASSIGNMENTS)
+
+    @functools.wraps(f, assigned=assigned)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except TypeError:
+            return NotImplemented
+    return wrapped
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -31,10 +50,29 @@ class Tensor(torch._C._TensorBase):
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
-                new_tensor = self.new()
-                new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                if self.is_quantized:
+                    if self.qscheme() == torch.per_tensor_affine:
+                        quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
+                    elif self.qscheme() == torch.per_channel_affine:
+                        quantizer_params = self.qscheme(), \
+                            self.q_per_channel_scales(), \
+                            self.q_per_channel_zero_points(), \
+                            self.q_per_channel_axis()
+                    else:
+                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                    new_tensor = torch._utils._rebuild_qtensor(
+                        new_storage,
+                        self.storage_offset(),
+                        self.size(),
+                        self.stride(),
+                        quantizer_params,
+                        self.requires_grad,
+                        self._backward_hooks)
+                else:
+                    new_tensor = self.new()
+                    new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+                    new_tensor.requires_grad = self.requires_grad
             memo[id(self)] = new_tensor
-            new_tensor.requires_grad = self.requires_grad
             return new_tensor
 
     def __reduce_ex__(self, proto):
@@ -253,10 +291,10 @@ class Tensor(torch._C._TensorBase):
 
     def retain_grad(self):
         r"""Enables .grad attribute for non-leaf Tensors."""
-        if self.grad_fn is None:  # no-op for leaves
-            return
         if not self.requires_grad:
             raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
+        if self.is_leaf:  # no-op for leaves
+            return
         if hasattr(self, 'retains_grad'):
             return
         weak_self = weakref.ref(self)
@@ -266,7 +304,10 @@ class Tensor(torch._C._TensorBase):
             if var is None:
                 return
             if var._grad is None:
-                var._grad = grad.clone()
+                if grad.is_sparse:
+                    var._grad = grad.clone()
+                else:
+                    var._grad = grad.clone(memory_format=torch.contiguous_format)
             else:
                 var._grad = var._grad + grad
 
@@ -372,17 +413,17 @@ class Tensor(torch._C._TensorBase):
         return object.__format__(self, format_spec)
 
     def __ipow__(self, other):
-        raise NotImplementedError("in-place pow not implemented")
+        return NotImplemented
 
+    @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
         return self.new_tensor(other) ** self
 
+    @_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
-        result = self / other
-        if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+        return torch.floor_divide(self, other)
 
+    @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         result = other / self
         if result.dtype.is_floating_point:
@@ -391,12 +432,12 @@ class Tensor(torch._C._TensorBase):
 
     __neg__ = _C._TensorBase.neg
 
-    __eq__ = _C._TensorBase.eq
-    __ne__ = _C._TensorBase.ne
-    __lt__ = _C._TensorBase.lt
-    __le__ = _C._TensorBase.le
-    __gt__ = _C._TensorBase.gt
-    __ge__ = _C._TensorBase.ge
+    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
+    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
+    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
+    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
+    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
+    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):
@@ -516,10 +557,16 @@ class Tensor(torch._C._TensorBase):
         itemsize = self.storage().element_size()
 
         shape = tuple(self.shape)
-        strides = tuple(s * itemsize for s in self.stride())
-        data = (self.data_ptr(), False)  # read-only is false
+        if self.is_contiguous():
+            # __cuda_array_interface__ v2 requires the strides to be omitted
+            # (either not set or set to None) for C-contiguous arrays.
+            strides = None
+        else:
+            strides = tuple(s * itemsize for s in self.stride())
+        data_ptr = self.data_ptr() if self.numel() > 0 else 0
+        data = (data_ptr, False)  # read-only is false
 
-        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=1)
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=2)
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
@@ -680,5 +727,29 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).rename_(names)
         else:
             return super(Tensor, self).rename(names)
+
+    @property
+    def grad(self):
+        """
+        This attribute is ``None`` by default and becomes a Tensor the first time a call to
+        :func:`backward` computes gradients for ``self``.
+        The attribute will then contain the gradients computed and future calls to
+        :func:`backward` will accumulate (add) gradients into it.
+        """
+        if self.requires_grad and not hasattr(self, "retains_grad") and not self.is_leaf and self._grad is None:
+            warnings.warn("The .grad attribute of a Tensor that is not a leaf Tensor is being accessed. Its .grad "
+                          "attribute won't be populated during autograd.backward(). If you indeed want the gradient "
+                          "for a non-leaf Tensor, use .retain_grad() on the non-leaf Tensor. If you access the "
+                          "non-leaf Tensor by mistake, make sure you access the leaf Tensor instead. See "
+                          "github.com/pytorch/pytorch/pull/30531 for more informations.")
+        return self._grad
+
+    @grad.setter
+    def grad(self, new_grad):
+        self._grad = new_grad
+
+    @grad.deleter
+    def grad(self):
+        del self._grad
 
     __module__ = 'torch'

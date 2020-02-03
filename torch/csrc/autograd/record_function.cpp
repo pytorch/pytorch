@@ -1,11 +1,13 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/utils/memory.h>
-
 #include <cstdlib>
 #include <random>
 
-namespace torch { namespace autograd { namespace profiler {
+namespace torch {
+namespace autograd {
+namespace profiler {
 
 namespace {
 
@@ -27,8 +29,7 @@ class CallbackManager {
 
   bool shouldRunSampledCallbacks() {
     return (num_sampled_callbacks > 0) &&
-        (!sampling_prop_set ||
-        (sample_zero_one() < sampling_prob));
+        (!sampling_prop_set || (sample_zero_one() < sampling_prob));
   }
 
   void pushCallback(
@@ -90,6 +91,7 @@ class CallbackManager {
   }
 };
 
+// thread_local_func_ points to the currently active RecordFunction.
 thread_local RecordFunction* thread_local_func_ = nullptr;
 
 CallbackManager& manager() {
@@ -117,10 +119,7 @@ void pushCallback(
     bool needs_inputs,
     bool sampled) {
   manager().pushCallback(
-      std::move(start),
-      std::move(end),
-      needs_inputs,
-      sampled);
+      std::move(start), std::move(end), needs_inputs, sampled);
 }
 
 void popCallback() {
@@ -139,6 +138,18 @@ bool hasNonSampledCallbacks() {
   return manager().hasNonSampledCallbacks();
 }
 
+void runBeforeCallbacks(RecordFunction* rf, const std::string& funcName) {
+  TORCH_INTERNAL_ASSERT(
+      rf != nullptr,
+      "The RecordFunction passed to before callbacks should not be null.");
+  if (hasCallbacks()) {
+    auto run_samples = shouldRunSampledCallbacks();
+    if (run_samples || hasNonSampledCallbacks()) {
+      rf->setRunSampled(run_samples);
+      rf->before(funcName);
+    }
+  }
+}
 
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!hasCallbacks()) {
@@ -188,15 +199,49 @@ void RecordFunction::processCallbacks() {
   }
 }
 
+void RecordFunction::setThreadId() {
+  auto threadId = torch::autograd::profiler::getThreadId();
+  TORCH_INTERNAL_ASSERT(
+      threadId != 0,
+      "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
+  threadId_ = threadId;
+}
+
 RecordFunction::~RecordFunction() {
+  try {
+    end();
+  } catch (const std::exception &e) {
+    LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
+  }
+}
+
+void RecordFunction::end() {
   if (initialized_) {
     for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
       if (!manager().is_callback_sampled[idx] || run_sampled_) {
         manager().end_callbacks[idx](*this);
       }
     }
+
+    // In the case that RecordFunction::end is called from a different thread,
+    // thread_local_func will not be this, so assert that we have overridden the
+    // thread id (by ensuring it is nonzero) and thread_local_func is null.
+    TORCH_INTERNAL_ASSERT(
+        (thread_local_func_ == this) ||
+            (thread_local_func_ == nullptr && threadId_ != 0),
+        name_,
+        ": must be top of stack. If you are calling RecordFunction::end in a"
+        "separate thread, call RecordFunction::setThreadId() in the creating"
+        "thread.");
     thread_local_func_ = parent_;
+    initialized_ = false;
   }
 }
 
-}}}
+RecordFunction* RecordFunction::current() {
+  return thread_local_func_;
+}
+
+} // namespace profiler
+} // namespace autograd
+} // namespace torch

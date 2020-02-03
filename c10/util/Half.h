@@ -259,7 +259,7 @@ namespace detail {
            * A normalized single-precision floating-point number is represented as:
            *    FP32 = (1 + mantissa * 2**(-23)) * 2**(exponent - 127)
            * Therefore, when the biased exponent is 126, a unit change in the mantissa of the input denormalized half-precision
-           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same ammount.
+           * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same amount.
            *
            * The last step is to adjust the bias of the constructed single-precision number. When the input half-precision number
            * is zero, the constructed single-precision number has the value of
@@ -389,34 +389,6 @@ struct scalar_value_type<ComplexHalf> {
   using type = Half;
 };
 
-// The old implementation of Converter as a function made nvcc's head explode
-// when we added std::complex on top of the specializations for CUDA-only types
-// like __half, so I rewrote it as a templated class (so, no more overloads,
-// just (partial) specialization).
-
-template <typename To, typename From, typename Enable = void>
-struct Converter {
-  To operator()(From f) {
-    return static_cast<To>(f);
-  }
-};
-
-template <typename To, typename From>
-To convert(From from) {
-  return Converter<To, From>()(from);
-}
-
-template <typename To, typename FromV>
-struct Converter<
-    To,
-    std::complex<FromV>,
-    typename std::enable_if<
-        c10::guts::negation<is_complex_t<To>>::value>::type> {
-  To operator()(std::complex<FromV> f) {
-    return static_cast<To>(f.real());
-  }
-};
-
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
 // C4804: unsafe use of type 'bool' in operation
@@ -427,6 +399,14 @@ struct Converter<
 #pragma warning( disable : 4804 )
 #endif
 
+// The overflow checks may involve float to int conversion which may
+// trigger precision loss warning. Re-enable the warning once the code
+// is fixed. See T58053069.
+#ifdef __clang__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#endif
 
 // bool can be converted to any type.
 // Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
@@ -467,6 +447,10 @@ overflows(From f) {
   return f < limit::lowest() || f > limit::max();
 }
 
+#ifdef __clang__
+#pragma GCC diagnostic pop
+#endif
+
 #ifdef _MSC_VER
 #pragma warning( pop )
 #endif
@@ -489,18 +473,6 @@ typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
       overflows<
              typename scalar_value_type<To>::type,
              typename From::value_type>(f.imag());
-}
-
-template <typename To, typename From>
-To checked_convert(From f, const char* name) {
-  // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
-    std::ostringstream oss;
-    oss << "value cannot be converted to type " << name
-        << " without overflow: " << f;
-    throw std::domain_error(oss.str());
-  }
-  return convert<To, From>(f);
 }
 
 C10_API std::ostream& operator<<(std::ostream& out, const Half& value);

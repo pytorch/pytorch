@@ -1,9 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <ATen/core/grad_mode.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -70,6 +71,48 @@ AnyTypePtr AnyType::get() {
   return value;
 }
 
+template <typename T>
+static bool compatible_optional(c10::optional<T> e, T a) {
+  return !e.has_value() || e.value() == a;
+}
+
+static bool compatible_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+  if (!e.size().has_value()) {
+    return true;
+  }
+
+  if (e.size().value() != a.size()) {
+    return false;
+  }
+
+  auto ndim = a.size();
+  for (size_t i = 0; i < ndim; i++) {
+    if (!compatible_optional(e[i], a[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorType::isCompatibleWithInCurrentExecutionContext(
+    at::Tensor& t) const {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
+  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
+  if (!t.defined()) {
+    return compatible_optional(undefined(), !t.defined());
+  }
+
+  return compatible_varying_shape(sizes(), t.sizes()) &&
+      (t.is_sparse() || t.is_mkldnn() ||
+       compatible_varying_shape(strides(), t.strides())) &&
+      compatible_optional(
+             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
+      compatible_optional(scalarType(), t.scalar_type()) &&
+      compatible_optional(device(), t.device());
+}
+
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {},
@@ -104,6 +147,10 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
+QSchemeTypePtr QSchemeType::get() {
+  static auto value = QSchemeType::create();
+  return value;
+}
 StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
@@ -112,8 +159,20 @@ DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
+ScalarTypeTypePtr ScalarTypeType::get() {
+static auto value = ScalarTypeType::create();
+return value;
+}
+LayoutTypePtr LayoutType::get() {
+static auto value = LayoutType::create();
+return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
+  return value;
+}
+PyObjectTypePtr PyObjectType::get() {
+  static auto value = PyObjectType::create();
   return value;
 }
 CapsuleTypePtr CapsuleType::get() {
@@ -136,52 +195,48 @@ ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
   return value;
 }
+ListTypePtr ListType::ofStrings() {
+  static auto value = ListType::create(StringType::get());
+  return value;
+}
 
-c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
     return t1;
-  } else {
-    return c10::nullopt;
-  }
-}
-
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
-  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
-    return *maybe_supertype;
   }
 
-  // NB: we do not return NumberType because there is not currently enough
-  // operator support for it
-
+  // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
     return t1->expect<TensorType>()->merge(t2->expect<TensorType>());
   }
 
-  if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
-    return static_cast<TypePtr>(TensorType::get());;
-  }
-
-  // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
     return OptionalType::create(t2);
   } else if (t2->isSubtypeOf(NoneType::get()) && !t1->isSubtypeOf(NoneType::get())) {
     return OptionalType::create(t1);
   }
 
-  //types which contain other types
-  if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
-    // int?[] = std::vector<IValue>  we don't allow type coercion,
-    // since t1 & t2 may have different runtime representations.
+  // NB: we do not return NumberType because there is not currently enough
+  // operator support for it
 
-    // allow Lists of different tensor types
-    auto unshaped_t1 = unshapedType(t1);
-    auto unshaped_t2 = unshapedType(t2);
-    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
-  } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
+  // Attempt to unify Complete Tensor Types for immutable type containers
+
+  // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
+  if (auto opt_t1 = t1->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
+      return OptionalType::create(*elem);
+    }
+  } else if (auto opt_t2 = t2->cast<OptionalType>()) {
+    if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
+      return OptionalType::create(*elem);
+    }
+  }
+
+  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
@@ -196,31 +251,50 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
       }
     }
     return static_cast<TypePtr>(TupleType::create(elements));
-  } else if (t1->cast<DictType>() && t2->cast<DictType>()) {
-    auto dict1 = t1->cast<DictType>();
-    auto dict2 = t2->cast<DictType>();
+  }
 
-    auto unified_key = unifyTypes(dict1->getKeyType(), dict2->getKeyType());
-    auto unshaped_value1 = unshapedType(dict1->getValueType());
-    auto unshaped_value2 = unshapedType(dict2->getValueType());
-    auto unified_value = tryEitherIsTheSuperType(unshaped_value1, unshaped_value2);
-    if (!unified_key || !unified_value) {
-      return c10::nullopt;
+  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+    if (auto elem = unifyTypes(
+            t1->cast<FutureType>()->getElementType(),
+            t2->cast<FutureType>()->getElementType())) {
+      return FutureType::create(*elem);
     }
-    return DictType::create(*unified_key, *unified_value);
+  }
+
+  // Check direct subtyping relations again with Unshaped Types,
+  // to handle unification of mutable container types which might contain two different
+  // specialized tensors (ListType / DictType)
+  auto t1_unshaped = unshapedType(t1);
+  auto t2_unshaped = unshapedType(t2);
+
+  if (t1_unshaped->isSubtypeOf(t2_unshaped)) {
+    return t2_unshaped;
+  } else if (t2_unshaped->isSubtypeOf(t1_unshaped)) {
+    return t1_unshaped;
   }
 
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements) {
+c10::optional<TypePtr> unifyTypeList(
+    at::ArrayRef<TypePtr> elements,
+    std::ostream& why_not) {
   if (elements.size() == 0) {
+    why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
   }
 
-  c10::optional<TypePtr> ret_type = elements[0];
+  TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    ret_type = unifyTypes(*ret_type, elements[i]);
+    auto maybe_unified = unifyTypes(ret_type, elements.at(i));
+    if (!maybe_unified) {
+      why_not << "Could not unify type list since element " << i << " of type "
+              << elements.at(i)->python_str()
+              << " did not match the types before it ("
+              << ret_type->python_str() << ")";
+      return c10::nullopt;
+    }
+    ret_type = maybe_unified.value();
   }
 
   return ret_type;
@@ -260,7 +334,8 @@ MatchTypeReturn matchTypeVariables(
       }
       return MatchTypeReturn::Success();
     } else if (auto tup_type = actual->cast<TupleType>()) {
-      auto maybe_tuple_unified = unifyTypeList(tup_type->elements());
+      std::stringstream ss;
+      auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
       if (maybe_tuple_unified) {
         return matchTypeVariables(
             lt_formal->getElementType(), *maybe_tuple_unified, type_env);
@@ -386,6 +461,10 @@ bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   if(auto rhs_ = rhs->cast<OptionalType>()) {
     return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
   }
+  return false;
+}
+
+bool Type::is_module() const {
   return false;
 }
 
@@ -561,14 +640,21 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName) {
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
   return InterfaceTypePtr(
-      new InterfaceType(std::move(qualifiedName)));
+      new InterfaceType(std::move(qualifiedName), is_module));
 }
 
 bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
+    if (!is_module() && iface->is_module()) {
+      if (why_not) {
+        *why_not << "Interface '" << python_str() << "' is not a subtype of "
+                  << "the module interface '" << rhs->python_str() << "'.\n";
+      }
+      return false;
+    }
     for (const FunctionSchema& schema : *iface->methods_) {
       auto self_schema = getMethod(schema.name());
       if (!self_schema) {
@@ -607,9 +693,10 @@ const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
 void InterfaceType::addMethod(FunctionSchema schema) {
   methods_->emplace_back(std::move(schema));
 }
-InterfaceType::InterfaceType(QualifiedName name)
+InterfaceType::InterfaceType(QualifiedName name, bool is_module)
     : NamedType(InterfaceType::Kind, std::move(name)),
-      methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
+      methods_(std::make_shared<std::vector<FunctionSchema>>()),
+      is_module_(is_module) {}
 
 InterfaceType::~InterfaceType() = default;
 

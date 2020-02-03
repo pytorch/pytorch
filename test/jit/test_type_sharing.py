@@ -1,13 +1,19 @@
 import os
 import sys
+import io
 
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
-from common_utils import suppress_warnings
+from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import suppress_warnings
+
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestTypeSharing(JitTestCase):
     def assertSameType(self, m1, m2):
@@ -253,7 +259,7 @@ class TestTypeSharing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
             torch.jit.script(m)
 
-    def test_script_function_attribute(self):
+    def test_script_function_attribute_different(self):
         """
         Different functions passed in should lead to different types
         """
@@ -278,7 +284,56 @@ class TestTypeSharing(JitTestCase):
 
         self.assertDifferentType(fn1_mod, fn2_mod)
 
-    def test_python_function_attribute(self):
+    def test_builtin_function_same(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.add)
+
+        self.assertSameType(c1, c2)
+
+    def test_builtin_function_different(self):
+        class Caller(torch.nn.Module):
+            def __init__(self, fn):
+                super(Caller, self).__init__()
+                self.fn = fn
+
+            def forward(self, input):
+                return self.fn(input, input)
+
+        c1 = Caller(torch.add)
+        c2 = Caller(torch.sub)
+
+        self.assertDifferentType(c1, c2)
+
+    def test_script_function_attribute_same(self):
+        """
+        Same functions passed in should lead to same types
+        """
+        @torch.jit.script
+        def fn(x):
+            return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        fn1_mod = M(fn)
+        fn2_mod = M(fn)
+
+        self.assertSameType(fn1_mod, fn2_mod)
+
+    def test_python_function_attribute_different(self):
         """
         Different functions passed in should lead to different types
         """
@@ -300,6 +355,26 @@ class TestTypeSharing(JitTestCase):
         fn2_mod = M(fn2)
 
         self.assertDifferentType(fn1_mod, fn2_mod)
+
+    def test_python_function_attribute_same(self):
+        """
+        Same functions passed in should lead to same types
+        """
+        def fn(x):
+            return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        fn1_mod = M(fn)
+        fn2_mod = M(fn)
+
+        self.assertSameType(fn1_mod, fn2_mod)
 
     @suppress_warnings
     def test_tracing_gives_different_types(self):
@@ -363,7 +438,40 @@ class TestTypeSharing(JitTestCase):
         b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+    def test_loaded_modules_work(self):
+        class AB(torch.nn.Module):
+            def __init__(self):
+                super(AB, self).__init__()
+                self.a = 1
+                self.b = 1
+
+            def forward(self):
+                return self.a + self.b
+
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+                self.a = 1
+
+            def forward(self):
+                return self.a
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, sub):
+                super(Wrapper, self).__init__()
+                self.sub = sub
+
+            def forward(self):
+                return self.sub()
+
+        def package(x):
+            buffer = io.BytesIO()
+            torch.jit.save(torch.jit.script(x), buffer)
+            buffer.seek(0)
+            return torch.jit.script(Wrapper(torch.jit.load(buffer)))
+
+
+        a = package(AB())
+        a()
+        b = package(A())
+        b()

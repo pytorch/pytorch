@@ -1,14 +1,16 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     input: "0"
     output: "1"
+    name: "Sqrt_0"
     op_type: "Sqrt"
   }
   node {
     output: "2"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -23,6 +25,7 @@ graph {
     input: "2"
     input: "1"
     output: "3"
+    name: "Div_2"
     op_type: "Div"
   }
   name: "torch-jit-export"

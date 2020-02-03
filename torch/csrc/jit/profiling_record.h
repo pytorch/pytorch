@@ -21,7 +21,6 @@ struct ProfilingRecord {
   // are captured in callbacks_
   ProfilingRecord(const ProfilingRecord&) = delete;
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
-  static TensorTypePtr toTensorTypePtr(const IValue& ival);
   TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
 

@@ -18,8 +18,22 @@ struct EigenPowFunctor {
           EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (e));
     } else {
       if (b_is_scalar) {
-        EigenVectorArrayMap<R>(out, n) =
-            EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (b[0]));
+        if (b[0] == -1.) {
+          EigenVectorArrayMap<R>(out, n) =
+              ConstEigenVectorArrayMap<T1>(a, n).inverse();
+        } else if (b[0] == 0.5) {
+          EigenVectorArrayMap<R>(out, n) =
+              ConstEigenVectorArrayMap<T1>(a, n).sqrt();
+        } else if (b[0] == -0.5) {
+          EigenVectorArrayMap<R>(out, n) =
+              ConstEigenVectorArrayMap<T1>(a, n).rsqrt();
+        } else if (b[0] == 2.) {
+          EigenVectorArrayMap<R>(out, n) =
+              ConstEigenVectorArrayMap<T1>(a, n).square();
+        } else {
+          EigenVectorArrayMap<R>(out, n) =
+              EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (b[0]));
+        }
       } else {
         EigenVectorArrayMap<R>(out, n) = EIGEN_POW(
             (ConstEigenVectorArrayMap<T1>(a, n)),

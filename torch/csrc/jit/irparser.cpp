@@ -154,10 +154,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
-        r.f = std::stod(str);
+        r.f = c10::stod(str);
       } else {
         r.k = AttributeKind::i;
-        r.i = std::stoll(str);
+        r.i = c10::stoll(str);
       }
       L.next();
       return r;

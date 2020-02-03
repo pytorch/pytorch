@@ -90,7 +90,8 @@ bool Message::isResponse() const {
   return MessageType::SCRIPT_RET == type_ || // ret of dist.rpc on builtin ops
       MessageType::PYTHON_RET == type_ || // ret of dist.rpc on Python UDFs
       MessageType::REMOTE_RET == type_ || // ret of dist.remote
-      MessageType::RREF_FETCH_RET == type_ || // ret on RRef::toHere()
+      MessageType::SCRIPT_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
+      MessageType::PYTHON_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
       MessageType::EXCEPTION == type_ || // propagate back exceptions
       MessageType::RREF_ACK == type_ || // ret of other types
       // Autograd response
@@ -100,16 +101,29 @@ bool Message::isResponse() const {
       MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
 }
 
-bool Message::isShutdown() const {
-  return MessageType::SHUTDOWN == type_;
-}
-
 int64_t Message::id() const {
   return id_;
 }
 
 void Message::setId(int64_t id) {
   id_ = id;
+}
+
+Message createExceptionResponse(
+    const Message& request,
+    const std::exception& e) {
+  return createExceptionResponse(request, e.what());
+}
+
+Message createExceptionResponse(
+    const Message& request,
+    const std::string& exceptionStr) {
+  std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
+  return Message(
+      std::move(payload),
+      std::vector<torch::Tensor>(),
+      MessageType::EXCEPTION,
+      request.id());
 }
 
 } // namespace rpc
