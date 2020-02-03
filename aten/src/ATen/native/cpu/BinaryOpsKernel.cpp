@@ -431,7 +431,11 @@ void max_elementwise_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "max_elementwise_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::max(a, b);
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::max(a, b);
+          }
         },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
     });
@@ -454,7 +458,11 @@ void min_elementwise_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::min(a, b);
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::min(a, b);
+          }
         },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
     });
