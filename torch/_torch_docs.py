@@ -1863,7 +1863,8 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
     for :func:`torch.symeig`
 
 Args:
-    input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
+    input (Tensor): the square matrix of shape :math:`(*, n, n)`  where * is zero or more
+        batch dimensions consisting of matrices for which the eigenvalues and eigenvectors
         will be computed
     eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
         otherwise, only eigenvalues will be computed
@@ -1872,11 +1873,11 @@ Args:
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **eigenvalues** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``input``,
+        - **eigenvalues** (*Tensor*): Shape :math:`(*, n, 2)`. Each row is an eigenvalue of ``input``,
           where the first element is the real part and the second element is the imaginary part.
           The eigenvalues are not necessarily ordered.
         - **eigenvectors** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
-          Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
+          Otherwise, this tensor of shape :math:`(*, n, n)` can be used to compute normalized (unit length)
           eigenvectors of corresponding eigenvalues as follows.
           If the corresponding `eigenvalues[j]` is a real number, column `eigenvectors[:, j]` is the eigenvector
           corresponding to `eigenvalues[j]`.

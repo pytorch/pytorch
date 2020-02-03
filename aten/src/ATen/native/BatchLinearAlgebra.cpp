@@ -65,6 +65,10 @@ extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda
 extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 
+// geev
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double *vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float *vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+
 // syev
 extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
 extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
@@ -115,6 +119,9 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
+
+template<class scalar_t>
+void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t *vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info);
@@ -253,6 +260,14 @@ template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, dou
 
 template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float *tau, float *work, int lwork, int *info) {
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+}
+
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double *vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info){
+  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float *vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info){
+  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
 template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, int *info) {
@@ -841,6 +856,115 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+template <typename scalar_t>
+static void apply_eig(Tensor& self, Tensor& reigvals, Tensor& ieigvals, Tensor& eigvecs, bool eigenvectors, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("eig: LAPACK library not found in compilation");
+#else
+  using value_t = typename ztype<scalar_t>::value_t;
+  auto self_data = self.data_ptr<scalar_t>();
+  auto reigvals_data = reigvals.data_ptr<scalar_t>();
+  auto ieigvals_data = ieigvals.data_ptr<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto eigvals_stride = reigvals.size(-2);
+  auto batch_size = batchCount(self);
+  auto n = self.size(-1);
+
+  char jobvl = 'N';
+  char jobvr = eigenvectors ? 'V' : 'N';
+  int ldvr = eigenvectors ? n : 1;
+
+  int info;
+  // Follow the practice in symeig which running it first to get the optimum work size.
+  int lwork = -1;
+  scalar_t wkopt;
+  scalar_t* eigvecs_data = eigenvectors ? eigvecs.data_ptr<scalar_t>() : NULL;
+  lapackEig<scalar_t>(jobvl, jobvr, n, self_data, n, reigvals_data, ieigvals_data, NULL, 1, eigvecs_data, ldvr, &wkopt, lwork, &info);
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, self.options());
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* reigvals_working_ptr = &reigvals_data[i * eigvals_stride];
+    scalar_t* ieigvals_working_ptr = &ieigvals_data[i * eigvals_stride];
+    scalar_t* eigvecs_working_ptr = eigenvectors ? &eigvecs_data[i * self_matrix_stride] : NULL;
+
+    lapackEig<scalar_t>(jobvl, jobvr, n, self_working_ptr, n,
+                        reigvals_working_ptr, ieigvals_working_ptr, NULL, 1,
+                        eigvecs_working_ptr, ldvr, work.data_ptr<scalar_t>(), lwork, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _eig_helper_cpu(const Tensor& self, bool eigenvectors) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  auto dim = self.dim();
+  auto self_sizes = self.sizes().vec();
+
+  if (self.numel() == 0) {
+    self_sizes[self_sizes.size()-1] = 2;
+    auto eigvals = at::empty(self_sizes, self.options());
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  }
+
+  // making the last index to be 1 for later concatenation
+  self_sizes[self_sizes.size()-1] = 1;
+  auto reigvals = at::empty(self_sizes, self.options());
+  auto ieigvals = at::empty(self_sizes, self.options());
+
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto eigvecs = eigenvectors ? cloneBatchedColumnMajor(self) : at::empty({0}, self.options());
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "symeig_cpu", [&]{
+    apply_eig<scalar_t>(self_working_copy, reigvals, ieigvals, eigvecs, eigenvectors, infos);
+  });
+  auto eigvals = at::cat({reigvals, ieigvals}, -1);
+
+  if (dim > 2) {
+    batchCheckErrors(infos, "eig_cpu");
+  } else {
+    singleCheckErrors(infos[0], "eig_cpu");
+  }
+  if (eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals, eigvecs);
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
+  }
+}
+
+std::tuple<Tensor, Tensor> eig(const Tensor& self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  squareCheckInputs(self);
+  return at::_eig_helper(self, eigenvectors);
+}
+
+std::tuple<Tensor&, Tensor&> eig_out(Tensor& vals, Tensor& vecs, const Tensor& self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  squareCheckInputs(self);
+  Tensor vals_tmp, vecs_tmp;
+  std::tie(vals_tmp, vecs_tmp) = at::_eig_helper(self, eigenvectors);
+
+  // The original function of torch.eig with out apparently wants the eigenvectors
+  // to be in column-major format (see THTensor_(geev) in THTensorLapack.cpp).
+  // So this is the work-around to make it passes the test and does not break the
+  // previous codes.
+  vecs.resize_as_(vecs_tmp);
+  if (vecs.is_contiguous()) {
+    vecs.transpose_(-2,-1);
+  }
+  vecs.copy_(vecs_tmp);
+
+  vals.resize_as_(vals_tmp).copy_(vals_tmp);
+  return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
@@ -983,7 +1107,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
-    
+
+
     // Compute S, U (optionally) and VT (optionally)
     lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
                         S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
@@ -999,7 +1124,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
-  
+
   char jobz = compute_uv ? (some ? 'S' : 'A') : 'N';
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;
