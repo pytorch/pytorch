@@ -67,7 +67,8 @@ blacklist = [
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
-    'align_tensors',  # BUILD_NAMEDTENSOR only
+    # type hints for named tensors are broken: https://github.com/pytorch/pytorch/issues/27846
+    'align_tensors',
     'meshgrid',
     'cartesian_prod',
     'norm',
@@ -322,7 +323,7 @@ def gen_nn_modules(out):
     def replace_forward(m):
         # We instruct mypy to not emit errors for the `forward` and `__call__` declarations since mypy
         # would otherwise correctly point out that Module's descendants' `forward` declarations
-        # conflict with `Module`s. Specificlaly, `Module` defines `forward(self, *args)` while the
+        # conflict with `Module`s. Specifically, `Module` defines `forward(self, *args)` while the
         # descandantes define more specific forms, such as `forward(self, input: Tensor)`, which
         # violates Liskov substitutability. The 'mypy' team recommended this solution for now.
         forward_def = m.group(0) + "  # type: ignore"
@@ -513,8 +514,9 @@ def gen_pyi(declarations_path, out):
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
-        'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: _bool=False)'
-                 ' -> Union[str, Tensor]: ...'],
+        'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
+                 'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
+                 ],
         'get_device': ['def get_device(self) -> _int: ...'],
         'contiguous': ['def contiguous(self) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],

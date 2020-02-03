@@ -11,20 +11,21 @@ embeddingbag_short_configs = op_bench.cross_product_configs(
     input_size=[8, 16, 64],
     offset=[0],
     sparse=[True],
+    device=['cpu'],
     tags=['short']
 )
 
 
 class EmbeddingBagBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, embeddingbags, dim, mode, input_size, offset, sparse):
+    def init(self, embeddingbags, dim, mode, input_size, offset, sparse, device):
         self.embegging = torch.nn.EmbeddingBag(
             num_embeddings=embeddingbags,
             embedding_dim=dim,
             mode=mode,
-            sparse=sparse)
+            sparse=sparse).to(device=device)
         numpy.random.seed((1 << 32) - 1)
-        self.input = torch.tensor(numpy.random.randint(0, embeddingbags, input_size)).long()
-        self.offset = torch.LongTensor([offset])
+        self.input = torch.tensor(numpy.random.randint(0, embeddingbags, input_size), device=device).long()
+        self.offset = torch.LongTensor([offset], device=device)
 
         self.set_module_name('embeddingbag')
 

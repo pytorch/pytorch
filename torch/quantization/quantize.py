@@ -122,10 +122,10 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, qconfig_dict=None, inplace=False):
+def prepare(model, inplace=False):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
-    Quantization configuration can be passed as an `qconfig_dict` or assigned preemptively
+    Quantization configuration should be assigned preemptively
     to individual submodules in `.qconfig` attribute.
 
     The model will be attached with observer or fake quant modules, and qconfig
@@ -133,10 +133,6 @@ def prepare(model, qconfig_dict=None, inplace=False):
 
     Args:
         model: input model to be modified in-place
-        qconfig_dict: dictionary that maps from name or type of submodule to quantization
-            configuration, qconfig applies to all submodules of a given
-            module unless qconfig for the submodules are specified (when the
-            submodule already has qconfig attribute)
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if not inplace:
@@ -217,8 +213,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         elif dtype == torch.float16:
             qconfig_spec = {
-                # TODO: uncomment when float16 Linear support is added
-                # nn.Linear : default_dynamic_qconfig,
+                nn.Linear : float16_dynamic_qconfig,
                 nn.LSTM : float16_dynamic_qconfig,
             }
         else:
@@ -248,8 +243,8 @@ def prepare_qat(model, mapping=None, inplace=False):
     Prepares a copy of the model for quantization calibration or
     quantization-aware training and convers it to quantized version.
 
-    Quantization configuration can be passed as an `qconfig_dict` or assigned
-    preemptively to individual submodules in `.qconfig` attribute.
+    Quantization configuration should be assigned preemptively
+    to individual submodules in `.qconfig` attribute.
 
     Args:
         model: input model to be modified in-place
@@ -309,7 +304,8 @@ def convert(module, mapping=None, inplace=False):
     SWAPPABLE_MODULES = (nni.ConvBn2d,
                          nni.ConvBnReLU2d,
                          nni.LinearReLU,
-                         nni.ConvReLU2d)
+                         nni.ConvReLU2d,
+                         nni.ConvReLU3d)
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:

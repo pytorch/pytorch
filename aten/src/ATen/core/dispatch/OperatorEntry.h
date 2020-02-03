@@ -27,28 +27,31 @@ public:
     return schema_;
   }
 
-  template<class Functor>
-  typename guts::infer_function_traits_t<Functor>::return_type readDispatchTable(Functor&& functor) const {
-    return dispatchTable_.read(std::forward<Functor>(functor));
+  const DispatchTable& dispatch_table() const {
+    return dispatchTable_;
   }
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(DispatchKey dispatch_key, KernelFunction kernel);
   RegistrationHandleRAII registerCatchallKernel(KernelFunction kernel);
 
   const OperatorOptions& options() {
     return options_;
   }
 
+  void updateOptionsAliasAnalysis(AliasAnalysisKind a) {
+    options_.setAliasAnalysis(a);
+  }
+
 private:
-  void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
+  void deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
 
   FunctionSchema schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
-  LeftRight<DispatchTable> dispatchTable_;
+  DispatchTable dispatchTable_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
@@ -82,7 +85,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>> kernels_;
+  ska::flat_hash_map<DispatchKey, std::list<KernelFunction>> kernels_;
   std::list<KernelFunction> catchAllKernels_;
 
   // Some metadata about the operator
@@ -92,7 +95,7 @@ private:
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
-  void updateDispatchTable_(TensorTypeId dispatch_key);
+  void updateDispatchTable_(DispatchKey dispatch_key);
   void updateCatchallDispatchTable_();
 };
 

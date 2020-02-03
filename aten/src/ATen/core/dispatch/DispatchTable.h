@@ -1,11 +1,10 @@
 #pragma once
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
-#include <c10/core/TensorTypeId.h>
+#include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
@@ -21,6 +20,58 @@
 
 namespace c10 {
 
+namespace impl {
+/**
+ * A KernelFunctionTable is a map from DispatchKey to a KernelFunction.
+ * It can store zero or one KernelFunctions for each DispatchKey.
+ */
+class KernelFunctionTable final {
+public:
+  explicit KernelFunctionTable()
+  : kernels_()
+  , kernelCount_(0) {}
+
+  enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
+  C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
+    auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
+    SetKernelResult result;;
+    if (slot.isValid()) {
+      result = SetKernelResult::OVERWROTE_EXISTING_KERNEL;
+    } else {
+      result = SetKernelResult::ADDED_NEW_KERNEL;
+      ++kernelCount_;
+    }
+    slot = std::move(kernel);
+    return result;
+  }
+
+  enum class RemoveKernelIfExistsResult : uint8_t {REMOVED_KERNEL, KERNEL_DIDNT_EXIST};
+  RemoveKernelIfExistsResult removeKernelIfExists(DispatchKey dispatchKey) {
+    auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
+    if (slot.isValid()) {
+      --kernelCount_;
+      slot = {};
+      return RemoveKernelIfExistsResult::REMOVED_KERNEL;
+    } else {
+      return RemoveKernelIfExistsResult::KERNEL_DIDNT_EXIST;
+    }
+  }
+
+  const KernelFunction& operator[](DispatchKey dispatchKey) const {
+    return kernels_[static_cast<uint8_t>(dispatchKey)];
+  }
+
+  size_t size() const {
+    return kernelCount_;
+  }
+
+private:
+  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
+  size_t kernelCount_;
+};
+}
+
 /**
  * Per-operator dispatch table.
  *
@@ -32,9 +83,9 @@ namespace c10 {
  */
 class DispatchTable final {
  public:
-  DispatchTable(const FunctionSchema& schema)
+  explicit DispatchTable(const FunctionSchema& schema)
   : kernels_()
-  , catchallKernel_(c10::nullopt)
+  , catchallKernel_()
   , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
   , operatorName_(toString(schema.operator_name())) {}
 
@@ -43,18 +94,11 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to define when this kernel is selected.
    * @param kernel Concrete kernel function implementation to register
    */
-  void setKernel(TensorTypeId dispatchKey, const KernelFunction& kernel) {
-    TORCH_INTERNAL_ASSERT(dispatchKey != TensorTypeId::UndefinedTensorId);
-    // The following assertion is disabled because we're codegenerating
-    // autograd kernels for operators without tensor arguments even though
-    // they are never called. These, however, register kernels for
-    // VariableTensorId.
-    // TODO Stop generating those kernels and re-enable this assertion here.
-    auto emplaced = kernels_.emplace(dispatchKey, kernel);
-    if (!emplaced.second) {
-      // Element already existed. Overwrite it.
-      emplaced.first->second = kernel;
-      TORCH_WARN("Registered a kernel for operator ", operatorName_," with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+  void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
+    if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
+      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
   }
 
@@ -63,9 +107,9 @@ class DispatchTable final {
    *
    * @param dispatch_key Dispatch key to unregister.
    */
-  void removeKernelIfExists(TensorTypeId dispatchKey) {
-    auto num_removed = kernels_.erase(dispatchKey);
-    TORCH_INTERNAL_ASSERT(num_removed <= 1); // This is not a multi-map
+  void removeKernelIfExists(DispatchKey dispatchKey) {
+    kernels_.removeKernelIfExists(dispatchKey);
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
   }
 
   /**
@@ -74,37 +118,43 @@ class DispatchTable final {
    * a catch-all kernel or a set of kernels with concrete
    * dispatch keys, not both.
    */
-  void setCatchallKernel(const KernelFunction& kernel) {
-    if (catchallKernel_.has_value()) {
+  void setCatchallKernel(KernelFunction kernel) {
+    if (catchallKernel_.isValid()) {
       TORCH_WARN("Registered a catch-all kernel for operator ", operatorName_," that overwrote a previously registered catch-all kernel for the same operator.");
     }
-    catchallKernel_ = kernel;
+    catchallKernel_ = std::move(kernel);
   }
 
   /**
    * Remove the catch-all kernel.
    */
   void removeCatchallKernel() {
-    TORCH_INTERNAL_ASSERT(catchallKernel_.has_value(), "Tried to remove the catch-all kernel for operator ", operatorName_," but there is no catch-all kernel registered.");
-    catchallKernel_ = c10::nullopt;
+    TORCH_INTERNAL_ASSERT(catchallKernel_.isValid(), "Tried to remove the catch-all kernel for operator ", operatorName_," but there is no catch-all kernel registered.");
+    catchallKernel_ = {};
   }
 
   bool isEmpty() const {
-   return !catchallKernel_.has_value() && kernels_.size() == 0;
+    return !catchallKernel_.isValid() && kernels_.size() == 0;
   }
 
   std::string listAllDispatchKeys() const {
     std::ostringstream str;
     str << "[";
 
-    if (kernels_.size() != 0) {
-      str << toString(kernels_.begin()->first);
-      for (auto iter = ++kernels_.begin(); iter != kernels_.end(); ++iter) {
-        str << ", " << toString(iter->first);
+    bool has_kernels = false;
+    for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+      if (!kernels_[static_cast<DispatchKey>(iter)].isValid()) {
+        continue;
       }
+      if (has_kernels) {
+        str << ", ";
+      }
+      str << toString(static_cast<DispatchKey>(iter));
+      has_kernels = true;
     }
-    if (catchallKernel_.has_value()) {
-      if (kernels_.size() != 0) {
+
+    if (catchallKernel_.isValid()) {
+      if (has_kernels) {
         str << ", ";
       }
       str << "CATCH-ALL";
@@ -113,21 +163,21 @@ class DispatchTable final {
     return str.str();
   }
 
-  const KernelFunction* lookup(TensorTypeId dispatchKey) const {
-    auto found = kernels_.find(dispatchKey);
-    if (found != kernels_.end()) {
-      return &found->second;
+  const KernelFunction* lookup(DispatchKey dispatchKey) const {
+    auto& slot = kernels_[dispatchKey];
+    if (slot.isValid()) {
+      return &slot;
     } else {
       return nullptr;
     }
   }
 
   const KernelFunction* lookupCatchallKernel() const {
-    if (!catchallKernel_.has_value()) {
+    if (!catchallKernel_.isValid()) {
       return nullptr;
     }
 
-    return &*catchallKernel_;
+    return &catchallKernel_;
   }
 
   const DispatchKeyExtractor& dispatchKeyExtractor() const {
@@ -140,8 +190,8 @@ class DispatchTable final {
 
 private:
 
-  ska::flat_hash_map<TensorTypeId, KernelFunction> kernels_;
-  c10::optional<KernelFunction> catchallKernel_;
+  impl::KernelFunctionTable kernels_;
+  KernelFunction catchallKernel_;
   DispatchKeyExtractor dispatchKeyExtractor_;
   std::string operatorName_;
 };

@@ -34,6 +34,25 @@ class TestCustomOperators(unittest.TestCase):
         self.assertEqual(len(output), 1)
         self.assertTrue(output[0].allclose(torch.ones(5)))
 
+    def test_calling_custom_op_with_autograd(self):
+        x = torch.randn((5, 5), requires_grad=True)
+        y = torch.randn((5, 5), requires_grad=True)
+        output = ops.custom.op_with_autograd(x, 2, y)
+        self.assertTrue(output.allclose(x + 2 * y + x * y))
+
+        go = torch.ones((), requires_grad=True)
+        output.sum().backward(go, False, True)
+
+        self.assertTrue(torch.allclose(x.grad, y + torch.ones((5, 5))))
+        self.assertTrue(torch.allclose(y.grad, x + torch.ones((5, 5)) * 2))
+
+    def test_calling_custom_op_with_autograd_in_nograd_mode(self):
+        with torch.no_grad():
+            x = torch.randn((5, 5), requires_grad=True)
+            y = torch.randn((5, 5), requires_grad=True)
+            output = ops.custom.op_with_autograd(x, 2, y)
+            self.assertTrue(output.allclose(x + 2 * y + x * y))
+
     def test_calling_custom_op_inside_script_module(self):
         model = Model()
         output = model.forward(torch.ones(5))

@@ -48,6 +48,8 @@ C10_DEFINE_bool(
   false,
   "Whether to print performance stats for AI-PEP.");
 
+C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
+
 std::vector<std::string>
 split(char separator, const std::string& string, bool ignore_empty = true) {
   std::vector<std::string> pieces;
@@ -97,9 +99,16 @@ int main(int argc, char** argv) {
       inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));
     } else if (input_type_list[i] == "uint8_t") {
       inputs.push_back(torch::ones(input_dims, at::ScalarType::Byte));
+    } else if (input_type_list[i] == "int64") {
+      inputs.push_back(torch::ones(input_dims, torch::kI64));
     } else {
       CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
     }
+  }
+
+  if (FLAGS_pytext_len > 0) {
+    auto stensor = FLAGS_pytext_len * at::ones({1}, torch::kI64);
+    inputs.push_back(stensor);
   }
 
   auto qengines = at::globalContext().supportedQEngines();
@@ -107,6 +116,7 @@ int main(int argc, char** argv) {
     at::globalContext().setQEngine(at::QEngine::QNNPACK);
   }
   torch::autograd::AutoGradMode guard(false);
+  torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);
 
   module.eval();
@@ -138,7 +148,7 @@ int main(int argc, char** argv) {
     auto start = high_resolution_clock::now();
     module.forward(inputs);
     auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(stop - start);
+    auto duration = duration_cast<milliseconds>(stop - start);
     times.push_back(duration.count());
   }
   millis = timer.MilliSeconds();

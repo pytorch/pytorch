@@ -24,7 +24,7 @@ SimpleRefCountNet::SimpleRefCountNet(
 
   std::map<string, int> last_consumed_at;
   std::set<string> created_by_me;
-  // For each opeartor
+  // For each operator
   for (int idx = 0; idx < net_def->op_size(); ++idx) {
     const auto& op_def = net_def->op(idx);
     for (const string& in_name : op_def.input()) {

@@ -1,11 +1,9 @@
 #pragma once
 
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/core/Dimname.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/C++17.h>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // XXX: This file exists because TensorImpl is in c10, but Dimname is in ATen.
@@ -28,7 +26,7 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
     : names_(std::move(names)) {}
 
   std::unique_ptr<c10::NamedTensorMetaInterface> clone() const override {
-    return c10::guts::make_unique<NamedTensorMeta>(names_);
+    return std::make_unique<NamedTensorMeta>(names_);
   }
 
   bool has_names() const;
@@ -64,14 +62,21 @@ struct CAFFE2_API NamesMode {
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
 struct CAFFE2_API NoNamesGuard {
-  NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
+  NoNamesGuard() : prev_mode(NamesMode::is_enabled()), initialized(true) {
     NamesMode::set_enabled(false);
   }
   ~NoNamesGuard() {
+    if (initialized) {
+      reset();
+    }
+  }
+  void reset() {
+    TORCH_INTERNAL_ASSERT(initialized);
     NamesMode::set_enabled(prev_mode);
   }
  private:
   bool prev_mode;
+  bool initialized;
 };
 
 void check_names_valid_for(const Tensor& tensor, DimnameList names);
@@ -116,4 +121,3 @@ CAFFE2_API optional<DimnameList> get_opt_names(const TensorImpl* impl);
 } // namespace impl
 
 } // namespace at
-#endif
