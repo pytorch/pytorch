@@ -731,14 +731,14 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
     auto shape = at::infer_size(mean.sizes(), std.sizes());
     TORCH_CHECK(empty_output || output.sizes().equals(shape), "output size is not the same as broadcast size of mean and std");
     if (empty_output) {
-      at::native::resize_(output, shape, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      at::native::resize_(output, shape);
     }
   }
   else {
     TORCH_CHECK(mean.numel() == std.numel(), "mean and std should have same number of element when nonexpandable");
     TORCH_CHECK(empty_output || output.sizes().equals(mean.sizes()), "output size is not the same as the size of mean");
     if (empty_output) {
-      at::native::resize_(output, mean.sizes(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      at::native::resize_(output, mean.sizes());
     }
   }
 
