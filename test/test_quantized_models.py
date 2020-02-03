@@ -1,8 +1,9 @@
 import torch
 import torch.jit
-from common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
-from common_quantization import QuantizationTestCase, ModelMultipleOps, ModelMultipleOpsNoAvgPool
-from common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_PPC
+from torch.testing._internal.common_quantization import QuantizationTestCase, \
+    ModelMultipleOps, ModelMultipleOpsNoAvgPool
+from torch.testing._internal.common_quantized import override_quantized_engine
 
 class ModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):
@@ -102,8 +103,8 @@ class ModelNumerics(QuantizationTestCase):
                 torch.manual_seed(67)
                 calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
                 eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
-                qconfigset = set([torch.quantization.default_weight_only_quant_qconfig,
-                                  torch.quantization.default_activation_only_quant_qconfig])
+                qconfigset = set([torch.quantization.default_weight_only_qconfig,
+                                  torch.quantization.default_activation_only_qconfig])
                 SQNRTarget = [35, 45]
                 for idx, qconfig in enumerate(qconfigset):
                     my_model = ModelMultipleOpsNoAvgPool().to(torch.float32)

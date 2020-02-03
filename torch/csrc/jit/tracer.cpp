@@ -1,18 +1,20 @@
 #include <torch/csrc/jit/tracer.h>
 
-#include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/jit/constants.h>
-#include <ATen/core/functional.h>
 #include <ATen/Backtrace.h>
+#include <ATen/core/Dict.h>
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
-#include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <memory>
 #include <sstream>
@@ -91,7 +93,7 @@ Value* TracingState::getValue(const IValue& var) {
         ->insertNode(graph->createList(
             TensorType::get(),
             fmap(
-                var.toTensorListRef(),
+                var.toTensorVector(),
                 [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
@@ -122,7 +124,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.is_variable() && ten.requires_grad()) {
+    if (ten.requires_grad()) {
       pauseTracing();
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
@@ -146,7 +148,7 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
-    std::ostringstream oss; 
+    std::ostringstream oss;
     if (var.isFuture()) {
       oss << "Tried to trace Future or Object that the tracer was not aware of.";
     } else {
@@ -179,7 +181,7 @@ bool TracingState::hasValue(const IValue& var) const {
 }
 
 
-Value* TracingState::getOutput(const IValue& iv) {
+Value* TracingState::getOutput(const IValue& iv, size_t i) {
    if (iv.isTensor()) {
      at::Tensor var = iv.toTensor();
      if (!var.defined()) {
@@ -191,22 +193,30 @@ Value* TracingState::getOutput(const IValue& iv) {
      auto it = value_map.find(iv);
      if (it == value_map.end()) {
        std::ostringstream os;
-       os << "output of traced region did not have observable "
+       os << "output " << i << " (" << var << ") of traced region did not have observable "
           << "data dependence with trace inputs; this probably indicates your "
              "program "
           << "cannot be understood by the tracer.";
        throw std::runtime_error(os.str());
      }
      return it->second;
+  } else if (iv.isTensorList()) {
+    return graph
+        ->insertNode(graph->createList(
+            TensorType::get(),
+            fmap(
+                iv.toTensorVector(),
+                [&](const IValue& ival) { return getOutput(ival, i); })))
+        ->output();
   } else if (iv.isTuple()) {
     auto tuple = iv.toTuple()->elements();
     auto tuple_node = graph->createTuple(
-        fmap(tuple, [&](const IValue& ival) { return getOutput(ival); }));
+        fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
     AT_ERROR(
-        "Only tensors or tuples of tensors can be output from traced functions");
+        "Only tensors, lists and tuples of tensors can be output from traced functions");
   }
 }
 
@@ -255,8 +265,8 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 
     return std::move(dict);
   } else if (auto list_type = type->cast<ListType>()) {
-    size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
-                                             : input.toTensorListRef().size();
+    size_t num_elems = input.isList() ? input.toListRef().size()
+                                             : input.toTensorVector().size();
     auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
     auto unpack_outputs = list_unpack->outputs();
 
@@ -267,7 +277,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
       }
       return elems;
     } else {
-      auto elems = input.toGenericList();
+      auto elems = input.toList();
       for (size_t i = 0; i < num_elems; i++) {
         elems[i] = addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]);
       }
@@ -283,63 +293,86 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 static void gatherParametersAndBuffers(
     const std::shared_ptr<TracingState>& state,
     Value* self_value,
-    const script::Module& self) {
+    const script::Module& self,
+    const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
-  
-  state->setValue(self.module_object(), self_value);
 
-  for (script::Slot s : self.get_slots()) {
-    if (s.type()->isSubtypeOf(TensorType::get())) {
+  state->setValue(self._ivalue(), self_value);
+
+  auto self_ty = self.type();
+  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
+    auto qualname = prefix + "." + s.name;
+    Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
+                                ->s_(attr::scope, qualname)
+                                ->output()
+                                ->setType(s.value.type());
+    if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));
-    } else if (s.entity_type() == script::EntityType::MODULE) {
+          state, s.value, s.value.type(), trace_get_attr);
+    } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
-          state, g.insertGetAttr(self_value, s.name()), s.to_module());
+          state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
   }
 }
 
-
-// Start tracing, treating 'inputs' as inputs to the trace, which can be
-// varied on subsequent invocations of the trace.  Any other variables
-// will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+std::pair<std::shared_ptr<TracingState>, Stack> trace(
+    Stack inputs,
+    const std::function<Stack(Stack)>& traced_fn,
+    std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool force_outplace,
     script::Module* self) {
-  if (isTracing()) {
-    AT_ERROR("Tracing can't be nested");
-  }
-  auto state = std::make_shared<TracingState>();
-  setTracingState(state);
+  try {
+    // Start tracing, treating 'inputs' as inputs to the trace, which can be
+    // varied on subsequent invocations of the trace.  Any other variables
+    // will be treated as constants.
+    if (isTracing()) {
+      AT_ERROR("Tracing can't be nested");
+    }
+    auto state = std::make_shared<TracingState>();
+    setTracingState(state);
 
-  // if we are a module, then make sure the modules parameters are in the map
-  // and mapped to accesses to the self object
-  if (self) {
-    Value* self_value =
-        state->graph->insertInput(0, "self")->setType(self->module_object()->type());
-    gatherParametersAndBuffers(state, self_value, *self);
-  }
+    // if we are a module, then make sure the modules parameters are in the map
+    // and mapped to accesses to the self object
+    if (self) {
+      Value* self_value = state->graph->insertInput(0, "self")->setType(
+          self->_ivalue()->type());
+      gatherParametersAndBuffers(state, self_value, *self, {"__module"});
+    }
 
-  size_t i = 0;
-  auto input_types = inputs.types()->elements();
-  for (IValue& input : inputs.stack()) {
-    input = addInput(state,
-        input, input_types[i++], state->graph->addInput());
-  }
-  return std::make_pair(state, inputs.stack());
-}
+    for (IValue& input : inputs) {
+      input = addInput(state, input, input.type(), state->graph->addInput());
+    }
+    auto graph = state->graph;
 
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-void exit(const Stack& outputs) {
-  auto& state = getTracingState();
-  size_t i = 0;
-  for (auto& output : outputs) {
-    state->graph->registerOutput(state->getOutput(output));
-    i++;
+    getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
+    getTracingState()->force_outplace = force_outplace;
+
+    // Invoke the traced function
+    auto out_stack = traced_fn(inputs);
+
+    // Exit a trace, treating 'out_stack' as the outputs of the trace.  These
+    // are the variables whose values will be computed upon subsequent
+    // invocations of the trace.
+    size_t i = 0;
+    for (auto& output : out_stack) {
+      // NB: The stack is in "reverse" order, so when we pass the diagnostic
+      // number we need to flip it based on size.
+      state->graph->registerOutput(state->getOutput(output, out_stack.size() - i));
+      i++;
+    }
+    setTracingState(nullptr);
+
+    if (script::getInlineEverythingMode()) {
+      Inline(*graph);
+    }
+    FixupTraceScopeBlocks(graph, self);
+
+    return {state, out_stack};
+  } catch (...) {
+    tracer::abandon();
+    throw;
   }
-  setTracingState(nullptr);
 }
 
 // Abort tracing. Used to reset the state in case of errors.
@@ -368,8 +401,8 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValue(outputs[i], unpack_node->outputs()[i]);
     }
-  } else if (v.isGenericList()) {
-    auto elements = v.toGenericListRef();
+  } else if (v.isList()) {
+    auto elements = v.toListRef();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {
@@ -418,6 +451,15 @@ void addInputs(Node* n, const char* name /* unused */, const c10::optional<bool>
 }
 void addInputs(Node* n, const char* name, double value) {
   detail::genericAddInput(n, value);
+}
+void addInputs(Node* n, const char* name /* unused */, const c10::optional<double>& value) {
+  if (value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
 }
 void addInputs(Node* n, const char* name, const at::Scalar& value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
@@ -478,14 +520,36 @@ void addInputs(
     n->addInput(none);
   }
 }
-#ifdef BUILD_NAMEDTENSOR
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Layout>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, static_cast<int64_t>(*value));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Device>& value) {
+  if (value.has_value()) {
+    detail::genericAddInput(n, value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
 void addInputs(
     Node* n,
     const char* name,
     c10::optional<at::DimnameList> value) {
   TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
 }
-#endif
 void addInputs(
     Node* n,
     const char* name,
@@ -517,10 +581,23 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
+void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<caffe2::TypeMeta> opt_dtype) {
+  if (opt_dtype.has_value()) {
+    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize
   // TensorOptions
-  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
+  addInputs(n, name, options.dtype_opt());
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
   addInputs(n, name, options.pinned_memory());
@@ -550,11 +627,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       g->insertNode(g->createList(jit::IntType::get(), info))->output());
 }
 
-void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
-  AT_ERROR("Tracing float lists currently not supported!");
-}
-
-void addInputs(Node* n, const char* name, const std::vector<double>& value) {
+void addInputs(Node* n, const char* name, ArrayRef<double> value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
@@ -581,6 +654,10 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   }
 }
 
+void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
+  return addOutput(node, outputs.vec());
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }
@@ -598,8 +675,12 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto& tracing_state = getTracingState();
   auto& graph = tracing_state->graph;
 
-  auto size_var =
-      autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+  Variable size_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoNonVariableTypeMode guard;
+    size_var = scalar_to_tensor(at::Scalar(var.size(dim)));
+  }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());

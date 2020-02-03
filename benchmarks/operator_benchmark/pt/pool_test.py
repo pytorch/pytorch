@@ -3,16 +3,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-
 import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
 
-
 """
 Microbenchmarks for MaxPool1d and AvgPool1d operators.
 """
-
 
 # Configs for pool-1d ops
 pool_1d_configs_short = op_bench.config_list(
@@ -22,17 +19,19 @@ pool_1d_configs_short = op_bench.config_list(
     attrs=[
         [3, 1, 8, 256, 256],
     ],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
     tags=['short']
 )
 
-pool_1d_configs_long = op_bench.config_list(
-    attr_names=[
-        'kernel', 'stride', 'N', 'C', 'L'
-    ],
-    attrs=[
-        [3, 2, 8, 3, 128],
-        [3, 2, 16, 3, 256],
-    ],
+pool_1d_configs_long = op_bench.cross_product_configs(
+    kernel=[3],
+    stride=[1, 2],
+    N=[8, 16],
+    C=[3],
+    L=[128, 256],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
@@ -46,8 +45,8 @@ pool_1d_ops_list = op_bench.op_list(
 
 
 class Pool1dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, L, op_func):
-        self.input = torch.rand(N, C, L)
+    def init(self, kernel, stride, N, C, L, device, op_func):
+        self.input = torch.rand(N, C, L, device=device)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
@@ -74,17 +73,20 @@ pool_2d_configs_short = op_bench.config_list(
     attrs=[
         [[3, 1], [2, 1], 1, 16, 32, 32],
     ],
+    cross_product_configs={
+        'device': ['cpu'],
+    },
     tags=['short']
 )
 
-pool_2d_configs_long = op_bench.config_list(
-    attr_names=[
-        'kernel', 'stride', 'N', 'C', 'H', 'W'
-    ],
-    attrs=[
-        [[3, 2], [2, 2], 8, 32, 64, 64],
-        [[3, 3], [2, 2], 16, 32, 64, 64],
-    ],
+pool_2d_configs_long = op_bench.cross_product_configs(
+    kernel=[[3, 2], [3, 3]],
+    stride=[[2, 2]],
+    N=[8, 16],
+    C=[32],
+    H=[32, 64],
+    W=[32, 64],
+    device=['cpu'],
     tags=['long']
 )
 
@@ -98,8 +100,8 @@ pool_2d_ops_list = op_bench.op_list(
 
 
 class Pool2dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, H, W, op_func):
-        self.input = torch.rand(N, C, H, W)
+    def init(self, kernel, stride, N, C, H, W, device, op_func):
+        self.input = torch.rand(N, C, H, W, device=device)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)
@@ -126,17 +128,21 @@ pool_3d_configs_short = op_bench.config_list(
     attrs=[
         [[3, 1, 3], [2, 1, 2], 1, 16, 16, 32, 32],
     ],
+    cross_product_configs={
+        'device': ['cpu'],
+    },
     tags=['short']
 )
 
-pool_3d_configs_long = op_bench.config_list(
-    attr_names=[
-        'kernel', 'stride', 'N', 'C', 'D', 'H', 'W'
-    ],
-    attrs=[
-        [[3, 2, 3], [2, 2, 2], 8, 32, 32, 64, 64],
-        [[3, 3, 3], [2, 2, 2], 16, 32, 32, 64, 64],
-    ],
+pool_3d_configs_long = op_bench.cross_product_configs(
+    kernel=[[3, 2, 3], [3, 3, 3]],
+    stride=[[2, 2, 2]],
+    N=[8, 16],
+    C=[32],
+    D=[32],
+    H=[32, 64],
+    W=[32, 64],
+    device=['cpu'],
     tags=['long']
 )
 
@@ -151,8 +157,8 @@ pool_3d_ops_list = op_bench.op_list(
 
 
 class Pool3dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, kernel, stride, N, C, D, H, W, op_func):
-        self.input = torch.rand(N, C, D, H, W)
+    def init(self, kernel, stride, N, C, D, H, W, device, op_func):
+        self.input = torch.rand(N, C, D, H, W, device=device)
         self.kernel = kernel
         self.stride = stride
         self.op_func = op_func(self.kernel, stride=self.stride)

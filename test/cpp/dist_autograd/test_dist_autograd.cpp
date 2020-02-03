@@ -1,14 +1,18 @@
+#include <memory>
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
-#include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/torch.h>
 
-using namespace torch::distributed::autograd;
-using namespace torch::distributed::rpc;
+namespace torch {
+namespace distributed {
+namespace autograd {
 
 class DistAutogradTest : public ::testing::Test {
  protected:
@@ -20,56 +24,78 @@ class DistAutogradTest : public ::testing::Test {
 
 DistAutogradContainer* DistAutogradTest::autogradContainer_ = nullptr;
 
-TEST_F(DistAutogradTest, TestSendFunction) {
-  // Initialize input tensors requiring grad.
-  auto options = at::TensorOptions().requires_grad(true);
-  auto in1 = torch::ones({3, 3}, options);
-  auto in2 = torch::ones({3, 3}, options);
-  ASSERT_FALSE(in1.grad().defined());
-  ASSERT_FALSE(in2.grad().defined());
-
-  autogradContainer_->newContext();
-  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
-  // Attach the send autograd function to tensors.
-  std::vector<torch::Tensor> tensors = {in1, in2};
-  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
-  auto send_function = autogradContext.sendFunctions()[1];
-  ASSERT_NE(send_function, nullptr);
-
-  // Build loss and attach it as input to send autograd function.
-  auto o1 = torch::autograd::Variable(torch::ones({3, 3}));
-  auto edge = torch::autograd::Edge(send_function, 0);
-  o1.set_gradient_edge(edge);
-  auto o2 = torch::autograd::Variable(torch::ones({3, 3}));
-  edge = torch::autograd::Edge(send_function, 1);
-  o2.set_gradient_edge(edge);
-  auto loss = torch::add(o1, o2);
-
-  // Run backwards pass and verify gradients accumulated.
-  auto gradient = torch::autograd::Variable(torch::rand({3, 3}));
-  loss.backward(gradient, false, false);
-  ASSERT_TRUE(in1.grad().defined());
-  ASSERT_TRUE(in2.grad().defined());
-}
-
 TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   auto options = at::TensorOptions().requires_grad(true);
   auto in1 = torch::ones({3, 3}, options);
   auto in2 = torch::ones({3, 3}, options);
 
   autogradContainer_->newContext();
-  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
+  auto autogradContext = autogradContainer_->currentContext();
   // Attach the send autograd function to tensors.
   std::vector<torch::Tensor> tensors = {in1, in2};
-  addSendRpcBackward(autogradContext, AutogradMetadata(1, 1), tensors);
-  auto send_function = autogradContext.sendFunctions()[1];
+  rpc::worker_id_t worker_id = 1;
+  addSendRpcBackward(
+      autogradContext, AutogradMetadata(1, 1), tensors);
+  autogradContext->addKnownWorkerId(worker_id);
+  auto send_function = autogradContext->sendFunctions()[1];
 
-  // Build loss and attach it as input to send autograd function.
-  auto loss = torch::autograd::Variable(torch::ones({3, 3}));
-  loss.set_gradient_edge(torch::autograd::Edge(send_function, 1));
+  // ensure that the worker_ids are recorded
+  auto knownWorkerIds = autogradContext->getKnownWorkerIds();
+  ASSERT_TRUE(knownWorkerIds.find(worker_id) != knownWorkerIds.end());
+  ASSERT_EQ(knownWorkerIds.size(), 1);
 
-  // This should fail since the SendRpcBackward function is looking for two
-  // inputs and as a result encounters an undefined grad.
-  EXPECT_THROW(
-      loss.backward(torch::autograd::Variable(), false, false), c10::Error);
+  // This should fail since the SendRpcBackward function shouldn't receive any
+  // inputs grad.
+  EXPECT_THROW(send_function->apply({in1, in2}), c10::Error);
+
+  // This should fail since the SendRpcBackward function encounters an undefined
+  // grad.
+  send_function->setGrads({in1, torch::autograd::Variable()});
+  EXPECT_THROW(send_function->apply({}), c10::Error);
 }
+
+TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
+  autogradContainer_->newContext();
+  auto& engine = DistEngine::getInstance();
+  ASSERT_EQ(0, engine.numBackwardPasses());
+
+  // Attach appropriate grad fn.
+  auto options = at::TensorOptions().requires_grad(true);
+  auto t = torch::autograd::make_variable(torch::ones({1}, options), true);
+  const auto& e = torch::autograd::impl::gradient_edge(t);
+  torch::autograd::impl::set_gradient_edge(t, e);
+  ASSERT_NE(nullptr, t.grad_fn());
+
+  // Execute engine.
+  engine.execute({t});
+
+  // Validate appropriate cleanup.
+  ASSERT_EQ(0, engine.numBackwardPasses());
+}
+
+TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
+  autogradContainer_->newContext();
+  auto context = autogradContainer_->currentContext();
+  auto& engine = DistEngine::getInstance();
+  ASSERT_EQ(0, engine.numBackwardPasses());
+
+  // Attach send function.
+  auto options = at::TensorOptions().requires_grad(true);
+  auto t = torch::ones({1}, options);
+  auto tensors = std::vector<torch::Tensor>{t};
+  addSendRpcBackward(
+      context, AutogradMetadata(context->contextId(), 0), tensors);
+
+  auto sendFunction = context->retrieveSendFunction(0);
+  sendFunction->setGrads({t});
+
+  // Execute engine.
+  engine.executeSendFunctionAsync(context, sendFunction)->wait();
+
+  // Validate appropriate cleanup.
+  ASSERT_EQ(0, engine.numBackwardPasses());
+}
+
+} // namespace autograd
+} // namespace distributed
+} // namespace torch

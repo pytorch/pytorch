@@ -10,21 +10,24 @@
 namespace at { namespace native {
 namespace {
 
+
+template <typename scalar_t>
+static void fill_non_native_type(TensorIterator& iter, Scalar value_scalar) {
+  auto value = value_scalar.to<scalar_t>().x;
+  using H = typename std::make_signed<decltype(value)>::type;  // Signed type has more acceleration
+  // Reserve the representation of value. static_cast<H>(value) is implementation defined.
+  H val = *reinterpret_cast<H*>(std::addressof(value));
+  cpu_kernel_vec(
+      iter,
+      [val]() -> H { return val; },
+      [val]() { return Vec256<H>(val); });
+}
+
 void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
   if (iter.dtype() == ScalarType::Half) {
-    auto value = value_scalar.to<at::Half>().x;
-    using H = decltype(value);
-    cpu_kernel_vec(
-        iter,
-        [=]() -> H { return value; },
-        [=]() { return Vec256<H>(value); });
+    fill_non_native_type<at::Half>(iter, value_scalar);
   } else if (iter.dtype() == ScalarType::BFloat16) {
-    auto value = value_scalar.to<at::BFloat16>().x;
-    using H = decltype(value);
-    cpu_kernel_vec(
-        iter,
-        [=]() -> H { return value; },
-        [=]() { return Vec256<H>(value); });
+    fill_non_native_type<at::BFloat16>(iter, value_scalar);
   } else if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "fill_cpu", [&]() {
       scalar_t value = value_scalar.to<scalar_t>();

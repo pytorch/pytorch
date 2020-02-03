@@ -122,7 +122,6 @@ class OnnxifiOp final : public Operator<Context> {
     // cached backend and therefore there is no need to repeat the above
     // process.
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
-
   }
 
   ~OnnxifiOp() {
@@ -237,10 +236,16 @@ class OnnxifiOp final : public Operator<Context> {
         for (const auto d : shape0) {
           shape.add_dims(d);
         }
-        weight_shape_info[weight_names[i]] =
-            ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
+        weight_shape_info[weight_names[i]] = ShapeInfo(
+            std::vector<TensorBoundShape::DimType>(
+                shape0.size(), TensorBoundShape_DimType_CONSTANT),
+            std::move(shape));
       }
 
+      Blob* defered_blob_reader = nullptr;
+      if (ws->HasBlob("__DEFERRED_BLOB_READER__")) {
+        defered_blob_reader = ws->GetBlob("__DEFERRED_BLOB_READER__");
+      }
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
           lib_->onnxInitGraph(
@@ -250,7 +255,9 @@ class OnnxifiOp final : public Operator<Context> {
               (const void*)(onnx_model_str.c_str()),
               weight_descs.size(),
               weight_descs.data(),
-              &graph),
+              &graph,
+              static_cast<uint32_t>(max_seq_size_),
+              defered_blob_reader),
           ONNXIFI_STATUS_SUCCESS);
 
       return std::make_shared<onnx::BackendGraphInfo>(

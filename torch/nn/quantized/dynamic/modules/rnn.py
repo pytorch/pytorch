@@ -13,6 +13,26 @@ def apply_permutation(tensor, permutation, dim=1):
     # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
 
+class PackedParameter(torch.nn.Module):
+    def __init__(self, param):
+        super(PackedParameter, self).__init__()
+        self.param = param
+
+    @torch.jit.export
+    def __getstate__(self):
+        return (torch.ops.quantized.linear_unpack(self.param), self.training)
+
+    @torch.jit.export
+    def __setstate__(self, state):
+        self.param = torch.ops.quantized.linear_prepack(*state[0])
+        self.training = state[1]
+
+    # This only exists because there's a bug in recursive scripting
+    # that arises only in Python 2 where a recursively scripted
+    # module does not have a forward(). We can delete this once we
+    # drop python 2 support
+    def forward(self):
+        raise RuntimeError('PackedParameter cannot be called')
 
 class RNNBase(torch.nn.Module):
 
@@ -51,7 +71,7 @@ class RNNBase(torch.nn.Module):
             raise ValueError("Unrecognized RNN mode: " + mode)
 
         self._all_weight_names = []
-        self._all_weight_values = []
+        _all_weight_values = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -88,12 +108,10 @@ class RNNBase(torch.nn.Module):
                         [gate_size, layer_input_size], scale=1, zero_point=0, dtype=torch.qint8)
                     w_hh = torch._empty_affine_quantized(
                         [gate_size, hidden_size], scale=1, zero_point=0, dtype=torch.qint8)
-                    b_ih = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_ih = torch.empty([gate_size], dtype=torch.float)
                     # Second bias vector included for CuDNN compatibility. Only one
                     # bias vector is needed in standard definition.
-                    b_hh = torch._empty_affine_quantized(
-                        [gate_size], scale=1, zero_point=0, dtype=torch.qint32)
+                    b_hh = torch.empty([gate_size], dtype=torch.float)
 
                 else:
                     w_ih = torch.Tensor(gate_size, layer_input_size).float()
@@ -111,7 +129,9 @@ class RNNBase(torch.nn.Module):
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
                     self._all_weight_names.extend([ih_name, hh_name])
-                    self._all_weight_values.extend([ih, hh])
+                    _all_weight_values.extend([PackedParameter(p) for p in [ih, hh]])
+
+            self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
     def _get_name(self):
         return 'DynamicQuantizedRNN'
@@ -173,50 +193,6 @@ class RNNBase(torch.nn.Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    @torch.jit.export
-    def __getstate__(self):
-        vals = (
-            self.mode,
-            self.input_size,
-            self.hidden_size,
-            self.num_layers,
-            self.bias,
-            self.batch_first,
-            self.dropout,
-            self.bidirectional,
-            self._all_weight_names,
-            self.__overloads__,
-            self.training,
-            self.dtype,
-        )
-
-        dynamic_vals = torch.jit.annotate(List[Tuple[torch.Tensor, Optional[torch.Tensor]]],
-                                          [])
-
-        for i in range(len(self._all_weight_names)):
-            dynamic_vals.append(torch.ops.quantized.linear_unpack(self._all_weight_values[i]))
-        return vals, dynamic_vals
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        vals, dynamic_vals = state
-        self.mode = vals[0]
-        self.input_size = vals[1]
-        self.hidden_size = vals[2]
-        self.num_layers = vals[3]
-        self.bias = vals[4]
-        self.batch_first = vals[5]
-        self.dropout = vals[6]
-        self.bidirectional = vals[7]
-        self._all_weight_names = vals[8]
-        self.__overloads__ = vals[9]
-        self.training = vals[10]
-        self.dtype = vals[11]
-
-        self._all_weight_values = []
-        for i in range(len(self._all_weight_names)):
-            self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
-
     @classmethod
     def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
@@ -229,7 +205,7 @@ class RNNBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.QConfig import default_dynamic_qconfig
+            from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
 
         dtype = weight_observer.dtype
@@ -248,7 +224,7 @@ class RNNBase(torch.nn.Module):
         assert mod.bias
 
         qRNNBase._all_weight_names = []
-        qRNNBase._all_weight_values = []
+        _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
             for direction in range(num_directions):
                 layer_input_size = qRNNBase.input_size if layer == 0 else qRNNBase.hidden_size * num_directions
@@ -296,7 +272,8 @@ class RNNBase(torch.nn.Module):
 
                 for (ih, ih_name), (hh, hh_name) in zip(zip(ih_params, ih_param_names), zip(hh_params, hh_param_names)):
                     qRNNBase._all_weight_names.extend([ih_name, hh_name])
-                    qRNNBase._all_weight_values.extend([ih, hh])
+                    _all_weight_values.extend([PackedParameter(p) for p in [ih, hh]])
+        qRNNBase._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
         return qRNNBase
 
@@ -327,11 +304,19 @@ class LSTM(RNNBase):
             hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
-        assert batch_sizes is None
 
-        result = _VF.quantized_lstm(input, hx, self._all_weight_values, self.bias, self.num_layers,
-                                    float(self.dropout), self.training, self.bidirectional,
-                                    self.batch_first, dtype=self.dtype, use_dynamic=True)
+        weight_values = []
+        for mod in self._all_weight_values:
+            weight_values.append(mod.param)
+
+        if batch_sizes is None:
+            result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
+                                        float(self.dropout), self.training, self.bidirectional,
+                                        self.batch_first, dtype=self.dtype, use_dynamic=True)
+        else:
+            result = _VF.quantized_lstm(input, batch_sizes, hx, weight_values, self.bias,
+                                        self.num_layers, float(self.dropout), self.training,
+                                        self.bidirectional, dtype=self.dtype, use_dynamic=True)
         output = result[0]
         hidden = result[1:]
 

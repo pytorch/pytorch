@@ -6,6 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" psutil
 
+# TODO move this to docker
+pip install unittest-xml-reporting
+
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
   pip install -q faulthandler
@@ -99,7 +102,6 @@ test_custom_script_ops() {
 
   # Run tests Python-side and export a script module.
   python test_custom_ops.py -v
-  python test_custom_classes.py -v
   python model.py --export-script-module=model.pt
   # Run tests C++-side and load the exported script module.
   build/test_custom_ops ./model.pt

@@ -8,11 +8,11 @@ import torch
 import warnings
 
 from .variable import Variable
-from .function import Function, NestedIOFunction  # noqa: F401
-from .gradcheck import gradcheck, gradgradcheck  # noqa: F401
-from .grad_mode import no_grad, enable_grad, set_grad_enabled  # noqa: F401
-from .anomaly_mode import detect_anomaly, set_detect_anomaly  # noqa: F401
-from . import profiler  # noqa: F401
+from .function import Function, NestedIOFunction
+from .gradcheck import gradcheck, gradgradcheck
+from .grad_mode import no_grad, enable_grad, set_grad_enabled
+from .anomaly_mode import detect_anomaly, set_detect_anomaly
+from . import profiler
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -32,7 +32,7 @@ def _make_grads(outputs, grads):
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
-                new_grads.append(torch.ones_like(out))
+                new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
         else:

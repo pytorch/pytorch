@@ -74,7 +74,7 @@ struct TempFile {
     file_ = fdopen(fd, "r+");
     #endif
 
-    // - 1 becuase tt.size() includes the null terminator,
+    // - 1 because tt.size() includes the null terminator,
     // but std::string does not expect one
     name_ = std::string(tt.begin(), tt.end() - 1);
   }

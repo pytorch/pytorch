@@ -68,7 +68,7 @@ static inline std::ostream& operator<<(
     std::ostream& out,
     const IODescriptor::VariableMetadata& meta) {
   at::Device meta_device = meta.device;
-  auto& t = at::getNonVariableDeprecatedTypeProperties(
+  auto& t = at::getDeprecatedTypeProperties(
       meta_device.is_cpu() ? at::Backend::CPU : at::Backend::CUDA, meta.type);
   out << t << "(requires_grad=" << meta.requires_grad;
   if (meta_device.is_cuda()) {
