@@ -10456,7 +10456,7 @@ class TestNNDeviceType(NNTestCase):
     def test_activations_bfloat16(self, device):
         def test(activation):
             # fp32 compute
-            input1 = torch.randn(5, device=device, dtype=torch.float32, requires_grad=True)
+            input1 = torch.randn(5, dtype=torch.float32, device=device, requires_grad=True)
             grad_input1 = torch.randn(5, device=device)
             out1 = activation(input1)
             out1.backward(grad_input1)
